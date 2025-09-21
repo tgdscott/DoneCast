@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import AudioCleanupSettings from "@/components/dashboard/AudioCleanupSettings";
 import AdminSettings from "@/components/dashboard/AdminSettings";
+import ComfortMenu from "@/components/common/ComfortMenu.jsx";
 import { useToast } from "@/hooks/use-toast";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useAuth } from "@/AuthContext.jsx";
@@ -137,6 +138,11 @@ export default function Settings({ token }) {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
+            <div>
+              <h3 className="text-lg font-medium">Display preferences</h3>
+              <p className="text-sm text-muted-foreground mb-2">Adjust text size and contrast to make the workspace easier to use.</p>
+              <ComfortMenu inline className="mt-3" />
+            </div>
             <div>
               <h3 className="text-lg font-medium">Your profile</h3>
               <p className="text-sm text-muted-foreground mb-2">We’ll use this to say hello and label your work.</p>

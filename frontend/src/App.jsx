@@ -13,7 +13,6 @@ import Settings from '@/components/dashboard/Settings.jsx'; // Import the Settin
 import ClosedAlphaGate from '@/components/ClosedAlphaGate.jsx';
 import { Toaster } from '@/components/ui/toaster.jsx';
 import MetaHead from '@/components/MetaHead.jsx';
-import ComfortMenu from '@/components/common/ComfortMenu.jsx';
 import TermsGate from '@/components/common/TermsGate.jsx';
 
 // --- IMPORTANT ---
@@ -178,7 +177,6 @@ export default function App() {
 export function AppWithToasterWrapper() {
     return <>
     <MetaHead />
-    <ComfortMenu />
         <App />
         <Toaster />
     </>;

@@ -31,9 +31,13 @@ const runtimeApiBase = (() => {
   const env = import.meta.env?.VITE_API_BASE || import.meta.env?.VITE_API_BASE_URL;
   if (env && typeof env === "string") return env.replace(/\/+$/, "");
   if (typeof window !== "undefined") {
-    const origin = window.location.origin;
-    if (origin.includes("app.")) return origin.replace("app.", "api.");
-    return origin;
+    let origin = window.location.origin;
+    if (origin.includes("app.")) {
+      origin = origin.replace("app.", "api.");
+    } else if (origin.includes("dashboard.")) {
+      origin = origin.replace("dashboard.", "api.");
+    }
+    return origin.replace(/\/+$/, "");
   }
   return "";
 })();
