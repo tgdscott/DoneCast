@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from uuid import uuid4
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import RedirectResponse
@@ -11,7 +11,6 @@ from sqlmodel import Session
 
 from ..core.config import settings
 import logging
-import httpx
 from ..core.security import verify_password
 from ..models.user import User, UserCreate, UserPublic
 from ..core.database import get_session
@@ -43,6 +42,13 @@ def _build_oauth_client() -> tuple[OAuth, str]:
     return o, settings.GOOGLE_CLIENT_ID
 
 # --- Helper Functions ---
+
+
+def _is_admin_email(email: str | None) -> bool:
+    admin_email = getattr(settings, "ADMIN_EMAIL", "") or ""
+    return bool(email and admin_email and email.lower() == admin_email.lower())
+
+
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
     """Creates a JWT access token."""
     to_encode = data.copy()
@@ -77,67 +83,83 @@ async def get_current_user(
         raise credentials_exception
     return user
 
+# --- Helper Functions (continued) ---
+
+
+def _to_user_public(user: User) -> UserPublic:
+    data = user.model_dump()
+    data.update({
+        "is_admin": _is_admin_email(user.email) or bool(getattr(user, "is_admin", False)),
+        "terms_version_required": getattr(settings, "TERMS_VERSION", None),
+    })
+    return UserPublic(**data)
+
+
+class UserRegisterPayload(UserCreate):
+    accept_terms: bool
+    terms_version: str
+
+
 # --- Standard Authentication Endpoints ---
+
+
 @router.post("/register", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
-async def register_user(request: Request, session: Session = Depends(get_session), user_in: UserCreate | None = None):
-    """Register a new user with email and password.
+async def register_user(
+    user_in: UserRegisterPayload,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Register a new user with email and password."""
+    if not user_in.accept_terms:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You must accept the terms of use to create an account.",
+        )
+    if user_in.terms_version != getattr(settings, "TERMS_VERSION", ""):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Terms version mismatch. Please refresh and try again.",
+        )
 
-    Note: Frontend may include accept_terms and terms_version; enforce if provided.
-    """
-    # Allow JSON body with potential extra fields: accept_terms, terms_version
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    email = body.get('email') if isinstance(body, dict) else None
-    password = body.get('password') if isinstance(body, dict) else None
-    accept_terms = bool(body.get('accept_terms')) if isinstance(body, dict) else False
-    terms_version = (body.get('terms_version') or '').strip() if isinstance(body, dict) else ''
-    if not email or not password:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid email or password format.")
-
-    db_user = crud.get_user_by_email(session=session, email=email)
+    db_user = crud.get_user_by_email(session=session, email=user_in.email)
     if db_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="A user with this email already exists.",
         )
-    # If terms info provided, enforce correctness
-    required_terms = getattr(settings, 'TERMS_VERSION', None)
-    if required_terms:
-        if not accept_terms:
-            raise HTTPException(status_code=400, detail="You must accept the Terms of Use to create an account.")
-        if terms_version != str(required_terms):
-            raise HTTPException(status_code=400, detail="Terms version mismatch. Please refresh and accept the latest terms.")
-    # Apply admin default activation toggle
+
     try:
         admin_settings = load_admin_settings(session)
-        is_active_default = bool(getattr(admin_settings, 'default_user_active', True))
+        default_active = bool(getattr(admin_settings, "default_user_active", True))
     except Exception:
-        is_active_default = True
-    # Create user
-    new_user_in = UserCreate(email=email, password=password, is_active=is_active_default)
-    user = crud.create_user(session=session, user_create=new_user_in)
-    # Record terms acceptance if enforced
-    if required_terms:
-        try:
-            ip = request.client.host if request and request.client else None
-        except Exception:
-            ip = None
-        ua = request.headers.get('user-agent', '') if request and request.headers else None
-        crud.record_terms_acceptance(session=session, user=user, version=str(required_terms), ip=ip, user_agent=ua)
-    # Return enriched public user
-    data = user.model_dump()
-    is_admin = bool(user.email and user.email.lower() == settings.ADMIN_EMAIL.lower())
-    data.update({
-        "is_admin": is_admin,
-        "terms_version_required": str(required_terms) if required_terms else None,
-    })
-    return UserPublic(**data)
+        default_active = True
+
+    base_user = UserCreate(**user_in.model_dump(exclude={"accept_terms", "terms_version"}))
+    base_user.is_active = default_active
+
+    user = crud.create_user(session=session, user_create=base_user)
+
+    if _is_admin_email(user.email):
+        user.is_admin = True
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+
+    ip = request.client.host if request and request.client else None
+    user_agent = request.headers.get("user-agent") if request else None
+    crud.record_terms_acceptance(
+        session=session,
+        user=user,
+        version=user_in.terms_version,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    session.refresh(user)
+    return _to_user_public(user)
 
 @router.post("/token")
 async def login_for_access_token(
-    form_data: OAuth2PasswordRequestForm = Depends(), 
+    form_data: OAuth2PasswordRequestForm = Depends(),
     session: Session = Depends(get_session)
 ):
     """Login user with email/password and return an access token."""
@@ -148,6 +170,8 @@ async def login_for_access_token(
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    if _is_admin_email(user.email):
+        user.is_admin = True
     user.last_login = datetime.utcnow()
     session.add(user)
     session.commit()
@@ -177,6 +201,8 @@ async def login_for_access_token_json(
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    if _is_admin_email(user.email):
+        user.is_admin = True
     user.last_login = datetime.utcnow()
     session.add(user)
     session.commit()
@@ -185,8 +211,6 @@ async def login_for_access_token_json(
     return {"access_token": access_token, "token_type": "bearer"}
 
 # --- User preference updates (first_name, last_name, timezone) ---
-from pydantic import BaseModel
-from typing import Optional
 
 class UserPrefsPatch(BaseModel):
     first_name: Optional[str] = None
@@ -212,7 +236,7 @@ async def patch_user_prefs(payload: UserPrefsPatch, session: Session = Depends(g
         session.add(current_user)
         session.commit()
         session.refresh(current_user)
-    return current_user
+    return _to_user_public(current_user)
 
 # --- Google OAuth Endpoints ---
 @router.get('/login/google')
@@ -288,12 +312,12 @@ async def auth_google_callback(request: Request, session: Session = Depends(get_
             user_create.is_active = True
         user = crud.create_user(session=session, user_create=user_create)
 
-    if user.email and user.email.lower() == settings.ADMIN_EMAIL.lower():
+    if _is_admin_email(user.email):
         user.is_admin = True
 
     if google_user_id and not user.google_id:
         user.google_id = google_user_id
-    
+
     user.last_login = datetime.utcnow()
     session.add(user)
     session.commit()
@@ -304,21 +328,14 @@ async def auth_google_callback(request: Request, session: Session = Depends(get_
     frontend_url = f"https://app.getpodcastplus.com/#access_token={access_token}&token_type=bearer"
     if user.is_admin:
         frontend_url = f"https://app.getpodcastplus.com/admin#access_token={access_token}&token_type=bearer"
-    
+
     return RedirectResponse(url=frontend_url)
 
 # --- User Test Endpoint ---
 @router.get("/users/me", response_model=UserPublic)
 async def read_users_me(current_user: User = Depends(get_current_user)):
     """Gets the details of the currently logged-in user."""
-    data = current_user.model_dump()
-    is_admin = bool(current_user.email and current_user.email.lower() == settings.ADMIN_EMAIL.lower())
-    required_terms = getattr(settings, 'TERMS_VERSION', None)
-    data.update({
-        "is_admin": is_admin,
-        "terms_version_required": str(required_terms) if required_terms else None,
-    })
-    return UserPublic(**data)
+    return _to_user_public(current_user)
 
 # --- Debug endpoint ---
 @router.get("/debug/google-client", include_in_schema=False)
@@ -369,10 +386,5 @@ async def accept_terms(
         ip = None
     ua = request.headers.get('user-agent', '') if request and request.headers else None
     crud.record_terms_acceptance(session=session, user=current_user, version=version, ip=ip, user_agent=ua)
-    data = current_user.model_dump()
-    is_admin = bool(current_user.email and current_user.email.lower() == settings.ADMIN_EMAIL.lower())
-    data.update({
-        "is_admin": is_admin,
-        "terms_version_required": required,
-    })
-    return UserPublic(**data)
+    session.refresh(current_user)
+    return _to_user_public(current_user)
