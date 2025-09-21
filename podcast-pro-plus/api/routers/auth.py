@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from uuid import uuid4
+from typing import Any, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import RedirectResponse
@@ -233,7 +234,7 @@ async def auth_google_callback(request: Request, session: Session = Depends(get_
         client = getattr(oauth_client, 'google', None)
         if client is None:
             raise RuntimeError("OAuth client not configured")
-        token = await client.authorize_access_token(request)
+        token: Mapping[str, Any] | None = await client.authorize_access_token(request)
     except Exception as e:
         logger.exception("Google OAuth token exchange failed")
         raise HTTPException(
@@ -242,18 +243,42 @@ async def auth_google_callback(request: Request, session: Session = Depends(get_
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    google_user_data = token.get('userinfo')
-    if not google_user_data:
+    if not isinstance(token, Mapping):
+        logger.error("Google OAuth returned unexpected token payload type: %s", type(token))
         raise HTTPException(status_code=400, detail="Could not fetch user info from Google.")
 
-    user_email = google_user_data['email']
+    google_user_data = token.get('userinfo')
+    if not isinstance(google_user_data, Mapping) or 'email' not in google_user_data:
+        google_user_data = None
+        # Try to recover user info via ID token or explicit userinfo call.
+        id_token = token.get('id_token')
+        if id_token:
+            try:
+                google_user_data = await client.parse_id_token(request, token)
+            except Exception as parse_err:
+                logger.warning("Failed to parse Google ID token: %s", parse_err)
+        if not google_user_data:
+            try:
+                google_user_data = await client.userinfo(token=token)
+            except Exception as userinfo_err:
+                logger.warning("Failed to fetch Google userinfo: %s", userinfo_err)
+
+    if not isinstance(google_user_data, Mapping) or 'email' not in google_user_data:
+        raise HTTPException(status_code=400, detail="Could not fetch user info from Google.")
+
+    user_email = str(google_user_data['email'])
+    google_user_id = str(google_user_data.get('sub') or google_user_data.get('id') or "").strip() or None
+
+    if not google_user_id:
+        logger.warning("Google userinfo missing stable subject identifier for email %s", user_email)
+
     user = crud.get_user_by_email(session=session, email=user_email)
 
     if not user:
         user_create = UserCreate(
             email=user_email,
             password=str(uuid4()),
-            google_id=google_user_data['sub']
+            google_id=google_user_id
         )
         try:
             admin_settings = load_admin_settings(session)
@@ -265,8 +290,8 @@ async def auth_google_callback(request: Request, session: Session = Depends(get_
     if user.email and user.email.lower() == settings.ADMIN_EMAIL.lower():
         user.is_admin = True
 
-    if not user.google_id:
-        user.google_id = google_user_data['sub']
+    if google_user_id and not user.google_id:
+        user.google_id = google_user_id
     
     user.last_login = datetime.utcnow()
     session.add(user)
