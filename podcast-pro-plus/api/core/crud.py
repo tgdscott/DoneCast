@@ -4,7 +4,7 @@ from uuid import UUID
 import json
 
 from .security import get_password_hash
-from ..models.user import User, UserCreate, UserPublic
+from ..models.user import User, UserCreate, UserPublic, UserTermsAcceptance
 from ..models.podcast import Podcast, PodcastTemplate, PodcastTemplateCreate, Episode, EpisodeStatus
 from ..models.subscription import Subscription
 
