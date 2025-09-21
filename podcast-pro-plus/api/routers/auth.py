@@ -267,6 +267,7 @@ async def auth_google_callback(request: Request, session: Session = Depends(get_
         raise HTTPException(status_code=400, detail="Could not fetch user info from Google.")
 
     user_email = str(google_user_data['email'])
+
     google_user_id = str(google_user_data.get('sub') or google_user_data.get('id') or "").strip() or None
 
     if not google_user_id:
