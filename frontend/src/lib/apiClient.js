@@ -12,6 +12,8 @@ const runtimeBase = (() => {
     let origin = window.location.origin;
     if (origin.includes('app.')) {
       origin = origin.replace('app.', 'api.');
+    } else if (origin.includes('dashboard.')) {
+      origin = origin.replace('dashboard.', 'api.');
     }
     return origin.replace(/\/+$/, '');
   }
