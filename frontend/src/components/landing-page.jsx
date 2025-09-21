@@ -20,23 +20,22 @@ import {
 } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { useAuth } from "@/AuthContext.jsx"
-import { makeApi } from '@/lib/apiClient';
+import { makeApi } from "@/lib/apiClient";
 import { useBrand } from "@/brand/BrandContext.jsx";
 import Logo from "@/components/Logo.jsx";
-
 
 // Determine API base URL at runtime. Prefer build-time Vite env, otherwise
 // derive from the current origin (swap app->api) so requests never hit the
 // static frontend which returns 405 on POST.
 const runtimeApiBase = (() => {
   const env = import.meta.env?.VITE_API_BASE || import.meta.env?.VITE_API_BASE_URL;
-  if (env && typeof env === 'string') return env.replace(/\/+$/, '');
-  if (typeof window !== 'undefined') {
+  if (env && typeof env === "string") return env.replace(/\/+$/, "");
+  if (typeof window !== "undefined") {
     const origin = window.location.origin;
-    if (origin.includes('app.')) return origin.replace('app.', 'api.');
+    if (origin.includes("app.")) return origin.replace("app.", "api.");
     return origin;
   }
-  return '';
+  return "";
 })();
 
 const apiUrl = (path) => {
@@ -46,333 +45,377 @@ const apiUrl = (path) => {
 };
 
 const LoginModal = ({ onClose }) => {
-    const { login } = useAuth();
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [error, setError] = useState('');
-    const [mode, setMode] = useState('login'); // 'login' | 'register'
-    const [showPassword, setShowPassword] = useState(false);
-    const emailRef = useRef(null);
-    const passwordRef = useRef(null);
-    const fallbackTermsVersion = import.meta?.env?.VITE_TERMS_VERSION || '2025-09-19';
-    const [acceptTerms, setAcceptTerms] = useState(false);
-    const [termsInfo, setTermsInfo] = useState({ version: fallbackTermsVersion, url: '/terms' });
-    const [termsLoading, setTermsLoading] = useState(false);
-    const [registerSubmitting, setRegisterSubmitting] = useState(false);
+  const { login } = useAuth();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [mode, setMode] = useState("login"); // 'login' | 'register'
+  const [showPassword, setShowPassword] = useState(false);
+  const emailRef = useRef(null);
+  const passwordRef = useRef(null);
+  const fallbackTermsVersion = import.meta?.env?.VITE_TERMS_VERSION || "2025-09-19";
+  const [acceptTerms, setAcceptTerms] = useState(false);
+  const [termsInfo, setTermsInfo] = useState({ version: fallbackTermsVersion, url: "/terms" });
+  const [termsLoading, setTermsLoading] = useState(false);
+  const [registerSubmitting, setRegisterSubmitting] = useState(false);
 
-
-    useEffect(() => {
-        let cancelled = false;
-        const loadTerms = async () => {
-            setTermsLoading(true);
-            try {
-                const res = await fetch(apiUrl('/api/auth/terms/info'));
-                if (!res.ok) {
-                    throw new Error('terms_fetch_failed');
-                }
-                const data = await res.json().catch(() => ({}));
-                if (!cancelled) {
-                    setTermsInfo({
-                        version: (data && data.version) || fallbackTermsVersion,
-                        url: (data && data.url) || '/terms',
-                    });
-                }
-            } catch (_err) {
-                if (!cancelled) {
-                    setTermsInfo(prev => ({
-                        version: (prev && prev.version) || fallbackTermsVersion,
-                        url: (prev && prev.url) || '/terms',
-                    }));
-                }
-            } finally {
-                if (!cancelled) {
-                    setTermsLoading(false);
-                }
-            }
-        };
-        loadTerms();
-        return () => {
-            cancelled = true;
-        };
-    }, [fallbackTermsVersion]);
-
-
-    const attemptEmailLogin = async (nextEmail, nextPassword) => {
-        const params = new URLSearchParams({ username: (nextEmail ?? email).trim(), password: nextPassword ?? password });
-        try {
-            const res = await fetch(apiUrl('/api/auth/token'), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: params.toString(),
-                credentials: 'include',
-            });
-            const data = await res.json().catch(() => ({}));
-            if (res.ok && data && data.access_token) {
-                login(data.access_token);
-                onClose();
-                return;
-            }
-            if (res.status === 401) {
-                setError('Invalid email or password.');
-            } else {
-                setError(data?.detail || data?.message || 'An unexpected error occurred. Please try again.');
-            }
-            throw new Error('login_failed');
-        } catch (err) {
-            if (err.message !== 'login_failed') {
-                setError('An unexpected error occurred. Please try again.');
-            }
-            throw err;
+  useEffect(() => {
+    let cancelled = false;
+    const loadTerms = async () => {
+      setTermsLoading(true);
+      try {
+        const res = await fetch(apiUrl("/api/auth/terms/info"));
+        if (!res.ok) {
+          throw new Error("terms_fetch_failed");
         }
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled) {
+          setTermsInfo({
+            version: (data && data.version) || fallbackTermsVersion,
+            url: (data && data.url) || "/terms",
+          });
+        }
+      } catch (_err) {
+        if (!cancelled) {
+          setTermsInfo((prev) => ({
+            version: (prev && prev.version) || fallbackTermsVersion,
+            url: (prev && prev.url) || "/terms",
+          }));
+        }
+      } finally {
+        if (!cancelled) {
+          setTermsLoading(false);
+        }
+      }
     };
-
-    const ensureFields = () => {
-        const trimmedEmail = email.trim();
-        if (!trimmedEmail) {
-            setError('Email is required.');
-            emailRef.current?.focus();
-            return null;
-        }
-        if (!password) {
-            setError('Password is required.');
-            passwordRef.current?.focus();
-            return null;
-        }
-        return trimmedEmail;
+    loadTerms();
+    return () => {
+      cancelled = true;
     };
+  }, [fallbackTermsVersion]);
 
-    const handleEmailLogin = async (e) => {
-        e.preventDefault();
-        setError('');
-        const trimmedEmail = ensureFields();
-        if (!trimmedEmail) return;
-        setEmail(trimmedEmail);
-        try {
-            await attemptEmailLogin(trimmedEmail, password);
-        } catch (_) {
-            // error already surfaced via setError
+  const attemptEmailLogin = async (nextEmail, nextPassword) => {
+    const params = new URLSearchParams({
+      username: (nextEmail ?? email).trim(),
+      password: nextPassword ?? password,
+    });
+    try {
+      const res = await fetch(apiUrl("/api/auth/token"), {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data && data.access_token) {
+        login(data.access_token);
+        onClose();
+        return;
+      }
+      if (res.status === 401) {
+        setError("Invalid email or password.");
+      } else {
+        setError(data?.detail || data?.message || "An unexpected error occurred. Please try again.");
+      }
+      throw new Error("login_failed");
+    } catch (err) {
+      if (err.message !== "login_failed") {
+        setError("An unexpected error occurred. Please try again.");
+      }
+      throw err;
+    }
+  };
+
+  const ensureFields = () => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setError("Email is required.");
+      emailRef.current?.focus();
+      return null;
+    }
+    if (!password) {
+      setError("Password is required.");
+      passwordRef.current?.focus();
+      return null;
+    }
+    return trimmedEmail;
+  };
+
+  const handleEmailLogin = async (e) => {
+    e.preventDefault();
+    setError("");
+    const trimmedEmail = ensureFields();
+    if (!trimmedEmail) return;
+    setEmail(trimmedEmail);
+    try {
+      await attemptEmailLogin(trimmedEmail, password);
+    } catch (_) {
+      // error already surfaced via setError
+    }
+  };
+
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (!acceptTerms) {
+      setError("Please confirm you agree to the Terms of Use to continue.");
+      return;
+    }
+    const trimmedEmail = ensureFields();
+    if (!trimmedEmail) return;
+    setEmail(trimmedEmail);
+    const versionToSend = termsInfo?.version || fallbackTermsVersion;
+    setRegisterSubmitting(true);
+    try {
+      const res = await fetch(apiUrl("/api/auth/register"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: trimmedEmail,
+          password,
+          accept_terms: true,
+          terms_version: versionToSend,
+        }),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 400) {
+          setError(data?.detail || "A user with this email already exists.");
+        } else if (res.status === 422) {
+          setError("Invalid email or password format.");
+        } else {
+          setError(data?.detail || data?.message || "Registration error. Please try again.");
         }
-    };
+        return;
+      }
+      await attemptEmailLogin(trimmedEmail, password);
+      setAcceptTerms(false);
+    } catch (err) {
+      setError((prev) => prev || "Registration error. Please try again.");
+    } finally {
+      setRegisterSubmitting(false);
+    }
+  };
 
-    const handleRegister = async (e) => {
-        e.preventDefault();
-        setError('');
-        if (!acceptTerms) {
-            setError('Please confirm you agree to the Terms of Use to continue.');
-            return;
-        }
-        const trimmedEmail = ensureFields();
-        if (!trimmedEmail) return;
-        setEmail(trimmedEmail);
-        const versionToSend = termsInfo?.version || fallbackTermsVersion;
-        setRegisterSubmitting(true);
-        try {
-            const res = await fetch(apiUrl('/api/auth/register'), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    email: trimmedEmail,
-                    password,
-                    accept_terms: true,
-                    terms_version: versionToSend,
-                }),
-                credentials: 'include',
-            });
-            if (!res.ok) {
-                const data = await res.json().catch(() => ({}));
-                if (res.status === 400) {
-                    setError(data?.detail || 'A user with this email already exists.');
-                } else if (res.status === 422) {
-                    setError('Invalid email or password format.');
-                } else {
-                    setError(data?.detail || data?.message || 'Registration error. Please try again.');
-                }
-                return;
-            }
-            await attemptEmailLogin(trimmedEmail, password);
-            setAcceptTerms(false);
-        } catch (err) {
-            setError((prev) => prev || 'Registration error. Please try again.');
-        } finally {
-            setRegisterSubmitting(false);
-        }
-    };
+  // --- Derived UI state for submit button ---
+  const submitDisabled =
+    mode === "login"
+      ? !email.trim() || !password
+      : registerSubmitting || termsLoading || !acceptTerms || !email.trim() || !password;
 
+  const submitText =
+    mode === "login" ? "Sign In" : registerSubmitting ? "Creating…" : "Create Account";
 
-    return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <Card className="w-full max-w-md mx-4">
-                <CardHeader className="flex flex-row items-center justify-between">
-                    <CardTitle>{mode === 'login' ? 'Sign In' : 'Create Account'}</CardTitle>
-                    <Button variant="ghost" size="sm" onClick={onClose}><X className="w-4 h-4" /></Button>
-                </CardHeader>
-                <CardContent>
-                    <form onSubmit={mode === 'login' ? handleEmailLogin : handleRegister} className="space-y-4">
-                        {error && (
-                            <div
-                                className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
-                                role="alert"
-                                aria-live="assertive"
-                            >
-                                {error}
-                            </div>
-                        )}
-                        <div className="space-y-2">
-                            <Label htmlFor="email">Email</Label>
-                            <Input
-                                ref={emailRef}
-                                id="email"
-                                type="email"
-                                autoComplete="email"
-                                placeholder="you@example.com"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                inputMode="email"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="password">Password</Label>
-                            <div className="relative">
-                                <Input
-                                    ref={passwordRef}
-                                    id="password"
-                                    type={showPassword ? 'text' : 'password'}
-                                    autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                    className="pr-20"
-                                />
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="absolute inset-y-1 right-1 h-7 px-2 text-xs"
-                                    onClick={() => setShowPassword((prev) => !prev)}
-                                    aria-pressed={showPassword}
-                                    aria-label={showPassword ? 'Hide password' : 'Show password'}
-                                >
-                                    {showPassword ? 'Hide' : 'Show'}
-                                </Button>
-                            </div>
-                        </div>
-                        {mode === 'register' && (
-                            <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
-                                <div className="flex items-start gap-2">
-                                    <Checkbox
-                                        id="accept-terms"
-                                        checked={acceptTerms}
-                                        disabled={termsLoading || registerSubmitting}
-                                        onCheckedChange={(checked) => setAcceptTerms(Boolean(checked))}
-                                    />
-                                    <label htmlFor="accept-terms" className="text-sm leading-5 text-slate-700">
-                                        I agree to the <a href={(termsInfo?.url) || '/terms'} target="_blank" rel="noreferrer" className="font-medium text-blue-600 hover:text-blue-700">Terms of Use</a> and acknowledge the
-                                        <span className="whitespace-nowrap">&nbsp;</span>
-                                        <a href="/privacy" target="_blank" rel="noreferrer" className="font-medium text-blue-600 hover:text-blue-700">Privacy Policy</a>.
-                                        {termsInfo?.version && (
-                                            <span className="mt-1 block text-xs text-muted-foreground">Current version: {termsInfo.version}</span>
-                                        )}
-                                    </label>
-                                </div>
-                            </div>
-                        )}
-                        <Button type="submit" className="w-full" disabled={submitDisabled}>
-                            {submitText}
-                        </Button>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setMode(m => m === 'login' ? 'register' : 'login');
-                                setError('');
-                                setRegisterSubmitting(false);
-                                setAcceptTerms(false);
-                            }}
-                            className="w-full text-xs text-blue-600 hover:underline"
-                        >
-                            {mode === 'login' ? "Need an account? Sign up" : "Have an account? Sign in"}
-                        </button>
-                    </form>
-                    <div className="relative my-4">
-                        <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
-                        <div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-muted-foreground">Or continue with</span></div>
-                    </div>
-                    {/** Use explicit backend host to avoid localhost vs 127.0.0.1 cookie partition causing Google OAuth state mismatch */}
-                    <a href={`https://api.getpodcastplus.com/api/auth/login/google`} className="block">
-                        <Button variant="outline" className="w-full">
-                            Sign In with Google
-                        </Button>
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <Card className="w-full max-w-md mx-4">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>{mode === "login" ? "Sign In" : "Create Account"}</CardTitle>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            <X className="w-4 h-4" />
+          </Button>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={mode === "login" ? handleEmailLogin : handleRegister} className="space-y-4">
+            {error && (
+              <div
+                className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+                role="alert"
+                aria-live="assertive"
+              >
+                {error}
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                ref={emailRef}
+                id="email"
+                type="email"
+                autoComplete="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                inputMode="email"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <div className="relative">
+                <Input
+                  ref={passwordRef}
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete={mode === "login" ? "current-password" : "new-password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="pr-20"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute inset-y-1 right-1 h-7 px-2 text-xs"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  aria-pressed={showPassword}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? "Hide" : "Show"}
+                </Button>
+              </div>
+            </div>
+            {mode === "register" && (
+              <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
+                <div className="flex items-start gap-2">
+                  <Checkbox
+                    id="accept-terms"
+                    checked={acceptTerms}
+                    disabled={termsLoading || registerSubmitting}
+                    onCheckedChange={(checked) => setAcceptTerms(Boolean(checked))}
+                  />
+                  <label htmlFor="accept-terms" className="text-sm leading-5 text-slate-700">
+                    I agree to the{" "}
+                    <a
+                      href={termsInfo?.url || "/terms"}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-blue-600 hover:text-blue-700"
+                    >
+                      Terms of Use
+                    </a>{" "}
+                    and acknowledge the
+                    <span className="whitespace-nowrap">&nbsp;</span>
+                    <a
+                      href="/privacy"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-blue-600 hover:text-blue-700"
+                    >
+                      Privacy Policy
                     </a>
-                </CardContent>
-            </Card>
-        </div>
-    );
+                    .
+                    {termsInfo?.version && (
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        Current version: {termsInfo.version}
+                      </span>
+                    )}
+                  </label>
+                </div>
+              </div>
+            )}
+            <Button type="submit" className="w-full" disabled={submitDisabled}>
+              {submitText}
+            </Button>
+            <button
+              type="button"
+              onClick={() => {
+                setMode((m) => (m === "login" ? "register" : "login"));
+                setError("");
+                setRegisterSubmitting(false);
+                setAcceptTerms(false);
+              }}
+              className="w-full text-xs text-blue-600 hover:underline"
+            >
+              {mode === "login" ? "Need an account? Sign up" : "Have an account? Sign in"}
+            </button>
+          </form>
+          <div className="relative my-4">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-white px-2 text-muted-foreground">Or continue with</span>
+            </div>
+          </div>
+          {/** Use explicit backend host to avoid localhost vs 127.0.0.1 cookie partition causing Google OAuth state mismatch */}
+          <a href={`https://api.getpodcastplus.com/api/auth/login/google`} className="block">
+            <Button variant="outline" className="w-full">
+              Sign In with Google
+            </Button>
+          </a>
+        </CardContent>
+      </Card>
+    </div>
+  );
 };
 
-
 export default function PodcastPlusLanding() {
-  const [isPlaying, setIsPlaying] = useState(false)
+  const [isPlaying, setIsPlaying] = useState(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [publicEpisodes, setPublicEpisodes] = useState([]);
   const { brand } = useBrand();
+
   // Auto-open login if ?login=1 present
-  useEffect(()=>{
+  useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
-      if(params.get('login') === '1') setIsLoginModalOpen(true);
-    } catch(_) {}
+      if (params.get("login") === "1") setIsLoginModalOpen(true);
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
-    (async ()=>{
-      try { const data = await makeApi().get('/api/public/episodes'); setPublicEpisodes(Array.isArray(data.items)? data.items: []); } catch {}
+    (async () => {
+      try {
+        const data = await makeApi().get("/api/public/episodes");
+        setPublicEpisodes(Array.isArray(data.items) ? data.items : []);
+      } catch {}
     })();
   }, []);
 
   const handlePlayDemo = () => {
-    setIsPlaying(!isPlaying)
-  }
+    setIsPlaying(!isPlaying);
+  };
 
   return (
     <div className="min-h-screen bg-white">
       {isLoginModalOpen && <LoginModal onClose={() => setIsLoginModalOpen(false)} />}
-      
+
       {/* Navigation Header */}
-    <nav className="px-4 py-4 border-b border-gray-100">
+      <nav className="px-4 py-4 border-b border-gray-100">
         <div className="container mx-auto max-w-6xl flex justify-between items-center">
-      <Logo size={28} lockup />
+          <Logo size={28} lockup />
           <div className="hidden md:flex items-center space-x-8">
-            <a href="#how-it-works" className="text-gray-600 hover:text-gray-800 transition-colors">How It Works</a>
-            <a href="#testimonials" className="text-gray-600 hover:text-gray-800 transition-colors">Reviews</a>
-            <a href="#faq" className="text-gray-600 hover:text-gray-800 transition-colors">FAQ</a>
+            <a href="#how-it-works" className="text-gray-600 hover:text-gray-800 transition-colors">
+              How It Works
+            </a>
+            <a href="#testimonials" className="text-gray-600 hover:text-gray-800 transition-colors">
+              Reviews
+            </a>
+            <a href="#faq" className="text-gray-600 hover:text-gray-800 transition-colors">
+              FAQ
+            </a>
+            <a href="/pricing" className="text-gray-600 hover:text-gray-800 transition-colors">
+              Pricing
+            </a>
             {/* Temporary dev link to A/B preview */}
-            <a href="/ab" className="text-gray-600 hover:text-gray-800 transition-colors">A/B</a>
+            <a href="/ab" className="text-gray-600 hover:text-gray-800 transition-colors">
+              A/B
+            </a>
             <Button
               onClick={() => setIsLoginModalOpen(true)}
               variant="outline"
               className="border-2 bg-transparent"
-              style={{ borderColor: "#2C3E50", color: "#2C3E50" }}>
+              style={{ borderColor: "#2C3E50", color: "#2C3E50" }}
+            >
               Sign In
             </Button>
           </div>
         </div>
       </nav>
+
       {/* Hero Section */}
       <section className="px-4 py-16 md:py-24 lg:py-32 relative overflow-hidden">
-        <div
-          className="absolute inset-0 bg-gradient-to-br from-blue-50 to-purple-50 opacity-30"></div>
+        <div className="absolute inset-0 bg-gradient-to-br from-blue-50 to-purple-50 opacity-30"></div>
         <div className="container mx-auto max-w-5xl text-center relative z-10">
-          <Badge
-            className="mb-6 px-4 py-2 text-sm font-medium"
-            style={{ backgroundColor: "#ECF0F1", color: "#2C3E50" }}>
+          <Badge className="mb-6 px-4 py-2 text-sm font-medium" style={{ backgroundColor: "#ECF0F1", color: "#2C3E50" }}>
             🎉 Over 10,000 podcasters trust Podcast Plus
           </Badge>
 
-          <h1
-            className="text-4xl md:text-6xl lg:text-7xl font-bold mb-6 leading-tight"
-            style={{ color: "#2C3E50" }}>
+          <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold mb-6 leading-tight" style={{ color: "#2C3E50" }}>
             {brand.heroH1}
           </h1>
-          <p
-            className="text-xl md:text-2xl lg:text-3xl mb-8 text-gray-600 max-w-4xl mx-auto leading-relaxed">
+          <p className="text-xl md:text-2xl lg:text-3xl mb-8 text-gray-600 max-w-4xl mx-auto leading-relaxed">
             {brand.heroSub}
           </p>
           <p className="text-lg md:text-xl mb-12 text-gray-500 max-w-3xl mx-auto">
@@ -384,7 +427,8 @@ export default function PodcastPlusLanding() {
             <Button
               size="lg"
               onClick={() => setIsLoginModalOpen(true)}
-              className="text-lg px-8 py-6 font-semibold rounded-[var(--radius)] hover:opacity-90 transition-all transform hover:scale-105 shadow-lg">
+              className="text-lg px-8 py-6 font-semibold rounded-[var(--radius)] hover:opacity-90 transition-all transform hover:scale-105 shadow-lg"
+            >
               Make my first episode
               <ArrowRight className="ml-2 w-5 h-5" />
             </Button>
@@ -392,14 +436,14 @@ export default function PodcastPlusLanding() {
               variant="outline"
               size="lg"
               className="text-lg px-8 py-6 font-semibold rounded-[var(--radius)] border bg-secondary text-secondary-foreground hover:opacity-90 transition-all"
-              onClick={handlePlayDemo}>
+              onClick={handlePlayDemo}
+            >
               <Play className="mr-2 w-5 h-5" />
               See how it works
             </Button>
           </div>
 
-          <div
-            className="flex flex-col sm:flex-row justify-center items-center gap-6 text-sm text-gray-500">
+          <div className="flex flex-col sm:flex-row justify-center items-center gap-6 text-sm text-gray-500">
             <div className="flex items-center">
               <CheckCircle className="w-4 h-4 mr-2 text-green-500" />
               Free 14-day trial
@@ -415,38 +459,31 @@ export default function PodcastPlusLanding() {
           </div>
         </div>
       </section>
+
       {/* Stats Section */}
       <section className="px-4 py-12" style={{ backgroundColor: "#ECF0F1" }}>
         <div className="container mx-auto max-w-4xl">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
             <div>
-              <div
-                className="text-3xl md:text-4xl font-bold mb-2"
-                style={{ color: "#2C3E50" }}>
+              <div className="text-3xl md:text-4xl font-bold mb-2" style={{ color: "#2C3E50" }}>
                 10K+
               </div>
               <div className="text-gray-600">Active Podcasters</div>
             </div>
             <div>
-              <div
-                className="text-3xl md:text-4xl font-bold mb-2"
-                style={{ color: "#2C3E50" }}>
+              <div className="text-3xl md:text-4xl font-bold mb-2" style={{ color: "#2C3E50" }}>
                 50K+
               </div>
               <div className="text-gray-600">Episodes Published</div>
             </div>
             <div>
-              <div
-                className="text-3xl md:text-4xl font-bold mb-2"
-                style={{ color: "#2C3E50" }}>
+              <div className="text-3xl md:text-4xl font-bold mb-2" style={{ color: "#2C3E50" }}>
                 95%
               </div>
               <div className="text-gray-600">Customer Satisfaction</div>
             </div>
             <div>
-              <div
-                className="text-3xl md:text-4xl font-bold mb-2"
-                style={{ color: "#2C3E50" }}>
+              <div className="text-3xl md:text-4xl font-bold mb-2" style={{ color: "#2C3E50" }}>
                 5 Min
               </div>
               <div className="text-gray-600">Average Setup Time</div>
@@ -454,13 +491,12 @@ export default function PodcastPlusLanding() {
           </div>
         </div>
       </section>
+
       {/* How It Works Section */}
       <section id="how-it-works" className="px-4 py-16 md:py-24">
         <div className="container mx-auto max-w-6xl">
           <div className="text-center mb-16">
-            <h2
-              className="text-3xl md:text-4xl lg:text-5xl font-bold mb-6"
-              style={{ color: "#2C3E50" }}>
+            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-6" style={{ color: "#2C3E50" }}>
               How It Works: Podcasting, Simplified.
             </h2>
             <p className="text-xl text-gray-600 max-w-3xl mx-auto">
@@ -472,16 +508,12 @@ export default function PodcastPlusLanding() {
             {/* Step 1 */}
             <div className="text-center group">
               <div className="relative">
-                <div
-                  className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center shadow-lg group-hover:shadow-xl transition-all transform group-hover:scale-105">
+                <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center shadow-lg group-hover:shadow-xl transition-all transform group-hover:scale-105">
                   <Mic className="w-12 h-12" style={{ color: "#2C3E50" }} />
                 </div>
-                <Badge
-                  className="absolute -top-2 -right-2 bg-green-500 text-white text-xs px-2 py-1">Step 1</Badge>
+                <Badge className="absolute -top-2 -right-2 bg-green-500 text-white text-xs px-2 py-1">Step 1</Badge>
               </div>
-              <h3
-                className="text-xl md:text-2xl font-semibold mb-4"
-                style={{ color: "#2C3E50" }}>
+              <h3 className="text-xl md:text-2xl font-semibold mb-4" style={{ color: "#2C3E50" }}>
                 Record or Generate Audio
               </h3>
               <p className="text-gray-600 text-lg leading-relaxed mb-4">
@@ -495,47 +527,35 @@ export default function PodcastPlusLanding() {
             {/* Step 2 */}
             <div className="text-center group">
               <div className="relative">
-                <div
-                  className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-green-100 to-blue-100 flex items-center justify-center shadow-lg group-hover:shadow-xl transition-all transform group-hover:scale-105">
+                <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-green-100 to-blue-100 flex items-center justify-center shadow-lg group-hover:shadow-xl transition-all transform group-hover:scale-105">
                   <Settings className="w-12 h-12" style={{ color: "#2C3E50" }} />
                 </div>
-                <Badge
-                  className="absolute -top-2 -right-2 bg-green-500 text-white text-xs px-2 py-1">Step 2</Badge>
+                <Badge className="absolute -top-2 -right-2 bg-green-500 text-white text-xs px-2 py-1">Step 2</Badge>
               </div>
-              <h3
-                className="text-xl md:text-2xl font-semibold mb-4"
-                style={{ color: "#2C3E50" }}>
+              <h3 className="text-xl md:text-2xl font-semibold mb-4" style={{ color: "#2C3E50" }}>
                 Automate Production & Polishing
               </h3>
               <p className="text-gray-600 text-lg leading-relaxed mb-4">
                 Our AI handles editing, noise reduction, music, and professional formatting automatically.
               </p>
-              <div className="text-sm text-gray-500">
-                ✓ Auto noise removal • ✓ Music & intros • ✓ Professional editing
-              </div>
+              <div className="text-sm text-gray-500">✓ Auto noise removal • ✓ Music & intros • ✓ Professional editing</div>
             </div>
 
             {/* Step 3 */}
             <div className="text-center group">
               <div className="relative">
-                <div
-                  className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-purple-100 to-pink-100 flex items-center justify-center shadow-lg group-hover:shadow-xl transition-all transform group-hover:scale-105">
+                <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-purple-100 to-pink-100 flex items-center justify-center shadow-lg group-hover:shadow-xl transition-all transform group-hover:scale-105">
                   <Share2 className="w-12 h-12" style={{ color: "#2C3E50" }} />
                 </div>
-                <Badge
-                  className="absolute -top-2 -right-2 bg-green-500 text-white text-xs px-2 py-1">Step 3</Badge>
+                <Badge className="absolute -top-2 -right-2 bg-green-500 text-white text-xs px-2 py-1">Step 3</Badge>
               </div>
-              <h3
-                className="text-xl md:text-2xl font-semibold mb-4"
-                style={{ color: "#2C3E50" }}>
+              <h3 className="text-xl md:text-2xl font-semibold mb-4" style={{ color: "#2C3E50" }}>
                 Publish & Share Instantly
               </h3>
               <p className="text-gray-600 text-lg leading-relaxed mb-4">
                 Your podcast goes live on Spotify, Apple Podcasts, and 20+ platforms with just one click.
               </p>
-              <div className="text-sm text-gray-500">
-                ✓ 20+ platforms • ✓ Automatic distribution • ✓ Analytics included
-              </div>
+              <div className="text-sm text-gray-500">✓ 20+ platforms • ✓ Automatic distribution • ✓ Analytics included</div>
             </div>
           </div>
 
@@ -543,25 +563,24 @@ export default function PodcastPlusLanding() {
             <Button
               size="lg"
               className="text-lg px-8 py-4 rounded-lg font-semibold text-white hover:opacity-90 transition-all"
-              style={{ backgroundColor: "#2C3E50" }}>
+              style={{ backgroundColor: "#2C3E50" }}
+            >
               Try It Free for 14 Days
             </Button>
           </div>
         </div>
       </section>
+
       {/* Benefits Section */}
       <section className="px-4 py-16 md:py-24" style={{ backgroundColor: "#ECF0F1" }}>
         <div className="container mx-auto max-w-6xl">
           <div className="text-center mb-16">
-            <h2
-              className="text-3xl md:text-4xl lg:text-5xl font-bold mb-8"
-              style={{ color: "#2C3E50" }}>
+            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-8" style={{ color: "#2C3E50" }}>
               Why 10,000+ Creators Choose Podcast Plus
             </h2>
 
             <div className="grid md:grid-cols-3 gap-8">
-              <Card
-                className="border-0 shadow-lg hover:shadow-xl transition-all transform hover:scale-105 bg-white">
+              <Card className="border-0 shadow-lg hover:shadow-xl transition-all transform hover:scale-105 bg-white">
                 <CardContent className="p-8 text-center">
                   <Clock className="w-16 h-16 mx-auto mb-6" style={{ color: "#2C3E50" }} />
                   <h3 className="text-2xl font-semibold mb-4" style={{ color: "#2C3E50" }}>
@@ -573,8 +592,7 @@ export default function PodcastPlusLanding() {
                 </CardContent>
               </Card>
 
-              <Card
-                className="border-0 shadow-lg hover:shadow-xl transition-all transform hover:scale-105 bg-white">
+              <Card className="border-0 shadow-lg hover:shadow-xl transition-all transform hover:scale-105 bg-white">
                 <CardContent className="p-8 text-center">
                   <Shield className="w-16 h-16 mx-auto mb-6" style={{ color: "#2C3E50" }} />
                   <h3 className="text-2xl font-semibold mb-4" style={{ color: "#2C3E50" }}>
@@ -586,8 +604,7 @@ export default function PodcastPlusLanding() {
                 </CardContent>
               </Card>
 
-              <Card
-                className="border-0 shadow-lg hover:shadow-xl transition-all transform hover:scale-105 bg-white">
+              <Card className="border-0 shadow-lg hover:shadow-xl transition-all transform hover:scale-105 bg-white">
                 <CardContent className="p-8 text-center">
                   <Sparkles className="w-16 h-16 mx-auto mb-6" style={{ color: "#2C3E50" }} />
                   <h3 className="text-2xl font-semibold mb-4" style={{ color: "#2C3E50" }}>
@@ -602,24 +619,31 @@ export default function PodcastPlusLanding() {
           </div>
         </div>
       </section>
+
       {/* Testimonials */}
       <section id="testimonials" className="px-4 py-16 md:py-24">
         <div className="container mx-auto max-w-6xl">
           {publicEpisodes.length > 0 && (
             <div className="mb-16">
-              <h2 className="text-3xl font-bold mb-6" style={{ color: "#2C3E50" }}>Recently Published with Podcast Plus</h2>
+              <h2 className="text-3xl font-bold mb-6" style={{ color: "#2C3E50" }}>
+                Recently Published with Podcast Plus
+              </h2>
               <div className="grid md:grid-cols-3 gap-6">
-                {publicEpisodes.map(ep => (
+                {publicEpisodes.map((ep) => (
                   <Card key={ep.id} className="overflow-hidden">
                     <div className="h-40 bg-gray-100">
-                      {ep.cover_url ? <img src={ep.cover_url} alt={ep.title} className="w-full h-full object-cover"/> : <div className="h-full flex items-center justify-center text-gray-400">No Cover</div>}
+                      {ep.cover_url ? (
+                        <img src={ep.cover_url} alt={ep.title} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="h-full flex items-center justify-center text-gray-400">No Cover</div>
+                      )}
                     </div>
                     <CardHeader>
                       <CardTitle className="text-lg line-clamp-1">{ep.title}</CardTitle>
                     </CardHeader>
                     <CardContent>
                       <p className="text-sm text-gray-600 line-clamp-3 mb-2">{ep.description}</p>
-                      {ep.final_audio_url && <audio controls src={ep.final_audio_url} className="w-full"/>}
+                      {ep.final_audio_url && <audio controls src={ep.final_audio_url} className="w-full" />}
                     </CardContent>
                   </Card>
                 ))}
@@ -627,9 +651,7 @@ export default function PodcastPlusLanding() {
             </div>
           )}
           <div className="text-center mb-16">
-            <h2
-              className="text-3xl md:text-4xl lg:text-5xl font-bold mb-6"
-              style={{ color: "#2C3E50" }}>
+            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-6" style={{ color: "#2C3E50" }}>
               Real Stories from Real Podcasters
             </h2>
             <div className="flex justify-center items-center mb-8">
@@ -660,7 +682,8 @@ export default function PodcastPlusLanding() {
                     alt="Sarah Johnson"
                     width={60}
                     height={60}
-                    className="rounded-full mr-4" />
+                    className="rounded-full mr-4"
+                  />
                   <div>
                     <h4 className="font-semibold text-lg" style={{ color: "#2C3E50" }}>
                       Sarah Johnson
@@ -688,7 +711,8 @@ export default function PodcastPlusLanding() {
                     alt="Robert Chen"
                     width={60}
                     height={60}
-                    className="rounded-full mr-4" />
+                    className="rounded-full mr-4"
+                  />
                   <div>
                     <h4 className="font-semibold text-lg" style={{ color: "#2C3E50" }}>
                       Robert Chen
@@ -716,7 +740,8 @@ export default function PodcastPlusLanding() {
                     alt="Maria Rodriguez"
                     width={60}
                     height={60}
-                    className="rounded-full mr-4" />
+                    className="rounded-full mr-4"
+                  />
                   <div>
                     <h4 className="font-semibold text-lg" style={{ color: "#2C3E50" }}>
                       Maria Rodriguez
@@ -729,21 +754,15 @@ export default function PodcastPlusLanding() {
           </div>
         </div>
       </section>
+
       {/* FAQ Section */}
-      <section
-        id="faq"
-        className="px-4 py-16 md:py-24"
-        style={{ backgroundColor: "#ECF0F1" }}>
+      <section id="faq" className="px-4 py-16 md:py-24" style={{ backgroundColor: "#ECF0F1" }}>
         <div className="container mx-auto max-w-4xl">
           <div className="text-center mb-16">
-            <h2
-              className="text-3xl md:text-4xl lg:text-5xl font-bold mb-6"
-              style={{ color: "#2C3E50" }}>
+            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-6" style={{ color: "#2C3E50" }}>
               Frequently Asked Questions
             </h2>
-            <p className="text-xl text-gray-600">
-              Everything you need to know about getting started with Podcast Plus
-            </p>
+            <p className="text-xl text-gray-600">Everything you need to know about getting started with Podcast Plus</p>
           </div>
 
           <div className="space-y-6">
@@ -781,34 +800,31 @@ export default function PodcastPlusLanding() {
           </div>
         </div>
       </section>
+
       {/* Final CTA Section */}
       <section className="px-4 py-16 md:py-24">
         <div className="container mx-auto max-w-5xl text-center">
-          <h2
-            className="text-3xl md:text-4xl lg:text-5xl font-bold mb-6"
-            style={{ color: "#2C3E50" }}>
+          <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-6" style={{ color: "#2C3E50" }}>
             Ready to Start Your Podcast Journey?
           </h2>
-          <p
-            className="text-xl md:text-2xl mb-8 text-gray-600 leading-relaxed max-w-3xl mx-auto">
+          <p className="text-xl md:text-2xl mb-8 text-gray-600 leading-relaxed max-w-3xl mx-auto">
             Join over 10,000 creators who've discovered the joy of effortless podcasting. Start your free trial today -
             no credit card required.
           </p>
 
-          <div
-            className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-8">
+          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-8">
             <Button
               size="lg"
               onClick={() => setIsLoginModalOpen(true)}
               className="text-xl px-10 py-6 rounded-lg font-semibold text-white hover:opacity-90 transition-all transform hover:scale-105 shadow-lg"
-              style={{ backgroundColor: "#2C3E50" }}>
+              style={{ backgroundColor: "#2C3E50" }}
+            >
               Start Your Free 14-Day Trial
               <ArrowRight className="ml-2 w-6 h-6" />
             </Button>
           </div>
 
-          <div
-            className="flex flex-col sm:flex-row justify-center items-center gap-6 text-sm text-gray-500 mb-8">
+          <div className="flex flex-col sm:flex-row justify-center items-center gap-6 text-sm text-gray-500 mb-8">
             <div className="flex items-center">
               <CheckCircle className="w-4 h-4 mr-2 text-green-500" />
               14-day free trial
@@ -824,18 +840,15 @@ export default function PodcastPlusLanding() {
           </div>
 
           <div className="text-center">
-            <Badge
-              className="px-4 py-2 text-sm font-medium"
-              style={{ backgroundColor: "#ECF0F1", color: "#2C3E50" }}>
+            <Badge className="px-4 py-2 text-sm font-medium" style={{ backgroundColor: "#ECF0F1", color: "#2C3E50" }}>
               🔒 Trusted by 10,000+ podcasters worldwide
             </Badge>
           </div>
         </div>
       </section>
+
       {/* Footer */}
-      <footer
-        className="px-4 py-12 border-t border-gray-200"
-        style={{ backgroundColor: "#ECF0F1" }}>
+      <footer className="px-4 py-12 border-t border-gray-200" style={{ backgroundColor: "#ECF0F1" }}>
         <div className="container mx-auto max-w-6xl">
           <div className="grid md:grid-cols-4 gap-8 mb-8">
             <div>
@@ -940,8 +953,7 @@ export default function PodcastPlusLanding() {
             </div>
           </div>
 
-          <div
-            className="border-t border-gray-200 pt-8 flex flex-col md:flex-row justify-between items-center">
+          <div className="border-t border-gray-200 pt-8 flex flex-col md:flex-row justify-between items-center">
             <p className="text-gray-600 mb-4 md:mb-0">Podcast Plus © 2025. All rights reserved.</p>
             <div className="flex space-x-6">
               <a href="/privacy" className="text-gray-600 hover:text-gray-800 transition-colors">
@@ -960,23 +972,3 @@ export default function PodcastPlusLanding() {
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

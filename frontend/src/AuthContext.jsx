@@ -95,7 +95,16 @@ export const AuthProvider = ({ children }) => {
         return () => window.removeEventListener('ppp-token-captured', onCaptured);
     }, [token]);
 
-    const value = { token, user, login, logout, refreshUser, isAuthenticated: !!token, backendOnline, hydrated };
+    const acceptTerms = useCallback(async (version) => {
+        if (!token) throw new Error('Not authenticated');
+        const api = makeApi(token);
+        const data = await api.post('/api/auth/terms/accept', { version });
+        // Server returns updated UserPublic; update local state
+        setUser(data);
+        return data;
+    }, [token]);
+
+    const value = { token, user, login, logout, refreshUser, isAuthenticated: !!token, backendOnline, hydrated, acceptTerms };
 
     return (
         <AuthContext.Provider value={value}>

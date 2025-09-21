@@ -14,6 +14,7 @@ import ClosedAlphaGate from '@/components/ClosedAlphaGate.jsx';
 import { Toaster } from '@/components/ui/toaster.jsx';
 import MetaHead from '@/components/MetaHead.jsx';
 import ComfortMenu from '@/components/common/ComfortMenu.jsx';
+import TermsGate from '@/components/common/TermsGate.jsx';
 
 // --- IMPORTANT ---
 // Admin is determined by backend role; no hard-coded emails.
@@ -155,6 +156,12 @@ export default function App() {
             if (!FULLPAGE && (podcastCheck.count === 0 || forceOnboarding)) {
                 return <OnboardingWizard />;
             }
+        }
+        // If Terms require acceptance, gate here before dashboard/admin
+        const requiredVersion = user?.terms_version_required;
+        const acceptedVersion = user?.terms_version_accepted;
+        if (requiredVersion && requiredVersion !== acceptedVersion) {
+            return <TermsGate />;
         }
         // Admin gating: render Admin only after user is loaded and if checks pass
         if (isAdmin(user)) {

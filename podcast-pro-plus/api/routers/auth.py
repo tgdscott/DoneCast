@@ -53,17 +53,6 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
-
-def _to_user_public(user: User) -> UserPublic:
-    data = user.model_dump()
-    admin_email = getattr(settings, "ADMIN_EMAIL", "") or ""
-    is_admin = bool(admin_email and user.email and user.email.lower() == admin_email.lower())
-    data.update({
-        "is_admin": is_admin or bool(getattr(user, "is_admin", False)),
-        "terms_version_required": settings.TERMS_VERSION,
-    })
-    return UserPublic(**data)
-
 # --- Dependency for getting current user ---
 async def get_current_user(
     request: Request, session: Session = Depends(get_session), token: str = Depends(oauth2_scheme)
@@ -88,49 +77,62 @@ async def get_current_user(
     return user
 
 # --- Standard Authentication Endpoints ---
-
-
-class UserRegisterPayload(UserCreate):
-    accept_terms: bool
-    terms_version: str
-
 @router.post("/register", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
-async def register_user(user_in: UserRegisterPayload, request: Request, session: Session = Depends(get_session)):
-    """Register a new user with email and password."""
-    if not user_in.accept_terms:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You must accept the terms of use to create an account.")
-    if user_in.terms_version != settings.TERMS_VERSION:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Terms version mismatch. Please refresh and try again.")
+async def register_user(request: Request, session: Session = Depends(get_session), user_in: UserCreate | None = None):
+    """Register a new user with email and password.
 
-    db_user = crud.get_user_by_email(session=session, email=user_in.email)
+    Note: Frontend may include accept_terms and terms_version; enforce if provided.
+    """
+    # Allow JSON body with potential extra fields: accept_terms, terms_version
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    email = body.get('email') if isinstance(body, dict) else None
+    password = body.get('password') if isinstance(body, dict) else None
+    accept_terms = bool(body.get('accept_terms')) if isinstance(body, dict) else False
+    terms_version = (body.get('terms_version') or '').strip() if isinstance(body, dict) else ''
+    if not email or not password:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid email or password format.")
+
+    db_user = crud.get_user_by_email(session=session, email=email)
     if db_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="A user with this email already exists.",
         )
-
+    # If terms info provided, enforce correctness
+    required_terms = getattr(settings, 'TERMS_VERSION', None)
+    if required_terms:
+        if not accept_terms:
+            raise HTTPException(status_code=400, detail="You must accept the Terms of Use to create an account.")
+        if terms_version != str(required_terms):
+            raise HTTPException(status_code=400, detail="Terms version mismatch. Please refresh and accept the latest terms.")
+    # Apply admin default activation toggle
     try:
         admin_settings = load_admin_settings(session)
-        default_active = bool(getattr(admin_settings, 'default_user_active', True))
+        is_active_default = bool(getattr(admin_settings, 'default_user_active', True))
     except Exception:
-        default_active = True
-
-    base_user = UserCreate(**user_in.model_dump(exclude={"accept_terms", "terms_version"}))
-    base_user.is_active = default_active
-
-    user = crud.create_user(session=session, user_create=base_user)
-    admin_email = getattr(settings, 'ADMIN_EMAIL', '')
-    if admin_email and user.email and user.email.lower() == admin_email.lower():
-        user.is_admin = True
-        session.add(user)
-        session.commit()
-        session.refresh(user)
-
-    ip = request.client.host if request.client else None
-    user_agent = request.headers.get('user-agent')
-    crud.record_terms_acceptance(session=session, user=user, version=user_in.terms_version, ip=ip, user_agent=user_agent)
-    session.refresh(user)
-    return _to_user_public(user)
+        is_active_default = True
+    # Create user
+    new_user_in = UserCreate(email=email, password=password, is_active=is_active_default)
+    user = crud.create_user(session=session, user_create=new_user_in)
+    # Record terms acceptance if enforced
+    if required_terms:
+        try:
+            ip = request.client.host if request and request.client else None
+        except Exception:
+            ip = None
+        ua = request.headers.get('user-agent', '') if request and request.headers else None
+        crud.record_terms_acceptance(session=session, user=user, version=str(required_terms), ip=ip, user_agent=ua)
+    # Return enriched public user
+    data = user.model_dump()
+    is_admin = bool(user.email and user.email.lower() == settings.ADMIN_EMAIL.lower())
+    data.update({
+        "is_admin": is_admin,
+        "terms_version_required": str(required_terms) if required_terms else None,
+    })
+    return UserPublic(**data)
 
 @router.post("/token")
 async def login_for_access_token(
@@ -145,9 +147,6 @@ async def login_for_access_token(
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    admin_email = getattr(settings, 'ADMIN_EMAIL', '')
-    if admin_email and user.email and user.email.lower() == admin_email.lower():
-        user.is_admin = True
     user.last_login = datetime.utcnow()
     session.add(user)
     session.commit()
@@ -164,37 +163,6 @@ class LoginRequest(BaseModel):
     password: str
 
 
-
-
-class TermsAcceptancePayload(BaseModel):
-    version: str
-
-
-@router.get("/terms/info", response_model=dict)
-async def get_terms_info():
-    """Expose the current terms version and canonical URL."""
-    return {
-        "version": settings.TERMS_VERSION,
-        "url": settings.TERMS_URL,
-    }
-
-
-@router.post("/terms/accept", response_model=UserPublic)
-async def accept_terms(
-    payload: TermsAcceptancePayload,
-    request: Request,
-    session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
-) -> UserPublic:
-    if payload.version != settings.TERMS_VERSION:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Terms version mismatch. Reload and try again.")
-
-    ip = request.client.host if request.client else None
-    user_agent = request.headers.get('user-agent')
-    crud.record_terms_acceptance(session=session, user=current_user, version=payload.version, ip=ip, user_agent=user_agent)
-    session.refresh(current_user)
-    return _to_user_public(current_user)
-
 @router.post("/login", response_model=dict)
 async def login_for_access_token_json(
     payload: LoginRequest,
@@ -208,9 +176,6 @@ async def login_for_access_token_json(
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    admin_email = getattr(settings, 'ADMIN_EMAIL', '')
-    if admin_email and user.email and user.email.lower() == admin_email.lower():
-        user.is_admin = True
     user.last_login = datetime.utcnow()
     session.add(user)
     session.commit()
@@ -246,7 +211,7 @@ async def patch_user_prefs(payload: UserPrefsPatch, session: Session = Depends(g
         session.add(current_user)
         session.commit()
         session.refresh(current_user)
-    return _to_user_public(current_user)
+    return current_user
 
 # --- Google OAuth Endpoints ---
 @router.get('/login/google')
@@ -255,14 +220,20 @@ async def login_google(request: Request):
     backend_base = settings.OAUTH_BACKEND_BASE or "https://api.getpodcastplus.com"
     redirect_uri = f"{backend_base}/api/auth/google/callback"
     oauth_client, _ = _build_oauth_client()
-    return await oauth_client.google.authorize_redirect(request, redirect_uri)
+    client = getattr(oauth_client, 'google', None)
+    if client is None:
+        raise HTTPException(status_code=500, detail="OAuth client not configured")
+    return await client.authorize_redirect(request, redirect_uri)
 
 @router.get('/google/callback')
 async def auth_google_callback(request: Request, session: Session = Depends(get_session)):
     """Handles the callback from Google, creates/updates the user, and redirects."""
     try:
         oauth_client, _ = _build_oauth_client()
-        token = await oauth_client.google.authorize_access_token(request)
+        client = getattr(oauth_client, 'google', None)
+        if client is None:
+            raise RuntimeError("OAuth client not configured")
+        token = await client.authorize_access_token(request)
     except Exception as e:
         logger.exception("Google OAuth token exchange failed")
         raise HTTPException(
@@ -291,8 +262,7 @@ async def auth_google_callback(request: Request, session: Session = Depends(get_
             user_create.is_active = True
         user = crud.create_user(session=session, user_create=user_create)
 
-    admin_email = getattr(settings, 'ADMIN_EMAIL', '')
-    if admin_email and user.email and user.email.lower() == admin_email.lower():
+    if user.email and user.email.lower() == settings.ADMIN_EMAIL.lower():
         user.is_admin = True
 
     if not user.google_id:
@@ -315,7 +285,14 @@ async def auth_google_callback(request: Request, session: Session = Depends(get_
 @router.get("/users/me", response_model=UserPublic)
 async def read_users_me(current_user: User = Depends(get_current_user)):
     """Gets the details of the currently logged-in user."""
-    return _to_user_public(current_user)
+    data = current_user.model_dump()
+    is_admin = bool(current_user.email and current_user.email.lower() == settings.ADMIN_EMAIL.lower())
+    required_terms = getattr(settings, 'TERMS_VERSION', None)
+    data.update({
+        "is_admin": is_admin,
+        "terms_version_required": str(required_terms) if required_terms else None,
+    })
+    return UserPublic(**data)
 
 # --- Debug endpoint ---
 @router.get("/debug/google-client", include_in_schema=False)
@@ -331,3 +308,45 @@ async def debug_google_client():
         "redirect_uri": f"{backend_base}/api/auth/google/callback",
         "oauth_backend_base_is_set": bool(settings.OAUTH_BACKEND_BASE),
     }
+
+# --- Terms of Use Endpoints ---
+
+class TermsInfo(BaseModel):
+    version: str
+    url: str
+
+class TermsAcceptRequest(BaseModel):
+    version: str | None = None
+
+@router.get("/terms/info", response_model=TermsInfo)
+async def get_terms_info() -> TermsInfo:
+    """Return the current Terms of Use version and URL."""
+    return TermsInfo(version=str(getattr(settings, 'TERMS_VERSION', '')), url=str(getattr(settings, 'TERMS_URL', '/terms')))
+
+@router.post("/terms/accept", response_model=UserPublic)
+async def accept_terms(
+    payload: TermsAcceptRequest,
+    request: Request,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> UserPublic:
+    """Record acceptance of the current Terms of Use for the authenticated user."""
+    required = str(getattr(settings, 'TERMS_VERSION', ''))
+    version = (payload.version or '').strip() or required
+    if not required:
+        raise HTTPException(status_code=500, detail="Server missing TERMS_VERSION configuration")
+    if version != required:
+        raise HTTPException(status_code=400, detail="Terms version mismatch. Please refresh and accept the latest terms.")
+    try:
+        ip = request.client.host if request and request.client else None
+    except Exception:
+        ip = None
+    ua = request.headers.get('user-agent', '') if request and request.headers else None
+    crud.record_terms_acceptance(session=session, user=current_user, version=version, ip=ip, user_agent=ua)
+    data = current_user.model_dump()
+    is_admin = bool(current_user.email and current_user.email.lower() == settings.ADMIN_EMAIL.lower())
+    data.update({
+        "is_admin": is_admin,
+        "terms_version_required": required,
+    })
+    return UserPublic(**data)

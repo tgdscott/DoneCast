@@ -30,6 +30,8 @@ export default function OnboardingWizard(){
     'category',
     'audience',
     'cover',
+    // New step: intro/outro with voice selection
+    'greeting',
     'audioSetup',
     'spreaker',
     'lastInfo',
@@ -57,12 +59,21 @@ export default function OnboardingWizard(){
   const [audience, setAudience] = useState('');
   // voiceover selection removed
   const [musicChoice, setMusicChoice] = useState('none');
-  const [introMode, setIntroMode] = useState('none');
-  const [outroMode, setOutroMode] = useState('none');
+  // Intro/Outro step state
+  const [introMode, setIntroMode] = useState('script');
+  const [outroMode, setOutroMode] = useState('script');
   const [introFile, setIntroFile] = useState(null);
   const [outroFile, setOutroFile] = useState(null);
-  const [introScript, setIntroScript] = useState('');
-  const [outroScript, setOutroScript] = useState('');
+  const [introScript, setIntroScript] = useState('Welcome to my podcast');
+  const [outroScript, setOutroScript] = useState('Thank you for listening!');
+  // ElevenLabs voices
+  const [voices, setVoices] = useState([]);
+  const [voicesLoading, setVoicesLoading] = useState(false);
+  const [voicesError, setVoicesError] = useState(null);
+  const [selectedVoiceId, setSelectedVoiceId] = useState('default');
+  // Template tracking
+  const [createdTemplateId, setCreatedTemplateId] = useState(null);
+  const [templateSegmentsDraft, setTemplateSegmentsDraft] = useState([]);
   const [coverMode, setCoverMode] = useState('later');
   const [coverFile, setCoverFile] = useState(null);
   // Music assets (Phase 1)
@@ -161,6 +172,29 @@ export default function OnboardingWizard(){
     }
   }, [newStep, musicAssets.length, musicLoading]);
 
+  // Fetch ElevenLabs voices when entering greeting step
+  useEffect(()=>{
+    if(newStep==='greeting' && !voicesLoading && voices.length===0){
+      setVoicesLoading(true); setVoicesError(null);
+      (async ()=>{
+        try {
+          const data = await makeApi(token).get('/api/elevenlabs/voices?size=50');
+          const items = (data && (data.items || data.voices)) || [];
+          setVoices(items);
+          if(items.length>0 && (!selectedVoiceId || selectedVoiceId==='default')){
+            const first = items[0];
+            setSelectedVoiceId(first.voice_id || first.id || first.name || 'default');
+          }
+        } catch (e){
+          setVoicesError('Voice list unavailable; using default voice.');
+          // Leave selectedVoiceId as 'default'
+        } finally {
+          setVoicesLoading(false);
+        }
+      })();
+    }
+  }, [newStep, voices.length, voicesLoading, selectedVoiceId, token]);
+
   function togglePreview(asset){
     if(asset.id==='none') return;
     if(musicPreviewing === asset.id){
@@ -185,6 +219,47 @@ export default function OnboardingWizard(){
     if(asset.id !== 'none'){
       try { await fetch(buildApiUrl(`/api/music/assets/${asset.id}/select`), { method:'POST', headers:{ Authorization:`Bearer ${token}` }}); } catch {}
     }
+  }
+
+  // Build segments array based on current greeting selections
+  function buildSegmentsFromGreeting(introUploadedFilename=null, outroUploadedFilename=null){
+    const segs = [];
+    if(introMode==='upload' && introUploadedFilename){
+      segs.push({ segment_type:'intro', source:{ source_type:'static', filename:introUploadedFilename } });
+    } else if(introMode==='script' && introScript.trim()){
+      segs.push({ segment_type:'intro', source:{ source_type:'tts', script:introScript.trim(), voice_id: selectedVoiceId || 'default' } });
+    }
+    // Placeholder content segment (kept minimal)
+    segs.push({ segment_type:'content', source:{ source_type:'tts', script:'', voice_id: selectedVoiceId || 'default' } });
+    if(outroMode==='upload' && outroUploadedFilename){
+      segs.push({ segment_type:'outro', source:{ source_type:'static', filename:outroUploadedFilename } });
+    } else if(outroMode==='script' && outroScript.trim()){
+      segs.push({ segment_type:'outro', source:{ source_type:'tts', script:outroScript.trim(), voice_id: selectedVoiceId || 'default' } });
+    }
+    return segs;
+  }
+
+  // Create "My first template" at the end of greeting step
+  async function createTemplateFromGreeting(){
+    setSaving(true); setError(null);
+    let introFilename=null, outroFilename=null;
+    // Upload files if provided
+    try { if(introMode==='upload' && introFile){ const fd=new FormData(); fd.append('files', introFile); const r=await makeApi(token).raw('/api/media/upload/intro',{method:'POST',body:fd}); if(r && Array.isArray(r) && r[0]) { introFilename=r[0]?.filename; } } } catch{}
+    try { if(outroMode==='upload' && outroFile){ const fd=new FormData(); fd.append('files', outroFile); const r=await makeApi(token).raw('/api/media/upload/outro',{method:'POST',body:fd}); if(r && Array.isArray(r) && r[0]) { outroFilename=r[0]?.filename; } } } catch{}
+    const segments = buildSegmentsFromGreeting(introFilename, outroFilename);
+    setTemplateSegmentsDraft(segments);
+    try{
+      const body = {
+        name: 'My first template',
+        segments,
+        background_music_rules: [],
+        timing: {},
+        default_elevenlabs_voice_id: selectedVoiceId || null
+      };
+      const tpl = await makeApi(token).post('/api/templates/', body);
+      if(tpl && tpl.id){ setCreatedTemplateId(tpl.id); }
+    } catch(e){ setError(e.message || 'Failed to create template'); }
+    finally { setSaving(false); }
   }
 
   function isNameValid(name){
@@ -277,19 +352,29 @@ export default function OnboardingWizard(){
         } catch{}
       }
 
-      // Upload intro/outro
-      let introFilename=null, outroFilename=null;
-        try { if(introMode==='upload' && introFile){ const fd=new FormData(); fd.append('files', introFile); const r=await makeApi(token).raw('/api/media/upload/intro',{method:'POST',body:fd}); if(r && Array.isArray(r) && r[0]) { introFilename=r[0]?.filename; } } } catch{}
-      try { if(outroMode==='upload' && outroFile){ const fd=new FormData(); fd.append('files', outroFile); const r=await makeApi(token).raw('/api/media/upload/outro',{method:'POST',body:fd}); if(r && Array.isArray(r) && r[0]) { outroFilename=r[0]?.filename; } } } catch{}
-      // Build segments
-      const segments=[];
-      if(introMode==='upload' && introFilename) segments.push({ segment_type:'intro', source:{ source_type:'static', filename:introFilename } });
-      else if(introMode==='script' && introScript.trim()) segments.push({ segment_type:'intro', source:{ source_type:'tts', script:introScript.trim(), voice_id:'default' } });
-      segments.push({ segment_type:'content', source:{ source_type:'tts', script:'', voice_id:'default' } });
-      if(outroMode==='upload' && outroFilename) segments.push({ segment_type:'outro', source:{ source_type:'static', filename:outroFilename } });
-      else if(outroMode==='script' && outroScript.trim()) segments.push({ segment_type:'outro', source:{ source_type:'tts', script:outroScript.trim(), voice_id:'default' } });
-      const templateBody = { podcast_id:podcastId, name:'Default Episode', segments, background_music_rules:[], timing:{} };
-  try { await makeApi(token).post('/api/templates/', templateBody); } catch{}
+      // If a template was created in the greeting step, update it to attach to this podcast (and include music if chosen)
+      try{
+        if(createdTemplateId){
+          // Merge music rule if any
+          let background_music_rules = [];
+          if(musicChoice && musicChoice !== 'none'){
+            // When music asset selected, ask backend to remember selection already; we also store a template rule shape
+            background_music_rules = [{ music_filename: musicChoice, apply_to_segments: ['intro','content','outro'], start_offset_s:0, end_offset_s:0, fade_in_s:2, fade_out_s:3, volume_db:-15 }];
+          }
+          // Use last known segments draft if available
+          const segments = templateSegmentsDraft && templateSegmentsDraft.length ? templateSegmentsDraft : [];
+          await makeApi(token).put(`/api/templates/${createdTemplateId}`, {
+            name: 'My first template',
+            podcast_id: podcastId,
+            segments,
+            background_music_rules,
+            timing: {},
+            default_elevenlabs_voice_id: selectedVoiceId || null,
+            is_active: true,
+            ai_settings: { auto_fill_ai: true, title_instructions: null, notes_instructions: null, tags_instructions: null, tags_always_include: [] }
+          });
+        }
+      } catch {}
       // If Spreaker token provided, attempt to load remote show info (creation attempted server-side)
       if(spreakerSaved){
         // slight delay to allow backend to create remote show
@@ -499,49 +584,60 @@ export default function OnboardingWizard(){
             <NavButtons onBack={()=> setNewStep('audience')} onNext={()=> setNewStep('audioSetup')} />
           </div>
         )}
-    {newStep==='audioSetup' && (
+    {newStep==='greeting' && (
           <div>
-            <h2 className="text-xl font-semibold mb-2">Audio setup</h2>
-      <p className="text-sm text-gray-600 mb-4">Optional: background music and intro/outro. You can skip this for now.</p>
+            <h2 className="text-xl font-semibold mb-2">How would you like to greet your listeners?</h2>
+            <p className="text-sm text-gray-600 mb-4">Set your intro and outro now. You can change these later.</p>
             <div className="grid md:grid-cols-2 gap-6 mb-6">
               <div>
-                <h3 className="font-medium mb-2">Intro & Outro (Optional)</h3>
-                <div className="mb-4">
-                  <label className="block text-xs font-semibold mb-1">Intro</label>
-                  <select className="w-full border rounded p-2 mb-2" value={introMode} onChange={e=>setIntroMode(e.target.value)}>
-                    <option value="none">No intro (add later)</option>
-                    <option value="upload">I already have a produced intro file</option>
-                    <option value="script">Write a script for an AI-read intro</option>
-                  </select>
-                  {introMode==='upload' && <input type="file" accept="audio/*" onChange={e=>setIntroFile(e.target.files?.[0]||null)} className="text-sm" />}
-                  {introMode==='script' && <textarea rows={3} className="w-full border rounded p-2 text-sm" value={introScript} placeholder="Welcome to..." onChange={e=>setIntroScript(e.target.value)} />}
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold mb-1">Outro</label>
-                  <select className="w-full border rounded p-2 mb-2" value={outroMode} onChange={e=>setOutroMode(e.target.value)}>
-                    <option value="none">No outro (add later)</option>
-                    <option value="upload">I already have a produced outro file</option>
-                    <option value="script">Write a script for an AI-read outro</option>
-                  </select>
-                  {outroMode==='upload' && <input type="file" accept="audio/*" onChange={e=>setOutroFile(e.target.files?.[0]||null)} className="text-sm" />}
-                  {outroMode==='script' && <textarea rows={3} className="w-full border rounded p-2 text-sm" value={outroScript} placeholder="Thanks for listening..." onChange={e=>setOutroScript(e.target.value)} />}
-                </div>
+                <h3 className="font-medium mb-2">Intro</h3>
+                <select className="w-full border rounded p-2 mb-2" value={introMode} onChange={e=>setIntroMode(e.target.value)}>
+                  <option value="script">Type a short greeting (AI voice)</option>
+                  <option value="upload">Upload my produced intro</option>
+                  <option value="none">Skip for now</option>
+                </select>
+                {introMode==='upload' && <input type="file" accept="audio/*" onChange={e=>setIntroFile(e.target.files?.[0]||null)} className="text-sm" />}
+                {introMode==='script' && <textarea rows={3} className="w-full border rounded p-2 text-sm" value={introScript} placeholder="Welcome to my podcast" onChange={e=>setIntroScript(e.target.value)} />}
               </div>
               <div>
-                <h3 className="font-medium mb-2 flex items-center gap-2">Background Music {musicLoading && <span className="text-xs text-gray-400">Loading…</span>}</h3>
-                <div className="flex flex-col gap-2 mb-2">
-                  {musicAssets.map(a => (
-                    <div key={a.id} className={`flex items-center gap-2 p-2 rounded border ${musicChoice===a.id?'border-blue-600 bg-blue-50':'bg-white hover:border-gray-300'}`}>
-                      <button type="button" onClick={()=>togglePreview(a)} disabled={a.id==='none'} className={`w-7 h-7 text-xs rounded border ${musicPreviewing===a.id?'bg-red-600 text-white border-red-600':'bg-gray-100 hover:bg-gray-200'}`}>{musicPreviewing===a.id? '■':'▶'}</button>
-                      <button type="button" onClick={()=>handleSelectMusic(a)} className={`flex-1 text-left text-xs ${musicChoice===a.id?'font-semibold':''}`}>{a.display_name}</button>
-                      {a.mood_tags && a.mood_tags.length>0 && <span className="hidden md:inline text-[10px] text-gray-500">{a.mood_tags.slice(0,3).join(', ')}</span>}
-                    </div>
-                  ))}
-                </div>
-                <p className="text-[11px] text-gray-500">We’ll expand this with AI-generated suggestions soon.</p>
+                <h3 className="font-medium mb-2">Outro</h3>
+                <select className="w-full border rounded p-2 mb-2" value={outroMode} onChange={e=>setOutroMode(e.target.value)}>
+                  <option value="script">Type a short sign-off (AI voice)</option>
+                  <option value="upload">Upload my produced outro</option>
+                  <option value="none">Skip for now</option>
+                </select>
+                {outroMode==='upload' && <input type="file" accept="audio/*" onChange={e=>setOutroFile(e.target.files?.[0]||null)} className="text-sm" />}
+                {outroMode==='script' && <textarea rows={3} className="w-full border rounded p-2 text-sm" value={outroScript} placeholder="Thank you for listening!" onChange={e=>setOutroScript(e.target.value)} />}
               </div>
             </div>
-            <NavButtons onBack={()=> setNewStep('cover')} onNext={()=> setNewStep('spreaker')} />
+            <div className="mb-6">
+              <h3 className="font-medium mb-2">Select a voice</h3>
+              {voicesError && <div className="text-xs text-orange-600 mb-2">{voicesError}</div>}
+              <select className="w-full border rounded p-2" value={selectedVoiceId} onChange={e=>setSelectedVoiceId(e.target.value)} disabled={voicesLoading || !!voicesError}>
+                {(voices && voices.length>0 ? voices : [{voice_id:'default', name:'Default'}]).map(v => (
+                  <option key={v.voice_id||v.id||v.name||'default'} value={v.voice_id||v.id||v.name||'default'}>{v.common_name||v.name||'Default'}</option>
+                ))}
+              </select>
+              {voicesLoading && <div className="text-xs text-gray-500 mt-1">Loading voices…</div>}
+            </div>
+            <NavButtons onBack={()=> setNewStep('cover')} onNext={async ()=>{ await createTemplateFromGreeting(); setNewStep('audioSetup'); }} />
+          </div>
+        )}
+    {newStep==='audioSetup' && (
+          <div>
+            <h2 className="text-xl font-semibold mb-2">Background music</h2>
+            <p className="text-sm text-gray-600 mb-4">Pick a background music bed. You can change this later.</p>
+            <div className="flex flex-col gap-2 mb-2">
+              {musicAssets.map(a => (
+                <div key={a.id} className={`flex items-center gap-2 p-2 rounded border ${musicChoice===a.id?'border-blue-600 bg-blue-50':'bg-white hover:border-gray-300'}`}>
+                  <button type="button" onClick={()=>togglePreview(a)} disabled={a.id==='none'} className={`w-7 h-7 text-xs rounded border ${musicPreviewing===a.id?'bg-red-600 text-white border-red-600':'bg-gray-100 hover:bg-gray-200'}`}>{musicPreviewing===a.id? '■':'▶'}</button>
+                  <button type="button" onClick={()=>handleSelectMusic(a)} className={`flex-1 text-left text-xs ${musicChoice===a.id?'font-semibold':''}`}>{a.display_name}</button>
+                  {a.mood_tags && a.mood_tags.length>0 && <span className="hidden md:inline text-[10px] text-gray-500">{a.mood_tags.slice(0,3).join(', ')}</span>}
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-gray-500">We’ll expand this with AI-generated suggestions soon.</p>
+            <NavButtons onBack={()=> setNewStep('greeting')} onNext={()=> setNewStep('spreaker')} />
           </div>
         )}
         {newStep==='spreaker' && (

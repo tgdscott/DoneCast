@@ -274,6 +274,8 @@ def list_episodes(
 		except Exception:
 			stream_url = None
 		final_audio_url = _final_url_for(e.final_audio_path)
+		if not final_exists:
+			final_audio_url = None
 		playback_url = stream_url or final_audio_url
 		playback_type = 'stream' if stream_url else ('local' if final_audio_url else 'none')
 		if playback_type == 'stream':

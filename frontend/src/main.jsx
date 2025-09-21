@@ -11,6 +11,7 @@ import OnboardingDemo from '@/pages/OnboardingDemo.jsx';
 import Onboarding from '@/pages/Onboarding.jsx';
 import PrivacyPolicy from '@/pages/PrivacyPolicy.jsx';
 import TermsOfUse from '@/pages/TermsOfUse.jsx';
+import Pricing from '@/pages/Pricing.jsx';
 import { AuthProvider } from './AuthContext.jsx';
 import { BrandProvider } from './brand/BrandContext.jsx';
 import { ComfortProvider } from './ComfortContext.jsx';
@@ -83,6 +84,7 @@ const router = createBrowserRouter([
   { path: '/error', element: <ErrorPage /> },
   { path: '/privacy', element: <PrivacyPolicy /> },
   { path: '/terms', element: <TermsOfUse /> },
+  { path: '/pricing', element: <Pricing /> },
   // Fallback 404 for any unknown route
   { path: '*', element: <NotFound /> },
 ]);

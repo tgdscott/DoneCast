@@ -3,14 +3,12 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request as StarletteRequest
 from starlette.staticfiles import StaticFiles
-from pydantic import BaseModel
 
 # Load settings early
 from api.core.config import settings
@@ -68,7 +66,9 @@ app = FastAPI(title="Podcast Pro Plus API")
 run_startup_tasks()
 
 # --- Middleware ---
-app.add_middleware(SessionMiddleware,
+from starlette.middleware.sessions import SessionMiddleware
+app.add_middleware(
+    SessionMiddleware,
     secret_key=settings.SESSION_SECRET_KEY,
     session_cookie="ppp_session",
     max_age=60 * 60 * 24 * 14,
@@ -83,6 +83,7 @@ app.add_middleware(
     allow_credentials=True,
 )
 
+# Security / request-id middleware
 from api.middleware.request_id import RequestIDMiddleware
 from api.middleware.security_headers import SecurityHeadersMiddleware
 app.add_middleware(RequestIDMiddleware)
@@ -91,17 +92,18 @@ app.add_middleware(SecurityHeadersMiddleware)
 class ResponseLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: StarletteRequest, call_next):
         try:
-            origin = request.headers.get('origin')
+            origin = request.headers.get("origin")
             method = request.method
             path = request.url.path
-            log.debug("[CORS-DBG] incoming request method=%s path=%s origin=%s", method, path, origin)
+            log.debug("[CORS-DBG] incoming %s %s origin=%s", method, path, origin)
         except Exception:
             pass
         response = await call_next(request)
         try:
-            aco = response.headers.get('access-control-allow-origin')
-            acc = response.headers.get('access-control-allow-credentials')
-            log.debug("[CORS-DBG] response for %s %s: A-C-A-O=%s A-C-A-C=%s request_id=%s", method, path, aco, acc, response.headers.get('x-request-id'))
+            aco = response.headers.get("access-control-allow-origin")
+            acc = response.headers.get("access-control-allow-credentials")
+            log.debug("[CORS-DBG] response for %s %s: A-C-A-O=%s A-C-A-C=%s request_id=%s",
+                      method, path, aco, acc, response.headers.get("x-request-id"))
         except Exception:
             pass
         return response
@@ -116,27 +118,33 @@ try:
     if not RL_DISABLED and getattr(limiter, "limit", None):
         app.state.limiter = limiter
         app.add_middleware(SlowAPIMiddleware)
+
         async def _rate_limit_handler(request, exc):  # type: ignore
             return JSONResponse(status_code=429, content={"detail": "Too many requests"}, headers={"Retry-After": "60"})
         app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)  # type: ignore
-except Exception: # pragma: no cover
+except Exception:  # pragma: no cover
     pass
 
 # --- Routers ---
 try:
     availability = attach_routers(app)
-    if not availability.get('users', False):
-        if ENV.lower() in ("prod", "production"):
-            log.error("Critical router 'users' missing in production; failing startup")
-            raise RuntimeError("Critical router 'users' missing at startup")
-        else:
-            log.warning("Users router missing; falling back to temporary 401 handler (non-prod)")
-            @app.get('/api/users/me')
-            def __fallback_users_me_nonprod():
-                return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 except Exception as e:
     log.exception("attach_routers threw an exception: %s", e)
-    raise
+    availability = {}
+
+def _ensure_users_route_present() -> None:
+    # Never crash Cloud Run on missing router; install a minimal 401 fallback so the app can bind PORT.
+    paths = {getattr(r, "path", None) for r in app.routes if getattr(r, "path", None)}
+    has_users_me = ("/users/me" in paths) or ("/api/users/me" in paths)
+    if not has_users_me:
+        log.error("Users router not detected at startup; installing fallback /api/users/me -> 401")
+        @app.get("/api/users/me")
+        async def __fallback_users_me():
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
+# If attach_routers reported availability, heed it; otherwise inspect routes.
+if not availability.get("users", False):
+    _ensure_users_route_present()
 
 # --- Health Checks ---
 @app.get("/api/health")
@@ -158,8 +166,8 @@ def readyz():
 
 # --- Static Files & SPA ---
 STATIC_UI_DIR = Path(os.getenv("STATIC_UI_DIR", "/app/static_ui"))
-app.mount("/static/final",   StaticFiles(directory=str(FINAL_DIR),       check_dir=False), name="final")
-app.mount("/static/media",   StaticFiles(directory=str(MEDIA_DIR),       check_dir=False), name="media")
+app.mount("/static/final",   StaticFiles(directory=str(FINAL_DIR),   check_dir=False), name="final")
+app.mount("/static/media",   StaticFiles(directory=str(MEDIA_DIR),   check_dir=False), name="media")
 app.mount("/static/flubber", StaticFiles(directory=str(FLUBBER_DIR), check_dir=False), name="flubber")
 
 @app.get("/{full_path:path}")
@@ -176,3 +184,5 @@ async def spa_catch_all(full_path: str):
     except Exception:
         pass
     return JSONResponse(status_code=404, content={"detail": "Not Found"})
+
+__all__ = ["app", "_compute_pt_expiry"]

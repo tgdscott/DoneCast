@@ -5,8 +5,12 @@ export default function Footer() {
   const { brand } = useBrand();
   return (
     <footer className="border-t mt-12 py-8 text-sm text-muted-foreground">
-      <div className="container mx-auto flex items-center justify-between">
+      <div className="container mx-auto flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>© {new Date().getFullYear()} {brand.key === "nsc" ? "No Sweat" : "Podcast Plus"}</div>
+        <nav className="flex items-center gap-4">
+          <a href="/privacy" className="hover:text-foreground">Privacy Policy</a>
+          <a href="/terms" className="hover:text-foreground">Terms of Use</a>
+        </nav>
         <div>
           {brand.key === "nsc" ? (
             <span className="inline-flex items-center gap-2">
