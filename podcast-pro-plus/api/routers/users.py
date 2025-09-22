@@ -24,13 +24,11 @@ def _to_user_public(u: User) -> UserPublic:
         and str(u.email).lower() == str(admin_email).lower()
     )
     terms_required = getattr(settings, "TERMS_VERSION", None)
-    data = u.model_dump()
-    data.update({
-        "is_admin": is_admin,
-        "role": "admin" if is_admin else None,
-        "terms_version_required": str(terms_required) if terms_required is not None else None,
-    })
-    return UserPublic(**data)
+    public = UserPublic.model_validate(u, from_attributes=True)
+    public.is_admin = is_admin
+    public.role = "admin" if is_admin else None
+    public.terms_version_required = str(terms_required) if terms_required is not None else None
+    return public
 
 class ElevenLabsAPIKeyUpdate(BaseModel):
     api_key: str

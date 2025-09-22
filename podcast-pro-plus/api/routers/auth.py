@@ -87,12 +87,13 @@ async def get_current_user(
 
 
 def _to_user_public(user: User) -> UserPublic:
-    data = user.model_dump()
-    data.update({
-        "is_admin": _is_admin_email(user.email) or bool(getattr(user, "is_admin", False)),
-        "terms_version_required": getattr(settings, "TERMS_VERSION", None),
-    })
-    return UserPublic(**data)
+    # Build a safe public view from DB User without leaking hashed_password
+    # Use Pydantic's model_validate with from_attributes to coerce fields safely.
+    public = UserPublic.model_validate(user, from_attributes=True)
+    # Enrich with computed flags
+    public.is_admin = _is_admin_email(user.email) or bool(getattr(user, "is_admin", False))
+    public.terms_version_required = getattr(settings, "TERMS_VERSION", None)
+    return public
 
 
 class UserRegisterPayload(UserCreate):
@@ -209,6 +210,12 @@ async def login_for_access_token_json(
 
     access_token = create_access_token(data={"sub": user.email})
     return {"access_token": access_token, "token_type": "bearer"}
+
+# --- Compatibility alias: some legacy SPA code calls /api/auth/me expecting { user: ... }
+@router.get("/me", response_model=UserPublic)
+async def auth_me_current_user(current_user: User = Depends(get_current_user)) -> UserPublic:
+    """Return the current user; mirrors /api/users/me but under /api/auth/me for older bundles."""
+    return _to_user_public(current_user)
 
 # --- User preference updates (first_name, last_name, timezone) ---
 
