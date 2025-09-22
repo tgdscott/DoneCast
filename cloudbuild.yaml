@@ -12,11 +12,8 @@ substitutions:
   # WEB
   _WEB_SERVICE: podcast-web
   _WEB_DIR: frontend
-  # Optional fallback; prefer pulling from Secret Manager below
   _VITE_GOOGLE_CLIENT_ID: ''
   _VITE_API_BASE: https://api.getpodcastplus.com
-  # Cloud SQL instance (PROJECT:REGION:INSTANCE)
-  _INSTANCE: podcast612:us-west1:podcast-db
 
 images:
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:latest'
@@ -34,7 +31,7 @@ steps:
     args:
       [ 'push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:latest' ]
 
-  # ---------- WEB: build & push (tar stream to ensure correct context) ----------
+  # ---------- WEB: build & push ----------
   - name: gcr.io/cloud-builders/docker
     id: web-build
     entrypoint: sh
@@ -52,19 +49,19 @@ steps:
         test -f "$${WEB_DIR}/package.json"
         du -sh "$${WEB_DIR}" || true
 
-        # Prefer GOOGLE_CLIENT_ID from Secret Manager if provided to this step via secretEnv (see bottom),
-        # otherwise fall back to the substitution _VITE_GOOGLE_CLIENT_ID.
-        # Use $$ to defer env expansion to the shell at runtime (avoid Cloud Build substitutions).
+        # Prefer GOOGLE_CLIENT_ID from Secret Manager (provided via secretEnv).
+        # Fall back to the substitution if it is set; otherwise emit a warning.
         VGCID="$${GOOGLE_CLIENT_ID:-${_VITE_GOOGLE_CLIENT_ID}}"
+        if [ -z "$${VGCID}" ]; then
+          echo "WARN: GOOGLE_CLIENT_ID is empty; Google auth will not work" >&2
+        fi
 
         echo "==> Building web image"
-        tar -C "$${WEB_DIR}" -cf - . | \
-          docker build \
-            --build-arg VITE_GOOGLE_CLIENT_ID="$${VGCID}" \
-            --build-arg VITE_API_BASE="${_VITE_API_BASE}" \
-            -t "$${IMG}" \
-            -f Dockerfile \
-            -
+        docker build "$${WEB_DIR}" \
+          --file "$${WEB_DIR}/Dockerfile" \
+          --build-arg VITE_GOOGLE_CLIENT_ID="$${VGCID}" \
+          --build-arg VITE_API_BASE="${_VITE_API_BASE}" \
+          -t "$${IMG}"
 
         docker push "$${IMG}"
 
@@ -75,15 +72,8 @@ steps:
       - -c
       - |
         set -euo pipefail
-        gcloud run deploy ${_SERVICE} \
-          --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:latest \
-          --region=${_REGION} \
-          --platform=managed \
-          --remove-env-vars=SECRET_KEY,GOOGLE_CLIENT_ID,DATABASE_URL,SESSION_SECRET_KEY,GEMINI_API_KEY,ELEVENLABS_API_KEY,ASSEMBLYAI_API_KEY,SPREAKER_API_TOKEN,SPREAKER_CLIENT_ID,SPREAKER_CLIENT_SECRET,GOOGLE_CLIENT_SECRET,STRIPE_SECRET_KEY,STRIPE_WEBHOOK_SECRET,DB_USER,DB_PASS,DB_NAME \
-          --update-env-vars="ADMIN_EMAIL=scott@scottgerhardt.com,MEDIA_ROOT=${_MEDIA_ROOT},OAUTH_BACKEND_BASE=https://api.getpodcastplus.com,CORS_ALLOWED_ORIGINS=https://app.getpodcastplus.com;https://getpodcastplus.com;https://www.getpodcastplus.com;https://api.getpodcastplus.com,INSTANCE_CONNECTION_NAME=${_INSTANCE}" \
-          --add-cloudsql-instances=${_INSTANCE} \
-          --update-secrets=DB_USER=DB_USER:latest,DB_PASS=DB_PASS:latest,DB_NAME=DB_NAME:latest,SECRET_KEY=SECRET_KEY:latest,SESSION_SECRET_KEY=SESSION_SECRET:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,ELEVENLABS_API_KEY=ELEVENLABS_API_KEY:latest,ASSEMBLYAI_API_KEY=ASSEMBLYAI_API_KEY:latest,SPREAKER_API_TOKEN=SPREAKER_API_TOKEN:latest,SPREAKER_CLIENT_ID=SPREAKER_CLIENT_ID:latest,SPREAKER_CLIENT_SECRET=SPREAKER_CLIENT_SECRET:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,STRIPE_SECRET_KEY=STRIPE_SECRET_KEY:latest,STRIPE_WEBHOOK_SECRET=STRIPE_WEBHOOK_SECRET:latest
-
+        CORS_ALLOWED='https://app.getpodcastplus.com;https://getpodcastplus.com;https://www.getpodcastplus.com'
+        gcloud run deploy ${_SERVICE} --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:latest --region=${_REGION} --platform=managed --remove-env-vars=SECRET_KEY,GOOGLE_CLIENT_ID,DATABASE_URL,SESSION_SECRET_KEY,GEMINI_API_KEY,ELEVENLABS_API_KEY,ASSEMBLYAI_API_KEY,SPREAKER_API_TOKEN,SPREAKER_CLIENT_ID,SPREAKER_CLIENT_SECRET,GOOGLE_CLIENT_SECRET,STRIPE_SECRET_KEY,STRIPE_WEBHOOK_SECRET,DB_USER,DB_PASS,DB_NAME --update-env-vars="ADMIN_EMAIL=scott@scottgerhardt.com,MEDIA_ROOT=${_MEDIA_ROOT},OAUTH_BACKEND_BASE=https://api.getpodcastplus.com,CORS_ALLOWED_ORIGINS=$$CORS_ALLOWED,INSTANCE_CONNECTION_NAME=podcast612:us-west1:podcast-db" --update-secrets=DB_USER=DB_USER:latest,DB_PASS=DB_PASS:latest,DB_NAME=DB_NAME:latest,SECRET_KEY=SECRET_KEY:latest,SESSION_SECRET_KEY=SESSION_SECRET:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,ELEVENLABS_API_KEY=ELEVENLABS_API_KEY:latest,ASSEMBLYAI_API_KEY=ASSEMBLYAI_API_KEY:latest,SPREAKER_API_TOKEN=SPREAKER_API_TOKEN:latest,SPREAKER_CLIENT_ID=SPREAKER_CLIENT_ID:latest,SPREAKER_CLIENT_SECRET=SPREAKER_CLIENT_SECRET:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,STRIPE_SECRET_KEY=STRIPE_SECRET_KEY:latest,STRIPE_WEBHOOK_SECRET=STRIPE_WEBHOOK_SECRET:latest
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     entrypoint: gcloud
     args:
@@ -93,24 +83,6 @@ steps:
         '--platform=managed',
         '--allow-unauthenticated' ]
 
-  # ---------- API: post-deploy smoke test ----------
-  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        set -euo pipefail
-        API_URL="$$(gcloud run services describe ${_SERVICE} --region=${_REGION} --format='value(status.url)')"
-        echo "==> API URL: $$API_URL"
-        code="$$(curl -sS -o /dev/null -w '%{http_code}' -H 'Origin: https://app.getpodcastplus.com' -H 'Accept: application/json' "$$API_URL/api/users/me")"
-        echo "GET /api/users/me -> $$code"
-        case "$$code" in
-          200|401|403) echo "API smoke looks OK" ;;
-          5*) echo "ERROR: API returned $$code" ; exit 1 ;;
-          *) echo "WARN: unexpected status $$code (continuing)" ;;
-        esac
-
-# Make GOOGLE_CLIENT_ID available to the web-build step without printing it.
 availableSecrets:
   secretManager:
     - versionName: projects/$PROJECT_ID/secrets/GOOGLE_CLIENT_ID/versions/latest
