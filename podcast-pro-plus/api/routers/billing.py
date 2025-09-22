@@ -11,6 +11,7 @@ from ..core.constants import TIER_LIMITS
 from ..core import crud
 from uuid import UUID
 from sqlmodel import select
+from sqlalchemy import func
 from ..services.billing import usage as usage_svc
 from ..core.config import settings
 
