@@ -62,7 +62,9 @@ export function resolveRuntimeApiBase() {
     ? String(import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_BASE_URL).replace(/\/+$/, '')
     : '';
   if (envBase) return envBase;
-  return deriveApiOriginFromWindowOrigin();
+  const derived = deriveApiOriginFromWindowOrigin();
+  // Hard fallback to prod API to avoid silent misroutes when derivation fails
+  return derived || 'https://api.getpodcastplus.com';
 }
 
 // Base URL for API requests. In dev, you can leave this blank and rely on Vite's /api proxy.

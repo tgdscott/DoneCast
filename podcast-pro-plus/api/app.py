@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
 from starlette.staticfiles import StaticFiles
@@ -80,8 +80,14 @@ app.add_middleware(
     allow_origins=settings.cors_allowed_origin_list,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
     allow_credentials=True,
 )
+
+# Global preflight handler to satisfy browser CORS checks on any path.
+@app.options("/{path:path}")
+def cors_preflight_handler(path: str):
+    return Response(status_code=204)
 
 # Security / request-id middleware
 from api.middleware.request_id import RequestIDMiddleware

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Query, Depends
 from sqlmodel import Session, select
+from sqlalchemy import text
 from api.core.database import get_session
 from api.models.podcast import Episode
 import os
@@ -16,7 +17,7 @@ def public_episodes(limit: int = Query(10, ge=1, le=50), session: Session = Depe
     statement = (
         select(Episode)
         .where(Episode.status == "published")
-        .order_by(Episode.processed_at.desc())
+        .order_by(text("processed_at DESC"))
         .limit(limit)
     )
     eps = session.exec(statement).all()
@@ -50,3 +51,13 @@ def public_episodes(limit: int = Query(10, ge=1, le=50), session: Session = Depe
         })
 
     return {"items": items, "diagnostics": {"missing_audio_files": missing_audio_count}}
+
+# Lightweight config surface for SPA boot-time fetch.
+from api.core.config import settings
+
+@router.get("/config")
+def public_config():
+    return {
+        "terms_version": getattr(settings, "TERMS_VERSION", ""),
+        "api_base": "https://api.getpodcastplus.com",
+    }
