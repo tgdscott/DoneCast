@@ -194,6 +194,35 @@ export default function PodcastCreator({ onBack, token, templates, podcasts, ini
     })();
   }, [token, authUser]);
 
+  useEffect(() => {
+    if (showIntentQuestions) return;
+    if (!uploadedFile) return;
+    if (isUploading) return;
+    if (currentStep !== 2) return;
+
+    const requireIntern = capabilities.has_elevenlabs || capabilities.has_google_tts;
+    const requireSfx = capabilities.has_any_sfx_triggers;
+
+    const needsFlubber = intents.flubber === null;
+    const needsIntern = requireIntern && intents.intern === null;
+    const needsSfx = requireSfx && intents.sfx === null;
+
+    if (needsFlubber || needsIntern || needsSfx) {
+      setShowIntentQuestions(true);
+    }
+  }, [
+    showIntentQuestions,
+    uploadedFile,
+    isUploading,
+    currentStep,
+    intents.flubber,
+    intents.intern,
+    intents.sfx,
+    capabilities.has_elevenlabs,
+    capabilities.has_google_tts,
+    capabilities.has_any_sfx_triggers,
+  ]);
+
   // Derive audio duration from uploaded file to estimate processing time
   useEffect(() => {
     if (!uploadedFile) { setAudioDurationSec(null); return; }
@@ -614,6 +643,8 @@ export default function PodcastCreator({ onBack, token, templates, podcasts, ini
       return
     }
     setUploadedFile(file)
+    setIntents({ flubber: null, intern: null, sfx: null })
+    setShowIntentQuestions(false)
     setIsUploading(true)
     setStatusMessage('Uploading audio file...')
     setError('')
@@ -627,9 +658,9 @@ export default function PodcastCreator({ onBack, token, templates, podcasts, ini
       const result = await api.raw('/api/media/upload/main_content', { method: 'POST', body: formData })
       const fname = result[0]?.filename
       setUploadedFilename(fname)
-  setStatusMessage('Upload successful!')
-  // Ask intent questions (required)
-  setShowIntentQuestions(true)
+      setStatusMessage('Upload successful!')
+      // Ask intent questions (required)
+      setShowIntentQuestions(true)
     } catch (err) {
       setError(err.message)
       setStatusMessage('')
