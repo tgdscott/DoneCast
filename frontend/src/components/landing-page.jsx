@@ -20,33 +20,23 @@ import {
 } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { useAuth } from "@/AuthContext.jsx"
-import { makeApi } from "@/lib/apiClient";
+import { makeApi, buildApiUrl, resolveRuntimeApiBase } from "@/lib/apiClient";
 import { useBrand } from "@/brand/BrandContext.jsx";
 import Logo from "@/components/Logo.jsx";
 
-// Determine API base URL at runtime. Prefer build-time Vite env, otherwise
-// derive from the current origin (swap app->api) so requests never hit the
-// static frontend which returns 405 on POST.
-const runtimeApiBase = (() => {
-  const env = import.meta.env?.VITE_API_BASE || import.meta.env?.VITE_API_BASE_URL;
-  if (env && typeof env === "string") return env.replace(/\/+$/, "");
-  if (typeof window !== "undefined") {
-    let origin = window.location.origin;
-    if (origin.includes("app.")) {
-      origin = origin.replace("app.", "api.");
-    } else if (origin.includes("dashboard.")) {
-      origin = origin.replace("dashboard.", "api.");
-    }
-    return origin.replace(/\/+$/, "");
-  }
-  return "";
-})();
+const apiUrl = (path) => buildApiUrl(path);
 
-const apiUrl = (path) => {
-  if (!path) return runtimeApiBase;
-  if (/^https?:\/\//i.test(path)) return path;
-  return `${runtimeApiBase}${path}`;
-};
+const googleLoginUrl = (() => {
+  const direct = buildApiUrl("/api/auth/login/google");
+  if (/^https?:\/\//i.test(direct)) {
+    return direct;
+  }
+  const base = resolveRuntimeApiBase();
+  if (base) {
+    return `${base.replace(/\/+$/, "")}/api/auth/login/google`;
+  }
+  return "https://api.getpodcastplus.com/api/auth/login/google";
+})();
 
 const LoginModal = ({ onClose }) => {
   const { login } = useAuth();
@@ -332,8 +322,8 @@ const LoginModal = ({ onClose }) => {
               <span className="bg-white px-2 text-muted-foreground">Or continue with</span>
             </div>
           </div>
-          {/** Use explicit backend host to avoid localhost vs 127.0.0.1 cookie partition causing Google OAuth state mismatch */}
-          <a href={`https://api.getpodcastplus.com/api/auth/login/google`} className="block">
+          {/** Build an absolute Google OAuth URL so marketing pages hit the API origin even without env config */}
+          <a href={googleLoginUrl} className="block">
             <Button variant="outline" className="w-full">
               Sign In with Google
             </Button>

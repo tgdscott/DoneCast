@@ -2,23 +2,71 @@ export function isApiError(e) {
   return e && typeof e === "object" && (e.error || e.detail || e.message);
 }
 
-// Base URL for API requests. In dev, you can leave this blank and rely on Vite's /api proxy.
-const runtimeBase = (() => {
+const LOCAL_LIKE_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]']);
+
+function deriveApiOriginFromWindowOrigin() {
+  if (typeof window === 'undefined' || !window.location?.origin) {
+    return '';
+  }
+
+  const fallback = window.location.origin.replace(/\/+$/, '');
+
+  try {
+    const url = new URL(window.location.origin);
+    const { protocol, hostname } = url;
+    const lowerHost = hostname.toLowerCase();
+    const makeOrigin = (host, keepPort = false) => {
+      const port = keepPort && url.port ? `:${url.port}` : '';
+      return `${protocol}//${host}${port}`.replace(/\/+$/, '');
+    };
+
+    const swapSubdomain = (prefix) => {
+      const needle = `${prefix}.`;
+      return lowerHost.startsWith(needle) ? `api.${hostname.slice(needle.length)}` : null;
+    };
+
+    const swapped =
+      swapSubdomain('app') ||
+      swapSubdomain('dashboard') ||
+      swapSubdomain('www');
+
+    if (swapped) {
+      return makeOrigin(swapped);
+    }
+
+    if (lowerHost === 'getpodcastplus.com') {
+      return makeOrigin('api.getpodcastplus.com');
+    }
+
+    const hostSegments = lowerHost.split('.');
+    if (
+      !lowerHost.startsWith('api.') &&
+      !LOCAL_LIKE_HOSTS.has(lowerHost) &&
+      hostSegments.length === 2
+    ) {
+      return makeOrigin(`api.${hostname}`);
+    }
+
+    return makeOrigin(hostname, true);
+  } catch (err) {
+    if (fallback.includes('//getpodcastplus.com')) {
+      return fallback.replace('://', '://api.');
+    }
+  }
+
+  return fallback;
+}
+
+export function resolveRuntimeApiBase() {
   const envBase = (import.meta && import.meta.env && (import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_BASE_URL))
     ? String(import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_BASE_URL).replace(/\/+$/, '')
     : '';
   if (envBase) return envBase;
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    let origin = window.location.origin;
-    if (origin.includes('app.')) {
-      origin = origin.replace('app.', 'api.');
-    } else if (origin.includes('dashboard.')) {
-      origin = origin.replace('dashboard.', 'api.');
-    }
-    return origin.replace(/\/+$/, '');
-  }
-  return '';
-})();
+  return deriveApiOriginFromWindowOrigin();
+}
+
+// Base URL for API requests. In dev, you can leave this blank and rely on Vite's /api proxy.
+const runtimeBase = resolveRuntimeApiBase();
 
 export function buildApiUrl(path) {
   const base = runtimeBase;
