@@ -12,7 +12,7 @@ substitutions:
   # WEB
   _WEB_SERVICE: podcast-web
   _WEB_DIR: frontend
-  _VITE_GOOGLE_CLIENT_ID: ''
+  _VITE_GOOGLE_CLIENT_ID: '724497178186-kdv8rp3loagl1me3e0v3udlctigq36g9.apps.googleusercontent.com'
   _VITE_API_BASE: https://api.getpodcastplus.com
 
 images:

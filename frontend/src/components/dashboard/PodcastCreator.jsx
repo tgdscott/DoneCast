@@ -149,6 +149,7 @@ export default function PodcastCreator({ onBack, token, templates, podcasts, ini
     }
   }, [templates, selectedTemplate, currentStep]);
   
+
   useEffect(() => {
     const api = makeApi(token);
     const fetchMedia = async () => {
@@ -226,6 +227,85 @@ export default function PodcastCreator({ onBack, token, templates, podcasts, ini
   // Derive audio duration from uploaded file to estimate processing time
   useEffect(() => {
     if (!uploadedFile) { setAudioDurationSec(null); return; }
+
+  useEffect(() => {
+    const api = makeApi(token);
+    const fetchMedia = async () => {
+      try {
+        const data = await api.get('/api/media/');
+        setMediaLibrary(data);
+      } catch (err) {
+        setError(err.message);
+      }
+    };
+    fetchMedia();
+    fetchSpreakerShows(); // Fetch Spreaker shows on mount
+    // Fetch platform admin Test Mode (only attempt for admins)
+    (async () => {
+      try {
+        const isAdmin = !!(authUser && (authUser.is_admin || authUser.role === 'admin'));
+        if (!isAdmin) { setTestMode(false); return; }
+        const settings = await api.get('/api/admin/settings');
+        if (settings && typeof settings.test_mode !== 'undefined') {
+          setTestMode(!!settings.test_mode);
+        }
+      } catch (_) {
+        setTestMode(false);
+      }
+    })();
+    // Fetch usage/quota (ignore errors silently so UI still works if endpoint absent)
+    (async () => {
+      try {
+        const u = await api.get('/api/billing/usage');
+        if (u) setUsage(u);
+      } catch (_) { /* no-op */ }
+    })();
+    // Fetch lightweight capabilities for UI gating
+    (async () => {
+      try {
+        const caps = await api.get('/api/users/me/capabilities');
+        if(caps){ setCapabilities({
+          has_elevenlabs: !!caps.has_elevenlabs,
+          has_google_tts: !!caps.has_google_tts,
+          has_any_sfx_triggers: !!caps.has_any_sfx_triggers,
+        }); }
+      } catch(_) { /* no-op */ }
+    })();
+  }, [token, authUser]);
+
+  useEffect(() => {
+    if (showIntentQuestions) return;
+    if (!uploadedFile) return;
+    if (isUploading) return;
+    if (currentStep !== 2) return;
+
+    const requireIntern = capabilities.has_elevenlabs || capabilities.has_google_tts;
+    const requireSfx = capabilities.has_any_sfx_triggers;
+
+    const needsFlubber = intents.flubber === null;
+    const needsIntern = requireIntern && intents.intern === null;
+    const needsSfx = requireSfx && intents.sfx === null;
+
+    if (needsFlubber || needsIntern || needsSfx) {
+      setShowIntentQuestions(true);
+    }
+  }, [
+    showIntentQuestions,
+    uploadedFile,
+    isUploading,
+    currentStep,
+    intents.flubber,
+    intents.intern,
+    intents.sfx,
+    capabilities.has_elevenlabs,
+    capabilities.has_google_tts,
+    capabilities.has_any_sfx_triggers,
+  ]);
+
+  // Derive audio duration from uploaded file to estimate processing time
+  useEffect(() => {
+    if (!uploadedFile) { setAudioDurationSec(null); return; }
+
     let url = null;
     const audio = new Audio();
     const onLoaded = () => {
@@ -645,6 +725,11 @@ export default function PodcastCreator({ onBack, token, templates, podcasts, ini
     setUploadedFile(file)
     setIntents({ flubber: null, intern: null, sfx: null })
     setShowIntentQuestions(false)
+
+    setUploadedFile(file)
+    setIntents({ flubber: null, intern: null, sfx: null })
+    setShowIntentQuestions(false)
+
     setIsUploading(true)
     setStatusMessage('Uploading audio file...')
     setError('')
@@ -653,6 +738,14 @@ export default function PodcastCreator({ onBack, token, templates, podcasts, ini
     formData.append("files", file)
     formData.append("friendly_names", JSON.stringify([file.name]))
 
+    try {
+      const api = makeApi(token);
+      const result = await api.raw('/api/media/upload/main_content', { method: 'POST', body: formData })
+      const fname = result[0]?.filename
+      setUploadedFilename(fname)
+      setStatusMessage('Upload successful!')
+      // Ask intent questions (required)
+      setShowIntentQuestions(true)
     try {
       const api = makeApi(token);
       const result = await api.raw('/api/media/upload/main_content', { method: 'POST', body: formData })
