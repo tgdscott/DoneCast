@@ -1,24 +1,72 @@
 from datetime import datetime, timedelta
 from uuid import uuid4
-from typing import Any, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Mapping, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
-from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
-from jose import JWTError, jwt
-from authlib.integrations.starlette_client import OAuth
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlmodel import Session
 
 from ..core.config import settings
-import logging
 from ..core.security import verify_password
 from ..models.user import User, UserCreate, UserPublic
 from ..core.database import get_session
 from ..core import crud
 from ..models.settings import load_admin_settings
 
+try:  # pragma: no cover - executed only when python-jose is missing in prod builds
+    from jose import JWTError, jwt
+except ModuleNotFoundError as exc:  # pragma: no cover
+    JWTError = Exception  # type: ignore[assignment]
+    jwt = None  # type: ignore[assignment]
+    _JOSE_IMPORT_ERROR: Optional[ModuleNotFoundError] = exc
+else:
+    _JOSE_IMPORT_ERROR = None
+
+if TYPE_CHECKING:  # pragma: no cover - typing helper
+    from authlib.integrations.starlette_client import OAuth as OAuthType
+else:  # pragma: no cover - runtime alias for type checkers
+    OAuthType = Any  # type: ignore[assignment]
+
+try:  # pragma: no cover - executed only when authlib is missing in prod builds
+    from authlib.integrations.starlette_client import OAuth as _OAuthFactory
+except ModuleNotFoundError as exc:  # pragma: no cover
+    _OAuthFactory = None  # type: ignore[assignment]
+    _AUTHLIB_ERROR: Optional[ModuleNotFoundError] = exc
+else:
+    _AUTHLIB_ERROR = None
+
 # --- Router Setup ---
 logger = logging.getLogger(__name__)
+
+
+def _raise_jwt_missing(context: str) -> None:
+    """Raise a helpful HTTP error when python-jose is absent."""
+
+    detail = (
+        "Authentication service is misconfigured (missing JWT support). "
+        "Please contact support."
+    )
+    if _JOSE_IMPORT_ERROR:
+        logger.error("JWT dependency missing while %s: %s", context, _JOSE_IMPORT_ERROR)
+    else:
+        logger.error("JWT dependency missing while %s", context)
+    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
+
+
+def _verify_password_or_error(password: str, hashed_password: str) -> bool:
+    """Wrapper around verify_password that surfaces configuration errors cleanly."""
+
+    try:
+        return verify_password(password, hashed_password)
+    except RuntimeError as exc:
+        logger.error("Password verification unavailable: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Authentication service is misconfigured (password hashing unavailable).",
+        )
 
 router = APIRouter(
     prefix="/auth",
@@ -29,17 +77,26 @@ router = APIRouter(
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
 # --- OAuth Client Setup ---
-def _build_oauth_client() -> tuple[OAuth, str]:
+def _build_oauth_client() -> tuple[OAuthType, str]:
     """Construct a new OAuth client registered for Google."""
-    o = OAuth()
-    o.register(
+
+    if _OAuthFactory is None:
+        message = "Google OAuth is unavailable because authlib is not installed."
+        if _AUTHLIB_ERROR:
+            logger.warning("%s Import error: %s", message, _AUTHLIB_ERROR)
+        else:
+            logger.warning(message)
+        raise RuntimeError(message)
+
+    oauth_client = _OAuthFactory()
+    oauth_client.register(
         name='google',
         server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
         client_id=settings.GOOGLE_CLIENT_ID,
         client_secret=settings.GOOGLE_CLIENT_SECRET,
         client_kwargs={'scope': 'openid email profile'},
     )
-    return o, settings.GOOGLE_CLIENT_ID
+    return oauth_client, settings.GOOGLE_CLIENT_ID
 
 # --- Helper Functions ---
 
@@ -51,6 +108,8 @@ def _is_admin_email(email: str | None) -> bool:
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
     """Creates a JWT access token."""
+    if jwt is None:
+        _raise_jwt_missing("creating access tokens")
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
@@ -70,6 +129,8 @@ async def get_current_user(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    if jwt is None:
+        _raise_jwt_missing("validating credentials")
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         email = payload.get("sub")
@@ -165,7 +226,13 @@ async def login_for_access_token(
 ):
     """Login user with email/password and return an access token."""
     user = crud.get_user_by_email(session=session, email=form_data.username)
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not _verify_password_or_error(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -196,7 +263,13 @@ async def login_for_access_token_json(
 ) -> dict:
     """Login user with email/password from a JSON body."""
     user = crud.get_user_by_email(session=session, email=payload.email)
-    if not user or not verify_password(payload.password, user.hashed_password):
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not _verify_password_or_error(payload.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -251,7 +324,13 @@ async def login_google(request: Request):
     """Redirects the user to Google's login page."""
     backend_base = settings.OAUTH_BACKEND_BASE or "https://api.getpodcastplus.com"
     redirect_uri = f"{backend_base}/api/auth/google/callback"
-    oauth_client, _ = _build_oauth_client()
+    try:
+        oauth_client, _ = _build_oauth_client()
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google login is temporarily unavailable. Please contact support.",
+        ) from exc
     client = getattr(oauth_client, 'google', None)
     if client is None:
         raise HTTPException(status_code=500, detail="OAuth client not configured")
@@ -262,6 +341,14 @@ async def auth_google_callback(request: Request, session: Session = Depends(get_
     """Handles the callback from Google, creates/updates the user, and redirects."""
     try:
         oauth_client, _ = _build_oauth_client()
+    except RuntimeError as exc:
+        logger.exception("Google OAuth unavailable during callback")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google login is temporarily unavailable. Please contact support.",
+        ) from exc
+
+    try:
         client = getattr(oauth_client, 'google', None)
         if client is None:
             raise RuntimeError("OAuth client not configured")
@@ -357,6 +444,8 @@ async def debug_google_client():
         "client_id_hint": _mask(settings.GOOGLE_CLIENT_ID),
         "redirect_uri": f"{backend_base}/api/auth/google/callback",
         "oauth_backend_base_is_set": bool(settings.OAUTH_BACKEND_BASE),
+        "authlib_available": _OAuthFactory is not None,
+        "authlib_error": str(_AUTHLIB_ERROR) if _AUTHLIB_ERROR else "",
     }
 
 # --- Terms of Use Endpoints ---
