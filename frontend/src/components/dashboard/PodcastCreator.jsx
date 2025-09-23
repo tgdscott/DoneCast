@@ -90,6 +90,8 @@ export default function PodcastCreator({
     showIntentQuestions,
     handleIntentSubmit,
     capabilities,
+    intentsComplete,
+    pendingIntentLabels,
     flubberNotFound,
     fuzzyThreshold,
     setFuzzyThreshold,
@@ -126,6 +128,10 @@ export default function PodcastCreator({
             onFileChange={handleFileChange}
             fileInputRef={fileInputRef}
             onBack={() => setCurrentStep(1)}
+            onNext={() => setCurrentStep(3)}
+            onEditAutomations={() => setShowIntentQuestions(true)}
+            canProceed={!!uploadedFile && intentsComplete && !isUploading}
+            pendingIntentLabels={pendingIntentLabels}
           />
         );
       case 3:

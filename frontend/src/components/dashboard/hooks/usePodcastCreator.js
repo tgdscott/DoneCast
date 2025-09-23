@@ -196,6 +196,16 @@ export default function usePodcastCreator({
     capabilities.has_any_sfx_triggers,
   ]);
 
+  const requireIntern = capabilities.has_elevenlabs || capabilities.has_google_tts;
+  const requireSfx = capabilities.has_any_sfx_triggers;
+
+  const pendingIntentLabels = [];
+  if (intents.flubber === null) pendingIntentLabels.push('Flubber');
+  if (requireIntern && intents.intern === null) pendingIntentLabels.push('Intern');
+  if (requireSfx && intents.sfx === null) pendingIntentLabels.push('Sound Effects');
+
+  const intentsComplete = pendingIntentLabels.length === 0;
+
   useEffect(() => {
     if (!uploadedFile) { setAudioDurationSec(null); return; }
     let url = null;
@@ -1188,6 +1198,8 @@ export default function usePodcastCreator({
     flubberContexts,
     showIntentQuestions,
     intents,
+    intentsComplete,
+    pendingIntentLabels,
     showFlubberScan,
     capabilities,
     flubberNotFound,

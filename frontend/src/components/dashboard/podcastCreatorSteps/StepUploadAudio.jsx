@@ -3,7 +3,17 @@ import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { FileAudio, Loader2, Mic, Upload, ArrowLeft } from 'lucide-react';
 
-export default function StepUploadAudio({ uploadedFile, isUploading, onFileChange, fileInputRef, onBack }) {
+export default function StepUploadAudio({
+  uploadedFile,
+  isUploading,
+  onFileChange,
+  fileInputRef,
+  onBack,
+  onNext = () => {},
+  onEditAutomations = () => {},
+  canProceed = false,
+  pendingIntentLabels = [],
+}) {
   const handleFileInput = (event) => {
     if (event.target.files?.[0]) {
       onFileChange(event.target.files[0]);
@@ -16,6 +26,9 @@ export default function StepUploadAudio({ uploadedFile, isUploading, onFileChang
       onFileChange(event.dataTransfer.files[0]);
     }
   };
+
+  const hasPendingIntents = Array.isArray(pendingIntentLabels) && pendingIntentLabels.length > 0;
+  const pendingLabelText = hasPendingIntents ? pendingIntentLabels.join(', ') : '';
 
   return (
     <div className="space-y-8">
@@ -59,10 +72,37 @@ export default function StepUploadAudio({ uploadedFile, isUploading, onFileChang
           </div>
         </CardContent>
       </Card>
-      <div className="flex justify-start pt-8">
+      <div className="flex flex-col gap-4 pt-8 sm:flex-row sm:items-center sm:justify-between">
         <Button onClick={onBack} variant="outline" size="lg">
           <ArrowLeft className="w-5 h-5 mr-2" />Back to Templates
         </Button>
+        {uploadedFile && (
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end w-full sm:w-auto">
+            <div className="text-sm text-gray-600 sm:text-right">
+              {hasPendingIntents
+                ? `We still need your answer about ${pendingLabelText}.`
+                : 'Automation answers saved. You can review them before continuing.'}
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={onEditAutomations}
+                disabled={isUploading}
+              >
+                {hasPendingIntents ? 'Answer now' : 'Review answers'}
+              </Button>
+              <Button
+                onClick={onNext}
+                size="lg"
+                className="text-white"
+                style={{ backgroundColor: '#2C3E50' }}
+                disabled={!canProceed}
+              >
+                Continue
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
