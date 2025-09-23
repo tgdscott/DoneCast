@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 import os
 from api.core.config import settings
 from api.core.database import get_session
-from api.routers.auth import get_current_user, create_access_token
+from api.routers.auth import create_access_token
 from api.models.user import User
 from jose import jwt, JWTError
 from sqlmodel import select
@@ -44,17 +44,29 @@ _SPREAKER_SUCCESS_REDIRECT = f"{_APP_BASE_URL}/dashboard?spreaker_connected=true
 def spreaker_oauth_start(
     request: Request,
     session: Session = Depends(get_session),
-    current_user: User | None = Depends(get_current_user)
 ):
     """Initiate Spreaker OAuth. Accepts Bearer auth OR ?access_token=<jwt> for popup flows.
     Adds verbose logging + graceful HTML when unauthenticated so popup shows actionable info.
     """
-    user = current_user
+    user = None
     authed_via = None
-    if user is not None:
-        authed_via = "dependency"
+    # Try Bearer token from Authorization header first
+    try:
+        authz = request.headers.get("Authorization") or ""
+        if authz.lower().startswith("bearer "):
+            token = authz.split(" ", 1)[1].strip()
+            if token:
+                payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+                email = payload.get("sub")
+                if email:
+                    user = crud.get_user_by_email(session=session, email=email)
+                    if user:
+                        authed_via = "header_bearer"
+    except JWTError as je:
+        log.warning(f"[spreaker_oauth.start] JWT decode failed (header): {je}")
+
+    # Fallback: try query param token (popup flow)
     if user is None:
-        # Fallback: try query param token
         token = request.query_params.get("access_token")
         if token:
             try:
@@ -65,7 +77,7 @@ def spreaker_oauth_start(
                     if user:
                         authed_via = "query_token"
             except JWTError as je:
-                log.warning(f"[spreaker_oauth.start] JWT decode failed: {je}")
+                log.warning(f"[spreaker_oauth.start] JWT decode failed (query): {je}")
     if user is None:
         log.info("[spreaker_oauth.start] Unauthenticated request. Headers: %s Query: %s", dict(request.headers), dict(request.query_params))
         return HTMLResponse("""

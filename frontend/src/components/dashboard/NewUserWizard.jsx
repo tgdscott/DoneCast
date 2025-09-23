@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from "@/hooks/use-toast";
-import { makeApi } from '@/lib/apiClient';
+import { makeApi, buildApiUrl } from '@/lib/apiClient';
 import { CheckCircle, ArrowLeft, X, HelpCircle } from 'lucide-react';
 
 const WizardStep = ({ children }) => <div className="py-4">{children}</div>;
@@ -119,9 +119,10 @@ const NewUserWizard = ({ open, onOpenChange, token, onPodcastCreated }) => {
 
   const handleConnectSpreaker = async () => {
     try {
-      const { auth_url } = await makeApi(token).get('/api/spreaker/auth/login');
-      if (!auth_url) throw new Error('Could not start the Spreaker sign-in.');
-      const popup = window.open(auth_url, 'spreakerAuth', 'width=600,height=700');
+      if (!token) throw new Error('Not signed in');
+      const qs = new URLSearchParams({ access_token: token }).toString();
+      const popupUrl = buildApiUrl(`/api/auth/spreaker/start?${qs}`);
+      const popup = window.open(popupUrl, 'spreakerAuth', 'width=600,height=700');
       if (!popup) throw new Error('Popup blocked. Please allow popups and try again.');
       if (pollRef.current) {
         clearInterval(pollRef.current);

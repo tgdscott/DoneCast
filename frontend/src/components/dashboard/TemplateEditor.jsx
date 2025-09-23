@@ -736,7 +736,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
 // Voice name display is optional; here we show the id compactly
 {/* The modal is rendered at the root of this component's return via conditional below */}
 
-const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDragging, onOpenTTS, justCreated, templateVoiceId, token }) => {
+const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDragging, onOpenTTS, justCreated, templateVoiceId, token, onMediaUploaded }) => {
     const filesForType = mediaFiles[segment.segment_type] || [];
     const [relinkOpen, setRelinkOpen] = useState(false);
     const filename = (segment?.source?.filename || '').trim();
@@ -747,6 +747,8 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
     const [relinkChoice, setRelinkChoice] = useState(filename);
     const [showLocalVoicePicker, setShowLocalVoicePicker] = useState(false);
     const [localVoiceName, setLocalVoiceName] = useState(null);
+    const uploadInputRef = useRef(null);
+    const [isUploading, setIsUploading] = useState(false);
 
     // Resolve friendly name for any existing per-segment voice_id when present
     useEffect(() => {
@@ -783,6 +785,39 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
             }
         }
     onSourceChange(segment.id, newSource);
+    };
+
+    const handleFileUpload = async (file) => {
+        if (!file) return;
+        setIsUploading(true);
+        try {
+            const api = makeApi(token);
+            const fd = new FormData();
+            fd.append('files', file);
+            // Map segment type to media category for upload endpoint
+            const segType = segment.segment_type;
+            const category = (segType === 'intro' || segType === 'outro' || segType === 'commercial') ? segType : 'sfx';
+            const data = await api.raw(`/api/media/upload/${category}`, { method: 'POST', body: fd });
+            const item = Array.isArray(data) ? data[0] : data;
+            const uploaded = item && (item.filename || item?.file?.filename) ? {
+                filename: item.filename || item?.file?.filename,
+                friendly_name: item.friendly_name || undefined,
+                category: category,
+                content_type: item.content_type || 'audio/mpeg',
+            } : null;
+            if (!uploaded) throw new Error('Upload succeeded but no file was returned.');
+            // Inform parent so the media list updates immediately
+            if (typeof onMediaUploaded === 'function') {
+                onMediaUploaded(uploaded);
+            }
+            // Link this segment to the new file
+            onSourceChange(segment.id, { source_type: 'static', filename: uploaded.filename });
+        } catch (e) {
+            try { toast({ variant: 'destructive', title: 'Upload failed', description: e?.message || 'Could not upload audio.' }); } catch {}
+        } finally {
+            setIsUploading(false);
+            try { if (uploadInputRef.current) uploadInputRef.current.value = ''; } catch {}
+        }
     };
 
     if (segment.segment_type === 'content') {

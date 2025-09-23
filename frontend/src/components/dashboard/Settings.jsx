@@ -90,17 +90,11 @@ export default function Settings({ token }) {
 
   const handleConnectSpreaker = async () => {
     try {
-      // Safer default: legacy flow that returns { auth_url } matches deployed redirect_uri most likely
+      // Unified popup flow via /api/auth/spreaker/start with JWT in query (no headers in popup)
       let popupUrl = null;
-      try {
-        const { auth_url } = await makeApi(token).get('/api/spreaker/auth/login');
-        popupUrl = auth_url;
-      } catch (_) {
-        // Fallback to new popup flow via /api/auth/spreaker/start with JWT in query (no headers in popup)
-        if (token) {
-          const qs = new URLSearchParams({ access_token: token }).toString();
-          popupUrl = buildApiUrl(`/api/auth/spreaker/start?${qs}`);
-        }
+      if (token) {
+        const qs = new URLSearchParams({ access_token: token }).toString();
+        popupUrl = buildApiUrl(`/api/auth/spreaker/start?${qs}`);
       }
       if (!popupUrl) throw new Error('Could not start the Spreaker sign-in.');
       const popup = window.open(popupUrl, 'spreakerAuth', 'width=600,height=700');

@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { CheckCircle, Play, Pause } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useComfort } from '@/ComfortContext.jsx';
-import { makeApi } from '@/lib/apiClient';
+import { makeApi, buildApiUrl } from '@/lib/apiClient';
 import { FORMATS, NO_MUSIC_OPTION } from "@/components/onboarding/OnboardingWizard.jsx";
 
 export default function Onboarding() {
@@ -322,10 +322,10 @@ export default function Onboarding() {
 
   async function handleConnectSpreaker() {
     try {
-    const api = makeApi(token);
-    const { auth_url } = await api.get('/api/spreaker/auth/login');
-    if (!auth_url) throw new Error('Could not start the Spreaker sign-in.');
-      const popup = window.open(auth_url, 'spreakerAuth', 'width=600,height=700');
+      if (!token) throw new Error('Not signed in');
+      const qs = new URLSearchParams({ access_token: token }).toString();
+      const popupUrl = buildApiUrl(`/api/auth/spreaker/start?${qs}`);
+      const popup = window.open(popupUrl, 'spreakerAuth', 'width=600,height=700');
       setSpreakerClicked(true);
       const timer = setInterval(() => {
         if (!popup || popup.closed) {

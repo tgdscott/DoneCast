@@ -75,7 +75,8 @@ class Settings(BaseSettings):
     def _apply_spreaker_defaults(self):
         if not self.SPREAKER_REDIRECT_URI:
             base = (self.OAUTH_BACKEND_BASE or "https://api.getpodcastplus.com").rstrip("/")
-            self.SPREAKER_REDIRECT_URI = f"{base}/api/spreaker/auth/callback"
+            # Unified Spreaker OAuth callback route (popup flow)
+            self.SPREAKER_REDIRECT_URI = f"{base}/api/auth/spreaker/callback"
         return self
 
     class Config:

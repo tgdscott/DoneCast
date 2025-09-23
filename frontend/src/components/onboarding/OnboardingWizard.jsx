@@ -674,17 +674,11 @@ export default function OnboardingWizard(){
                     onClick={async () => {
                     try { setConnectClicked(true); } catch {}
                     try {
-                      // Safer default: legacy endpoint first
+                      // Unified popup start endpoint with JWT in query
                       let popupUrl = null;
-                      try {
-                        const data = await makeApi(token).get('/api/spreaker/auth/login');
-                        popupUrl = data && data.auth_url;
-                      } catch(_) {
-                        // Fallback to new popup start endpoint with JWT in query
-                        if (token) {
-                          const qs = new URLSearchParams({ access_token: token }).toString();
-                          popupUrl = buildApiUrl(`/api/auth/spreaker/start?${qs}`);
-                        }
+                      if (token) {
+                        const qs = new URLSearchParams({ access_token: token }).toString();
+                        popupUrl = buildApiUrl(`/api/auth/spreaker/start?${qs}`);
                       }
                       if(!popupUrl) throw new Error('Auth init failed');
                       window.open(popupUrl, 'spreakerOAuth', 'width=720,height=800');

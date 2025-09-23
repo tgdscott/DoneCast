@@ -1,6 +1,6 @@
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session
 
 from api.core.database import get_session
@@ -8,11 +8,6 @@ from api.core.auth import get_current_user
 from api.models.user import User
 from api.services.publisher import SpreakerClient
 from api.core.config import settings
-from api.core import crud
-import secrets
-from urllib.parse import urlencode
-import os
-from fastapi.responses import HTMLResponse
 import requests
 from sqlmodel import select
 from api.models.podcast import Podcast, PodcastType, Episode
@@ -20,9 +15,6 @@ from uuid import UUID
 import logging
 
 log = logging.getLogger(__name__)
-
-_APP_BASE_URL = (settings.APP_BASE_URL or "https://app.getpodcastplus.com").rstrip("/")
-_SPREAKER_SUCCESS_REDIRECT = f"{_APP_BASE_URL}/dashboard?spreaker_connected=true"
 
 router = APIRouter(prefix="/spreaker", tags=["spreaker"])
 
@@ -214,87 +206,6 @@ def get_plays_totals_for_user_episodes(
     except Exception as ex:
         raise HTTPException(status_code=500, detail=str(ex))
 
-# ---- Legacy auth style (non-popup) reused for Settings & optional onboarding (B approach) ----
-_oauth_states: dict[str, dict] = {}
-
-@router.get("/auth/login")
-def spreaker_auth_login(request: Request, current_user: User = Depends(get_current_user)):
-    if not settings.SPREAKER_CLIENT_ID or not settings.SPREAKER_REDIRECT_URI:
-        raise HTTPException(status_code=500, detail="Spreaker OAuth not configured")
-    state = secrets.token_urlsafe(24)
-    _oauth_states[state] = {"user_id": str(current_user.id)}
-    params = {
-        "client_id": settings.SPREAKER_CLIENT_ID,
-        "response_type": "code",
-        "redirect_uri": settings.SPREAKER_REDIRECT_URI.replace("localhost", "127.0.0.1"),
-        "scope": "basic",
-        "state": state,
-    }
-    auth_url = f"https://www.spreaker.com/oauth2/authorize?{urlencode(params)}"
-    return {"auth_url": auth_url}
-
-@router.get("/auth/callback")
-def spreaker_auth_callback(request: Request, code: str, state: str, session: Session = Depends(get_session)):
-    data = _oauth_states.pop(state, None)
-    if not data or not data.get("user_id"):
-        raise HTTPException(status_code=403, detail="Invalid state")
-    user = session.get(User, UUID(data["user_id"]))
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    token_url = "https://api.spreaker.com/oauth2/token"
-    payload = {
-        "grant_type": "authorization_code",
-        "code": code,
-        "client_id": settings.SPREAKER_CLIENT_ID,
-        "client_secret": settings.SPREAKER_CLIENT_SECRET,
-        "redirect_uri": settings.SPREAKER_REDIRECT_URI.replace("localhost", "127.0.0.1"),
-    }
-    try:
-        r = requests.post(token_url, data=payload, timeout=30)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Token request failed: {e}")
-    if r.status_code // 100 != 2:
-        raise HTTPException(status_code=400, detail="Failed to retrieve access token")
-    tok = r.json()
-    user.spreaker_access_token = tok.get("access_token")
-    user.spreaker_refresh_token = tok.get("refresh_token")
-    session.add(user)
-    session.commit()
-    session.refresh(user)
-    # Return minimal success page that notifies opener (onboarding wizard) then attempts to close.
-    # Previous version redirected to /settings which fails when only backend is exposed via ngrok.
-    return HTMLResponse(f"""
-<html><head><meta charset='utf-8' /><title>Spreaker Connected</title></head>
-<body style='font:14px system-ui, sans-serif; padding:24px; text-align:center;'>
-    <h2>Spreaker Connected</h2>
-    <p>You can close this window and return to the app.</p>
-    <script>
-        (function() {{
-            const target = "{_SPREAKER_SUCCESS_REDIRECT}";
-            function notify() {{
-                try {{
-                    if (window.opener && !window.opener.closed) {{
-                        window.opener.postMessage({{ type: 'spreaker_connected' }}, '*');
-                    }}
-                }} catch (err) {{}}
-            }}
-            function closeOrRedirect() {{
-                notify();
-                let closed = false;
-                try {{
-                    window.close();
-                    closed = window.closed;
-                }} catch (err) {{}}
-                if (!closed) {{
-                    window.location.href = target;
-                }}
-            }}
-            setTimeout(closeOrRedirect, 400);
-        }})();
-    </script>
-    <p style='margin-top:32px; font-size:12px; opacity:.6'>If this window does not close automatically, just close it manually.</p>
-</body></html>
-""")
 
 @router.post("/disconnect")
 def spreaker_disconnect(session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
