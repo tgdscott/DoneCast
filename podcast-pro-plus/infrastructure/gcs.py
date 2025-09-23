@@ -1,14 +1,55 @@
-import os, datetime
+import os, datetime, pathlib
 from typing import BinaryIO, Optional
 from google.cloud import storage
 
-_client = storage.Client()
+# --- Local Dev Sandbox Implementation ---
+IS_DEV_ENV = os.getenv("APP_ENV") == "dev"
+
+# In dev mode, we don't need a real client.
+_client: Optional[storage.Client] = None
+if not IS_DEV_ENV:
+    try:
+        _client = storage.Client()
+    except Exception as e:
+        # This will allow the app to start, but GCS calls will fail.
+        # Good for local dev without gcloud auth.
+        print(f"Warning: Failed to initialize Google Cloud Storage client: {e}")
+
+def _local_upload(key: str, data_or_fileobj: bytes | BinaryIO) -> str:
+    """Helper to write data to the local MEDIA_DIR and return the filename."""
+    from api.core.paths import MEDIA_DIR
+    # The 'key' from GCS corresponds to the object path inside the bucket.
+    # We'll save it directly under MEDIA_DIR, using just the basename.
+    dest_path = MEDIA_DIR / os.path.basename(key)
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if isinstance(data_or_fileobj, bytes):
+        dest_path.write_bytes(data_or_fileobj)
+    else: # BinaryIO
+        try:
+            data_or_fileobj.seek(0)
+        except Exception:
+            pass
+        with open(dest_path, "wb") as f:
+            # For local dev, reading the whole thing is fine and simple.
+            f.write(data_or_fileobj.read())
+
+    # Return the simple filename. The `upload_media_files` function will store this
+    # in the DB. The app serves `/static/media` from MEDIA_DIR, so this works.
+    return dest_path.name
+
 
 def upload_bytes(bucket: str, key: str, data: bytes, content_type: str) -> str:
     """Upload an in-memory bytes payload to GCS.
 
     Note: For large files, prefer upload_fileobj() to avoid duplicating data in memory.
     """
+    if IS_DEV_ENV:
+        return _local_upload(key, data)
+
+    if not _client:
+        raise RuntimeError("GCS client not initialized. Is APP_ENV set correctly and are you authenticated?")
+
     b = _client.bucket(bucket)
     blob = b.blob(key)
     blob.upload_from_string(data, content_type=content_type)
@@ -21,6 +62,12 @@ def upload_fileobj(bucket: str, key: str, fileobj: BinaryIO, *, size: Optional[i
     - Allows setting a larger chunk size for better throughput
     - If size is provided, passes it to the client for efficiency
     """
+    if IS_DEV_ENV:
+        return _local_upload(key, fileobj)
+
+    if not _client:
+        raise RuntimeError("GCS client not initialized. Is APP_ENV set correctly and are you authenticated?")
+
     b = _client.bucket(bucket)
     blob = b.blob(key)
     # Use a larger chunk size to improve throughput on large uploads
@@ -48,3 +95,25 @@ def make_signed_url(bucket: str, key: str, minutes: int = 60) -> str:
         expiration=datetime.timedelta(minutes=minutes),
         method="GET",
     )
+
+def delete_blob(bucket: str, key: str):
+    """Deletes a blob from GCS or the local filesystem for dev."""
+    if IS_DEV_ENV:
+        # The local implementation uses the key as the filename
+        from api.core.paths import MEDIA_DIR
+        try:
+            (MEDIA_DIR / os.path.basename(key)).unlink(missing_ok=True)
+        except Exception as e:
+            print(f"Warning: local file delete failed for {key}: {e}")
+        return
+
+    if not _client:
+        raise RuntimeError("GCS client not initialized.")
+
+    try:
+        b = _client.bucket(bucket)
+        blob = b.blob(key)
+        blob.delete()
+    except Exception as e:
+        # Log and ignore, as per the pattern in delete_media_item
+        print(f"Warning: Failed to delete GCS blob gs://{bucket}/{key}: {e}")

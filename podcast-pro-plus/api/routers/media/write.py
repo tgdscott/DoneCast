@@ -26,7 +26,7 @@ from api.models.user import User
 from api.core.database import get_session
 from api.routers.auth import get_current_user
 from infrastructure.tasks_client import enqueue_http_task
-from infrastructure.gcs import upload_bytes, upload_fileobj
+from infrastructure.gcs import upload_bytes, upload_fileobj, delete_blob
 
 from .schemas import MediaItemUpdate
 from .common import sanitize_name, copy_with_limit
@@ -86,22 +86,8 @@ async def upload_media_files(
     names = parse_friendly_names(friendly_names)
 
     MB = 1024 * 1024
-    # Resolve dynamic main content limit from admin settings (MB -> bytes)
-    try:
-        from api.models.settings import load_admin_settings
-        from api.core.database import engine
-        from sqlmodel import Session as _Session
-        with _Session(engine) as _s:
-            _limit_mb = int(getattr(load_admin_settings(_s), 'max_upload_mb', 500) or 500)
-    except Exception:
-        _limit_mb = 500
-    # Clamp to sane bounds
-    if _limit_mb < 10:
-        _limit_mb = 10
-    if _limit_mb > 2048:
-        _limit_mb = 2048
     CATEGORY_SIZE_LIMITS = {
-        MediaCategory.main_content: _limit_mb * MB,
+        MediaCategory.main_content: 500 * MB,
         MediaCategory.intro: 50 * MB,
         MediaCategory.outro: 50 * MB,
         MediaCategory.music: 50 * MB,
@@ -285,13 +271,25 @@ def delete_media_item(
     if not media_item:
         raise HTTPException(status_code=404, detail="Media item not found or you don't have permission to delete it.")
 
-    file_path = MEDIA_DIR / media_item.filename
-    if file_path.exists():
+    # The filename can be a gs:// URI (prod) or a simple filename (local dev).
+    # We need to handle both cases for deletion.
+    if media_item.filename.startswith("gs://"):
         try:
-            file_path.unlink()
+            path_part = media_item.filename[5:]
+            bucket_name, _, key = path_part.partition('/')
+            if bucket_name and key:
+                delete_blob(bucket_name, key)
         except Exception:
             # don't block DB delete if FS cleanup fails
             pass
+    else:
+        # Fallback for local files (as used in the dev sandbox)
+        file_path = MEDIA_DIR / media_item.filename
+        if file_path.exists():
+            try:
+                file_path.unlink()
+            except Exception:
+                pass
 
     session.delete(media_item)
     session.commit()
