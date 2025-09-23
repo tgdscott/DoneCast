@@ -9,7 +9,7 @@ import ComfortMenu from "@/components/common/ComfortMenu.jsx";
 import { useToast } from "@/hooks/use-toast";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useAuth } from "@/AuthContext.jsx";
-import { makeApi } from "@/lib/apiClient";
+import { makeApi, buildApiUrl } from "@/lib/apiClient";
 
 export default function Settings({ token }) {
   const { toast } = useToast();
@@ -54,7 +54,16 @@ export default function Settings({ token }) {
 
   useEffect(() => {
     const handleMessage = (event) => {
-      if (event.origin !== window.location.origin) return;
+      // Accept messages from our app origin and API origin (popup runs on API domain)
+      let allowed = new Set([window.location.origin]);
+      try {
+        const apiBase = buildApiUrl("");
+        if (apiBase) {
+          const apiOrigin = new URL(apiBase).origin;
+          allowed.add(apiOrigin);
+        }
+      } catch (_) {}
+      if (!allowed.has(event.origin)) return;
       const data = event.data;
       if (data === 'spreaker_connected' || (data && data.type === 'spreaker_connected')) {
         if (pollRef.current) {
@@ -81,9 +90,20 @@ export default function Settings({ token }) {
 
   const handleConnectSpreaker = async () => {
     try {
-      const { auth_url } = await makeApi(token).get('/api/spreaker/auth/login');
-      if (!auth_url) throw new Error('Could not start the Spreaker sign-in.');
-      const popup = window.open(auth_url, 'spreakerAuth', 'width=600,height=700');
+      // Safer default: legacy flow that returns { auth_url } matches deployed redirect_uri most likely
+      let popupUrl = null;
+      try {
+        const { auth_url } = await makeApi(token).get('/api/spreaker/auth/login');
+        popupUrl = auth_url;
+      } catch (_) {
+        // Fallback to new popup flow via /api/auth/spreaker/start with JWT in query (no headers in popup)
+        if (token) {
+          const qs = new URLSearchParams({ access_token: token }).toString();
+          popupUrl = buildApiUrl(`/api/auth/spreaker/start?${qs}`);
+        }
+      }
+      if (!popupUrl) throw new Error('Could not start the Spreaker sign-in.');
+      const popup = window.open(popupUrl, 'spreakerAuth', 'width=600,height=700');
       if (!popup) throw new Error('Popup blocked. Please allow popups and try again.');
       if (pollRef.current) {
         clearInterval(pollRef.current);

@@ -649,11 +649,31 @@ export default function OnboardingWizard(){
                 <button
                     onClick={async () => {
                     try {
-                      const data = await makeApi(token).get('/api/spreaker/auth/login');
-                      const auth_url = data && data.auth_url;
-                      if(!auth_url) throw new Error('Auth init failed');
-                      window.open(auth_url, 'spreakerOAuth', 'width=720,height=800');
+                      // Safer default: legacy endpoint first
+                      let popupUrl = null;
+                      try {
+                        const data = await makeApi(token).get('/api/spreaker/auth/login');
+                        popupUrl = data && data.auth_url;
+                      } catch(_) {
+                        // Fallback to new popup start endpoint with JWT in query
+                        if (token) {
+                          const qs = new URLSearchParams({ access_token: token }).toString();
+                          popupUrl = buildApiUrl(`/api/auth/spreaker/start?${qs}`);
+                        }
+                      }
+                      if(!popupUrl) throw new Error('Auth init failed');
+                      window.open(popupUrl, 'spreakerOAuth', 'width=720,height=800');
                       const handler = (ev) => {
+                        try {
+                          // Accept messages from our app and API origins
+                          const allowed = new Set([window.location.origin]);
+                          const apiBase = buildApiUrl("");
+                          if (apiBase) {
+                            const apiOrigin = new URL(apiBase).origin;
+                            allowed.add(apiOrigin);
+                          }
+                          if (!allowed.has(ev.origin)) return;
+                        } catch(_) {}
                         if(ev.data === 'spreaker_connected' || (ev.data && ev.data.type==='spreaker_connected')){
                           window.removeEventListener('message', handler);
                           // Verify server actually stored token before marking connected

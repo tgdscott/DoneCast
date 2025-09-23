@@ -26,7 +26,7 @@ from api.models.user import User
 from api.core.database import get_session
 from api.routers.auth import get_current_user
 from infrastructure.tasks_client import enqueue_http_task
-from infrastructure.gcs import upload_bytes
+from infrastructure.gcs import upload_bytes, upload_fileobj
 
 from .schemas import MediaItemUpdate
 from .common import sanitize_name, copy_with_limit
@@ -142,20 +142,51 @@ async def upload_media_files(
         # GCS object key: user_id/category/uuid4_safe_filename
         gcs_key = f"{current_user.id}/{category.value}/{uuid4().hex}_{safe_orig}"
 
+        # Prefer streaming upload to GCS without buffering entire file in memory
         max_bytes = CATEGORY_SIZE_LIMITS.get(category, 50 * MB)
-        bytes_written = 0
-        data = bytearray()
-        while True:
-            chunk = await file.read(1024 * 1024)
-            if not chunk:
-                break
-            bytes_written += len(chunk)
-            if bytes_written > max_bytes:
-                raise HTTPException(status_code=413, detail="File too large.")
-            data.extend(chunk)
         bucket = _require_bucket()
-        # Write to GCS
-        gcs_uri = upload_bytes(bucket, gcs_key, bytes(data), file.content_type or "application/octet-stream")
+        content_type = file.content_type or "application/octet-stream"
+
+        # SpooledTemporaryFile used by Starlette/UploadFile provides .file with potential ._file attribute
+        # We will stream that file object to GCS. First, try to determine size cheaply.
+        raw_f = getattr(file, "file", None)
+        file_size = None
+        try:
+            # Some implementations expose a ._file that is a SpooledTemporaryFile or disk file
+            _inner = getattr(raw_f, "_file", raw_f)
+            if _inner is not None and hasattr(_inner, "seek") and hasattr(_inner, "tell"):
+                cur = _inner.tell()
+                _inner.seek(0, 2)
+                end = _inner.tell()
+                _inner.seek(cur, 0)
+                file_size = int(end)
+        except Exception:
+            file_size = None
+
+        # Enforce size limit prior to upload when size is known
+        if file_size is not None and file_size > max_bytes:
+            raise HTTPException(status_code=413, detail="File too large.")
+
+        # Upload from the underlying file object; if size unknown, GCS library will stream until EOF
+        # Use a larger chunk for throughput
+        try:
+            if raw_f is None or not hasattr(raw_f, "read"):
+                raise RuntimeError("no file object; fallback path")
+            gcs_uri = upload_fileobj(bucket, gcs_key, raw_f, size=file_size, content_type=content_type, chunk_mb=8)
+            bytes_written = file_size if file_size is not None else None
+        except Exception as ex:
+            # As a fallback, buffer in chunks enforcing size limit and upload as bytes (smaller files)
+            bytes_written = 0
+            buf = bytearray()
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                bytes_written += len(chunk)
+                if bytes_written > max_bytes:
+                    raise HTTPException(status_code=413, detail="File too large.")
+                buf.extend(chunk)
+            gcs_uri = upload_bytes(bucket, gcs_key, bytes(buf), content_type)
 
         friendly_name = names[i] if i < len(names) and str(names[i]).strip() else default_friendly_name
 
@@ -163,7 +194,7 @@ async def upload_media_files(
             filename=gcs_uri,  # Store gs:// URI
             friendly_name=str(friendly_name),
             content_type=(file.content_type or None),
-            filesize=bytes_written,
+            filesize=(int(bytes_written) if isinstance(bytes_written, int) and bytes_written >= 0 else None),
             user_id=current_user.id,
             category=category,
         )
