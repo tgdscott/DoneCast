@@ -71,6 +71,7 @@ logs/
 
 # Media and large generated content
 media_uploads/
+local_media/
 cleaned_audio/
 edited_audio/
 final_episodes/
@@ -84,6 +85,7 @@ transcripts/
 # Docker
 .dockerignore
 docker-compose.override.yml
+docker-compose.yaml
 
 # Google Cloud and local SDKs
 .config/gcloud/

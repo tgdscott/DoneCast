@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 
@@ -29,8 +30,8 @@ export default function IntentQuestions({ open, onSubmit, onCancel, hide }){
     intern: h.intern ? 'no' : answers.intern,
     sfx: h.sfx ? 'no' : answers.sfx,
   });
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40" role="dialog" aria-modal="true">
       <Card className="w-full max-w-2xl">
         <CardHeader className="flex items-center justify-between">
           <CardTitle className="text-base">Before We Start</CardTitle>
@@ -45,6 +46,7 @@ export default function IntentQuestions({ open, onSubmit, onCancel, hide }){
           </div>
         </CardContent>
       </Card>
-    </div>
+    </div>,
+    document.body
   );
 }

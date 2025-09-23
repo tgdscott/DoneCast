@@ -10,6 +10,8 @@ __pycache__
 .git
 .gitignore
 *.log
+.env
+.env.local
 
 # Keep bulky local-only dirs out of the image, but KEEP podcast-pro-plus/*
 assembly_logs
