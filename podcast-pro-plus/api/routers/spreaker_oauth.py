@@ -14,6 +14,7 @@ from api.models.user import User
 from jose import jwt, JWTError
 from sqlmodel import select
 from api.core import crud
+from uuid import UUID
 
 router = APIRouter(prefix="/auth/spreaker", tags=["spreaker-oauth"])
 
@@ -110,9 +111,16 @@ def spreaker_oauth_start(
 @router.get("/callback")
 def spreaker_oauth_callback(code: str, state: str, session: Session = Depends(get_session)):
     """Handle Spreaker redirect, exchange code for tokens, store on user, return closing popup script."""
-    user_id = _verify_state(state)
+    user_id_raw = _verify_state(state)
     from api.models.user import User  # noqa
-    user: User | None = session.get(User, user_id)
+    # Ensure the primary key type matches the model (UUID). If parsing fails,
+    # surface a clean client error instead of raising an unhandled exception.
+    try:
+        user_pk = UUID(user_id_raw)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid state: malformed user id")
+
+    user: User | None = session.get(User, user_pk)
     if not user:
         raise HTTPException(status_code=404, detail="User not found for state")
     data = {

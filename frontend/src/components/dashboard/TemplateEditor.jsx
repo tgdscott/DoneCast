@@ -798,13 +798,13 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
             const segType = segment.segment_type;
             const category = (segType === 'intro' || segType === 'outro' || segType === 'commercial') ? segType : 'sfx';
             const data = await api.raw(`/api/media/upload/${category}`, { method: 'POST', body: fd });
-            const item = Array.isArray(data) ? data[0] : data;
-            const uploaded = item && (item.filename || item?.file?.filename) ? {
-                id: item.id || crypto.randomUUID(),
-                filename: item.filename || item?.file?.filename,
-                friendly_name: item.friendly_name || undefined,
+            const uploadedItem = Array.isArray(data) ? data[0] : data;
+            const uploaded = uploadedItem && uploadedItem.filename ? {
+                id: uploadedItem.id || crypto.randomUUID(),
+                filename: uploadedItem.filename,
+                friendly_name: uploadedItem.friendly_name || undefined,
                 category: category,
-                content_type: item.content_type || 'audio/mpeg',
+                content_type: uploadedItem.content_type || 'audio/mpeg',
             } : null;
             if (!uploaded) throw new Error('Upload succeeded but no file was returned.');
             // Inform parent so the media list updates immediately

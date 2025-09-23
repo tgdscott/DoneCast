@@ -43,7 +43,7 @@ function FadeSlide({ children, keyProp }) {
   );
 }
 
-export default function OnboardingWrapper({ steps, index, setIndex, onComplete, prefs, greetingName, nextDisabled = false, hideNext = false }) {
+export default function OnboardingWrapper({ steps, index, setIndex, onComplete, prefs, greetingName, nextDisabled = false, hideNext = false, hideBack = false }) {
   const step = steps[index];
   const total = steps.length;
   const pct = Math.round(((index + 1) / total) * 100);
@@ -264,14 +264,16 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
           </FadeSlide>
 
           <div className="flex items-center justify-between pt-2">
-            <Button
-              variant="outline"
-              onClick={handleBack}
-              disabled={index === 0}
-              className="rounded-[var(--radius)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring h-11 min-h-[44px] px-5 btn-outline text-foreground"
-            >
-              <ChevronLeft className="mr-2 h-4 w-4" /> Back
-            </Button>
+            {!hideBack && (
+              <Button
+                variant="outline"
+                onClick={handleBack}
+                disabled={index === 0}
+                className="rounded-[var(--radius)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring h-11 min-h-[44px] px-5 btn-outline text-foreground"
+              >
+                <ChevronLeft className="mr-2 h-4 w-4" /> Back
+              </Button>
+            )}
 
             <div className="flex items-center gap-2">
               {isLast && !hideNext && (

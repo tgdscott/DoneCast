@@ -51,6 +51,9 @@ export default function Onboarding() {
   const [importResult, setImportResult] = useState(null);
   const [resumeAfterImport, setResumeAfterImport] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
+  // Interop flags for import -> new flow jump
+  const [showSkipNotice, setShowSkipNotice] = useState(false);
+  const [importJumpedToStep6, setImportJumpedToStep6] = useState(false);
 
   // Music assets
   const [musicAssets, setMusicAssets] = useState([NO_MUSIC_OPTION]);
@@ -171,6 +174,8 @@ export default function Onboarding() {
       { id: 'showDetails', title: 'About your show', description: "Tell us the name and what it's about. You can change this later." },
       { id: 'format', title: 'Format', description: 'How will most episodes feel?' },
       { id: 'coverArt', title: 'Podcast Cover Art (optional)', description: "Upload your podcast cover art. A square picture at least 1400 pixels wide works best. If you don't have one yet, you can skip this for now." },
+      // Optional interstitial: show a one-off page when jumping here after import
+      ...(showSkipNotice ? [{ id: 'skipNotice', title: 'Skipping ahead', description: "We imported your show. We'll jump to Step 6 so you can finish setup." }] : []),
       { id: 'introOutro', title: 'Intro & Outro', description: 'Create simple intro/outro audio now, or upload files if you have them.' },
       { id: 'music', title: 'Music (optional)', description: 'Pick intro/outro music (optional).' },
       { id: 'spreaker', title: 'Connect to Podcast Host', description: "We partner with Spreaker to host your podcast." },
@@ -883,12 +888,14 @@ export default function Onboarding() {
   useEffect(() => {
     const shouldResume = resumeAfterImport && path === 'import' && stepId === 'importSuccess';
     if (shouldResume && !importResumeTimerRef.current) {
-      const targetIndex = introOutroIndex >= 0 ? introOutroIndex : 0;
+      const targetIndex = introOutroIndex >= 0 ? introOutroIndex : 0; // base index becomes skipNotice when enabled
       importResumeTimerRef.current = window.setTimeout(() => {
         importResumeTimerRef.current = null;
         setResumeAfterImport(false);
         setPath('new');
-        setStepIndex(targetIndex);
+        setShowSkipNotice(true);
+        setImportJumpedToStep6(true);
+        setStepIndex(targetIndex); // points at skipNotice if enabled
         const importedName = importResult?.podcast_name || importResult?.title || importResult?.name || formData.podcastName || 'your show';
         toast({ title: 'Import complete', description: `We pulled in ${importedName}. Continue with the rest of the setup.` });
       }, 600);
@@ -910,6 +917,11 @@ export default function Onboarding() {
     let disabled = false;
     let hide = false;
     switch (stepId) {
+      case 'skipNotice': {
+        // Allow immediate continue; also auto-advance via effect below
+        disabled = false;
+        break;
+      }
       case 'choosePath':
         // Special UX: hide Continue; use Start new / Import existing buttons
         hide = true;
@@ -954,6 +966,15 @@ export default function Onboarding() {
     return { nextDisabled: !!disabled, hideNext: !!hide };
   }, [stepId, path, importLoading, firstName, formData.podcastName, formData.podcastDescription, formData.coverArt, skipCoverNow, spreakerClicked, isSpreakerConnected, freqUnit, freqCount, notSureSchedule, selectedWeekdays.length, selectedDates.length]);
 
+  // Auto-advance the skip notice after a short delay
+  useEffect(() => {
+    if (stepId !== 'skipNotice') return;
+    const t = setTimeout(() => {
+      setStepIndex((n) => Math.min(n + 1, wizardSteps.length - 1));
+    }, 900);
+    return () => clearTimeout(t);
+  }, [stepId, wizardSteps.length, setStepIndex]);
+
   return (
     <OnboardingWrapper
       steps={steps}
@@ -964,6 +985,7 @@ export default function Onboarding() {
       greetingName={firstName?.trim() || ''}
       nextDisabled={nextDisabled}
       hideNext={hideNext}
+      hideBack={importJumpedToStep6 && stepId === 'introOutro'}
     />
   );
 }
