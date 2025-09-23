@@ -710,9 +710,10 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                                     try { toast({ title: 'TTS created', description: 'Audio saved to Media and linked to this segment.' }); } catch {}
                                     setTtsOpen(false);
                                 } catch (e) {
-                                    const msg = e?.message || String(e);
-                                    setError(msg);
-                                    try { toast({ variant: 'destructive', title: 'TTS failed', description: msg }); } catch {}
+                                    // Try to extract a meaningful error message from the API response.
+                                    const apiMessage = e?.detail?.error?.message || e?.detail;
+                                    const detail = (typeof apiMessage === 'string' ? apiMessage : e?.message) || 'Could not create audio.';
+                                    toast({ variant: 'destructive', title: 'TTS Failed', description: detail });
                                 } finally {
                                     setTtsLoading(false);
                                 }

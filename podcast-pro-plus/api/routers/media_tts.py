@@ -3,6 +3,7 @@ from typing import Optional, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session
+import logging
 
 from api.core.database import get_session
 from api.models.user import User
@@ -12,6 +13,7 @@ from api.models.podcast import MediaItem, MediaCategory
 import api.services.ai_enhancer as enhancer
 
 router = APIRouter(prefix="/media", tags=["Media Library"])
+log = logging.getLogger(__name__)
 
 
 class TTSCREATEBody(BaseModel):
@@ -61,11 +63,19 @@ async def create_tts_media(
             provider=body.provider or "elevenlabs",
             google_voice=(body.google_voice or "en-US-Neural2-C"),
             speaking_rate=sr,
+            # Pass the user to the service so it can access user-specific API keys
+            user=current_user,
         )
     except enhancer.AIEnhancerError as e:
         raise HTTPException(status_code=502, detail=f"TTS failed: {e}")
-    except Exception:
-        raise HTTPException(status_code=500, detail="TTS failed")
+    except Exception as e:
+        log.exception("TTS synthesis failed with an unexpected error: %s", e)
+        err_str = str(e).lower()
+        if "elevenlabs" in err_str and ("authentication" in err_str or "api key" in err_str):
+            detail = "TTS failed: Invalid or missing ElevenLabs API key. Check your settings or the server configuration."
+        else:
+            detail = "TTS failed due to an unexpected server error. Please check the server logs."
+        raise HTTPException(status_code=500, detail=detail)
 
     # Export mp3 to MEDIA_DIR
     slug = _safe_slug(text)
