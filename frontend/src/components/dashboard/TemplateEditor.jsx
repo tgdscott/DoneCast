@@ -800,6 +800,7 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
             const data = await api.raw(`/api/media/upload/${category}`, { method: 'POST', body: fd });
             const item = Array.isArray(data) ? data[0] : data;
             const uploaded = item && (item.filename || item?.file?.filename) ? {
+                id: item.id || crypto.randomUUID(),
                 filename: item.filename || item?.file?.filename,
                 friendly_name: item.friendly_name || undefined,
                 category: category,
