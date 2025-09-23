@@ -4,6 +4,13 @@ from typing import Optional
 from pydub import AudioSegment
 import io
 
+try:
+    import httpx
+    _HTTPX_AVAILABLE = True
+except ImportError:
+    httpx = None # type: ignore
+    _HTTPX_AVAILABLE = False
+
 from api.core.config import settings
 from api.models.user import User
 
@@ -57,7 +64,25 @@ def generate_speech_from_text(
             
             return AudioSegment.from_file(io.BytesIO(audio_bytes), format="mp3")
         except Exception as e:
-            # Check for common API errors from ElevenLabs response
+            # Try to extract a more specific error from httpx exceptions
+            if _HTTPX_AVAILABLE and isinstance(e, httpx.HTTPStatusError):
+                status_code = e.response.status_code
+                try:
+                    details = e.response.json().get("detail", {})
+                    message = details.get("message", e.response.text)
+                except Exception:
+                    message = e.response.text
+                
+                if status_code == 401:
+                    raise AIEnhancerError("The provided ElevenLabs API key is invalid or lacks permissions.")
+                if status_code == 402:
+                    raise AIEnhancerError("ElevenLabs API call failed due to a billing issue. Please check your ElevenLabs account.")
+                if status_code == 422 and "voice_id" in message.lower():
+                    raise AIEnhancerError(f"The voice ID '{voice_id_to_use}' could not be found or is invalid.")
+                
+                raise AIEnhancerError(f"ElevenLabs API error ({status_code}): {message}")
+
+            # Fallback for other exception types
             err_str = str(e).lower()
             if "invalid api key" in err_str or "unauthorized" in err_str:
                  raise AIEnhancerError("The provided ElevenLabs API key is invalid or lacks permissions.")
