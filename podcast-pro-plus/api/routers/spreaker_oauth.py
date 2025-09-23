@@ -101,8 +101,10 @@ def spreaker_oauth_start(
         "response_type": "code",
         "redirect_uri": settings.SPREAKER_REDIRECT_URI,
         "state": state,
+        "scope": "basic",
     }
-    url = f"https://api.spreaker.com/oauth2/authorize?{urlencode(params)}"
+    # Per Spreaker docs, the authorize endpoint is on www.spreaker.com (token is on api.spreaker.com)
+    url = f"https://www.spreaker.com/oauth2/authorize?{urlencode(params)}"
     return RedirectResponse(url)
 
 @router.get("/callback")
@@ -125,12 +127,20 @@ def spreaker_oauth_callback(code: str, state: str, session: Session = Depends(ge
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Token request failed: {e}")
     if r.status_code // 100 != 2:
+        # Include response body to make mismatch reasons clear (e.g., redirect_uri mismatch)
         raise HTTPException(status_code=502, detail=f"Token exchange failed: {r.status_code} {r.text}")
-    tok = r.json()
+    try:
+        tok = r.json()
+    except Exception:
+        # Spreaker responded 2xx but body wasn't JSON
+        raise HTTPException(status_code=502, detail=f"Token JSON parse failed (2xx). Body: {r.text}")
+    if not isinstance(tok, dict):
+        raise HTTPException(status_code=502, detail=f"Unexpected token response type: {type(tok).__name__}")
     access = tok.get("access_token")
     refresh = tok.get("refresh_token")
     if not access:
-        raise HTTPException(status_code=500, detail="No access_token in response")
+        # Surface entire token payload for debugging
+        raise HTTPException(status_code=502, detail=f"No access_token in response: {tok}")
     user.spreaker_access_token = access
     if refresh:
         user.spreaker_refresh_token = refresh
