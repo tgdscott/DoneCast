@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Body, UploadFile, File, Form
 from typing import List, Optional, Dict, Any
 from sqlmodel import Session, select
 from sqlalchemy import func
@@ -8,6 +8,7 @@ from ..core.config import settings
 from ..models.user import User, UserPublic
 from ..core.database import get_session
 from ..core import crud
+from ..core.paths import MEDIA_DIR
 from .auth import get_current_user
 from ..models.podcast import Podcast, PodcastTemplate, TemplateSegment, StaticSegmentSource, SegmentTiming, BackgroundMusicRule, PodcastTemplateCreate
 from ..models.podcast import Episode, MusicAsset, MusicAssetSource
@@ -19,6 +20,11 @@ from sqlalchemy import text as _sql_text
 from ..models.settings import AppSetting, AdminSettings, load_admin_settings, save_admin_settings
 from datetime import datetime, timedelta, timezone
 import os
+from pathlib import Path
+import re
+import uuid
+import shutil
+import requests
 try:
     import stripe as _stripe
 except Exception:  # pragma: no cover
@@ -286,7 +292,12 @@ def admin_update_music_asset(
     session: Session = Depends(get_session),
     admin_user: User = Depends(get_current_admin_user),
 ):
-    asset = session.get(MusicAsset, asset_id)
+    # Coerce to UUID to avoid type mismatch causing 404 on valid IDs
+    try:
+        key = UUID(str(asset_id))
+    except Exception:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    asset = session.get(MusicAsset, key)
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
     try:
@@ -311,13 +322,18 @@ def admin_update_music_asset(
         raise HTTPException(status_code=500, detail=f"Failed to update asset: {e}")
 
 
-@router.delete("/music/assets/{asset_id}", status_code=204)
+@router.delete("/music/assets/{asset_id}", status_code=200)
 def admin_delete_music_asset(
     asset_id: str,
     session: Session = Depends(get_session),
     admin_user: User = Depends(get_current_admin_user),
 ):
-    asset = session.get(MusicAsset, asset_id)
+    # Coerce to UUID to avoid type mismatch causing 404 on valid IDs
+    try:
+        key = UUID(str(asset_id))
+    except Exception:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    asset = session.get(MusicAsset, key)
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
     try:
@@ -327,6 +343,131 @@ def admin_delete_music_asset(
     except Exception as e:
         session.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to delete asset: {e}")
+
+def _sanitize_filename(name: str) -> str:
+    base = re.sub(r"[^A-Za-z0-9._-]", "_", (name or "").strip())
+    return base or uuid.uuid4().hex
+
+def _ensure_music_dir() -> Path:
+    music_dir = MEDIA_DIR / "music"
+    music_dir.mkdir(parents=True, exist_ok=True)
+    return music_dir
+
+def _unique_path(dirpath: Path, base: str) -> Path:
+    candidate = dirpath / base
+    if not candidate.exists():
+        return candidate
+    stem = Path(base).stem
+    suf = Path(base).suffix
+    for i in range(1, 10000):
+        p = dirpath / f"{stem}-{i}{suf}"
+        if not p.exists():
+            return p
+    return dirpath / f"{stem}-{uuid.uuid4().hex}{suf}"
+
+@router.post("/music/assets/upload", status_code=201)
+def admin_upload_music_asset(
+    file: UploadFile = File(...),
+    display_name: Optional[str] = Form(None),
+    mood_tags: Optional[str] = Form(None),  # comma-separated or JSON
+    license: Optional[str] = Form(None),
+    attribution: Optional[str] = Form(None),
+    session: Session = Depends(get_session),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    try:
+        music_dir = _ensure_music_dir()
+        orig = file.filename or "uploaded.mp3"
+        base = _sanitize_filename(orig)
+        if "." not in base:
+            base += ".mp3"
+        out_path = _unique_path(music_dir, base)
+        with out_path.open("wb") as f:
+            shutil.copyfileobj(file.file, f)
+        rel_url = f"/static/media/music/{out_path.name}"
+        tags_list: list[str] = []
+        if mood_tags:
+            try:
+                if mood_tags.strip().startswith("["):
+                    tags_list = [t for t in (json.loads(mood_tags) or []) if t]
+                else:
+                    tags_list = [t.strip() for t in mood_tags.split(",") if t.strip()]
+            except Exception:
+                tags_list = []
+        asset = MusicAsset(
+            display_name=(display_name or Path(orig).stem),
+            filename=rel_url,
+            mood_tags_json=json.dumps(tags_list or []),
+            source_type=MusicAssetSource.external,
+            license=license,
+            attribution=attribution,
+        )
+        session.add(asset)
+        session.commit()
+        session.refresh(asset)
+        return {"id": str(asset.id), "filename": rel_url}
+    except HTTPException:
+        raise
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+
+class MusicAssetImportUrl(BaseModel):
+    display_name: str
+    source_url: str
+    mood_tags: Optional[list[str]] = None
+    license: Optional[str] = None
+    attribution: Optional[str] = None
+
+@router.post("/music/assets/import-url", status_code=201)
+def admin_import_music_asset_by_url(
+    payload: MusicAssetImportUrl,
+    session: Session = Depends(get_session),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    url = (payload.source_url or "").strip()
+    if not url or not (url.lower().startswith("http://") or url.lower().startswith("https://")):
+        raise HTTPException(status_code=400, detail="source_url must be http(s)")
+    try:
+        r = requests.get(url, stream=True, timeout=30)
+        r.raise_for_status()
+        # Guess extension from content-type or URL
+        ext = None
+        ct = (r.headers.get("content-type", "") or "").lower()
+        if "audio/" in ct:
+            ext = "." + ct.split("/", 1)[-1].split(";")[0].strip()
+            if ext == ".mpeg":
+                ext = ".mp3"
+        if not ext:
+            try:
+                from urllib.parse import urlparse
+                p = Path(urlparse(url).path)
+                ext = p.suffix or ".mp3"
+            except Exception:
+                ext = ".mp3"
+        safe_name = _sanitize_filename((payload.display_name or "track") + ext)
+        music_dir = _ensure_music_dir()
+        out_path = _unique_path(music_dir, safe_name)
+        with out_path.open("wb") as f:
+            shutil.copyfileobj(r.raw, f)
+        rel_url = f"/static/media/music/{out_path.name}"
+        asset = MusicAsset(
+            display_name=payload.display_name.strip(),
+            filename=rel_url,
+            mood_tags_json=json.dumps(payload.mood_tags or []),
+            source_type=MusicAssetSource.external,
+            license=payload.license,
+            attribution=payload.attribution,
+        )
+        session.add(asset)
+        session.commit()
+        session.refresh(asset)
+        return {"id": str(asset.id), "filename": rel_url}
+    except HTTPException:
+        raise
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=f"Import failed: {e}")
 
 # ---------------- Tier Editor (placeholder storage) ----------------
 

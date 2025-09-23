@@ -31,6 +31,7 @@ export default function usePodcastCreator({
   const [flubberContexts, setFlubberContexts] = useState(null);
   const [flubberCutsMs, setFlubberCutsMs] = useState(null);
   const [showIntentQuestions, setShowIntentQuestions] = useState(false);
+  const intentsPromptedRef = useRef(false);
   const [intents, setIntents] = useState({ flubber: null, intern: null, sfx: null });
   const [showFlubberScan, setShowFlubberScan] = useState(false);
   const [capabilities, setCapabilities] = useState({ has_elevenlabs:false, has_google_tts:false, has_any_sfx_triggers:false });
@@ -74,6 +75,21 @@ export default function usePodcastCreator({
   const [coverMode, setCoverMode] = useState('crop');
   const [isUploadingCover, setIsUploadingCover] = useState(false);
   const [audioDurationSec, setAudioDurationSec] = useState(null);
+
+  // Consider a build "active" when something non-trivial is in-flight or staged
+  const buildActive = useMemo(() => {
+    const hasAudio = !!(uploadedFile || uploadedFilename);
+    const hasCover = !!(episodeDetails?.coverArt || episodeDetails?.cover_image_path);
+    return !!(isUploading || isAssembling || isPublishing || autoPublishPending || hasAudio || hasCover);
+  }, [
+    isUploading,
+    isAssembling,
+    isPublishing,
+    autoPublishPending,
+    uploadedFile,
+    uploadedFilename,
+    episodeDetails,
+  ]);
 
   useEffect(() => {
     let used = false;
@@ -585,7 +601,8 @@ export default function usePodcastCreator({
     }
     setUploadedFile(file);
     setIntents({ flubber: null, intern: null, sfx: null });
-    setShowIntentQuestions(false);
+  setShowIntentQuestions(false);
+  intentsPromptedRef.current = false; // new file -> prompt again in Step 2
     setIsUploading(true);
     setStatusMessage('Uploading audio file...');
     setError('');
@@ -599,26 +616,88 @@ export default function usePodcastCreator({
       const result = await api.raw('/api/media/upload/main_content', { method: 'POST', body: formData });
       const fname = result[0]?.filename;
       setUploadedFilename(fname);
+      try {
+        if (fname) localStorage.setItem('ppp_uploaded_filename', fname);
+      } catch {}
       setStatusMessage('Upload successful!');
     } catch (err) {
       setError(err.message);
       setStatusMessage('');
       setUploadedFile(null);
+      try {
+        localStorage.removeItem('ppp_uploaded_filename');
+      } catch {}
     } finally {
       setIsUploading(false);
     }
   };
 
+  // Auto-open intent modal when on Step 2 with pending answers
+  useEffect(() => {
+    if (currentStep === 2 && (uploadedFile || uploadedFilename) && !intentsComplete && !intentsPromptedRef.current) {
+      setShowIntentQuestions(true);
+      intentsPromptedRef.current = true;
+    }
+  }, [currentStep, uploadedFile, uploadedFilename, intentsComplete]);
+
+  const cancelBuild = () => {
+    try {
+      localStorage.removeItem('ppp_uploaded_filename');
+      localStorage.removeItem('ppp_uploaded_hint');
+      localStorage.removeItem('ppp_start_step');
+      localStorage.removeItem('ppp_transcript_ready');
+    } catch {}
+    setUploadedFile(null);
+    setUploadedFilename(null);
+    setTranscriptReady(false);
+    transcriptReadyRef.current = false;
+    setIntents({ flubber: null, intern: null, sfx: null });
+    setShowIntentQuestions(false);
+    setStatusMessage('');
+    setError('');
+    setCurrentStep(1);
+  };
+
   const uploadCover = async (file) => {
     const MB = 1024 * 1024;
     const ct = (file?.type || '').toLowerCase();
-    if (!ct.startsWith('image/')) throw new Error('Cover must be an image file.');
-    if (file.size > 10 * MB) throw new Error('Cover image exceeds 10MB limit.');
+  if (!ct.startsWith('image/')) throw new Error('Cover must be an image file.');
+  if (file.size > 15 * MB) throw new Error('Cover image exceeds 15MB limit.');
     const fd = new FormData();
     fd.append('files', file);
     fd.append('friendly_names', JSON.stringify([file.name]));
     const api = makeApi(token);
-    const data = await api.raw('/api/media/upload/episode_cover', { method: 'POST', body: fd });
+    // Add a timeout so the request doesn't hang forever and block the wizard
+    const controller = new AbortController();
+    const timeoutMs = 8000; // 8s
+    const t = setTimeout(() => controller.abort(), timeoutMs);
+    let data;
+    try {
+      data = await api.raw('/api/media/upload/episode_cover', { method: 'POST', body: fd, signal: controller.signal });
+    } catch (e) {
+      // Fallback: try the simpler single-file cover_art endpoint
+      try {
+        const fd2 = new FormData();
+        fd2.append('file', file);
+        const controller2 = new AbortController();
+        const t2 = setTimeout(() => controller2.abort(), 8000);
+        let alt;
+        try {
+          alt = await api.raw('/api/media/upload/cover_art', { method: 'POST', body: fd2, signal: controller2.signal });
+        } finally {
+          clearTimeout(t2);
+        }
+        // Normalize shape to list
+        data = [{ filename: alt?.filename || alt?.path || alt?.stored_as }];
+      } catch (e2) {
+        if (e && e.name === 'AbortError') {
+          throw new Error('Cover upload timed out. Please check your connection and try again.');
+        }
+        throw e2;
+      }
+    } finally {
+      clearTimeout(t);
+    }
     const uploaded = data?.[0]?.filename;
     if (!uploaded) throw new Error('Cover upload: no filename returned.');
     setEpisodeDetails(prev => ({ ...prev, cover_image_path: uploaded }));
@@ -637,7 +716,7 @@ export default function usePodcastCreator({
       setIsUploadingCover(true);
       const blob = await coverCropperRef.current.getProcessedBlob();
       if(!blob){ throw new Error('Could not process image.'); }
-      const processedFile = new File([blob], (episodeDetails.coverArt.name.replace(/\.[^.]+$/, '') + '-square.png'), { type: 'image/png' });
+  const processedFile = new File([blob], (episodeDetails.coverArt.name.replace(/\.[^.]+$/, '') + '-square.jpg'), { type: 'image/jpeg' });
       await uploadCover(processedFile);
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -884,6 +963,7 @@ export default function usePodcastCreator({
     };
 
     setIntents(normalized);
+    intentsPromptedRef.current = true;
     setShowIntentQuestions(false);
 
     const shouldScan = uploadedFilename && (normalized.flubber === 'yes' || normalized.flubber === 'unknown');
@@ -1241,6 +1321,8 @@ export default function usePodcastCreator({
     minutesRemaining,
     minutesNearCap,
     minutesCap,
+    buildActive,
+  cancelBuild,
     handleTemplateSelect,
     handleFileChange,
     handleCoverFileSelected,

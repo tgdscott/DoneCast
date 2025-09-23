@@ -25,6 +25,8 @@ export default function PodcastCreatorScaffold({
   token,
   templates,
   onRecurringApply,
+  onCancelBuild,
+  buildActive,
   children,
 }) {
   return (
@@ -39,9 +41,24 @@ export default function PodcastCreatorScaffold({
             <h1 className="text-3xl font-bold" style={{ color: '#2C3E50' }}>
               Episode Creator
             </h1>
-            <div className="w-48 text-right">
+            <div className="w-48 text-right space-y-1">
               {selectedTemplate && (
-                <span className="text-sm text-gray-500">Template: {selectedTemplate.name}</span>
+                <div className="text-sm text-gray-500 truncate" title={`Template: ${selectedTemplate.name}`}>
+                  Template: {selectedTemplate.name}
+                </div>
+              )}
+              {typeof onCancelBuild === 'function' && currentStep > 1 && buildActive && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-red-700 border-red-300 hover:bg-red-50"
+                  onClick={() => {
+                    const ok = window.confirm('Cancel this build and discard in-progress state? You will need to start over.');
+                    if (ok) onCancelBuild();
+                  }}
+                >
+                  Cancel Build
+                </Button>
               )}
             </div>
           </div>

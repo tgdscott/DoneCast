@@ -4,7 +4,6 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from './AuthContext.jsx'; 
 import { makeApi } from '@/lib/apiClient';
 import PodcastPlusDashboard from '@/components/dashboard.jsx'; // The regular user dashboard
-import OnboardingWizard from '@/components/onboarding/OnboardingWizard.jsx';
 import Onboarding from '@/pages/Onboarding.jsx';
 import AdminDashboard from '@/components/admin-dashboard.jsx'; // The new admin dashboard
 import { useToast } from '@/hooks/use-toast';
@@ -141,20 +140,14 @@ export default function App() {
             return <ClosedAlphaGate />;
         }
         if (podcastCheck.loading) return <div className="flex items-center justify-center h-screen">Preparing your workspace...</div>;
-        // Only show onboarding wizard if explicitly requested via query param and no podcasts exist
+        // Only show onboarding if explicitly requested via query param and/or no podcasts exist
         const params = new URLSearchParams(window.location.search);
         const onboardingParam = params.get('onboarding');
         const forceOnboarding = onboardingParam === '1';
         const skipOnboarding = onboardingParam === '0' || params.get('skip_onboarding') === '1';
-        const rawFullpage = import.meta.env?.VITE_ONBOARDING_FULLPAGE ?? import.meta.env?.ONBOARDING_FULLPAGE;
-        const FULLPAGE = rawFullpage === undefined ? true : String(rawFullpage).toLowerCase() === 'true';
-        if (!skipOnboarding) {
-            if (FULLPAGE && (podcastCheck.count === 0 || forceOnboarding)) {
-                return <Onboarding />;
-            }
-            if (!FULLPAGE && (podcastCheck.count === 0 || forceOnboarding)) {
-                return <OnboardingWizard />;
-            }
+        if (!skipOnboarding && (podcastCheck.count === 0 || forceOnboarding)) {
+            // Always use the new full-page onboarding; retire the legacy wizard
+            return <Onboarding />;
         }
         // If Terms require acceptance, gate here before dashboard/admin
         const requiredVersion = user?.terms_version_required;

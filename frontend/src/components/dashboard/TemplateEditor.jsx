@@ -15,6 +15,7 @@ import {
   GripVertical,
   FileText,
   Mic,
+  Upload,
   Music,
   Bot,
   Settings2,
@@ -121,6 +122,10 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
       return true;
     }
   }, [template, baselineTemplate]);
+
+  const onMediaUploaded = (newFile) => {
+    setMediaFiles(prev => [...prev, newFile]);
+  };
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -501,6 +506,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                                             justCreated={!!createdFromTTS[segment.id]}
                                             templateVoiceId={voiceId || null}
                                             token={token}
+                                            onMediaUploaded={onMediaUploaded}
                                         />
                                     </div>
                                 )}
@@ -870,16 +876,28 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
                     {segment?.source?.source_type === 'static' && (
                         <div>
                             <Label>Audio File</Label>
-                            <Select value={mediaMatch ? segment.source.filename : ''} onValueChange={(v) => handleSourceChangeLocal('filename', v)}>
-                                <SelectTrigger className="w-full mt-1"><SelectValue placeholder={`Select a ${segment.segment_type} file...`} /></SelectTrigger>
-                                <SelectContent>
-                                    {filesForType.map(mf => (
-                                        <SelectItem key={mf.id} value={mf.filename}>
-                                            {mf.friendly_name || mf.filename.split('_').slice(1).join('_')}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                            <div className="flex items-center gap-2 mt-1">
+                                <Select value={mediaMatch ? segment.source.filename : ''} onValueChange={(v) => handleSourceChangeLocal('filename', v)}>
+                                    <SelectTrigger className="w-full"><SelectValue placeholder={`Select a ${segment.segment_type} file...`} /></SelectTrigger>
+                                    <SelectContent>
+                                        {filesForType.map(mf => (
+                                            <SelectItem key={mf.id} value={mf.filename}>
+                                                {mf.friendly_name || mf.filename.split('_').slice(1).join('_')}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <Button variant="outline" size="icon" onClick={() => uploadInputRef.current?.click()} disabled={isUploading}>
+                                    {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                                </Button>
+                                <input
+                                    type="file"
+                                    ref={uploadInputRef}
+                                    className="hidden"
+                                    accept="audio/*"
+                                    onChange={(e) => handleFileUpload(e.target.files?.[0])}
+                                />
+                            </div>
                         </div>
                     )}
                     {segment?.source?.source_type === 'tts' && (

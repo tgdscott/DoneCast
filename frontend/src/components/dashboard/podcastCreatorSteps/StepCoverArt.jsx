@@ -3,6 +3,7 @@ import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { FileImage, Upload, ArrowLeft } from 'lucide-react';
 import CoverCropper from '../CoverCropper';
+import { assetUrl } from '../../../lib/apiClient';
 
 export default function StepCoverArt({
   episodeDetails,
@@ -26,7 +27,47 @@ export default function StepCoverArt({
       <Card className="border-0 shadow-lg bg-white">
         <CardContent className="p-8 space-y-6">
           <div className="space-y-4">
-            {!episodeDetails.coverArt && !episodeDetails.coverArtPreview && (
+            {/* 1) Existing server cover (after refresh) */}
+            {!episodeDetails.coverArt && !episodeDetails.coverArtPreview && !!episodeDetails.cover_image_path && (
+              <div className="flex flex-col md:flex-row gap-10 items-start">
+                <div className="w-48 h-48 rounded-lg overflow-hidden border bg-gray-50">
+                  {(() => {
+                    const p = String(episodeDetails.cover_image_path || '').replace(/^\/+/, '');
+                    const name = p.split('/').pop();
+                    const url = p.startsWith('http') ? p : assetUrl(`/static/media/${name}`);
+                    return <img src={url} alt="Cover (saved)" className="w-full h-full object-cover" />;
+                  })()}
+                </div>
+                <div className="space-y-3 text-sm">
+                  <p className="text-gray-600">
+                    Using saved square cover
+                    {episodeDetails.cover_image_path && (
+                      <>
+                        {' '}as <span className="text-green-600">{episodeDetails.cover_image_path}</span>
+                      </>
+                    )}
+                    .
+                  </p>
+                  <div className="flex gap-2 flex-wrap">
+                    <Button size="sm" variant="outline" onClick={() => coverArtInputRef.current?.click()}>
+                      <Upload className="w-4 h-4 mr-1" />Replace
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={onRemoveCover}>
+                      Remove
+                    </Button>
+                  </div>
+                  <input
+                    ref={coverArtInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) => onCoverFileSelected(event.target.files?.[0])}
+                    className="hidden"
+                  />
+                </div>
+              </div>
+            )}
+            {/* 2) No cover selected yet */}
+            {!episodeDetails.coverArt && !episodeDetails.coverArtPreview && !episodeDetails.cover_image_path && (
               <div
                 className="border-2 border-dashed rounded-xl p-10 text-center"
                 onDragOver={(event) => event.preventDefault()}
@@ -70,7 +111,7 @@ export default function StepCoverArt({
                   <Button size="sm" variant="ghost" onClick={onRemoveCover}>
                     Remove
                   </Button>
-                  {coverNeedsUpload && <span className="text-xs text-amber-600 font-medium">Will upload on Continue</span>}
+                  {/* Removed extra helper text to reduce clutter; the primary button label indicates upload behavior. */}
                 </div>
               </div>
             )}

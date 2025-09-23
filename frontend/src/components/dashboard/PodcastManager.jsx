@@ -3,12 +3,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { ArrowLeft, Trash2, Loader2, Plus, Image as ImageIcon, Rss } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import * as Icons from "lucide-react";
 import { useState, useEffect } from "react";
 import EditPodcastDialog from "./EditPodcastDialog";
 import NewUserWizard from "./NewUserWizard";
 import { useToast } from "@/hooks/use-toast";
-import { buildApiUrl } from "@/lib/apiClient";
+import { makeApi, buildApiUrl } from "@/lib/apiClient";
 
 const API_BASE_URL = ""; // Use relative so it works behind any proxy
 
@@ -19,6 +20,7 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [podcastToEdit, setPodcastToEdit] = useState(null);
   const [isWizardOpen, setIsWizardOpen] = useState(false);
+  const [recoveringId, setRecoveringId] = useState(null);
   const { toast } = useToast();
   const rawFullpage = import.meta.env?.VITE_ONBOARDING_FULLPAGE ?? import.meta.env?.ONBOARDING_FULLPAGE;
   const fullPageOnboarding = rawFullpage === undefined ? true : String(rawFullpage).toLowerCase() === 'true';
@@ -85,10 +87,44 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
     }
   };
 
+  const handleRecovery = async (podcast) => {
+    if (!podcast || !podcast.id) return;
+    if (!window.confirm(`This will scan Spreaker for episodes belonging to "${podcast.name}" and create local records for any that are missing. This cannot be undone. Continue?`)) {
+      return;
+    }
+
+    setRecoveringId(podcast.id);
+    try {
+      const api = makeApi(token);
+      const result = await api.post(`/api/podcasts/${podcast.id}/recover-from-spreaker`);
+      
+      const count = result?.recovered_count || 0;
+      if (count > 0) {
+        toast({
+          title: "Recovery Complete",
+          description: `Successfully recovered and created records for ${count} missing episodes. Please refresh the episode history to see them.`,
+        });
+      } else {
+        toast({
+          title: "Scan Complete",
+          description: "No missing episodes were found on Spreaker for this show.",
+        });
+      }
+    } catch (error) {
+      const detail = error?.detail || error?.message || "An unknown error occurred.";
+      toast({
+        variant: 'destructive',
+        title: 'Recovery Failed',
+        description: detail,
+      });
+    } finally {
+      setRecoveringId(null);
+    }
+  };
 
   return (
     <div className="p-6">
-      <Button onClick={onBack} variant="ghost" className="mb-4"><ArrowLeft className="w-4 h-4 mr-2" />Back to Dashboard</Button>
+  <Button onClick={onBack} variant="ghost" className="mb-4"><Icons.ArrowLeft className="w-4 h-4 mr-2" />Back to Dashboard</Button>
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
@@ -97,10 +133,10 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
               <CardDescription>Here you can create, import, edit, or delete your podcasts.</CardDescription>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={openWizard}><Plus className="w-4 h-4 mr-2" /> New Podcast</Button>
+              <Button variant="outline" size="sm" onClick={openWizard}><Icons.Plus className="w-4 h-4 mr-2" /> New Podcast</Button>
               <Button variant="outline" size="sm" onClick={() => {
                 try { window.dispatchEvent(new CustomEvent('ppp:navigate-view', { detail: 'rssImporter' })); } catch {}
-              }}><Rss className="w-4 h-4 mr-2" /> Import</Button>
+              }}><Icons.Rss className="w-4 h-4 mr-2" /> Import</Button>
             </div>
           </div>
         </CardHeader>
@@ -123,7 +159,7 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
                       />
                     ) : (
                       <div className="w-16 h-16 rounded-md bg-gray-100 flex items-center justify-center">
-                        <ImageIcon className="w-8 h-8 text-gray-400" />
+                        <Icons.Image className="w-8 h-8 text-gray-400" />
                       </div>
                     )}
                     <div>
@@ -131,10 +167,30 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
                       <p className="text-sm text-gray-500 line-clamp-2">{podcast.description || "No description."}</p>
                     </div>
                   </div>
-      <div className="space-x-2">
+                  <div className="flex items-center space-x-2">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" aria-label={`Actions for ${podcast.name}`}>
+                          <Icons.Settings className="h-5 w-5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onClick={() => handleRecovery(podcast)}
+                          disabled={recoveringId === podcast.id || !podcast.spreaker_show_id}
+                        >
+                          {recoveringId === podcast.id ? (
+                            <Icons.Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          ) : (
+                            <Icons.RefreshCw className="w-4 h-4 mr-2" />
+                          )}
+                          <span>Recover Missing Episodes</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                     <Button variant="outline" size="sm" onClick={() => openEditDialog(podcast)}>Edit</Button>
                     <Button variant="destructive" size="sm" onClick={() => openDeleteDialog(podcast)}>
-        <Trash2 className="w-4 h-4 mr-2" /> Delete
+                      <Icons.Trash2 className="w-4 h-4 mr-2" /> Delete
                     </Button>
                   </div>
                 </Card>
@@ -178,7 +234,7 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
               disabled={deleteConfirmationText !== 'delete' || isDeleting}
               onClick={handleDeleteShow}
             >
-              {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Delete Podcast"}
+              {isDeleting ? <Icons.Loader2 className="w-4 h-4 animate-spin" /> : "Delete Podcast"}
             </Button>
           </DialogFooter>
         </DialogContent>

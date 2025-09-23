@@ -21,7 +21,7 @@ def convert_db_template_to_public(db_template: PodcastTemplate) -> PodcastTempla
         id=db_template.id,
         user_id=db_template.user_id,
         name=db_template.name,
-    **({"podcast_id": db_template.podcast_id} if getattr(db_template, 'podcast_id', None) else {}),
+        podcast_id=getattr(db_template, 'podcast_id', None),
     # bubble default voice to clients
     default_elevenlabs_voice_id=getattr(db_template, 'default_elevenlabs_voice_id', None),
         segments=json.loads(db_template.segments_json),
@@ -92,6 +92,20 @@ async def delete_template(
         raise HTTPException(status_code=404, detail="Template not found")
     if db_template.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to delete this template")
+    # Safeguard: if this is the only template for the associated podcast (or user overall), block delete
+    try:
+        podcast_id = getattr(db_template, 'podcast_id', None)
+        if podcast_id:
+            from ..models.podcast import PodcastTemplate
+            count = session.exec(select(PodcastTemplate).where(PodcastTemplate.user_id == current_user.id, PodcastTemplate.podcast_id == podcast_id)).all()
+            total = len(count or [])
+            if total <= 1:
+                raise HTTPException(status_code=400, detail="You must have at least one template assigned to this podcast. Create another template before deleting your last one.")
+    except HTTPException:
+        raise
+    except Exception:
+        # If any error occurs, do not block; proceed with deletion to avoid hard lockouts due to edge cases
+        pass
     
     session.delete(db_template)
     session.commit()

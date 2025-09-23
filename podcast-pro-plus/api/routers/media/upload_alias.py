@@ -15,7 +15,7 @@ router = APIRouter(tags=["media"])
 
 ALLOWED_CONTENT_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg", "image/webp": ".webp"}
 
-@router.post("/api/media/upload/cover_art", status_code=status.HTTP_201_CREATED)
+@router.post("/media/upload/cover_art", status_code=status.HTTP_201_CREATED)
 async def upload_cover_art(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),  # noqa: ARG001 (ensures auth)

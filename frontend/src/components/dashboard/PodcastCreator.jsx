@@ -40,6 +40,7 @@ export default function PodcastCreator({
     selectedTemplate,
     handleTemplateSelect,
     uploadedFile,
+    uploadedFilename,
     isUploading,
     handleFileChange,
     fileInputRef,
@@ -112,6 +113,8 @@ export default function PodcastCreator({
     setScheduleDate,
     setScheduleTime,
     setShowIntentQuestions,
+    cancelBuild,
+    buildActive,
   } = controller;
 
   const stepContent = (() => {
@@ -127,6 +130,7 @@ export default function PodcastCreator({
         return (
           <StepUploadAudio
             uploadedFile={uploadedFile}
+            uploadedFilename={uploadedFilename}
             isUploading={isUploading}
             onFileChange={handleFileChange}
             fileInputRef={fileInputRef}
@@ -135,7 +139,7 @@ export default function PodcastCreator({
             onEditAutomations={() => setShowIntentQuestions(true)}
             onIntentChange={handleIntentAnswerChange}
             onIntentSubmit={handleIntentSubmit}
-            canProceed={!!uploadedFile && intentsComplete && !isUploading}
+            canProceed={!!(uploadedFile || uploadedFilename) && intentsComplete && !isUploading}
             pendingIntentLabels={pendingIntentLabels}
             intents={intents}
             intentVisibility={intentVisibility}
@@ -174,10 +178,15 @@ export default function PodcastCreator({
             onBack={() => setCurrentStep(3)}
             onSkip={() => setCurrentStep(5)}
             onContinue={async () => {
-              if (episodeDetails.coverArt && coverNeedsUpload) {
-                await handleUploadProcessedCover();
+              try {
+                if (episodeDetails.coverArt && coverNeedsUpload) {
+                  await handleUploadProcessedCover();
+                }
+              } catch (e) {
+                // Error toast is handled inside handleUploadProcessedCover; proceed anyway
+              } finally {
+                setCurrentStep(5);
               }
-              setCurrentStep(5);
             }}
           />
         );
@@ -235,10 +244,12 @@ export default function PodcastCreator({
         progressPercentage={progressPercentage}
         usage={usage}
         minutesNearCap={minutesNearCap}
+        buildActive={buildActive}
         minutesRemaining={minutesRemaining}
         token={token}
         templates={templates}
         onRecurringApply={handleRecurringApply}
+        onCancelBuild={cancelBuild}
       >
         {stepContent}
       </PodcastCreatorScaffold>

@@ -41,7 +41,14 @@ export default function TemplateManager({ onBack, token, setCurrentView }) {
         // Refresh the list after deleting
         fetchTemplates();
     } catch (err) {
-        setError(err.message);
+        // Special-case: last template safeguard
+        const msg = (err && err.message) || '';
+        if (msg.toLowerCase().includes('at least one template')){
+          setError(null);
+          alert('You need to create another template before deleting your last one.');
+        } else {
+          setError(msg || 'Delete failed');
+        }
     }
   };
 

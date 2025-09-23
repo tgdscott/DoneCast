@@ -13,10 +13,11 @@ import logging
 
 from ..core.database import get_session
 from ..models.user import User
-from ..models.podcast import Podcast, PodcastBase, PodcastType
+from ..models.podcast import Podcast, PodcastBase, PodcastType, Episode, EpisodeStatus
 from ..services.publisher import SpreakerClient
 from ..services.image_utils import ensure_cover_image_constraints
 from .auth import get_current_user
+from datetime import datetime, timezone
 
 logging.basicConfig(level=logging.INFO)
 from sqlmodel import Session, select
@@ -182,6 +183,80 @@ async def create_podcast(
     log.info("--- Podcast creation process finished ---")
     return db_podcast
 
+@router.post("/{podcast_id}/recover-from-spreaker", status_code=200)
+async def recover_spreaker_episodes(
+    podcast_id: UUID,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Scans a podcast's Spreaker show for episodes that are not in the local database
+    and creates local records for them. This is useful for recovering episodes
+    uploaded outside the app.
+    """
+    log.info(f"Starting Spreaker recovery for podcast {podcast_id} for user {current_user.id}")
+
+    podcast = session.get(Podcast, podcast_id)
+    if not podcast or podcast.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Podcast not found.")
+
+    if not podcast.spreaker_show_id or not current_user.spreaker_access_token:
+        raise HTTPException(status_code=400, detail="Podcast is not linked to Spreaker or user is not connected.")
+
+    client = SpreakerClient(api_token=current_user.spreaker_access_token)
+
+    # 1. Get all episodes from Spreaker for the show
+    ok, spreaker_episodes_data = client.get_all_episodes_for_show(podcast.spreaker_show_id)
+    if not ok or not isinstance(spreaker_episodes_data, dict):
+        log.error(f"Failed to fetch episodes from Spreaker for show {podcast.spreaker_show_id}: {spreaker_episodes_data}")
+        raise HTTPException(status_code=502, detail="Could not fetch episodes from Spreaker.")
+    
+    spreaker_episodes = spreaker_episodes_data.get("items", [])
+    if not spreaker_episodes:
+        return {"recovered_count": 0, "message": "No episodes found on Spreaker for this show."}
+
+    # 2. Get all existing Spreaker episode IDs from the local DB for this podcast
+    existing_spreaker_ids_stmt = select(Episode.spreaker_episode_id).where(
+        Episode.podcast_id == podcast.id,
+        Episode.spreaker_episode_id != None  # noqa: E711 - intentional IS NOT NULL check
+    )
+    existing_ids = set(session.exec(existing_spreaker_ids_stmt).all())
+
+    # 3. Find missing episodes and create them
+    recovered_count = 0
+    episodes_to_add = []
+    for spk_ep in spreaker_episodes:
+        spreaker_episode_id = str(spk_ep.get("episode_id"))
+        if spreaker_episode_id in existing_ids:
+            continue
+
+        publish_date_str = spk_ep.get("published_at")
+        publish_date = None
+        if publish_date_str:
+            try:
+                dt = datetime.strptime(publish_date_str, "%Y-%m-%d %H:%M:%S")
+                publish_date = dt.replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                log.warning(f"Could not parse publish date '{publish_date_str}' for episode {spreaker_episode_id}")
+
+        new_episode = Episode(
+            user_id=current_user.id, podcast_id=podcast.id, title=spk_ep.get("title", "Untitled Recovered Episode"),
+            show_notes=spk_ep.get("description"), spreaker_episode_id=spreaker_episode_id,
+            final_audio_path=spk_ep.get("stream_url") or spk_ep.get("download_url"),
+            remote_cover_url=spk_ep.get("image_original_url") or spk_ep.get("image_url"),
+            status=EpisodeStatus.published if publish_date and publish_date <= datetime.now(timezone.utc) else EpisodeStatus.processed,
+            publish_at=publish_date, is_published_to_spreaker=True,
+            created_at=publish_date or datetime.now(timezone.utc)
+        )
+        episodes_to_add.append(new_episode)
+        recovered_count += 1
+
+    if episodes_to_add:
+        session.add_all(episodes_to_add)
+        session.commit()
+        log.info(f"Recovered and created {recovered_count} new episode records for podcast {podcast.id}")
+
+    return {"recovered_count": recovered_count, "message": f"Successfully recovered {recovered_count} missing episodes."}
 
 @router.get("/", response_model=List[Podcast])
 async def get_user_podcasts(

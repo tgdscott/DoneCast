@@ -64,8 +64,8 @@ export default function OnboardingWizard(){
   const [outroMode, setOutroMode] = useState('script');
   const [introFile, setIntroFile] = useState(null);
   const [outroFile, setOutroFile] = useState(null);
-  const [introScript, setIntroScript] = useState('Welcome to my podcast');
-  const [outroScript, setOutroScript] = useState('Thank you for listening!');
+  const [introScript, setIntroScript] = useState('Welcome to my podcast!');
+  const [outroScript, setOutroScript] = useState('Thank you for listening and see you next time!');
   // ElevenLabs voices
   const [voices, setVoices] = useState([]);
   const [voicesLoading, setVoicesLoading] = useState(false);
@@ -76,6 +76,7 @@ export default function OnboardingWizard(){
   const [templateSegmentsDraft, setTemplateSegmentsDraft] = useState([]);
   const [coverMode, setCoverMode] = useState('later');
   const [coverFile, setCoverFile] = useState(null);
+  const [skipCoverNow, setSkipCoverNow] = useState(false);
   // Music assets (Phase 1)
   const [musicAssets, setMusicAssets] = useState([]); // fetched list
   const [musicLoading, setMusicLoading] = useState(false);
@@ -87,16 +88,21 @@ export default function OnboardingWizard(){
   const [spreakerPhase, setSpreakerPhase] = useState('intro'); // intro | token | status
   const [spreakerVerifying, setSpreakerVerifying] = useState(false); // after popup closes we verify token
   const [spreakerConnectError, setSpreakerConnectError] = useState(null); // specific to connect flow
+  const [connectClicked, setConnectClicked] = useState(false); // require click before continue
   const [showInfo, setShowInfo] = useState(null); // remote mapped show info after creation
   const [showInfoLoading, setShowInfoLoading] = useState(false);
   const [showInfoError, setShowInfoError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [createdPodcast, setCreatedPodcast] = useState(null);
+  // Step 8: frequency selection (required, no default)
+  const [publishFrequency, setPublishFrequency] = useState('');
   const [rssUrl, setRssUrl] = useState(''); // import path
   const [importResult, setImportResult] = useState(null);
   const [importFormatDescription, setImportFormatDescription] = useState('');
   const [importAssets, setImportAssets] = useState([]);
+  // Step 9 style: allow skipping category selection explicitly
+  const [notSureCategories, setNotSureCategories] = useState(false);
 
   function nextNew(stepName){
     const idx = NEW_STEPS.indexOf(stepName ?? newStep);
@@ -250,7 +256,7 @@ export default function OnboardingWizard(){
     setTemplateSegmentsDraft(segments);
     try{
       const body = {
-        name: 'My first template',
+        name: 'My First Template',
         segments,
         background_music_rules: [],
         timing: {},
@@ -358,13 +364,18 @@ export default function OnboardingWizard(){
           // Merge music rule if any
           let background_music_rules = [];
           if(musicChoice && musicChoice !== 'none'){
-            // When music asset selected, ask backend to remember selection already; we also store a template rule shape
-            background_music_rules = [{ music_filename: musicChoice, apply_to_segments: ['intro','content','outro'], start_offset_s:0, end_offset_s:0, fade_in_s:2, fade_out_s:3, volume_db:-15 }];
+            // Apply distinct defaults per segment as requested
+            background_music_rules = [
+              // Intro rule: fade in 1.5s, no start offset, fade out 2s, end offset -1s (bleeds 1s into content)
+              { music_filename: musicChoice, apply_to_segments: ['intro'], start_offset_s: 0, end_offset_s: -1, fade_in_s: 1.5, fade_out_s: 2, volume_db: -4 },
+              // Outro rule: fade in 3s with -10s start offset (plays over last 10s of main content), fade out 1s, no end offset
+              { music_filename: musicChoice, apply_to_segments: ['outro'], start_offset_s: -10, end_offset_s: 0, fade_in_s: 3, fade_out_s: 1, volume_db: -4 },
+            ];
           }
           // Use last known segments draft if available
           const segments = templateSegmentsDraft && templateSegmentsDraft.length ? templateSegmentsDraft : [];
           await makeApi(token).put(`/api/templates/${createdTemplateId}`, {
-            name: 'My first template',
+            name: 'My First Template',
             podcast_id: podcastId,
             segments,
             background_music_rules,
@@ -401,14 +412,14 @@ export default function OnboardingWizard(){
     return (
   <main className="max-w-xl mx-auto py-12" role="main" aria-label="Onboarding main content" tabIndex={-1}>
         <h1 className="text-3xl font-bold mb-4">We’ll guide you one step at a time.</h1>
-        <p className="text-gray-600 mb-8">Do you already have a podcast? You can’t break anything, and we save as you go.</p>
+        <p className="text-gray-600 mb-8">If you have an existing podcast, Import it here</p>
         <div className="flex flex-col gap-4">
           <button onClick={()=>setMode('new')} className="px-6 py-4 bg-blue-600 text-white rounded text-left">
-            <span className="font-semibold block">I’m starting fresh</span>
+            <span className="font-semibold block">Start New</span>
             <span className="text-sm">We’ll help you set things up and create a starter template.</span>
           </button>
           <button onClick={()=>setMode('import')} className="px-6 py-4 bg-white border rounded text-left hover:shadow">
-            <span className="font-semibold block">I already have a show</span>
+            <span className="font-semibold block">Import Existing</span>
             <span className="text-sm text-gray-600">Import your feed and we’ll mirror your setup.</span>
           </button>
         </div>
@@ -469,8 +480,7 @@ export default function OnboardingWizard(){
               </div>
             </div>
             <div className="flex gap-3">
-              <button disabled={!firstName} onClick={()=>{ saveUserNames(); setNewStep('haveNameQuestion'); }} className={`px-5 py-3 rounded text-white ${firstName? 'bg-blue-600 hover:bg-blue-500':'bg-gray-400 cursor-not-allowed'}`}>Continue</button>
-              <button onClick={()=> setNewStep('haveNameQuestion')} className="px-5 py-3 border rounded">Skip</button>
+              <button disabled={!firstName || !lastName} onClick={()=>{ saveUserNames(); setNewStep('haveNameQuestion'); }} className={`px-5 py-3 rounded text-white ${firstName && lastName? 'bg-blue-600 hover:bg-blue-500':'bg-gray-400 cursor-not-allowed'}`}>Continue</button>
             </div>
           </div>
         )}
@@ -555,7 +565,11 @@ export default function OnboardingWizard(){
               ))}
             </div>
             <div className="text-xs text-gray-500 mb-4">{selectedCategories.length}/3 selected</div>
-            <NavButtons onBack={()=> setNewStep('format')} onNext={()=> setNewStep('audience')} nextDisabled={selectedCategories.length===0} />
+            <label className="flex items-center gap-2 text-sm mb-2">
+              <input type="checkbox" checked={notSureCategories} onChange={e=> setNotSureCategories(e.target.checked)} />
+              <span>I’m not sure yet</span>
+            </label>
+            <NavButtons onBack={()=> setNewStep('format')} onNext={()=> setNewStep('audience')} nextDisabled={selectedCategories.length===0 && !notSureCategories} />
           </div>
         )}
         {newStep==='audience' && (
@@ -580,8 +594,18 @@ export default function OnboardingWizard(){
                 <input type="radio" name="cover" className="mr-2" checked={coverMode==='later'} onChange={()=>setCoverMode('later')} />I'll do this later
               </label>
             </div>
-            {coverMode==='upload' && <input type="file" accept="image/*" onChange={e=>setCoverFile(e.target.files?.[0]||null)} />}
-            <NavButtons onBack={()=> setNewStep('audience')} onNext={()=> setNewStep('audioSetup')} />
+            {coverMode==='upload' && (
+              <div className="space-y-2">
+                <input type="file" accept="image/*" onChange={e=>setCoverFile(e.target.files?.[0]||null)} />
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={skipCoverNow} onChange={e=> setSkipCoverNow(e.target.checked)} />
+                  <span>Skip this for now</span>
+                </label>
+              </div>
+            )}
+            {(() => { const canProceed = coverMode !== 'upload' || !!coverFile || !!skipCoverNow; return (
+              <NavButtons onBack={()=> setNewStep('audience')} onNext={()=> setNewStep('audioSetup')} nextDisabled={!canProceed} />
+            ); })()}
           </div>
         )}
     {newStep==='greeting' && (
@@ -648,6 +672,7 @@ export default function OnboardingWizard(){
                 <p>We partner with Spreaker to host your podcast.</p>
                 <button
                     onClick={async () => {
+                    try { setConnectClicked(true); } catch {}
                     try {
                       // Safer default: legacy endpoint first
                       let popupUrl = null;
@@ -684,7 +709,7 @@ export default function OnboardingWizard(){
                     } catch(e){ setError("Couldn't start the Spreaker sign-in"); }
                   }}
                   className="px-5 py-2 bg-blue-600 text-white rounded"
-                >Sign in to Spreaker</button>
+                >Connect to Podcast Host</button>
                 {spreakerVerifying && <div className="text-xs text-gray-500">Verifying connection…</div>}
                 {spreakerConnectError && (
                   <div className="text-xs text-red-600 flex items-center gap-2">
@@ -707,7 +732,7 @@ export default function OnboardingWizard(){
                 </div>
               </div>
             )}
-            {!spreakerSaved && <NavButtons onBack={()=> setNewStep('audioSetup')} nextDisabled={true} />}
+            {!spreakerSaved && <NavButtons onBack={()=> setNewStep('audioSetup')} nextDisabled={!connectClicked} onNext={()=> setNewStep('lastInfo')} />}
             {spreakerSaved && <NavButtons onBack={()=> setNewStep('audioSetup')} onNext={()=> setNewStep('lastInfo')} />}
           </div>
         )}
@@ -715,7 +740,19 @@ export default function OnboardingWizard(){
           <div>
             <h2 className="text-xl font-semibold mb-2">Final details</h2>
             <p className="text-sm text-gray-600 mb-4">We'll collect any remaining details (like contact email) after creation. You can edit everything in Settings.</p>
-            <NavButtons onBack={()=> setNewStep('spreaker')} onNext={()=> setNewStep('distribution')} />
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-1">How often do you plan to publish?</label>
+              <p className="text-xs text-gray-600 mb-2">Take your best guess, you can change this later.</p>
+              <select className="w-full border rounded p-2" value={publishFrequency} onChange={e=> setPublishFrequency(e.target.value)}>
+                <option value="">Select frequency...</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="biweekly">Every 2 weeks</option>
+                <option value="monthly">Monthly</option>
+                <option value="occasionally">Occasionally</option>
+              </select>
+            </div>
+            <NavButtons onBack={()=> setNewStep('spreaker')} onNext={()=> setNewStep('distribution')} nextDisabled={!publishFrequency} />
           </div>
         )}
         {newStep==='distribution' && (

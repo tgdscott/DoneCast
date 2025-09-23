@@ -10,7 +10,7 @@ export const options = {
   },
 };
 
-const BASE = __ENV.BASE_URL || 'http://localhost:8000';
+const BASE = __ENV.BASE_URL || 'http://127.0.0.1:8000';
 
 export default function () {
   const res1 = http.get(`${BASE}/api/health`);

@@ -43,7 +43,7 @@ function FadeSlide({ children, keyProp }) {
   );
 }
 
-export default function OnboardingWrapper({ steps, index, setIndex, onComplete, prefs, greetingName }) {
+export default function OnboardingWrapper({ steps, index, setIndex, onComplete, prefs, greetingName, nextDisabled = false, hideNext = false }) {
   const step = steps[index];
   const total = steps.length;
   const pct = Math.round(((index + 1) / total) * 100);
@@ -185,28 +185,20 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
 
   return (
     <div className={`min-h-screen bg-background ${baseText} ${hc}`}>
-      {/* Top header with progress */}
+      {/* Top header without percent complete per spec */}
       <header className="border-b bg-card/40 backdrop-blur-sm">
         <div className="container mx-auto px-4 py-6">
           <div className="flex flex-col gap-3">
             <h1 className="text-xl md:text-2xl font-semibold">
               New Podcast Setup
             </h1>
-            <div className="flex items-center justify-between gap-4">
-              <div className="text-sm text-muted-foreground">
-                Step {index + 1} • {pct}% complete
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="hidden md:block w-56">
-                  <Progress value={pct} />
-                </div>
-                <ComfortControls
-                  largeText={prefs.largeText}
-                  setLargeText={prefs.setLargeText ?? (()=>{})}
-                  highContrast={prefs.highContrast}
-                  setHighContrast={prefs.setHighContrast ?? (()=>{})}
-                />
-              </div>
+            <div className="flex items-center justify-end gap-3">
+              <ComfortControls
+                largeText={prefs.largeText}
+                setLargeText={prefs.setLargeText ?? (()=>{})}
+                highContrast={prefs.highContrast}
+                setHighContrast={prefs.setHighContrast ?? (()=>{})}
+              />
             </div>
           </div>
         </div>
@@ -282,25 +274,28 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
             </Button>
 
             <div className="flex items-center gap-2">
-              {isLast && (
+              {isLast && !hideNext && (
                 <span className="text-xs text-muted-foreground hidden md:inline-flex items-center gap-1">
                   <CheckCircle2 className="h-4 w-4" /> You're all set after this
                 </span>
               )}
-              <Button
-                onClick={handleNext}
-                className="rounded-[var(--radius)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring h-11 min-h-[44px] px-5 btn text-white"
-              >
-                {isLast ? (
-                  <>
-                    Finish <ChevronRight className="ml-2 h-4 w-4" />
-                  </>
-                ) : (
-                  <>
-                    Continue <ChevronRight className="ml-2 h-4 w-4" />
-                  </>
-                )}
-              </Button>
+              {!hideNext && (
+                <Button
+                  onClick={handleNext}
+                  disabled={!!nextDisabled}
+                  className="rounded-[var(--radius)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring h-11 min-h-[44px] px-5 btn text-white disabled:opacity-60"
+                >
+                  {isLast ? (
+                    <>
+                      Finish <ChevronRight className="ml-2 h-4 w-4" />
+                    </>
+                  ) : (
+                    <>
+                      Continue <ChevronRight className="ml-2 h-4 w-4" />
+                    </>
+                  )}
+                </Button>
+              )}
             </div>
           </div>
         </section>

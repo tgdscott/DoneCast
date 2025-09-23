@@ -1,5 +1,8 @@
 @echo off
 setlocal
+REM Always run from the folder where this script lives
+set "SCRIPT_DIR=%~dp0"
+pushd "%SCRIPT_DIR%"
 set VENV_DIR=.venv
 
 echo.
@@ -18,53 +21,57 @@ IF NOT EXIST %VENV_DIR%\Scripts\activate.bat (
 call %VENV_DIR%\Scripts\activate.bat
 echo.
  
-echo [2/4] Checking Docker status...
+REM [2/4] Optional Docker step — skip if not present or unavailable
+IF NOT EXIST docker-compose.yml goto no_docker
+echo [2/4] Docker compose file detected. Checking Docker...
 
-REM Check if Docker is running by trying a quiet command.
-docker info > nul 2> nul
-IF %ERRORLEVEL% EQU 0 (
-    echo Docker is already running.
-    goto :dockerReady
+REM Check if docker is available
+where docker > nul 2> nul
+IF %ERRORLEVEL% NEQ 0 (
+    echo   'docker' command not found. Skipping Docker steps.
+    goto afterDocker
 )
 
-echo Docker is not running. Attempting to start Docker Desktop...
-REM The path to Docker Desktop might vary. This is the default location.
-start "" "C:\Program Files\Docker\Docker\Docker Desktop.exe"
-
-REM Wait for the Docker daemon to initialize, with a timeout.
-set /a "retries=0"
-:waitForDocker
-set /a "retries+=1"
-if %retries% gtr 12 (
-    echo.
-    echo ERROR: Docker Desktop did not start within 60 seconds.
-    echo Please start it manually and run this script again.
-    pause
-    exit /b 1
-)
-
-echo Waiting for Docker daemon... (attempt %retries%/12)
-timeout /t 5 /nobreak > nul
+REM Try a quiet docker info
 docker info > nul 2> nul
 IF %ERRORLEVEL% NEQ 0 (
-    goto :waitForDocker
+    echo   Docker not running. Attempting to start Docker Desktop...
+    start "" "C:\Program Files\Docker\Docker\Docker Desktop.exe"
+    set retries=0
+:pollDocker
+    set /A retries+=1
+    IF %retries% GTR 12 (
+        echo   Timed out waiting for Docker. Continuing without Docker.
+        goto afterDocker
+    )
+    echo   Waiting for Docker daemon... attempt %retries% of 12
+    timeout /t 5 /nobreak > nul
+    docker info > nul 2> nul
+    IF ERRORLEVEL 1 goto pollDocker
+    echo   Docker started successfully.
 )
 
-echo Docker started successfully.
-echo.
+REM Check docker-compose availability
+where docker-compose > nul 2> nul
+IF %ERRORLEVEL% NEQ 0 (
+    echo   'docker-compose' not found. Skipping Docker services.
+    goto afterDocker
+)
 
-:dockerReady
-echo [3/4] Ensuring Docker services are running...
+echo [3/4] Bringing up Docker services with docker-compose...
 docker-compose up -d
-
 IF %ERRORLEVEL% NEQ 0 (
-    echo.
-    echo ERROR: docker-compose failed to start services.
-    pause
-    exit /b 1
+    echo   docker-compose returned an error. Skipping Docker and continuing.
+) ELSE (
+    echo   Docker services are ready.
 )
-echo Docker services are ready.
 echo.
+goto afterDocker
+
+:no_docker
+echo [2/4] No docker-compose.yml found. Skipping Docker steps.
+
+:afterDocker
 
 echo [4/4] Starting API and Frontend servers in new windows...
 echo.
@@ -80,4 +87,5 @@ echo  All systems go! Your servers are starting in new windows.
 echo =================================================================
 echo.
 echo You can close this window.
+popd
 endlocal

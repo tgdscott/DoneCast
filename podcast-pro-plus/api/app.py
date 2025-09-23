@@ -59,13 +59,17 @@ run_startup_tasks()
 
 # --- Middleware ---
 from starlette.middleware.sessions import SessionMiddleware
+# In dev/test environments, don't mark the session cookie as Secure and
+# relax SameSite so the cookie is sent on the OAuth redirect back from Google.
+# In prod, keep SameSite=None + Secure (https_only=True) for cross-site flows.
+_IS_DEV = str(ENV).lower() in {"dev", "development", "local", "test", "testing"}
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.SESSION_SECRET_KEY,
     session_cookie="ppp_session",
     max_age=60 * 60 * 24 * 14,
-    same_site="none",
-    https_only=True,
+    same_site=("lax" if _IS_DEV else "none"),
+    https_only=(False if _IS_DEV else True),
 )
 app.add_middleware(
     CORSMiddleware,

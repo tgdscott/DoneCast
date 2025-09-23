@@ -3,7 +3,11 @@ from typing import BinaryIO, Optional
 from google.cloud import storage
 
 # --- Local Dev Sandbox Implementation ---
-IS_DEV_ENV = os.getenv("APP_ENV") == "dev"
+def _is_dev_env() -> bool:
+    val = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower()
+    return val in {"dev", "development", "local", "test", "testing"}
+
+IS_DEV_ENV = _is_dev_env()
 
 # In dev mode, we don't need a real client.
 _client: Optional[storage.Client] = None
@@ -88,6 +92,14 @@ def upload_fileobj(bucket: str, key: str, fileobj: BinaryIO, *, size: Optional[i
     return f"gs://{bucket}/{key}"
 
 def make_signed_url(bucket: str, key: str, minutes: int = 60) -> str:
+    if IS_DEV_ENV:
+        # In local dev, assets are served from MEDIA_DIR via /static/media
+        name = os.path.basename(key)
+        return f"/static/media/{name}"
+
+    if not _client:
+        raise RuntimeError("GCS client not initialized.")
+
     b = _client.bucket(bucket)
     blob = b.blob(key)
     return blob.generate_signed_url(

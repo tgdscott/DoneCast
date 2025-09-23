@@ -14,18 +14,17 @@ def enqueue_http_task(path: str, body: dict) -> dict:
         # This is simpler than a full task queue setup and good for most dev scenarios.
         # For true async behavior, you could integrate Celery here.
         import httpx
-
-        api_url = f"http://localhost:8000{path}"
+        api_url = f"http://127.0.0.1:8000{path}"
         # Use a local secret for task authentication
         auth_secret = os.getenv("TASKS_AUTH", "a-secure-local-secret")
         headers = {"Content-Type": "application/json", "X-Tasks-Auth": auth_secret}
 
         print(f"DEV MODE: Calling task endpoint synchronously: POST {api_url}")
         try:
-            with httpx.Client(timeout=300.0) as client: # 5 minute timeout
+            with httpx.Client(timeout=300.0) as client:  # 5 minute timeout
                 response = client.post(api_url, json=body, headers=headers)
                 response.raise_for_status()
-                print(f"DEV MODE: Sync task call successful.")
+                print("DEV MODE: Sync task call successful.")
                 return {"name": f"local-sync-call-{datetime.utcnow().isoformat()}"}
         except Exception as e:
             print(f"ERROR: DEV MODE synchronous task call failed: {e}")
@@ -35,7 +34,12 @@ def enqueue_http_task(path: str, body: dict) -> dict:
     if tasks_v2 is None:
         raise ImportError("google-cloud-tasks is not installed")
     client = tasks_v2.CloudTasksClient()
-    parent = client.queue_path(os.getenv("GOOGLE_CLOUD_PROJECT"), os.getenv("TASKS_LOCATION"), os.getenv("TASKS_QUEUE"))
+    project = os.getenv("GOOGLE_CLOUD_PROJECT")
+    location = os.getenv("TASKS_LOCATION")
+    queue = os.getenv("TASKS_QUEUE")
+    if not project or not location or not queue:
+        raise ValueError("Missing required Cloud Tasks configuration: GOOGLE_CLOUD_PROJECT, TASKS_LOCATION, TASKS_QUEUE")
+    parent = client.queue_path(project, location, queue)
     url = f"{os.getenv('TASKS_URL_BASE')}{path}"
     task = {
         "http_request": {

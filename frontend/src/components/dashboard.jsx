@@ -185,6 +185,12 @@ export default function PodcastPlusDashboard() {
 
   // Initial load + token change: fetch other data (user already fetched by AuthContext)
   useEffect(() => { if (token) { fetchData(); } }, [token, logout]);
+  // When navigating back to the Dashboard view, refresh data so cards reflect latest state
+  useEffect(() => {
+    if (token && currentView === 'dashboard') {
+      fetchData();
+    }
+  }, [token, currentView]);
   // Fetch notifications
   useEffect(() => {
     if(!token) return;
@@ -269,6 +275,8 @@ export default function PodcastPlusDashboard() {
   const handleBackToDashboard = () => {
     setSelectedTemplateId(null);
     setCurrentView('dashboard');
+    // Ensure counts (podcasts/templates/stats) are fresh when returning
+    try { fetchData(); } catch {}
   };
   
   const handleBackToTemplateManager = () => {
@@ -284,7 +292,12 @@ export default function PodcastPlusDashboard() {
     toast({ title: "Success", description: "Template deleted." });
     fetchData(); 
   } catch (err) {
-    toast({ title: "Error", description: err.message, variant: "destructive" });
+    const msg = (err && err.message) || '';
+    if (msg.toLowerCase().includes('at least one template')){
+      toast({ title: "Action needed", description: "Create another template before deleting your last one.", variant: "destructive" });
+    } else {
+      toast({ title: "Error", description: msg || 'Delete failed', variant: "destructive" });
+    }
   }
   };
 
@@ -305,7 +318,7 @@ export default function PodcastPlusDashboard() {
           />
         );
       case 'templateManager':
-        return <TemplateManager onBack={() => setCurrentView('dashboard')} token={token} setCurrentView={setCurrentView} />;
+        return <TemplateManager onBack={handleBackToDashboard} token={token} setCurrentView={setCurrentView} />;
       case 'editTemplate':
         return <TemplateEditor templateId={selectedTemplateId} onBack={handleBackToTemplateManager} token={token} onTemplateSaved={fetchData} />;
       case 'createEpisode':

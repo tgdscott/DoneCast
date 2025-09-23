@@ -162,6 +162,12 @@ class SpreakerClient:
         Returns (ok, response_dict_or_error)."""
         return self._get(f"/shows/{show_id}")
 
+    def get_all_episodes_for_show(self, show_id: str) -> Tuple[bool, Any]:
+        """
+        Fetches all episodes for a given show, handling pagination.
+        """
+        return self._get_paginated(f"/shows/{show_id}/episodes", params={"limit": 100}, items_key="items")
+
     def create_show(self, *, title: str, description: str = "", language: str = "en") -> Tuple[bool, Any]:
         """Create a new show on Spreaker.
 

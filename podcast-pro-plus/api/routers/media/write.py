@@ -41,9 +41,16 @@ router = APIRouter(prefix="/media", tags=["Media Library"])
 
 MEDIA_BUCKET = os.getenv("MEDIA_BUCKET")
 
+def _is_dev_env() -> bool:
+    val = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower()
+    return val in {"dev", "development", "local", "test", "testing"}
+
 
 def _require_bucket() -> str:
     bucket = MEDIA_BUCKET or os.getenv("MEDIA_BUCKET")
+    # In local/dev/test, allow a dummy bucket and store files on the local MEDIA_DIR via the dev GCS shim
+    if not bucket and _is_dev_env():
+        return "dev-bucket"
     if not bucket:
         raise HTTPException(status_code=500, detail="Media storage bucket is not configured. Set the MEDIA_BUCKET environment variable.")
     return bucket
@@ -93,8 +100,8 @@ async def upload_media_files(
         MediaCategory.music: 50 * MB,
         MediaCategory.commercial: 50 * MB,
         MediaCategory.sfx: 25 * MB,
-        MediaCategory.podcast_cover: 10 * MB,
-        MediaCategory.episode_cover: 10 * MB,
+        MediaCategory.podcast_cover: 15 * MB,
+        MediaCategory.episode_cover: 15 * MB,
     }
 
     AUDIO_PREFIX = "audio/"
@@ -164,6 +171,13 @@ async def upload_media_files(
             file_size = None
 
         # Enforce size limit prior to upload when size is known
+        try:
+            logging.info(
+                "event=upload.precheck filename=%s category=%s size=%s limit=%s content_type=%s",
+                file.filename, category.value, (file_size if file_size is not None else "unknown"), max_bytes, content_type
+            )
+        except Exception:
+            pass
         if file_size is not None and file_size > max_bytes:
             raise HTTPException(status_code=413, detail="File too large.")
 
@@ -184,6 +198,13 @@ async def upload_media_files(
                     break
                 bytes_written += len(chunk)
                 if bytes_written > max_bytes:
+                    try:
+                        logging.warning(
+                            "event=upload.reject_too_large filename=%s category=%s bytes=%s limit=%s",
+                            file.filename, category.value, bytes_written, max_bytes
+                        )
+                    except Exception:
+                        pass
                     raise HTTPException(status_code=413, detail="File too large.")
                 buf.extend(chunk)
             gcs_uri = upload_bytes(bucket, gcs_key, bytes(buf), content_type)

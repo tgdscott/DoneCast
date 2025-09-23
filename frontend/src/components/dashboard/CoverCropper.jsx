@@ -170,21 +170,38 @@ const CoverCropper = forwardRef(function CoverCropper({ sourceFile, existingUrl,
   // Export processed square image (Blob)
   const exportSquareBlob = useCallback(() => {
     if (!imgRef.current || !dims.w) return null;
-    const full = mode === 'pad' ? Math.max(dims.w, dims.h) : crop.size || Math.min(dims.w, dims.h);
-    if (!full) return null;
+    // Limit output dimensions to keep file sizes reasonable
+    const MAX_OUT = 2048; // px
+    const baseSquare = mode === 'pad' ? Math.max(dims.w, dims.h) : (crop.size || Math.min(dims.w, dims.h));
+    if (!baseSquare) return null;
+    const outSize = Math.min(baseSquare, MAX_OUT);
+
     const canvas = document.createElement('canvas');
-    canvas.width = full; canvas.height = full;
+    canvas.width = outSize; canvas.height = outSize;
     const ctx = canvas.getContext('2d');
+    // Always paint a white background so JPEG has no transparency artifacts
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0,0,outSize,outSize);
+
     if (mode === 'pad') {
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(0,0,full,full);
-      const offsetX = (full - dims.w) / 2;
-      const offsetY = (full - dims.h) / 2;
-      ctx.drawImage(imgRef.current, offsetX, offsetY, dims.w, dims.h);
+      // Scale entire image to fit within outSize square and center it
+      const full = Math.max(dims.w, dims.h);
+      const s = outSize / full;
+      const drawW = Math.round(dims.w * s);
+      const drawH = Math.round(dims.h * s);
+      const dx = Math.round((outSize - drawW) / 2);
+      const dy = Math.round((outSize - drawH) / 2);
+      ctx.drawImage(imgRef.current, 0, 0, dims.w, dims.h, dx, dy, drawW, drawH);
     } else {
-      ctx.drawImage(imgRef.current, crop.x, crop.y, crop.size, crop.size, 0, 0, full, full);
+      // Crop to square and scale to outSize
+      ctx.drawImage(
+        imgRef.current,
+        crop.x, crop.y, crop.size, crop.size,
+        0, 0, outSize, outSize
+      );
     }
-    return new Promise(resolve => canvas.toBlob(b => resolve(b), 'image/png', 0.92));
+    // Encode as JPEG to keep sizes small
+    return new Promise(resolve => canvas.toBlob(b => resolve(b), 'image/jpeg', 0.88));
   }, [crop, dims, mode]);
 
   useImperativeHandle(ref, () => ({

@@ -11,6 +11,7 @@ const normalize = (value) => {
 
 export default function IntentQuestions({ open, onSubmit, onCancel, hide, initialAnswers }){
   const [answers, setAnswers] = useState({ flubber: 'no', intern: 'no', sfx: 'no' });
+  const [detailMode, setDetailMode] = useState(false);
   useEffect(()=>{
     if(open){
       const base = initialAnswers || {};
@@ -19,6 +20,7 @@ export default function IntentQuestions({ open, onSubmit, onCancel, hide, initia
         intern: normalize(base.intern),
         sfx: normalize(base.sfx),
       });
+      setDetailMode(false);
     }
   }, [open, initialAnswers]);
   if(!open) return null;
@@ -26,17 +28,22 @@ export default function IntentQuestions({ open, onSubmit, onCancel, hide, initia
   const allAnswered = ['flubber','intern','sfx']
     .filter(k => !h[k])
     .every(k => ['yes','no','unknown'].includes(answers[k]));
-  const Radio = ({name,label}) => (
-    <div className="flex items-center gap-4 text-sm">
-      <div className="w-64 text-[13px]">{label}</div>
-      {['yes','no','unknown'].map(v => (
-        <label key={v} className="flex items-center gap-1 cursor-pointer">
-          <input type="radio" name={name} value={v}
-                 checked={answers[name]===v}
-                 onChange={()=> setAnswers(a=>({...a,[name]:v}))} />
-          <span className="capitalize">{v==='unknown' ? "I Don't Remember" : v}</span>
-        </label>
-      ))}
+  const Radio = ({name,label,description}) => (
+    <div className="flex flex-col gap-2 text-sm">
+      <div className="flex items-center gap-4">
+        <div className="w-64 text-[13px] font-medium">{label}</div>
+        {['yes','no','unknown'].map(v => (
+          <label key={v} className="flex items-center gap-1 cursor-pointer">
+            <input type="radio" name={name} value={v}
+                   checked={answers[name]===v}
+                   onChange={()=> setAnswers(a=>({...a,[name]:v}))} />
+            <span className="capitalize">{v==='unknown' ? "I Don't Remember" : v}</span>
+          </label>
+        ))}
+      </div>
+      {detailMode && description && (
+        <div className="text-xs text-muted-foreground ml-0 md:ml-[16.5rem] -mt-1">{description}</div>
+      )}
     </div>
   );
   const submit = () => onSubmit({
@@ -51,9 +58,39 @@ export default function IntentQuestions({ open, onSubmit, onCancel, hide, initia
           <CardTitle className="text-base">Before We Start</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {!h.flubber && <Radio name="flubber" label="Is there a Flubber?"/>}
-          {!h.intern && <Radio name="intern" label="Is there an Intern?"/>}
-          {!h.sfx && <Radio name="sfx" label="Are there any word Sound Effects?"/>}
+          {/* Detail toggle */}
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={()=> setDetailMode(d=>!d)}
+              className="text-xs text-slate-600 hover:text-slate-900 underline"
+            >
+              {detailMode ? 'Hide details' : 'What does this mean?'}
+            </button>
+          </div>
+
+          {!h.flubber && (
+            <Radio
+              name="flubber"
+              label="Is there a Flubber?"
+              description="If you recorded any redos or mistakes, we can look for them automatically so you can trim them in the next step."
+            />
+          )}
+          {!h.intern && (
+            <Radio
+              name="intern"
+              label="Is there an Intern?"
+              description="Tell us if the AI intern voice should speak in this recording. We only ask when voices are available on your account."
+            />
+          )}
+          {!h.sfx && (
+            <Radio
+              name="sfx"
+              label="Are there any word Sound Effects?"
+              description="Answer yes if you have cue words that should drop music or SFX during assembly."
+            />
+          )}
+
           <div className="flex justify-end gap-2 mt-2">
             <Button variant="ghost" onClick={onCancel}>Cancel</Button>
             <Button onClick={submit} disabled={!allAnswered}>Continue</Button>
