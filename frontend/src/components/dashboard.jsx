@@ -32,12 +32,13 @@ import {
   DollarSign,
   ChevronDown,
 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { makeApi } from "@/lib/apiClient";
 import { useAuth } from "@/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import Logo from "@/components/Logo.jsx";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import Joyride, { STATUS } from "react-joyride";
 
 import TemplateEditor from "@/components/dashboard/TemplateEditor";
 import PodcastCreator from "@/components/dashboard/PodcastCreator";
@@ -53,6 +54,7 @@ import BillingPage from "@/components/dashboard/BillingPage";
 import Recorder from "@/components/quicktools/Recorder";
 
 const isAdmin = (u) => !!(u && (u.is_admin || u.role === 'admin'));
+const DASHBOARD_TOUR_STORAGE_KEY = 'ppp_dashboard_tour_completed';
 
 function formatRelative(iso) {
   if(!iso) return '—';
@@ -113,6 +115,54 @@ export default function PodcastPlusDashboard() {
   const [selectedTemplateId, setSelectedTemplateId] = useState(null);
   const [preselectedMainFilename, setPreselectedMainFilename] = useState(null);
   const [preselectedTranscriptReady, setPreselectedTranscriptReady] = useState(false);
+  const [shouldRunTour, setShouldRunTour] = useState(false);
+
+  const tourSteps = useMemo(() => [
+    {
+      target: '[data-tour-id="dashboard-new-episode"]',
+      title: 'New Episode Button',
+      content: 'This is where the magic happens. Hit this button to start making your episode either from a show you\'ve already recorded, or one you want to record now.',
+      disableBeacon: true,
+    },
+    {
+      target: '[data-tour-id="dashboard-quicktool-podcasts"]',
+      title: 'Podcasts',
+      content: 'If you want to change anything about the structure of your show, like the name, cover, or description, that\'s here.',
+    },
+    {
+      target: '[data-tour-id="dashboard-quicktool-templates"]',
+      title: 'Templates',
+      content: 'This is the blueprint for your show - the stuff that happens every episode. We made one for you already, but you can edit it or make others.',
+    },
+    {
+      target: '[data-tour-id="dashboard-quicktool-media"]',
+      title: 'Media',
+      content: 'Any sound files that you use for your show are uploaded and stored here.',
+    },
+    {
+      target: '[data-tour-id="dashboard-quicktool-episodes"]',
+      title: 'Episodes',
+      content: 'All the details about your individual episodes here so you can edit them as you need to.',
+    },
+    {
+      target: '[data-tour-id="dashboard-quicktool-subscription"]',
+      title: 'Subscription',
+      content: 'This is where you can choose and edit your plan here so you get the perfect one for you.',
+    },
+    {
+      target: '[data-tour-id="dashboard-quicktool-settings"]',
+      title: 'Settings',
+      content: 'If it doesn\'t fit in one of the categories above, look for it here.',
+    },
+  ], []);
+
+  const handleTourCallback = (data) => {
+    const { status } = data;
+    if ([STATUS.FINISHED, STATUS.SKIPPED].includes(status)) {
+      try { localStorage.setItem(DASHBOARD_TOUR_STORAGE_KEY, '1'); } catch {}
+      setShouldRunTour(false);
+    }
+  };
 
   const fetchData = async () => {
     if (!token) return;
@@ -411,7 +461,7 @@ export default function PodcastPlusDashboard() {
                       {canCreateEpisode ? (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button className="flex-1 md:flex-none" title="Start a new episode">
+                            <Button className="flex-1 md:flex-none" title="Start a new episode" data-tour-id="dashboard-new-episode">
                               <Plus className="w-4 h-4 mr-2" />
                               Start New Episode
                               <ChevronDown className="w-4 h-4 ml-2 opacity-80" />
@@ -500,13 +550,13 @@ export default function PodcastPlusDashboard() {
                   </CardHeader>
                   <CardContent>
                     <div className="grid grid-cols-2 gap-3">
-          <Button onClick={() => setCurrentView('podcastManager')} variant="outline" className="justify-start text-sm h-10"><Podcast className="w-4 h-4 mr-2" />Podcasts</Button>
-                      <Button onClick={() => setCurrentView('templateManager')} variant="outline" className="justify-start text-sm h-10"><FileText className="w-4 h-4 mr-2" />Templates</Button>
-                      <Button onClick={() => setCurrentView('mediaLibrary')} variant="outline" className="justify-start text-sm h-10"><Music className="w-4 h-4 mr-2" />Media</Button>
-          <Button onClick={() => setCurrentView('episodeHistory')} variant="outline" className="justify-start text-sm h-10"><BarChart3 className="w-4 h-4 mr-2" />Episodes</Button>
+          <Button onClick={() => setCurrentView('podcastManager')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-podcasts"><Podcast className="w-4 h-4 mr-2" />Podcasts</Button>
+                      <Button onClick={() => setCurrentView('templateManager')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-templates"><FileText className="w-4 h-4 mr-2" />Templates</Button>
+                      <Button onClick={() => setCurrentView('mediaLibrary')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-media"><Music className="w-4 h-4 mr-2" />Media</Button>
+          <Button onClick={() => setCurrentView('episodeHistory')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-episodes"><BarChart3 className="w-4 h-4 mr-2" />Episodes</Button>
           {/* Import moved under Podcasts */}
-          <Button onClick={() => setCurrentView('billing')} variant="outline" className="justify-start text-sm h-10"><DollarSign className="w-4 h-4 mr-2" />Subscription</Button>
-                      <Button onClick={() => setCurrentView('settings')} variant="outline" className="justify-start text-sm h-10"><SettingsIcon className="w-4 h-4 mr-2" />Settings</Button>
+          <Button onClick={() => setCurrentView('billing')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-subscription"><DollarSign className="w-4 h-4 mr-2" />Subscription</Button>
+                      <Button onClick={() => setCurrentView('settings')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-settings"><SettingsIcon className="w-4 h-4 mr-2" />Settings</Button>
                       {isAdmin(authUser) && (
                         <Button onClick={() => setCurrentView('devTools')} variant="destructive" className="justify-start text-sm h-10"><AlertTriangle className="w-4 h-4 mr-2" />Dev</Button>
                       )}
@@ -537,9 +587,50 @@ export default function PodcastPlusDashboard() {
     };
   }, []);
 
+  useEffect(() => {
+    if (shouldRunTour) return;
+    if (currentView !== 'dashboard') {
+      setShouldRunTour(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      try {
+        if (localStorage.getItem(DASHBOARD_TOUR_STORAGE_KEY) === '1') {
+          return;
+        }
+      } catch {
+        return;
+      }
+
+      const firstTarget = document.querySelector('[data-tour-id="dashboard-new-episode"]');
+      if (firstTarget) {
+        setShouldRunTour(true);
+      }
+    }, 600);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [currentView, podcasts, templates, shouldRunTour]);
+
   return (
     <div className="min-h-screen bg-gray-50">
-    <nav className="border-b border-gray-200 px-4 py-4 bg-white shadow-sm">
+      <Joyride
+        steps={tourSteps}
+        run={shouldRunTour}
+        continuous
+        showSkipButton
+        callback={handleTourCallback}
+        disableOverlayClose
+        scrollToFirstStep
+        styles={{ options: { zIndex: 10000 } }}
+        spotlightClicks
+      />
+      <nav className="border-b border-gray-200 px-4 py-4 bg-white shadow-sm">
         <div className="container mx-auto max-w-7xl flex justify-between items-center">
       <Logo size={28} lockup />
           <div className="flex items-center space-x-4">
