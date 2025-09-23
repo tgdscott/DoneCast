@@ -12,6 +12,8 @@ from starlette.staticfiles import StaticFiles
 
 # Load settings early
 from api.core.config import settings
+# Import paths *after* settings are loaded, as paths might use env vars
+from api.core.paths import FINAL_DIR, MEDIA_DIR, FLUBBER_CTX_DIR
 
 # Now, other modules can be imported that might use settings
 import api.db_listeners  # registers SQLAlchemy listeners
@@ -25,16 +27,6 @@ from api.routing import attach_routers
 # --- logging ASAP ---
 configure_logging()
 log = get_logger("api.app")
-
-# --- Writable Dirs Setup ---
-FINAL_DIR = Path(os.getenv("FINAL_DIR", "/tmp/final_episodes"))
-MEDIA_DIR = Path(settings.MEDIA_ROOT)
-FLUBBER_DIR = Path(os.getenv("FLUBBER_CONTEXTS_DIR", "/tmp/flubber_contexts"))
-for d in (FINAL_DIR, MEDIA_DIR, FLUBBER_DIR):
-    try:
-        d.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
-        log.warning("Could not create static dir %s: %s", d, e)
 
 # --- Sentry (optional) ---
 SENTRY_DSN = os.getenv("SENTRY_DSN")
@@ -174,7 +166,7 @@ def readyz():
 STATIC_UI_DIR = Path(os.getenv("STATIC_UI_DIR", "/app/static_ui"))
 app.mount("/static/final",   StaticFiles(directory=str(FINAL_DIR),   check_dir=False), name="final")
 app.mount("/static/media",   StaticFiles(directory=str(MEDIA_DIR),   check_dir=False), name="media")
-app.mount("/static/flubber", StaticFiles(directory=str(FLUBBER_DIR), check_dir=False), name="flubber")
+app.mount("/static/flubber", StaticFiles(directory=str(FLUBBER_CTX_DIR), check_dir=False), name="flubber")
 
 @app.get("/{full_path:path}")
 async def spa_catch_all(full_path: str):

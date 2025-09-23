@@ -21,9 +21,7 @@ import logging
 
 log = logging.getLogger(__name__)
 
-_APP_BASE_URL = (os.getenv("APP_BASE_URL") or "https://app.getpodcastplus.com").rstrip("/")
-if not _APP_BASE_URL:
-    _APP_BASE_URL = "https://app.getpodcastplus.com"
+_APP_BASE_URL = (settings.APP_BASE_URL or "https://app.getpodcastplus.com").rstrip("/")
 _SPREAKER_SUCCESS_REDIRECT = f"{_APP_BASE_URL}/dashboard?spreaker_connected=true"
 
 router = APIRouter(prefix="/spreaker", tags=["spreaker"])
@@ -271,28 +269,28 @@ def spreaker_auth_callback(request: Request, code: str, state: str, session: Ses
     <h2>Spreaker Connected</h2>
     <p>You can close this window and return to the app.</p>
     <script>
-        (function() {
+        (function() {{
             const target = "{_SPREAKER_SUCCESS_REDIRECT}";
-            function notify() {
-                try {
-                    if (window.opener && !window.opener.closed) {
-                        window.opener.postMessage({ type: 'spreaker_connected' }, '*');
-                    }
-                } catch (err) {}
-            }
-            function closeOrRedirect() {
+            function notify() {{
+                try {{
+                    if (window.opener && !window.opener.closed) {{
+                        window.opener.postMessage({{ type: 'spreaker_connected' }}, '*');
+                    }}
+                }} catch (err) {{}}
+            }}
+            function closeOrRedirect() {{
                 notify();
                 let closed = false;
-                try {
+                try {{
                     window.close();
                     closed = window.closed;
-                } catch (err) {}
-                if (!closed) {
+                }} catch (err) {{}}
+                if (!closed) {{
                     window.location.href = target;
-                }
-            }
+                }}
+            }}
             setTimeout(closeOrRedirect, 400);
-        })();
+        }})();
     </script>
     <p style='margin-top:32px; font-size:12px; opacity:.6'>If this window does not close automatically, just close it manually.</p>
 </body></html>

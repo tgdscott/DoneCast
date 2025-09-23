@@ -129,28 +129,28 @@ def spreaker_oauth_callback(code: str, state: str, session: Session = Depends(ge
 <h3>Spreaker Connected</h3>
 <p>You can close this window and return to the app.</p>
 <script>
-  (function() {
+  (function() {{
     const target = "{_SPREAKER_SUCCESS_REDIRECT}";
-    function notify() {
-      try {
-        if (window.opener && !window.opener.closed) {
-          window.opener.postMessage({ type: 'spreaker_connected' }, '*');
-        }
-      } catch (err) {}
-    }
-    function closeOrRedirect() {
+    function notify() {{
+      try {{
+        if (window.opener && !window.opener.closed) {{
+          window.opener.postMessage({{ type: 'spreaker_connected' }}, '*');
+        }}
+      }} catch (err) {{}}
+    }}
+    function closeOrRedirect() {{
       notify();
       let closed = false;
-      try {
+      try {{
         window.close();
         closed = window.closed;
-      } catch (err) {}
-      if (!closed) {
+      }} catch (err) {{}}
+      if (!closed) {{
         window.location.href = target;
-      }
-    }
+      }}
+    }}
     setTimeout(closeOrRedirect, 400);
-  })();
+  }})();
 </script>
 </body></html>
 """

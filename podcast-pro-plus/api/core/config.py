@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     ADMIN_EMAIL: str
     MEDIA_ROOT: str = "/tmp"
     OAUTH_BACKEND_BASE: Optional[str] = None
+    APP_BASE_URL: Optional[str] = None # For frontend redirects
     CORS_ALLOWED_ORIGINS: str
 
     # --- Legal ---
@@ -83,4 +84,3 @@ class Settings(BaseSettings):
 
 # Create a single, immutable instance of the settings
 settings = Settings()
-

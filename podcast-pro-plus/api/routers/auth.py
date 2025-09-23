@@ -419,9 +419,10 @@ async def auth_google_callback(request: Request, session: Session = Depends(get_
 
     access_token = create_access_token(data={"sub": user.email})
 
-    frontend_url = f"https://app.getpodcastplus.com/#access_token={access_token}&token_type=bearer"
+    frontend_base = (settings.APP_BASE_URL or "https://app.getpodcastplus.com").rstrip("/")
+    frontend_url = f"{frontend_base}/#access_token={access_token}&token_type=bearer"
     if user.is_admin:
-        frontend_url = f"https://app.getpodcastplus.com/admin#access_token={access_token}&token_type=bearer"
+        frontend_url = f"{frontend_base}/admin#access_token={access_token}&token_type=bearer"
 
     return RedirectResponse(url=frontend_url)
 

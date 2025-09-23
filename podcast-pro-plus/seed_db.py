@@ -1,5 +1,6 @@
 # d:\PodWebDeploy\podcast-pro-plus\seed_db.py
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 from sqlmodel import Session, select
 
@@ -9,10 +10,18 @@ def main():
     Seeds the local database with essential data for development, like an admin user.
     Run this script after running create_db.py.
     """
-    print("Loading local environment from .env.local...")
-    load_dotenv(dotenv_path=".env.local")
+    # Build a path to .env.local in the same directory as this script
+    env_path = Path(__file__).parent / ".env.local"
+    print(f"Loading local environment from {env_path}...")
+    load_dotenv(dotenv_path=env_path)
 
     # These imports must come AFTER load_dotenv
+    # First, ensure the database schema is up-to-date by running migrations.
+    from api.startup_tasks import run_startup_tasks
+    print("Ensuring database schema is up to date...")
+    run_startup_tasks()
+    print("✅ Schema is up to date.")
+
     from api.core.database import engine
     from api.models.user import User
     from api.core.security import get_password_hash

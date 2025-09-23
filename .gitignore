@@ -72,6 +72,7 @@ logs/
 # Media and large generated content
 media_uploads/
 local_media/
+local_tmp/
 cleaned_audio/
 edited_audio/
 final_episodes/
