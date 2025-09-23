@@ -85,7 +85,6 @@ transcripts/
 # Docker
 .dockerignore
 docker-compose.override.yml
-docker-compose.yaml
 
 # Google Cloud and local SDKs
 .config/gcloud/

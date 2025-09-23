@@ -1,57 +1,20 @@
-from __future__ import annotations
-
-from pathlib import Path
+# api/core/paths.py
 import os
+from pathlib import Path
 
+# The root of the project is one level up from the 'api' directory
+# e.g., d:\PodWebDeploy\podcast-pro-plus\
+PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
 
-# Resolve important directories relative to the workspace root (PPPv0)
-# This avoids scattering media under the backend package folder.
-# Layout enforced:
-# - Workspace root (WS_ROOT)
-#   - media_uploads/
-#   - final_episodes/
-#   - cleaned_audio/
-#   - edited_audio/
-#   - transcripts/
-#   - flubber_contexts/
-
-APP_ROOT = Path(__file__).resolve().parents[2]          # .../podcast-pro-plus
-# Allow override via env (for Cloud Run/GCS mounts). Falls back to workspace parent.
-_ENV_MEDIA_ROOT = os.getenv("MEDIA_ROOT")
-if _ENV_MEDIA_ROOT:
-    try:
-        WS_ROOT = Path(_ENV_MEDIA_ROOT).resolve()
-    except Exception:
-        WS_ROOT = APP_ROOT.parent
+# Define the local media directory.
+# It reads from the .env file (e.g., MEDIA_ROOT in .env.local).
+# If not set, it defaults to a 'local_media' folder in the project root.
+# This is much more robust for cross-platform (Windows/Linux) development.
+_media_root_str = os.getenv("MEDIA_ROOT")
+if _media_root_str:
+    MEDIA_DIR = Path(_media_root_str).resolve()
 else:
-    WS_ROOT = APP_ROOT.parent                                # .../PPPv0
+    MEDIA_DIR = PROJECT_ROOT / "local_media"
 
-MEDIA_DIR = WS_ROOT / "media_uploads"
-FINAL_DIR = WS_ROOT / "final_episodes"
-CLEANED_DIR = WS_ROOT / "cleaned_audio"
-EDITED_DIR = WS_ROOT / "edited_audio"
-TRANSCRIPTS_DIR = WS_ROOT / "transcripts"
-FLUBBER_CTX_DIR = WS_ROOT / "flubber_contexts"
-AI_SEGMENTS_DIR = WS_ROOT / "ai_segments"
-
-# Ensure they exist at import time (idempotent)
-for d in [MEDIA_DIR, FINAL_DIR, CLEANED_DIR, EDITED_DIR, TRANSCRIPTS_DIR, FLUBBER_CTX_DIR, AI_SEGMENTS_DIR]:
-    try:
-        d.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-
-__all__ = [
-    "APP_ROOT",
-    "WS_ROOT",
-    "MEDIA_DIR",
-    "FINAL_DIR",
-    "CLEANED_DIR",
-    "EDITED_DIR",
-    "TRANSCRIPTS_DIR",
-    "FLUBBER_CTX_DIR",
-    "AI_SEGMENTS_DIR",
-]
-
-# Back-compat alias for older code
-FLUBBER_DIR = FLUBBER_CTX_DIR
+# Ensure the directory exists so the app doesn't crash on first upload
+MEDIA_DIR.mkdir(parents=True, exist_ok=True)
