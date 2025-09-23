@@ -60,4 +60,27 @@ def public_config():
     return {
         "terms_version": getattr(settings, "TERMS_VERSION", ""),
         "api_base": "https://api.getpodcastplus.com",
+        # Include dynamic admin-exposed limits for client UX (non-sensitive)
+        "max_upload_mb": _get_max_upload_mb(),
     }
+
+# Pull current admin setting from DB if available; default to 500 on error
+def _get_max_upload_mb() -> int:
+    try:
+        from api.core.database import get_session
+        from fastapi import Depends
+        # We cannot use Depends here; manually open a session
+        from sqlmodel import Session
+        from api.core.database import engine
+        with Session(engine) as s:
+            from api.models.settings import load_admin_settings
+            admin = load_admin_settings(s)
+            val = int(getattr(admin, 'max_upload_mb', 500) or 500)
+            # enforce a sane floor/ceiling
+            if val < 10:
+                return 10
+            if val > 2048:
+                return 2048
+            return val
+    except Exception:
+        return 500

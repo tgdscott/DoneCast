@@ -50,10 +50,27 @@ export default function Recorder({ onBack, token, onFinish, onSaved }) {
   const countdownTimerRef = useRef(null);
   const wakeLockRef = useRef(null);
   const audioRef = useRef(null);
-  const MAX_UPLOAD_BYTES = 500 * 1024 * 1024; // 500 MB backend limit
+  const [maxUploadMb, setMaxUploadMb] = useState(500);
+  const MAX_UPLOAD_BYTES = useMemo(() => maxUploadMb * 1024 * 1024, [maxUploadMb]);
 
   const isMobile = useMemo(() => {
     try { return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent || ''); } catch { return false; }
+  }, []);
+
+  useEffect(() => {
+    let canceled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/public/config');
+        const data = await res.json().catch(() => ({}));
+        const n = parseInt(String(data?.max_upload_mb || '500'), 10);
+        if (!canceled && isFinite(n) && !isNaN(n)) {
+          const clamped = Math.min(Math.max(n, 10), 2048);
+          setMaxUploadMb(clamped);
+        }
+      } catch {}
+    })();
+    return () => { canceled = true; };
   }, []);
 
   const formatTime = (s) => {

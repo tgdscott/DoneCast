@@ -25,6 +25,8 @@ class AdminSettings(BaseModel):
     """
     test_mode: bool = False
     default_user_active: bool = True
+    # Maximum upload size for main content (in MB). Exposed publicly for client hints.
+    max_upload_mb: int = 500
 
 
 def load_admin_settings(session: Session) -> AdminSettings:

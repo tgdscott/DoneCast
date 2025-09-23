@@ -1320,29 +1320,7 @@ export default function AdminDashboard() {
                 </CardContent>
               </Card>
 
-              {/* API Configuration */}
-              <Card className="border-0 shadow-sm bg-white">
-                <CardHeader>
-                  <CardTitle style={{ color: "#2C3E50" }}>API Configuration</CardTitle>
-                  <p className="text-gray-600">Configure external service integrations</p>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  {/* OpenAI API Key input removed */}
-
-                  <div>
-                    <Label htmlFor="max-file-size" className="text-base font-medium text-gray-700">
-                      Maximum File Size (MB)
-                    </Label>
-                    <p className="text-sm text-gray-500 mt-1 mb-2">Maximum audio file upload size</p>
-                    <Input
-                      id="max-file-size"
-                      type="number"
-                      value={settings.maxFileSize}
-                      onChange={(e) => setSettings({ ...settings, maxFileSize: e.target.value })}
-                      placeholder="500" />
-                  </div>
-                </CardContent>
-              </Card>
+              {/* API Configuration - moved Max Upload to AdminFeatureToggles above */}
 
               {/* System Status */}
               <Card className="border-0 shadow-sm" style={{ backgroundColor: "#ECF0F1" }}>

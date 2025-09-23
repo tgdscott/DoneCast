@@ -86,8 +86,22 @@ async def upload_media_files(
     names = parse_friendly_names(friendly_names)
 
     MB = 1024 * 1024
+    # Resolve dynamic main content limit from admin settings (MB -> bytes)
+    try:
+        from api.models.settings import load_admin_settings
+        from api.core.database import engine
+        from sqlmodel import Session as _Session
+        with _Session(engine) as _s:
+            _limit_mb = int(getattr(load_admin_settings(_s), 'max_upload_mb', 500) or 500)
+    except Exception:
+        _limit_mb = 500
+    # Clamp to sane bounds
+    if _limit_mb < 10:
+        _limit_mb = 10
+    if _limit_mb > 2048:
+        _limit_mb = 2048
     CATEGORY_SIZE_LIMITS = {
-        MediaCategory.main_content: 500 * MB,
+        MediaCategory.main_content: _limit_mb * MB,
         MediaCategory.intro: 50 * MB,
         MediaCategory.outro: 50 * MB,
         MediaCategory.music: 50 * MB,

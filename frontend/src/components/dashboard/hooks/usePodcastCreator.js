@@ -196,6 +196,16 @@ export default function usePodcastCreator({
     capabilities.has_any_sfx_triggers,
   ]);
 
+  const requireIntern = capabilities.has_elevenlabs || capabilities.has_google_tts;
+  const requireSfx = capabilities.has_any_sfx_triggers;
+
+  const pendingIntentLabels = [];
+  if (intents.flubber === null) pendingIntentLabels.push('Flubber');
+  if (requireIntern && intents.intern === null) pendingIntentLabels.push('Intern');
+  if (requireSfx && intents.sfx === null) pendingIntentLabels.push('Sound Effects');
+
+  const intentsComplete = pendingIntentLabels.length === 0;
+
   useEffect(() => {
     if (!uploadedFile) { setAudioDurationSec(null); return; }
     let url = null;
@@ -571,8 +581,16 @@ export default function usePodcastCreator({
       setError('Please select an audio file.');
       return;
     }
-    if (file.size > 500 * MB) {
-      setError('Audio exceeds 500MB limit.');
+    // Fetch dynamic limit from public config (cached per session)
+    let maxMb = 500;
+    try {
+      const res = await fetch('/api/public/config');
+      const cfg = await res.json().catch(()=>({}));
+      const n = parseInt(String(cfg?.max_upload_mb || '500'), 10);
+      if (isFinite(n) && !isNaN(n)) maxMb = Math.min(Math.max(n, 10), 2048);
+    } catch {}
+    if (file.size > maxMb * MB) {
+      setError(`Audio exceeds ${maxMb}MB limit.`);
       return;
     }
     setUploadedFile(file);
@@ -1188,6 +1206,8 @@ export default function usePodcastCreator({
     flubberContexts,
     showIntentQuestions,
     intents,
+  intentsComplete,
+  pendingIntentLabels,
     showFlubberScan,
     capabilities,
     flubberNotFound,

@@ -424,11 +424,7 @@ export default function PodcastCreator() {
                         onChange={handleFileInputChange}
                         className="hidden" />
                     </div>
-                    <div className="flex justify-center mt-4">
-                      <p className="text-sm text-gray-500 bg-gray-100 px-4 py-2 rounded-full">
-                        Supports MP3, WAV, M4A files up to 500MB
-                      </p>
-                    </div>
+                    <CreatorUploadHint />
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -1136,6 +1132,29 @@ Example: 'Today I want to talk about my summer adventures. I visited three diffe
           </div>
         )}
       </main>
+    </div>
+  );
+}
+
+function CreatorUploadHint() {
+  const [maxMb, setMaxMb] = React.useState(500);
+  React.useEffect(() => {
+    let canceled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/public/config');
+        const data = await res.json().catch(() => ({}));
+        const n = parseInt(String(data?.max_upload_mb || '500'), 10);
+        if (!canceled && isFinite(n) && !isNaN(n)) setMaxMb(Math.min(Math.max(n, 10), 2048));
+      } catch {}
+    })();
+    return () => { canceled = true; };
+  }, []);
+  return (
+    <div className="flex justify-center mt-4">
+      <p className="text-sm text-gray-500 bg-gray-100 px-4 py-2 rounded-full">
+        Supports MP3, WAV, M4A files up to {maxMb}MB
+      </p>
     </div>
   );
 }
