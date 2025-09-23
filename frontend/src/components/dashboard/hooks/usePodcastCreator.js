@@ -661,16 +661,23 @@ export default function usePodcastCreator({
   const uploadCover = async (file) => {
     const MB = 1024 * 1024;
     const ct = (file?.type || '').toLowerCase();
-  if (!ct.startsWith('image/')) throw new Error('Cover must be an image file.');
-  if (file.size > 15 * MB) throw new Error('Cover image exceeds 15MB limit.');
+    if (!ct.startsWith('image/')) throw new Error('Cover must be an image file.');
+    if (file.size > 15 * MB) throw new Error('Cover image exceeds 15MB limit.');
     const fd = new FormData();
     fd.append('files', file);
     fd.append('friendly_names', JSON.stringify([file.name]));
     const api = makeApi(token);
-    // Add a timeout so the request doesn't hang forever and block the wizard
+    // Add a timeout so the request doesn't hang forever and block the wizard.
+    // Give uploads plenty of time to complete – 8s was too aggressive when
+    // users pick multi-megabyte images on slower connections.
     const controller = new AbortController();
-    const timeoutMs = 8000; // 8s
-    const t = setTimeout(() => controller.abort(), timeoutMs);
+    const uploadTimeoutMs = (() => {
+      const MB = 1024 * 1024;
+      if (!file?.size) return 45000; // sensible default when size unknown
+      const approx = 15000 + Math.ceil(file.size / MB) * 4000; // base + 4s/MB
+      return Math.min(Math.max(approx, 20000), 90000); // clamp 20s-90s
+    })();
+    const t = setTimeout(() => controller.abort(), uploadTimeoutMs);
     let data;
     try {
       data = await api.raw('/api/media/upload/episode_cover', { method: 'POST', body: fd, signal: controller.signal });
@@ -680,7 +687,7 @@ export default function usePodcastCreator({
         const fd2 = new FormData();
         fd2.append('file', file);
         const controller2 = new AbortController();
-        const t2 = setTimeout(() => controller2.abort(), 8000);
+        const t2 = setTimeout(() => controller2.abort(), uploadTimeoutMs);
         let alt;
         try {
           alt = await api.raw('/api/media/upload/cover_art', { method: 'POST', body: fd2, signal: controller2.signal });
