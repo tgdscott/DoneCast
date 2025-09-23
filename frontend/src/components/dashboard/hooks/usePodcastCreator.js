@@ -167,37 +167,27 @@ export default function usePodcastCreator({
     })();
   }, [token, authUser]);
 
-  useEffect(() => {
-    if (showIntentQuestions) return;
-    if (!uploadedFile) return;
-    if (isUploading) return;
-    if (currentStep !== 2) return;
-
-    const requireIntern = capabilities.has_elevenlabs || capabilities.has_google_tts;
-    const requireSfx = capabilities.has_any_sfx_triggers;
-
-    const needsFlubber = intents.flubber === null;
-    const needsIntern = requireIntern && intents.intern === null;
-    const needsSfx = requireSfx && intents.sfx === null;
-
-    if (needsFlubber || needsIntern || needsSfx) {
-      setShowIntentQuestions(true);
-    }
-  }, [
-    showIntentQuestions,
-    uploadedFile,
-    isUploading,
-    currentStep,
-    intents.flubber,
-    intents.intern,
-    intents.sfx,
-    capabilities.has_elevenlabs,
-    capabilities.has_google_tts,
-    capabilities.has_any_sfx_triggers,
-  ]);
-
   const requireIntern = capabilities.has_elevenlabs || capabilities.has_google_tts;
   const requireSfx = capabilities.has_any_sfx_triggers;
+
+  const intentVisibility = {
+    flubber: true,
+    intern: requireIntern,
+    sfx: requireSfx,
+  };
+
+  const normalizeIntentValue = (value) => {
+    if (value === 'yes' || value === 'no' || value === 'unknown') return value;
+    return null;
+  };
+
+  const handleIntentAnswerChange = (key, value) => {
+    if (!['flubber', 'intern', 'sfx'].includes(key)) return;
+    setIntents((prev) => {
+      const next = normalizeIntentValue(value);
+      return { ...prev, [key]: next === null ? prev?.[key] ?? null : next };
+    });
+  };
 
   const pendingIntentLabels = [];
   if (intents.flubber === null) pendingIntentLabels.push('Flubber');
@@ -610,7 +600,6 @@ export default function usePodcastCreator({
       const fname = result[0]?.filename;
       setUploadedFilename(fname);
       setStatusMessage('Upload successful!');
-      setShowIntentQuestions(true);
     } catch (err) {
       setError(err.message);
       setStatusMessage('');
@@ -887,47 +876,55 @@ export default function usePodcastCreator({
     setCurrentStep(3);
   };
 
-  const handleIntentSubmit = async (ans) => {
-    setIntents(ans);
+  const handleIntentSubmit = async (answers = intents) => {
+    const normalized = {
+      flubber: normalizeIntentValue(answers?.flubber ?? intents.flubber) ?? 'no',
+      intern: requireIntern ? (normalizeIntentValue(answers?.intern ?? intents.intern) ?? 'no') : 'no',
+      sfx: requireSfx ? (normalizeIntentValue(answers?.sfx ?? intents.sfx) ?? 'no') : 'no',
+    };
+
+    setIntents(normalized);
     setShowIntentQuestions(false);
-    try {
-      if (uploadedFilename && (ans.flubber==='yes' || ans.flubber==='unknown')){
-        setStatusMessage('Scanning for retakes (flubber)...');
-        setShowFlubberScan(true);
-        const api = makeApi(token);
-        const payload = { filename: uploadedFilename, intents: { flubber: ans.flubber } };
-        let contexts = [];
-        try {
-          for (let attempt = 0; attempt < 20; attempt++) {
-            try {
-              const data = await api.post('/api/flubber/prepare-by-file', payload);
-              contexts = Array.isArray(data?.contexts) ? data.contexts : [];
-              break;
-            } catch (e) {
-              if (e && e.status === 425) {
-                await new Promise(r => setTimeout(r, 1000));
-                continue;
-              }
-              break;
+
+    const shouldScan = uploadedFilename && (normalized.flubber === 'yes' || normalized.flubber === 'unknown');
+    if (shouldScan) {
+      setStatusMessage('Scanning for retakes (flubber)...');
+      setShowFlubberScan(true);
+      const api = makeApi(token);
+      const payload = { filename: uploadedFilename, intents: { flubber: normalized.flubber } };
+      let contexts = [];
+      try {
+        for (let attempt = 0; attempt < 20; attempt++) {
+          try {
+            const data = await api.post('/api/flubber/prepare-by-file', payload);
+            contexts = Array.isArray(data?.contexts) ? data.contexts : [];
+            break;
+          } catch (e) {
+            if (e && e.status === 425) {
+              await new Promise((r) => setTimeout(r, 1000));
+              continue;
             }
-            await new Promise(r => setTimeout(r, 1000));
+            break;
           }
-        } catch (_) {
         }
+      } catch (_) {
+      } finally {
         setShowFlubberScan(false);
-        if (contexts.length > 0) {
-          setFlubberContexts(contexts);
-          setShowFlubberReview(true);
-          return;
-        }
-        if (ans.flubber === 'yes') {
-          setFlubberNotFound(true);
-          return;
-        }
       }
-    } catch(_) {}
-    setShowFlubberScan(false);
+
+      if (contexts.length > 0) {
+        setFlubberContexts(contexts);
+        setShowFlubberReview(true);
+        return false;
+      }
+      if (normalized.flubber === 'yes') {
+        setFlubberNotFound(true);
+        return false;
+      }
+    }
+
     setCurrentStep(3);
+    return true;
   };
 
   const handlePublish = async () => {
@@ -1206,8 +1203,9 @@ export default function usePodcastCreator({
     flubberContexts,
     showIntentQuestions,
     intents,
-  intentsComplete,
-  pendingIntentLabels,
+    intentVisibility,
+    intentsComplete,
+    pendingIntentLabels,
     showFlubberScan,
     capabilities,
     flubberNotFound,
@@ -1255,6 +1253,7 @@ export default function usePodcastCreator({
     handleFlubberConfirm,
     handleFlubberCancel,
     handleIntentSubmit,
+    handleIntentAnswerChange,
     handlePublish,
     handleVoiceChange,
     handleAISuggest,

@@ -89,9 +89,12 @@ export default function PodcastCreator({
     handleFlubberCancel,
     showIntentQuestions,
     handleIntentSubmit,
+    intents,
+    handleIntentAnswerChange,
+    intentVisibility,
     capabilities,
-  intentsComplete,
-  pendingIntentLabels,
+    intentsComplete,
+    pendingIntentLabels,
     flubberNotFound,
     fuzzyThreshold,
     setFuzzyThreshold,
@@ -130,8 +133,12 @@ export default function PodcastCreator({
             onBack={() => setCurrentStep(1)}
             onNext={() => setCurrentStep(3)}
             onEditAutomations={() => setShowIntentQuestions(true)}
+            onIntentChange={handleIntentAnswerChange}
+            onIntentSubmit={handleIntentSubmit}
             canProceed={!!uploadedFile && intentsComplete && !isUploading}
             pendingIntentLabels={pendingIntentLabels}
+            intents={intents}
+            intentVisibility={intentVisibility}
           />
         );
       case 3:
@@ -261,6 +268,7 @@ export default function PodcastCreator({
             setShowIntentQuestions(false);
             setCurrentStep(3);
           }}
+          initialAnswers={intents}
           hide={{
             flubber: false,
             intern: !(capabilities.has_elevenlabs || capabilities.has_google_tts),

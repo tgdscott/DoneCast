@@ -4,9 +4,23 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 
 // props: open, onSubmit({ flubber, intern, sfx }), onCancel, hide={{flubber:bool,intern:bool,sfx:bool}}
-export default function IntentQuestions({ open, onSubmit, onCancel, hide }){
+const normalize = (value) => {
+  if (value === 'yes' || value === 'no' || value === 'unknown') return value;
+  return 'no';
+};
+
+export default function IntentQuestions({ open, onSubmit, onCancel, hide, initialAnswers }){
   const [answers, setAnswers] = useState({ flubber: 'no', intern: 'no', sfx: 'no' });
-  useEffect(()=>{ if(open){ setAnswers({ flubber:'no', intern:'no', sfx:'no' }); } }, [open]);
+  useEffect(()=>{
+    if(open){
+      const base = initialAnswers || {};
+      setAnswers({
+        flubber: normalize(base.flubber),
+        intern: normalize(base.intern),
+        sfx: normalize(base.sfx),
+      });
+    }
+  }, [open, initialAnswers]);
   if(!open) return null;
   const h = hide || {};
   const allAnswered = ['flubber','intern','sfx']
@@ -26,9 +40,9 @@ export default function IntentQuestions({ open, onSubmit, onCancel, hide }){
     </div>
   );
   const submit = () => onSubmit({
-    flubber: h.flubber ? 'no' : answers.flubber,
-    intern: h.intern ? 'no' : answers.intern,
-    sfx: h.sfx ? 'no' : answers.sfx,
+    flubber: h.flubber ? 'no' : normalize(answers.flubber),
+    intern: h.intern ? 'no' : normalize(answers.intern),
+    sfx: h.sfx ? 'no' : normalize(answers.sfx),
   });
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40" role="dialog" aria-modal="true">
