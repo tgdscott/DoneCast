@@ -26,10 +26,8 @@ export default function Onboarding() {
     }
   });
   const stepSaveTimer = useRef(null);
+  const importResumeTimerRef = useRef(null);
   const { largeText, setLargeText, highContrast, setHighContrast } = useComfort();
-
-  // Feature flag parity with modal wizard
-  const ENABLE_BYOK = (import.meta.env?.VITE_ENABLE_BYOK === 'true');
 
   // Path selection: 'new' | 'import'
   const [path, setPath] = useState('new');
@@ -50,6 +48,9 @@ export default function Onboarding() {
   const [formatKey, setFormatKey] = useState('solo');
   const [publishDay, setPublishDay] = useState('Monday');
   const [rssUrl, setRssUrl] = useState('');
+  const [importResult, setImportResult] = useState(null);
+  const [resumeAfterImport, setResumeAfterImport] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
 
   // Music assets
   const [musicAssets, setMusicAssets] = useState([NO_MUSIC_OPTION]);
@@ -117,8 +118,16 @@ export default function Onboarding() {
     }
   };
 
-  const wizardSteps = useMemo(() => {
-    // Step 1: Get their name
+  const importFlowSteps = useMemo(() => ([
+    { id: 'rss', title: 'Import from RSS', description: 'Paste your feed URL.' },
+    { id: 'confirm', title: 'Confirm import', description: "We'll mirror your setup and assets." },
+    { id: 'importing', title: 'Importing...', description: 'Fetching episodes and metadata.' },
+    { id: 'analyze', title: 'Analyzing', description: "We'll bring over what we can, and you can tidy later." },
+    { id: 'assets', title: 'Assets', description: "We'll bring over what we can, and you can tidy later." },
+    { id: 'importSuccess', title: 'Imported', description: 'Your show is now in Podcast Pro Plus.' },
+  ]), []);
+
+  const newFlowSteps = useMemo(() => {
     const nameStep = {
       id: 'yourName',
       title: 'What can we call you?',
@@ -129,8 +138,8 @@ export default function Onboarding() {
         if (!fn) { setNameError('First name is required'); return false; }
         setNameError('');
         try {
-            const api = makeApi(token);
-            await api.patch('/api/auth/users/me/prefs', { first_name: fn, last_name: ln || undefined });
+          const api = makeApi(token);
+          await api.patch('/api/auth/users/me/prefs', { first_name: fn, last_name: ln || undefined });
           try { refreshUser?.({ force: true }); } catch {}
         } catch (_) { /* non-fatal */ }
         return true;
@@ -150,51 +159,38 @@ export default function Onboarding() {
       ),
     };
 
-    // Step 2: Ask about existing podcast
     const choosePathStep = {
       id: 'choosePath',
       title: 'Do you have an existing podcast?',
       description: 'Start fresh, or import an existing show if you already have one.',
     };
 
-  if (path === 'import') {
-      const importSteps = [
-    { id: 'rss', title: 'Import from RSS', description: 'Paste your feed URL.' },
-    { id: 'confirm', title: 'Confirm import', description: "We'll mirror your setup and assets." },
-    { id: 'importing', title: 'Importing...', description: 'Fetching episodes and metadata.' },
-    { id: 'analyze', title: 'Analyzing', description: "We'll bring over what we can, and you can tidy later." },
-    { id: 'assets', title: 'Assets', description: "We'll bring over what we can, and you can tidy later." },
-        { id: 'importSuccess', title: 'Imported', description: 'Your show is now in Podcast Pro Plus.' },
-      ];
-  // Import path after branching at Step 2
-  return [...importSteps];
-    }
-
-    // Default: 'new' flow
     const newSteps = [
-      // Step 1: Name
       nameStep,
-      // Step 2: Choose path
       choosePathStep,
-      // Step 3: About your show
       { id: 'showDetails', title: 'About your show', description: "Tell us the name and what it's about. You can change this later." },
       { id: 'format', title: 'Format', description: 'How will most episodes feel?' },
       { id: 'coverArt', title: 'Podcast Cover Art (optional)', description: "Upload your podcast cover art. A square picture at least 1400 pixels wide works best. If you don't have one yet, you can skip this for now." },
-      // New: Intro/Outro creation step
       { id: 'introOutro', title: 'Intro & Outro', description: 'Create simple intro/outro audio now, or upload files if you have them.' },
       { id: 'music', title: 'Music (optional)', description: 'Pick intro/outro music (optional).' },
       { id: 'spreaker', title: 'Connect to Podcast Host', description: "We partner with Spreaker to host your podcast." },
-      // Step 8: Publish cadence
       { id: 'publishCadence', title: 'How often will you publish?', description: 'Take your best guess — you can change this later.' },
-      // Step 9: Conditional schedule details
       { id: 'publishSchedule', title: 'Publishing days', description: 'Pick your publishing days/dates.' },
       { id: 'finish', title: 'Finish', description: 'Nice work. You can publish now or explore your dashboard.' },
     ];
-    // Conditionally include publishSchedule (skip if unit is day or year)
+
     const includeSchedule = (freqUnit !== 'day' && freqUnit !== 'year');
-    const withConditional = includeSchedule ? newSteps : newSteps.filter(s => s.id !== 'publishSchedule');
-    return withConditional;
-  }, [path, ENABLE_BYOK, firstName, lastName, nameError, freqUnit]);
+    return includeSchedule ? newSteps : newSteps.filter((s) => s.id !== 'publishSchedule');
+  }, [firstName, lastName, nameError, freqUnit, path, token, refreshUser]);
+
+  const wizardSteps = useMemo(() => (
+    path === 'import' ? importFlowSteps : newFlowSteps
+  ), [path, importFlowSteps, newFlowSteps]);
+
+  const introOutroIndex = useMemo(() => {
+    const idx = newFlowSteps.findIndex((s) => s.id === 'introOutro');
+    return idx >= 0 ? idx : 0;
+  }, [newFlowSteps]);
 
   const stepId = wizardSteps[stepIndex]?.id;
 
@@ -788,7 +784,7 @@ export default function Onboarding() {
           return (
             <div className="space-y-2">
               <h3 className="text-lg font-semibold">Imported</h3>
-              <p className="text-sm text-muted-foreground">Your show is in Podcast Pro Plus. Explore your episodes on the dashboard.</p>
+              <p className="text-sm text-muted-foreground">Your show is in Podcast Pro Plus. We&apos;ll continue the setup from step 6 so you can fine-tune everything.</p>
             </div>
           );
         default:
@@ -813,12 +809,36 @@ export default function Onboarding() {
       if ((freqUnit === 'bi-weekly' || freqUnit === 'month') && selectedDates.length === 0) return false;
       return true;
     } : s.id === 'confirm' && path === 'import' ? async () => {
-      // Start import on Continue
+      const trimmed = (rssUrl || '').trim();
+      if (!trimmed) {
+        toast({ variant: 'destructive', title: 'RSS feed required', description: 'Please enter your feed URL before continuing.' });
+        return false;
+      }
+      setImportLoading(true);
       try {
-        if (!rssUrl) return true; // lenient: allow moving forward even if blank
-        try { await makeApi(token).post('/api/import/rss', { rss_url: rssUrl.trim() }); } catch {}
-      } catch {}
-      return true;
+        const api = makeApi(token);
+        const data = await api.post('/api/import/rss', { rss_url: trimmed });
+        setImportResult(data);
+        setRssUrl(trimmed);
+        const importedName = data?.podcast_name || data?.title || data?.name || '';
+        const importedDescription = data?.description || data?.summary || '';
+        setFormData((prev) => ({
+          ...prev,
+          podcastName: importedName || prev.podcastName || '',
+          podcastDescription: importedDescription || prev.podcastDescription || '',
+        }));
+        setSkipCoverNow(true);
+        setResumeAfterImport(true);
+        return true;
+      } catch (err) {
+        const message = err?.detail || err?.message || 'Failed to import RSS feed.';
+        toast({ variant: 'destructive', title: 'Import failed', description: message });
+        setImportResult(null);
+        setResumeAfterImport(false);
+        return false;
+      } finally {
+        setImportLoading(false);
+      }
     } : s.id === 'showDetails' ? async () => {
       const nameOk = (formData.podcastName || '').trim().length > 0;
       const descOk = (formData.podcastDescription || '').trim().length > 0;
@@ -860,6 +880,31 @@ export default function Onboarding() {
     return () => { if (t) clearTimeout(t); };
   }, [path, stepId, wizardSteps.length]);
 
+  useEffect(() => {
+    const shouldResume = resumeAfterImport && path === 'import' && stepId === 'importSuccess';
+    if (shouldResume && !importResumeTimerRef.current) {
+      const targetIndex = introOutroIndex >= 0 ? introOutroIndex : 0;
+      importResumeTimerRef.current = window.setTimeout(() => {
+        importResumeTimerRef.current = null;
+        setResumeAfterImport(false);
+        setPath('new');
+        setStepIndex(targetIndex);
+        const importedName = importResult?.podcast_name || importResult?.title || importResult?.name || formData.podcastName || 'your show';
+        toast({ title: 'Import complete', description: `We pulled in ${importedName}. Continue with the rest of the setup.` });
+      }, 600);
+    } else if (!shouldResume && importResumeTimerRef.current) {
+      clearTimeout(importResumeTimerRef.current);
+      importResumeTimerRef.current = null;
+    }
+
+    return () => {
+      if (importResumeTimerRef.current) {
+        clearTimeout(importResumeTimerRef.current);
+        importResumeTimerRef.current = null;
+      }
+    };
+  }, [resumeAfterImport, path, stepId, introOutroIndex, importResult, formData.podcastName, toast, setStepIndex, setPath, setResumeAfterImport]);
+
   // Compute gating for Next/Finish and hide rules
   const { nextDisabled, hideNext } = useMemo(() => {
     let disabled = false;
@@ -869,6 +914,12 @@ export default function Onboarding() {
         // Special UX: hide Continue; use Start new / Import existing buttons
         hide = true;
         break;
+      case 'confirm': {
+        if (path === 'import') {
+          disabled = importLoading;
+        }
+        break;
+      }
       case 'yourName': {
         disabled = !(firstName || '').trim();
         break;
@@ -901,7 +952,7 @@ export default function Onboarding() {
         break;
     }
     return { nextDisabled: !!disabled, hideNext: !!hide };
-  }, [stepId, firstName, formData.podcastName, formData.podcastDescription, formData.coverArt, skipCoverNow, spreakerClicked, isSpreakerConnected, freqUnit, freqCount, notSureSchedule, selectedWeekdays.length, selectedDates.length]);
+  }, [stepId, path, importLoading, firstName, formData.podcastName, formData.podcastDescription, formData.coverArt, skipCoverNow, spreakerClicked, isSpreakerConnected, freqUnit, freqCount, notSureSchedule, selectedWeekdays.length, selectedDates.length]);
 
   return (
     <OnboardingWrapper
