@@ -30,12 +30,14 @@ import {
   AlertTriangle,
   Settings as SettingsIcon,
   DollarSign,
+  ChevronDown,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { makeApi } from "@/lib/apiClient";
 import { useAuth } from "@/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import Logo from "@/components/Logo.jsx";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 import TemplateEditor from "@/components/dashboard/TemplateEditor";
 import PodcastCreator from "@/components/dashboard/PodcastCreator";
@@ -407,9 +409,23 @@ export default function PodcastPlusDashboard() {
                     </div>
                     <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
                       {canCreateEpisode ? (
-                        <Button onClick={() => setCurrentView('createEpisode')} className="flex-1 md:flex-none">
-                          <Plus className="w-4 h-4 mr-2" />New Episode
-                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button className="flex-1 md:flex-none" title="Start a new episode">
+                              <Plus className="w-4 h-4 mr-2" />
+                              Start New Episode
+                              <ChevronDown className="w-4 h-4 ml-2 opacity-80" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="min-w-[220px]">
+                            <DropdownMenuItem onClick={() => setCurrentView('createEpisode')} className="cursor-pointer">
+                              <Upload className="w-4 h-4 mr-2" /> Use Prerecorded Audio
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setCurrentView('recorder')} className="cursor-pointer">
+                              <Mic className="w-4 h-4 mr-2" /> Record Your Show Now
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       ) : (
                         <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 space-y-1">
                           <span className="font-medium text-amber-800">Finish setup to start publishing.</span>
@@ -487,7 +503,6 @@ export default function PodcastPlusDashboard() {
           <Button onClick={() => setCurrentView('podcastManager')} variant="outline" className="justify-start text-sm h-10"><Podcast className="w-4 h-4 mr-2" />Podcasts</Button>
                       <Button onClick={() => setCurrentView('templateManager')} variant="outline" className="justify-start text-sm h-10"><FileText className="w-4 h-4 mr-2" />Templates</Button>
                       <Button onClick={() => setCurrentView('mediaLibrary')} variant="outline" className="justify-start text-sm h-10"><Music className="w-4 h-4 mr-2" />Media</Button>
-          <Button onClick={() => setCurrentView('recorder')} variant="outline" className="justify-start text-sm h-10"><Mic className="w-4 h-4 mr-2" />Record</Button>
           <Button onClick={() => setCurrentView('episodeHistory')} variant="outline" className="justify-start text-sm h-10"><BarChart3 className="w-4 h-4 mr-2" />Episodes</Button>
           {/* Import moved under Podcasts */}
           <Button onClick={() => setCurrentView('billing')} variant="outline" className="justify-start text-sm h-10"><DollarSign className="w-4 h-4 mr-2" />Subscription</Button>
