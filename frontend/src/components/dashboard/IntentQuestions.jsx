@@ -9,7 +9,7 @@ const normalize = (value) => {
   return 'no';
 };
 
-export default function IntentQuestions({ open, onSubmit, onCancel, hide, initialAnswers }){
+export default function IntentQuestions({ open, onSubmit, onCancel, hide, initialAnswers, detectedIntents }){
   const [answers, setAnswers] = useState({ flubber: 'no', intern: 'no', sfx: 'no' });
   const [detailMode, setDetailMode] = useState(false);
   useEffect(()=>{
@@ -28,21 +28,98 @@ export default function IntentQuestions({ open, onSubmit, onCancel, hide, initia
   const allAnswered = ['flubber','intern','sfx']
     .filter(k => !h[k])
     .every(k => ['yes','no','unknown'].includes(answers[k]));
-  const Radio = ({name,label,description}) => (
+
+  const detection = detectedIntents || {};
+
+  const resolveInfo = (key) => {
+    const info = detection?.[key] || {};
+    const count = Number(info?.count ?? 0);
+    const matches = Array.isArray(info?.matches) ? info.matches : [];
+    return { count, matches };
+  };
+
+  const makeCopy = (key, baseLabel, baseDescription) => {
+    const info = resolveInfo(key);
+    if (info.count > 0) {
+      if (key === 'flubber') {
+        const qty = info.count === 1 ? 'a Flubber marker' : `${info.count} Flubber markers`;
+        return {
+          detected: true,
+          label: `We detected ${qty}. Should we process those?`,
+          description: `We heard ${info.count} possible redo${info.count === 1 ? '' : 's'} in your transcript.`,
+        };
+      }
+      if (key === 'intern') {
+        const qty = info.count === 1 ? 'an Intern command' : `${info.count} Intern commands`;
+        return {
+          detected: true,
+          label: `We detected ${qty}. Should we process those?`,
+          description: `We heard ${info.count} intern cue${info.count === 1 ? '' : 's'} in your transcript.`,
+        };
+      }
+      if (key === 'sfx') {
+        const names = Array.from(new Set(info.matches.map(m => (m?.label || m?.phrase || '').trim()).filter(Boolean)));
+        let detail = `We heard ${info.count} sound effect cue${info.count === 1 ? '' : 's'}.`;
+        if (names.length === 1) detail = `Cue word detected: ${names[0]}.`;
+        else if (names.length === 2) detail = `Cue words detected: ${names[0]} and ${names[1]}.`;
+        else if (names.length > 2) {
+          const preview = names.slice(0, 3).join(', ');
+          detail = `Cue words detected: ${preview}${names.length > 3 ? '…' : ''}.`;
+        }
+        return {
+          detected: true,
+          label: `We detected sound effect cues. Should we process those?`,
+          description: detail,
+        };
+      }
+    }
+    return { detected: false, label: baseLabel, description: baseDescription };
+  };
+
+  const flubberCopy = makeCopy(
+    'flubber',
+    'Is there a Flubber?',
+    'If you recorded any redos or mistakes, we can look for them automatically so you can trim them in the next step.',
+  );
+  const internCopy = makeCopy(
+    'intern',
+    'Is there an Intern?',
+    'Tell us if the AI intern voice should speak in this recording. We only ask when voices are available on your account.',
+  );
+  const sfxCopy = makeCopy(
+    'sfx',
+    'Are there any word Sound Effects?',
+    'Answer yes if you have cue words that should drop music or SFX during assembly.',
+  );
+
+  const Radio = ({name,label,description,detected}) => (
     <div className="flex flex-col gap-2 text-sm">
       <div className="flex items-center gap-4">
-        <div className="w-64 text-[13px] font-medium">{label}</div>
+        <div className={`w-64 text-[13px] font-medium ${detected ? 'text-emerald-700' : ''}`}>
+          {label}
+          {detected && (
+            <span className="ml-2 inline-flex items-center rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+              Detected
+            </span>
+          )}
+        </div>
         {['yes','no','unknown'].map(v => (
           <label key={v} className="flex items-center gap-1 cursor-pointer">
-            <input type="radio" name={name} value={v}
-                   checked={answers[name]===v}
-                   onChange={()=> setAnswers(a=>({...a,[name]:v}))} />
+            <input
+              type="radio"
+              name={name}
+              value={v}
+              checked={answers[name]===v}
+              onChange={()=> setAnswers(a=>({...a,[name]:v}))}
+            />
             <span className="capitalize">{v==='unknown' ? "I Don't Remember" : v}</span>
           </label>
         ))}
       </div>
-      {detailMode && description && (
-        <div className="text-xs text-muted-foreground ml-0 md:ml-[16.5rem] -mt-1">{description}</div>
+      {(detected || detailMode) && description && (
+        <div className={`text-xs ${detected ? 'text-emerald-700' : 'text-muted-foreground'} ml-0 md:ml-[16.5rem] -mt-1`}>
+          {description}
+        </div>
       )}
     </div>
   );
@@ -72,22 +149,25 @@ export default function IntentQuestions({ open, onSubmit, onCancel, hide, initia
           {!h.flubber && (
             <Radio
               name="flubber"
-              label="Is there a Flubber?"
-              description="If you recorded any redos or mistakes, we can look for them automatically so you can trim them in the next step."
+              label={flubberCopy.label}
+              description={flubberCopy.description}
+              detected={flubberCopy.detected}
             />
           )}
           {!h.intern && (
             <Radio
               name="intern"
-              label="Is there an Intern?"
-              description="Tell us if the AI intern voice should speak in this recording. We only ask when voices are available on your account."
+              label={internCopy.label}
+              description={internCopy.description}
+              detected={internCopy.detected}
             />
           )}
           {!h.sfx && (
             <Radio
               name="sfx"
-              label="Are there any word Sound Effects?"
-              description="Answer yes if you have cue words that should drop music or SFX during assembly."
+              label={sfxCopy.label}
+              description={sfxCopy.description}
+              detected={sfxCopy.detected}
             />
           )}
 

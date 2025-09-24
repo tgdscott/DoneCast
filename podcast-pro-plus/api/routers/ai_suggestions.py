@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
-from typing import Optional
+from typing import Optional, Iterable, Dict, Any
 from pathlib import Path
 import json
 import uuid
@@ -8,7 +8,7 @@ from api.core.paths import TRANSCRIPTS_DIR
 import logging
 from api.services.audio.transcript_io import load_transcript_json
 from api.services.episodes import repo as _ep_repo
-from api.models.podcast import Episode
+from api.models.podcast import Episode, MediaItem, MediaCategory
 from uuid import UUID as _UUID
 from api.core.database import get_session
 from sqlmodel import Session, select
@@ -24,6 +24,9 @@ from api.services.ai_content.schemas import (
 from api.services.ai_content.generators.title import suggest_title
 from api.services.ai_content.generators.notes import suggest_notes
 from api.services.ai_content.generators.tags import suggest_tags
+from api.services.intent_detection import analyze_intents, get_user_commands
+from .auth import get_current_user
+from api.models.user import User
 
 try:
     # Limiter is attached to app.state by main.py; get a safe reference for decorators
@@ -180,6 +183,128 @@ def _discover_transcript_for_episode(session: Session, episode_id: str, hint: Op
     return None
 
 
+def _discover_transcript_json_path(
+    session: Session,
+    episode_id: Optional[str] = None,
+    hint: Optional[str] = None,
+) -> Optional[Path]:
+    """Return the best matching transcript JSON path for an episode or hint."""
+
+    candidates: list[str] = []
+    hint_stem: Optional[str] = None
+    if hint:
+        try:
+            hint_stem = Path(str(hint)).stem
+        except Exception:
+            hint_stem = None
+
+    if episode_id:
+        try:
+            ep_uuid = _UUID(str(episode_id))
+        except Exception:
+            ep_uuid = None
+        ep: Optional[Episode]
+        try:
+            ep = _ep_repo.get_episode_by_id(session, ep_uuid) if ep_uuid else None
+        except Exception:
+            ep = None
+        if ep:
+            for attr in ("working_audio_name", "final_audio_path"):
+                stem = getattr(ep, attr, None)
+                if stem:
+                    try:
+                        candidates.append(Path(str(stem)).stem)
+                    except Exception:
+                        pass
+            try:
+                meta = json.loads(getattr(ep, "meta_json", "{}") or "{}")
+                for key in ("source_filename", "main_content_filename", "output_filename"):
+                    val = meta.get(key)
+                    if not val:
+                        continue
+                    try:
+                        candidates.append(Path(str(val)).stem)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+    if hint_stem:
+        candidates.append(hint_stem)
+
+    # Deduplicate while preserving order
+    seen = set()
+    ordered: list[str] = []
+    for cand in candidates:
+        if not cand:
+            continue
+        if cand in seen:
+            continue
+        seen.add(cand)
+        ordered.append(cand)
+
+    if not ordered and hint_stem:
+        ordered.append(hint_stem)
+
+    if not ordered:
+        return None
+
+    TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _resolve_for_stem(stem: str) -> Optional[Path]:
+        preferred = [
+            TRANSCRIPTS_DIR / f"{stem}.json",
+            TRANSCRIPTS_DIR / f"{stem}.original.json",
+            TRANSCRIPTS_DIR / f"{stem}.words.json",
+            TRANSCRIPTS_DIR / f"{stem}.original.words.json",
+        ]
+        for path in preferred:
+            if path.exists():
+                return path
+        try:
+            matches = [
+                p
+                for p in TRANSCRIPTS_DIR.glob("*.json")
+                if stem in p.stem and not p.name.endswith(".nopunct.json")
+            ]
+            matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+            if matches:
+                return matches[0]
+        except Exception:
+            return None
+        return None
+
+    for stem in ordered:
+        resolved = _resolve_for_stem(stem)
+        if resolved:
+            return resolved
+    return None
+
+
+def _gather_user_sfx_entries(session: Session, current_user: User) -> Iterable[Dict[str, Any]]:
+    try:
+        stmt = (
+            select(MediaItem)
+            .where(
+                MediaItem.user_id == current_user.id,
+                MediaItem.trigger_keyword != None,  # noqa: E711
+                MediaItem.category == MediaCategory.sfx,
+            )
+        )
+        for item in session.exec(stmt):
+            trigger = getattr(item, "trigger_keyword", None)
+            if not trigger:
+                continue
+            label = getattr(item, "friendly_name", None) or Path(str(item.filename)).stem
+            yield {
+                "phrase": trigger,
+                "label": label,
+                "source": f"media:{item.id}",
+            }
+    except Exception:
+        return []
+
+
 def _get_template_settings(session: Session, podcast_id):
     try:
         tmpl = session.exec(select(PodcastTemplate).where(PodcastTemplate.podcast_id == podcast_id)).first()
@@ -267,3 +392,36 @@ def transcript_ready(request: Request, episode_id: Optional[str] = None, hint: O
     eid = episode_id if episode_id else "00000000-0000-0000-0000-000000000000"
     p = _discover_transcript_for_episode(session, str(eid), hint)
     return {"ready": bool(p), "transcript_path": p}
+
+
+@router.get("/intent-hints")
+def intent_hints(
+    request: Request,
+    episode_id: Optional[str] = None,
+    hint: Optional[str] = None,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Return detected command keywords for a transcript."""
+
+    path = _discover_transcript_json_path(session, episode_id, hint)
+    if not path:
+        raise HTTPException(status_code=409, detail="TRANSCRIPT_NOT_READY")
+
+    try:
+        words = load_transcript_json(path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="TRANSCRIPT_NOT_FOUND")
+    except Exception as exc:  # pragma: no cover - unexpected parse errors
+        _log.warning("[intent-hints] failed to load transcript %s: %s", path, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="TRANSCRIPT_LOAD_ERROR")
+
+    commands_cfg = get_user_commands(current_user)
+    sfx_entries = list(_gather_user_sfx_entries(session, current_user))
+    intents = analyze_intents(words, commands_cfg, sfx_entries)
+
+    return {
+        "ready": True,
+        "transcript": path.name,
+        "intents": intents,
+    }

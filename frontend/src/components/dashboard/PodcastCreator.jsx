@@ -91,6 +91,8 @@ export default function PodcastCreator({
     showIntentQuestions,
     handleIntentSubmit,
     intents,
+    intentDetections,
+    intentDetectionReady,
     handleIntentAnswerChange,
     intentVisibility,
     capabilities,
@@ -116,6 +118,26 @@ export default function PodcastCreator({
     cancelBuild,
     buildActive,
   } = controller;
+
+  const intentDetectionCounts = {
+    flubber: Number((intentDetections?.flubber?.count) ?? 0),
+    intern: Number((intentDetections?.intern?.count) ?? 0),
+    sfx: Number((intentDetections?.sfx?.count) ?? 0),
+  };
+
+  const baseIntentHide = {
+    flubber: false,
+    intern: !(capabilities.has_elevenlabs || capabilities.has_google_tts),
+    sfx: !capabilities.has_any_sfx_triggers,
+  };
+
+  const effectiveIntentHide = intentDetectionReady
+    ? {
+        flubber: baseIntentHide.flubber || intentDetectionCounts.flubber === 0,
+        intern: baseIntentHide.intern || intentDetectionCounts.intern === 0,
+        sfx: baseIntentHide.sfx || intentDetectionCounts.sfx === 0,
+      }
+    : baseIntentHide;
 
   const stepContent = (() => {
     switch (currentStep) {
@@ -280,11 +302,8 @@ export default function PodcastCreator({
             setCurrentStep(3);
           }}
           initialAnswers={intents}
-          hide={{
-            flubber: false,
-            intern: !(capabilities.has_elevenlabs || capabilities.has_google_tts),
-            sfx: !capabilities.has_any_sfx_triggers,
-          }}
+          hide={effectiveIntentHide}
+          detectedIntents={intentDetections}
         />
       )}
 

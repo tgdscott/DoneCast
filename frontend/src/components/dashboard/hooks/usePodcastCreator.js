@@ -33,6 +33,8 @@ export default function usePodcastCreator({
   const [showIntentQuestions, setShowIntentQuestions] = useState(false);
   const intentsPromptedRef = useRef(false);
   const [intents, setIntents] = useState({ flubber: null, intern: null, sfx: null });
+  const [intentDetections, setIntentDetections] = useState({ flubber: null, intern: null, sfx: null });
+  const [intentDetectionReady, setIntentDetectionReady] = useState(true);
   const [showFlubberScan, setShowFlubberScan] = useState(false);
   const [capabilities, setCapabilities] = useState({ has_elevenlabs:false, has_google_tts:false, has_any_sfx_triggers:false });
   const [flubberNotFound, setFlubberNotFound] = useState(false);
@@ -96,6 +98,8 @@ export default function usePodcastCreator({
     try {
       if (preselectedMainFilename && !uploadedFilename) {
         setUploadedFilename(preselectedMainFilename);
+        setIntentDetections({ flubber: null, intern: null, sfx: null });
+        setIntentDetectionReady(false);
         setCurrentStep(5);
         if (preselectedTranscriptReady === true) { setTranscriptReady(true); transcriptReadyRef.current = true; }
         used = true;
@@ -108,8 +112,16 @@ export default function usePodcastCreator({
       const startStep = localStorage.getItem('ppp_start_step');
       const wasReady = localStorage.getItem('ppp_transcript_ready');
       if (!uploadedFilename) {
-        if (handedFilename) setUploadedFilename(handedFilename);
-        else if (handedHint) setUploadedFilename(handedHint);
+        if (handedFilename) {
+          setUploadedFilename(handedFilename);
+          setIntentDetections({ flubber: null, intern: null, sfx: null });
+          setIntentDetectionReady(false);
+        }
+        else if (handedHint) {
+          setUploadedFilename(handedHint);
+          setIntentDetections({ flubber: null, intern: null, sfx: null });
+          setIntentDetectionReady(false);
+        }
       }
       if (startStep === '5') setCurrentStep(5);
       if (wasReady === '1') { setTranscriptReady(true); transcriptReadyRef.current = true; }
@@ -468,6 +480,53 @@ export default function usePodcastCreator({
   }, [currentStep, uploadedFilename, expectedEpisodeId, token, transcriptReady]);
 
   useEffect(() => {
+    if (!transcriptReady) return;
+    if (!uploadedFilename && !expectedEpisodeId) return;
+    let canceled = false;
+    const api = makeApi(token);
+    setIntentDetectionReady(false);
+    setIntentDetections({ flubber: null, intern: null, sfx: null });
+    const params = [];
+    if (expectedEpisodeId) params.push(`episode_id=${encodeURIComponent(expectedEpisodeId)}`);
+    if (uploadedFilename) params.push(`hint=${encodeURIComponent(uploadedFilename)}`);
+    const url = `/api/ai/intent-hints${params.length ? `?${params.join('&')}` : ''}`;
+
+    const fetchHints = async (attempt = 0) => {
+      try {
+        const res = await api.get(url);
+        if (canceled) return;
+        const hints = (res && res.intents) ? res.intents : {};
+        setIntentDetections(hints);
+        const flubberCount = Number((hints?.flubber?.count) ?? 0);
+        const internCount = Number((hints?.intern?.count) ?? 0);
+        const sfxCount = Number((hints?.sfx?.count) ?? 0);
+        setIntents(prev => {
+          const next = { ...prev };
+          let changed = false;
+          if (prev.flubber === null && flubberCount === 0) { next.flubber = 'no'; changed = true; }
+          if (prev.intern === null && internCount === 0) { next.intern = 'no'; changed = true; }
+          if (prev.sfx === null && sfxCount === 0) { next.sfx = 'no'; changed = true; }
+          return changed ? next : prev;
+        });
+        setIntentDetectionReady(true);
+      } catch (err) {
+        if (canceled) return;
+        const status = err && typeof err === 'object' ? err.status : null;
+        if (status && [404, 409, 425].includes(status) && attempt < 5) {
+          setTimeout(() => { if (!canceled) fetchHints(attempt + 1); }, 750);
+          return;
+        }
+        setIntentDetections(null);
+        setIntentDetectionReady(true);
+      }
+    };
+
+    fetchHints();
+
+    return () => { canceled = true; };
+  }, [transcriptReady, uploadedFilename, expectedEpisodeId, token]);
+
+  useEffect(() => {
     if (selectedTemplate) return;
     if (!Array.isArray(templates)) return;
     const activeTemplates = templates.filter(t => t?.is_active !== false);
@@ -601,8 +660,10 @@ export default function usePodcastCreator({
     }
     setUploadedFile(file);
     setIntents({ flubber: null, intern: null, sfx: null });
-  setShowIntentQuestions(false);
-  intentsPromptedRef.current = false; // new file -> prompt again in Step 2
+    setIntentDetections({ flubber: null, intern: null, sfx: null });
+    setIntentDetectionReady(false);
+    setShowIntentQuestions(false);
+    intentsPromptedRef.current = false; // new file -> prompt again in Step 2
     setIsUploading(true);
     setStatusMessage('Uploading audio file...');
     setError('');
@@ -634,11 +695,14 @@ export default function usePodcastCreator({
 
   // Auto-open intent modal when on Step 2 with pending answers
   useEffect(() => {
-    if (currentStep === 2 && (uploadedFile || uploadedFilename) && !intentsComplete && !intentsPromptedRef.current) {
+    if (currentStep !== 2) return;
+    if (!(uploadedFile || uploadedFilename)) return;
+    if (!intentDetectionReady) return;
+    if (!intentsComplete && !intentsPromptedRef.current) {
       setShowIntentQuestions(true);
       intentsPromptedRef.current = true;
     }
-  }, [currentStep, uploadedFile, uploadedFilename, intentsComplete]);
+  }, [currentStep, uploadedFile, uploadedFilename, intentsComplete, intentDetectionReady]);
 
   const cancelBuild = () => {
     try {
@@ -652,6 +716,8 @@ export default function usePodcastCreator({
     setTranscriptReady(false);
     transcriptReadyRef.current = false;
     setIntents({ flubber: null, intern: null, sfx: null });
+    setIntentDetections({ flubber: null, intern: null, sfx: null });
+    setIntentDetectionReady(true);
     setShowIntentQuestions(false);
     setStatusMessage('');
     setError('');
@@ -1290,6 +1356,8 @@ export default function usePodcastCreator({
     flubberContexts,
     showIntentQuestions,
     intents,
+    intentDetections,
+    intentDetectionReady,
     intentVisibility,
     intentsComplete,
     pendingIntentLabels,
