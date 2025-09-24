@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
 import { makeApi, isApiError } from "@/lib/apiClient";
+import CoverCropper from "./CoverCropper";
 
 // Basic subset of Spreaker language codes; extend as needed
 const LANG_OPTIONS = [
@@ -37,6 +38,8 @@ export default function EditPodcastDialog({
 	onSave,
 	token,
 	userEmail,
+	userFirstName,
+	userLastName,
 }) {
 	const [formData, setFormData] = useState({
 		name: "",
@@ -65,28 +68,64 @@ export default function EditPodcastDialog({
 	const [confirmShowIdChange, setConfirmShowIdChange] = useState(false);
 	const [newCoverFile, setNewCoverFile] = useState(null);
 	const [coverPreview, setCoverPreview] = useState("");
+	const coverCropperRef = useRef(null);
+	const [coverCrop, setCoverCrop] = useState(null);
+	const [coverMode, setCoverMode] = useState('crop');
 	const { toast } = useToast();
+
+	// Derived validation: Spreaker requires 4+ chars for title
+	const nameTooShort = (formData.name || "").trim().length < 4;
+
+	// Ensure we always present a readable error string (never [object Object])
+	const toErrorText = (err) => {
+		if (!err) return "";
+		if (typeof err === "string") return err;
+		const pick = (v) => (typeof v === "string" ? v : (v && typeof v === "object" ? JSON.stringify(v) : (v == null ? "" : String(v))));
+		// Common fields returned by our API client
+		const msg = err.detail || err.error || err.message || err.reason || err.msg;
+		if (msg) return pick(msg);
+		if (typeof err.status === 'number') return `Request failed (${err.status})`;
+		return pick(err);
+	};
 
 	// Track if we've done the initial local population to avoid overwriting remote-loaded values
 	const initializedFromLocal = useRef(false);
-	useEffect(() => {
+		useEffect(() => {
 		if (!podcast) return;
 		// If remote already loaded, don't clobber remote values
 		if (remoteStatus.loaded) return;
 		// Only initialize once per open lifecycle
 		if (initializedFromLocal.current && isOpen) return;
 		initializedFromLocal.current = true;
+			// Defaults
+			const detectedLang = (() => {
+				try {
+					const nav = navigator?.language || navigator?.languages?.[0] || '';
+					if (!nav) return '';
+					const lower = String(nav).toLowerCase();
+					// Map en-US -> en, es-ES -> es, pt-BR pass-through
+					if (lower.startsWith('pt-br')) return 'pt-br';
+					const base = lower.split('-')[0];
+					const allowed = new Set(["en","es","fr","de","it","pt","pt-br","nl","sv","no","da","fi","pl","ru","ja","zh","ar"]);
+					return allowed.has(base) ? base : 'en';
+				} catch { return 'en'; }
+			})();
+			const defaultLang = detectedLang || 'en';
+			const defaultType = 'episodic';
+			const owner = (podcast?.owner_name) || [userFirstName, userLastName].filter(Boolean).join(' ');
+			const author = (podcast?.author_name) || [userFirstName, userLastName].filter(Boolean).join(' ');
+			const email = podcast?.contact_email || userEmail || '';
 		setFormData({
-			name: podcast.name || "",
-			description: podcast.description || "",
-			cover_path: podcast.cover_path || "",
-			podcast_type: podcast.podcast_type || "",
-			language: podcast.language || "",
-			copyright_line: podcast.copyright_line || "",
-			owner_name: podcast.owner_name || "",
-			author_name: podcast.author_name || "",
+				name: podcast.name || "",
+				description: podcast.description || "",
+				cover_path: podcast.cover_path || "",
+				podcast_type: podcast.podcast_type || defaultType,
+				language: podcast.language || defaultLang,
+				copyright_line: podcast.copyright_line || "",
+				owner_name: owner || "",
+				author_name: author || "",
 			spreaker_show_id: podcast.spreaker_show_id || "",
-			contact_email: podcast.contact_email || userEmail || "",
+				contact_email: email,
 			category_id: podcast.category_id ? String(podcast.category_id) : "",
 			category_2_id: podcast.category_2_id ? String(podcast.category_2_id) : "",
 			category_3_id: podcast.category_3_id ? String(podcast.category_3_id) : "",
@@ -130,8 +169,10 @@ export default function EditPodcastDialog({
 				if (m.cover_path) setCoverPreview(resolveCoverURL(m.cover_path));
 				setRemoteStatus({ loading: false, error: "", loaded: true });
 			} catch (e) {
-				const msg = isApiError(e) ? (e.detail || e.error || e.message) : String(e);
-				setRemoteStatus({ loading: false, error: msg || "Failed remote fetch", loaded: false });
+				const msg = toErrorText(isApiError(e) ? (e.detail || e.error || e.message || e) : e);
+				// Treat 404/Not Found (no mapping yet) as a soft miss, not a hard error for UI noise
+				const status = (e && typeof e === 'object' && 'status' in e) ? e.status : undefined;
+				setRemoteStatus({ loading: false, error: status === 404 ? "" : (msg || "Failed remote fetch"), loaded: false });
 			}
 		}
 		loadRemote();
@@ -179,11 +220,16 @@ export default function EditPodcastDialog({
 		if (file) {
 			setNewCoverFile(file);
 			setCoverPreview(URL.createObjectURL(file));
+			setCoverCrop(null);
 		}
 	};
 
 	const handleSubmit = async (e) => {
 		e.preventDefault();
+		if (nameTooShort) {
+			toast({ title: "Name too short", description: "Podcast title must be at least 4 characters.", variant: "destructive" });
+			return;
+		}
 		// Guard: if spreaker_show_id changed, require confirmation checkbox
 		if (originalSpreakerId && formData.spreaker_show_id && formData.spreaker_show_id !== originalSpreakerId && !confirmShowIdChange) {
 			toast({ title: "Confirmation Required", description: "Check the confirmation box to change the Spreaker Show ID.", variant: "destructive" });
@@ -198,7 +244,16 @@ export default function EditPodcastDialog({
 				Object.entries(formData).forEach(([k, v]) => {
 					if (v !== undefined && v !== null && v !== "") data.append(k, v);
 				});
-				data.append("cover_image", newCoverFile);
+				try {
+					const blob = await coverCropperRef.current?.getProcessedBlob?.();
+					if (blob) {
+						data.append("cover_image", new File([blob], "cover.jpg", { type: "image/jpeg" }));
+					} else {
+						data.append("cover_image", newCoverFile);
+					}
+				} catch {
+					data.append("cover_image", newCoverFile);
+				}
 				if (originalSpreakerId && formData.spreaker_show_id !== originalSpreakerId && confirmShowIdChange) {
 					data.append("allow_spreaker_id_change", "true");
 				}
@@ -236,7 +291,7 @@ export default function EditPodcastDialog({
 						<span className="text-muted-foreground">
 							{remoteStatus.loading && "Loading Spreaker metadata..."}
 							{!remoteStatus.loading && remoteStatus.loaded && "Values loaded from Spreaker"}
-							{!remoteStatus.loading && remoteStatus.error && `Remote load failed (${remoteStatus.error}) using local data`}
+							{!remoteStatus.loading && !remoteStatus.loaded && remoteStatus.error && "Remote load failed — using local data"}
 						</span>
 						<button
 							type="button"
@@ -257,8 +312,9 @@ export default function EditPodcastDialog({
 									if (m.cover_path) setCoverPreview(resolveCoverURL(m.cover_path));
 									setRemoteStatus({loading:false,error:"",loaded:true});
 								} catch(err){
-									const msg = isApiError(err) ? (err.detail || err.error || err.message) : String(err);
-									setRemoteStatus({loading:false,error:msg,loaded:false});
+									const msg = toErrorText(isApiError(err) ? (err.detail || err.error || err.message || err) : err);
+									const status = (err && typeof err === 'object' && 'status' in err) ? err.status : undefined;
+									setRemoteStatus({loading:false,error: status === 404 ? "" : msg, loaded:false});
 								}
 							}}
 						>
@@ -270,6 +326,7 @@ export default function EditPodcastDialog({
 						<div className="space-y-1">
 							<Label htmlFor="name">Name</Label>
 							<Input id="name" value={formData.name} onChange={handleChange} />
+							{nameTooShort && <p className="text-[11px] text-amber-700">Minimum 4 characters.</p>}
 						</div>
 						<div className="space-y-1">
 							<Label htmlFor="spreaker_show_id">Spreaker Show ID</Label>
@@ -324,23 +381,34 @@ export default function EditPodcastDialog({
 						</div>
 						<div className="space-y-1">
 							<Label>Cover</Label>
-							<div className="flex items-start gap-4">
-								{coverPreview && (
-									<img
-										src={coverPreview}
-										alt="cover preview"
-										className="w-16 h-16 rounded object-cover border"
-									/>
-								)}
-								<div className="flex-1 space-y-2">
-									<Input type="file" accept="image/*" onChange={handleCoverFileChange} />
-									{!newCoverFile && (
-										<p className="text-xs text-muted-foreground">
-											Leave blank to keep existing cover.
-										</p>
+							{!newCoverFile && (
+								<div className="flex items-start gap-4">
+									{coverPreview && (
+										<img
+											src={coverPreview}
+											alt="cover preview"
+											className="w-16 h-16 rounded object-cover border"
+										/>
 									)}
+									<div className="flex-1 space-y-2">
+										<Input type="file" accept="image/*" onChange={handleCoverFileChange} />
+										<p className="text-xs text-muted-foreground">Leave blank to keep existing cover.</p>
+									</div>
 								</div>
-							</div>
+							)}
+							{newCoverFile && (
+								<div className="space-y-2">
+									<CoverCropper
+										ref={coverCropperRef}
+										sourceFile={newCoverFile}
+										existingUrl={null}
+										value={coverCrop}
+										onChange={(s)=> setCoverCrop(s)}
+										onModeChange={(m)=> setCoverMode(m)}
+									/>
+									<p className="text-[11px] text-muted-foreground">We’ll upload a square image based on your selection.</p>
+								</div>
+							)}
 						</div>
 						<div className="space-y-1">
 							<Label>Categories</Label>
@@ -414,7 +482,7 @@ export default function EditPodcastDialog({
 						<Button type="button" variant="outline" onClick={onClose}>
 							Cancel
 						</Button>
-						<Button type="submit" disabled={isSaving}>
+						<Button type="submit" disabled={isSaving || nameTooShort}>
 							{isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : ""}
 							Save changes
 						</Button>

@@ -22,6 +22,61 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [recoveringId, setRecoveringId] = useState(null);
   const { toast } = useToast();
+  const [isSpreakerConnected, setIsSpreakerConnected] = useState(false);
+  const [me, setMe] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const profile = await makeApi(token).get('/api/auth/users/me');
+        setMe(profile || null);
+        setIsSpreakerConnected(!!profile?.spreaker_access_token);
+      } catch { setIsSpreakerConnected(false); }
+    })();
+  }, [token]);
+
+  const getComplianceIssues = (p) => {
+    const issues = [];
+    const nameLen = (p?.name || '').trim().length;
+    if (nameLen < 4) issues.push('name');
+    if (!p?.podcast_type) issues.push('podcast_type');
+    if (!p?.language) issues.push('language');
+    if (!p?.contact_email) issues.push('contact_email');
+    return issues;
+  };
+
+  const handlePublishToSpreaker = async (p) => {
+    // If not connected, start OAuth then prompt user to return/retry
+    try {
+      if (!isSpreakerConnected) {
+        const qs = new URLSearchParams({ access_token: token }).toString();
+        const popupUrl = buildApiUrl(`/api/auth/spreaker/start?${qs}`);
+        const popup = window.open(popupUrl, 'spreakerAuth', 'width=600,height=700');
+        const timer = setInterval(async () => {
+          if (!popup || popup.closed) {
+            clearInterval(timer);
+            try {
+              const me = await makeApi(token).get('/api/auth/users/me');
+              const connected = !!me?.spreaker_access_token;
+              setIsSpreakerConnected(connected);
+              if (connected) {
+                toast({ title: 'Connected to Spreaker', description: 'You can now publish your podcast.' });
+                // Open edit to review and save; a dedicated publish call can be added here once available
+                openEditDialog(p);
+              } else {
+                toast({ title: 'Not connected', description: 'Please try connecting again.', variant: 'destructive' });
+              }
+            } catch {}
+          }
+        }, 1000);
+        return;
+      }
+      // Connected: open edit to finalize details; integrate direct publish endpoint here if available.
+      openEditDialog(p);
+    } catch (e) {
+      toast({ title: 'Unable to publish', description: e?.message || 'Please try again.', variant: 'destructive' });
+    }
+  };
   const rawFullpage = import.meta.env?.VITE_ONBOARDING_FULLPAGE ?? import.meta.env?.ONBOARDING_FULLPAGE;
   const fullPageOnboarding = rawFullpage === undefined ? true : String(rawFullpage).toLowerCase() === 'true';
 
@@ -52,7 +107,7 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
   const openWizard = () => {
     // If full-page onboarding is enabled, steer users to /onboarding instead of opening the modal
     if (fullPageOnboarding) {
-      try { window.location.href = '/onboarding'; } catch {}
+      try { window.location.href = '/onboarding?from=manager&reset=1'; } catch {}
     } else {
       setIsWizardOpen(true);
     }
@@ -168,6 +223,36 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
                     </div>
                   </div>
                   <div className="flex items-center space-x-2">
+                    {/* Spreaker publish/setup pills */}
+                    {(() => {
+                      const issues = getComplianceIssues(podcast);
+                      const hasShowId = !!podcast.spreaker_show_id;
+                      // Only one pill at a time.
+                      // Rule: Yellow requires a Spreaker ID (i.e., show exists on Spreaker) but is incomplete locally
+                      if (hasShowId && issues.length > 0) {
+                        return (
+                          <button
+                            className="px-3 py-1 rounded-full bg-yellow-400 text-black text-xs"
+                            onClick={() => openEditDialog(podcast)}
+                          >
+                            Complete setup to publish to Spreaker
+                          </button>
+                        );
+                      }
+                      // If not connected and no Spreaker show yet, offer green publish CTA when compliant
+                      if (!isSpreakerConnected && !hasShowId && issues.length === 0) {
+                        return (
+                          <button
+                            className="px-3 py-1 rounded-full bg-green-600 text-white text-xs"
+                            onClick={() => handlePublishToSpreaker(podcast)}
+                          >
+                            Publish to Spreaker
+                          </button>
+                        );
+                      }
+                      // Otherwise, no pill for non-Spreaker shows or when fully compliant with ID
+                      return null;
+                    })()}
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" aria-label={`Actions for ${podcast.name}`}>
@@ -248,7 +333,9 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
           podcast={podcastToEdit}
           onSave={handleEditPodcast}
           token={token}
-          userEmail={podcastToEdit?.user?.email || undefined}
+          userEmail={me?.email || podcastToEdit?.user?.email || undefined}
+          userFirstName={me?.first_name}
+          userLastName={me?.last_name}
         />
       )}
 

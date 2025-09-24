@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '@/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '../ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
 import { Progress } from '../ui/progress';
+import { Badge } from '@/components/ui/badge';
 import { makeApi, isApiError } from '@/lib/apiClient';
 
 export default function BillingPage({ token, onBack }) {
@@ -17,6 +18,7 @@ export default function BillingPage({ token, onBack }) {
   const [checkoutDetails, setCheckoutDetails] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [planPolling, setPlanPolling] = useState(false);
+  const [annual, setAnnual] = useState(false);
   const { toast } = (() => { try { return useToast(); } catch { return { toast: () => {} }; } })();
   const tabIdRef = useRef(null);
   if(!tabIdRef.current) {
@@ -178,43 +180,100 @@ export default function BillingPage({ token, onBack }) {
     try { const d = new Date(iso); const mm = String(d.getMonth()+1).padStart(2,'0'); const dd = String(d.getDate()).padStart(2,'0'); const yy = d.getFullYear(); return `${mm}-${dd}-${yy}`; } catch { return iso; }
   };
 
+  // Pricing data (Creator & Pro only for in-app billing)
+  const tiers = useMemo(() => ([
+    {
+      key: 'starter', name: 'Starter', monthly: 19, annual: null,
+      processing: '120 (2 hrs)', extraRate: '$6/hr', queue: '2 hrs, held 7 days',
+      features: {
+        uploadRecord: true, basicCleanup: true, manualPublish: true,
+        autopublishSpreaker: false, flubber: false, intern: false, advancedIntern: false,
+        sfxTemplates: false, analytics: false, multiUser: false, priorityQueue: false, premiumSupport: false,
+      }
+    },
+    {
+      key: 'creator', name: 'Creator', monthly: 39, annual: 31,
+      processing: '600 (10 hrs)', extraRate: '$5/hr', queue: '10 hrs, held 14 days',
+      features: {
+        uploadRecord: true, basicCleanup: true, manualPublish: true,
+        autopublishSpreaker: true, flubber: true, intern: true, advancedIntern: false,
+        sfxTemplates: false, analytics: false, multiUser: false, priorityQueue: false, premiumSupport: false,
+      },
+      popular: true, badge: 'Most Popular',
+    },
+    {
+      key: 'pro', name: 'Pro', monthly: 79, annual: 63,
+      processing: '1500 (25 hrs)', extraRate: '$4/hr', queue: '25 hrs, held 30 days',
+      features: {
+        uploadRecord: true, basicCleanup: true, manualPublish: true,
+        autopublishSpreaker: true, flubber: true, intern: true, advancedIntern: true,
+        sfxTemplates: true, analytics: true, multiUser: false, priorityQueue: false, premiumSupport: false,
+      },
+    },
+    {
+      key: 'enterprise', name: 'Enterprise', monthly: null, annual: null,
+      processing: '3600 (60 hrs)', extraRate: '$3/hr', queue: '60 hrs, held 60 days',
+      features: {
+        uploadRecord: true, basicCleanup: true, manualPublish: true,
+        autopublishSpreaker: true, flubber: true, intern: true, advancedIntern: true,
+        sfxTemplates: true, analytics: true, multiUser: true, priorityQueue: true, premiumSupport: true,
+      },
+      contact: true,
+    },
+  ]), []);
+
+  const rows = useMemo(() => ([
+    { key: 'price', label: 'Price' },
+    { key: 'processing', label: 'Processing minutes / mo' },
+    { key: 'extraRate', label: 'Extra minutes (rollover)' },
+    { key: 'queue', label: 'Queue storage (unprocessed audio)' },
+    { key: 'uploadRecord', label: 'Upload & record' },
+    { key: 'basicCleanup', label: 'Basic cleanup (noise, trim)' },
+    { key: 'manualPublish', label: 'Manual publish' },
+    { key: 'autopublishSpreaker', label: 'Auto-publish to Spreaker (+ linked platforms)' },
+    { key: 'flubber', label: 'Flubber (filler removal)' },
+    { key: 'intern', label: 'Intern (spoken edits)' },
+    { key: 'advancedIntern', label: 'Advanced Intern (multi-step edits)' },
+    { key: 'sfxTemplates', label: 'SFX & templates' },
+    { key: 'analytics', label: 'Analytics (via Spreaker API)' },
+    { key: 'multiUser', label: 'Multi-user accounts' },
+    { key: 'priorityQueue', label: 'Priority processing queue' },
+    { key: 'premiumSupport', label: 'Premium support' },
+  ]), []);
+
+  const priceFor = (t) => {
+    if (t.contact) return 'Contact Us';
+    const amt = annual ? t.annual : t.monthly;
+    if (amt == null) return annual ? '—' : `$${t.monthly}/mo`;
+    return `$${amt}/mo` + (annual ? ' (billed annually)' : '');
+  };
+
+  function Check({ on }) {
+    return <span aria-label={on ? 'Included' : 'Not included'} className={on ? 'text-green-600' : 'text-slate-400'}>{on ? '✅' : '–'}</span>;
+  }
+
+  const currentPlanKey = (subscription?.plan_key || 'free');
+  const renewalIso = subscription?.current_period_end;
+  const cancelAtEnd = !!(subscription?.cancel_at_period_end) || !!(subscription?.will_cancel_at);
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-2">
-        {onBack && <Button variant="ghost" onClick={onBack}>Back</Button>}
-        <h2 className="text-2xl font-semibold">Billing</h2>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          {onBack && <Button variant="ghost" onClick={onBack}>Back</Button>}
+          <h2 className="text-2xl font-semibold">Subscriptions</h2>
+        </div>
+        <div className="inline-flex items-center gap-3 rounded-full border px-3 py-1 text-sm">
+          <button type="button" onClick={()=>setAnnual(false)} className={!annual? 'font-semibold':'text-slate-500'} aria-pressed={!annual}>Monthly</button>
+          <span className="text-slate-300">|</span>
+          <button type="button" onClick={()=>setAnnual(true)} className={annual? 'font-semibold':'text-slate-500'} aria-pressed={annual}>Annual (Save 20%)</button>
+        </div>
       </div>
       {error && <div className="text-red-600 text-sm">{error}</div>}
+
+      {/* Usage bar above table */}
       <Card>
-        <CardHeader><CardTitle>Current Plan</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          {loading && <div className="text-sm text-gray-500">Loading...</div>}
-          {!loading && subscription && (
-            <div className="space-y-1 text-sm">
-              <div>Plan: <span className="font-medium capitalize">{subscription.plan_key}</span></div>
-              {subscription.plan_key !== 'free' && subscription.current_period_end && <div>Renews: {formatDate(subscription.current_period_end)}</div>}
-            </div>
-          )}
-          {planPolling && <div className="text-xs text-amber-600">Finalizing upgrade...</div>}
-          <div className="flex flex-col gap-2">
-            {subscription?.plan_key === 'free' && (<>
-              <Button disabled={checkoutLoading} onClick={()=>startCheckout('creator','monthly')}>Upgrade to Creator (Monthly)</Button>
-              <Button variant="outline" disabled={checkoutLoading} onClick={()=>startCheckout('creator','annual')}>Creator Annual</Button>
-              <Button disabled={checkoutLoading} onClick={()=>startCheckout('pro','monthly')}>Pro Monthly</Button>
-              <Button variant="outline" disabled={checkoutLoading} onClick={()=>startCheckout('pro','annual')}>Pro Annual</Button>
-            </>)}
-            {subscription?.plan_key === 'creator' && (<>
-              <Button disabled={checkoutLoading} onClick={()=>startCheckout('pro','monthly')}>Upgrade to Pro (Monthly)</Button>
-              <Button variant="outline" disabled={checkoutLoading} onClick={()=>startCheckout('pro','annual')}>Pro Annual</Button>
-              <Button disabled={portalLoading} variant="secondary" onClick={openPortal}>Manage Subscription</Button>
-            </>)}
-            {subscription?.plan_key === 'pro' && (<Button disabled={portalLoading} onClick={openPortal}>Manage Subscription</Button>)}
-          </div>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader><CardTitle>Usage</CardTitle></CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="pt-6">
           {!usage && <div className="text-sm text-gray-500">Loading usage...</div>}
           {usage && (() => {
             const usedMin = typeof usage.processing_minutes_used_this_month === 'number' ? usage.processing_minutes_used_this_month : (typeof usage.minutes_used === 'number' ? usage.minutes_used : null);
@@ -222,13 +281,97 @@ export default function BillingPage({ token, onBack }) {
             const leftMin = (capMin == null) ? '∞' : (usedMin == null ? null : Math.max(0, capMin - usedMin));
             const pct = (capMin && typeof usedMin === 'number') ? Math.min(100, (usedMin/Math.max(1,capMin))*100) : null;
             return (
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between"><span>Minutes</span><span>{usedMin ?? '—'} / {capMin == null ? '∞' : capMin}</span></div>
+              <div className="space-y-2 text-sm relative">
+                <div className="flex justify-between"><span>Processing minutes</span><span>{usedMin ?? '—'} / {capMin == null ? '∞' : capMin}</span></div>
                 {typeof pct === 'number' && <Progress value={pct} />}
-                {leftMin !== null && <div className="text-xs text-muted-foreground">Minutes left: {leftMin}</div>}
+                <div className="flex items-center justify-between">
+                  {leftMin !== null && <div className="text-xs text-muted-foreground">Minutes left: {leftMin}</div>}
+                  {currentPlanKey !== 'free' && renewalIso && (
+                    <div className="text-[11px] text-muted-foreground">
+                      {cancelAtEnd ? 'Your subscription ends on ' : 'Your subscription renews on '}
+                      <span className="font-medium">{formatDate(renewalIso)}</span>
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })()}
+        </CardContent>
+      </Card>
+
+      {/* Pricing table */}
+      <Card>
+        <CardHeader><CardTitle>Subscription Plans</CardTitle></CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse align-top min-w-[860px]">
+              <thead>
+                <tr>
+                  <th className="text-left p-2 align-bottom text-sm">&nbsp;</th>
+                  {tiers.map(t => (
+                    <th key={t.key} className="p-2 text-left align-top min-w-[200px]">
+                      <div className={`rounded-lg border p-3 ${t.popular ? 'border-blue-500' : 'border-slate-200'}`}>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-base font-semibold">{t.name}</h3>
+                          {t.popular && <Badge variant="secondary">{t.badge || 'Most Popular'}</Badge>}
+                          {currentPlanKey === t.key && <Badge variant="secondary" className="bg-green-100 text-green-700">Current Plan</Badge>}
+                        </div>
+                        <div className="mt-1 text-xl font-bold">{priceFor(t)}</div>
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(row => (
+                  <tr key={row.key} className="border-t">
+                    <td className="p-2 text-[13px] font-medium">{row.key === 'price' ? '' : row.label}</td>
+                    {tiers.map(t => (
+                      <td key={t.key} className="p-2 text-[13px] align-top">
+                        {row.key === 'price' && (
+                          <div className="flex items-center justify-center gap-3">
+                            <div className="flex items-center gap-2">
+                              {t.contact ? (
+                                <Button asChild variant="secondary">
+                                  <a href="/contact">Contact Sales</a>
+                                </Button>
+                              ) : currentPlanKey === t.key ? (
+                                <Button disabled variant="secondary">Current</Button>
+                              ) : (
+                                <Button disabled={checkoutLoading} onClick={()=>startCheckout(t.key, annual? 'annual':'monthly')}>
+                                  {annual ? `Choose ${t.name} (Annual)` : `Choose ${t.name}`}
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        {row.key === 'processing' && t.processing}
+                        {row.key === 'extraRate' && t.extraRate}
+                        {row.key === 'queue' && t.queue}
+                        {row.key !== 'price' && row.key !== 'processing' && row.key !== 'extraRate' && row.key !== 'queue' && (
+                          <Check on={!!t.features[row.key]} />
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+                {/* Manage subscription row for non-free plans */}
+                {currentPlanKey !== 'free' && (
+                  <tr className="border-t">
+                    <td className="p-2 text-[13px] font-medium">Manage</td>
+                    {tiers.map(t => (
+                      <td key={t.key} className="p-2 text-[13px]">
+                        {currentPlanKey === t.key ? (
+                          <Button disabled={portalLoading} onClick={openPortal}>Manage Subscription</Button>
+                        ) : <span className="text-xs text-muted-foreground">—</span>}
+                      </td>
+                    ))}
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          {planPolling && <div className="text-xs text-amber-600 mt-3">Finalizing upgrade...</div>}
         </CardContent>
       </Card>
       {showModal && <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">

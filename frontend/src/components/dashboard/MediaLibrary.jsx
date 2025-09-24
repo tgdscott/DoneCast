@@ -3,10 +3,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Loader2, Music, Trash2, Upload, Edit, Save, XCircle } from "lucide-react";
+import { ArrowLeft, Loader2, Music, Trash2, Upload, Edit, Save, XCircle, Play, Pause, CheckSquare, Square } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { makeApi } from "@/lib/apiClient";
+import { makeApi, buildApiUrl } from "@/lib/apiClient";
 
 export default function MediaLibrary({ onBack, token }) {
   const [mediaFiles, setMediaFiles] = useState([]);
@@ -20,6 +20,9 @@ export default function MediaLibrary({ onBack, token }) {
   const [editingName, setEditingName] = useState("");
   const [editingTrigger, setEditingTrigger] = useState("");
   const { toast } = useToast();
+  const [previewingId, setPreviewingId] = useState(null);
+  const [audioEl, setAudioEl] = useState(null);
+  const [selectedIdsByCat, setSelectedIdsByCat] = useState({});
 
   const fetchMedia = async () => {
     setIsLoading(true);
@@ -37,6 +40,11 @@ export default function MediaLibrary({ onBack, token }) {
   useEffect(() => {
     if (token) fetchMedia();
   }, [token]);
+
+  // Stop audio on unmount
+  useEffect(() => {
+    return () => { try { audioEl?.pause(); } catch {} };
+  }, [audioEl]);
 
   const handleFileSelect = (e) => {
     const MB = 1024 * 1024;
@@ -144,6 +152,79 @@ export default function MediaLibrary({ onBack, token }) {
     }, {});
   }, [mediaFiles]);
 
+  const orderedCategories = useMemo(() => {
+    const order = ["intro", "outro", "music", "sfx", "commercial"];
+    const keys = Object.keys(groupedMedia);
+    return order.filter(k => keys.includes(k)).concat(keys.filter(k => !order.includes(k)));
+  }, [groupedMedia]);
+
+  const resolvePreviewUrl = (file) => {
+    let url = file.preview_url || file.url || file.filename;
+    if (!url) return null;
+    // Handle gs:// URIs via a backend proxy endpoint if needed
+    if (/^gs:\/\//i.test(url)) {
+      // Expect backend to serve a signed redirect at /api/media/preview?id=UUID or ?path=gs://...
+      // Prefer id for auth and permissions.
+      return buildApiUrl(`/api/media/preview?id=${encodeURIComponent(file.id)}`);
+    }
+    if (!/^https?:\/\//i.test(url)) {
+      url = url.startsWith('/') ? url : `/${url}`;
+      url = buildApiUrl(url);
+    }
+    return url;
+  };
+
+  const togglePreview = (file) => {
+    try {
+      if (!file) return;
+      const url = resolvePreviewUrl(file);
+      if (!url) return;
+      if (previewingId === file.id) {
+        try { audioEl?.pause(); } catch {}
+        setPreviewingId(null);
+        setAudioEl(null);
+        return;
+      }
+      if (audioEl) { try { audioEl.pause(); } catch {} }
+      const a = new Audio(url);
+      setAudioEl(a);
+      setPreviewingId(file.id);
+      a.onended = () => { setPreviewingId(null); setAudioEl(null); };
+      a.play().catch(() => { setPreviewingId(null); setAudioEl(null); });
+    } catch {
+      setPreviewingId(null);
+      setAudioEl(null);
+    }
+  };
+
+  const isSelected = (category, id) => Boolean((selectedIdsByCat[category] || new Set()).has(id));
+  const toggleSelected = (category, id) => {
+    setSelectedIdsByCat(prev => {
+      const cur = new Set(prev[category] || []);
+      if (cur.has(id)) cur.delete(id); else cur.add(id);
+      return { ...prev, [category]: cur };
+    });
+  };
+  const clearSelection = (category) => {
+    setSelectedIdsByCat(prev => ({ ...prev, [category]: new Set() }));
+  };
+  const deleteSelected = async (category) => {
+    const ids = Array.from(selectedIdsByCat[category] || []);
+    if (!ids.length) return;
+    if (!window.confirm(`Delete ${ids.length} selected ${category} item(s)? This cannot be undone.`)) return;
+    try {
+      const api = makeApi(token);
+      for (const id of ids) {
+        try { await api.del(`/api/media/${id}`); } catch {}
+      }
+      setMediaFiles(prev => prev.filter(f => !(f.category === category && ids.includes(f.id))));
+      clearSelection(category);
+      toast({ description: `Deleted ${ids.length} ${category} item(s).` });
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   return (
     <div className="p-6">
       <Button onClick={onBack} variant="ghost" className="mb-4"><ArrowLeft className="w-4 h-4 mr-2" />Back to Dashboard</Button>
@@ -177,46 +258,89 @@ export default function MediaLibrary({ onBack, token }) {
       </Card>
       {isLoading && <p>Loading media library...</p>}
       <div className="space-y-6">
-        {Object.entries(groupedMedia).map(([category, files]) => (
+        {orderedCategories.map((category) => {
+          const files = groupedMedia[category] || [];
+          const isCommercial = category === 'commercial';
+          return (
           <Card key={category}>
-            <CardHeader><CardTitle className="capitalize">{category.replace("_", " ")}</CardTitle></CardHeader>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="capitalize flex items-center gap-2">
+                  {category.replace("_", " ")}
+                  {isCommercial && <span className="text-xs text-gray-500">(Coming Soon)</span>}
+                </CardTitle>
+                {(!isCommercial && (selectedIdsByCat[category]?.size > 0)) && (
+                  <div className="flex items-center gap-2">
+                    <Button variant="destructive" size="sm" onClick={()=>deleteSelected(category)}>
+                      Delete selected {category}
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={()=>clearSelection(category)}>Clear</Button>
+                  </div>
+                )}
+              </div>
+            </CardHeader>
             <CardContent>
-              <div className="space-y-2">
+              <div className={`space-y-2 ${isCommercial ? 'opacity-60 pointer-events-none' : ''}`}>
                 {files.map(file => (
                   <div key={file.id} className="flex items-center justify-between p-2 rounded-md hover:bg-gray-50">
                     <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={()=>toggleSelected(category, file.id)}
+                          className={`inline-flex items-center justify-center h-6 w-6 rounded-md border ${isSelected(category,file.id)?'bg-red-50 text-red-600 border-red-300':'bg-white text-muted-foreground border-muted-foreground/30'}`}
+                          title={isSelected(category,file.id)?'Unselect':'Select'}
+                        >
+                          {isSelected(category,file.id) ? <CheckSquare className="w-3 h-3"/> : <Square className="w-3 h-3"/>}
+                        </button>
                         <Music className="w-4 h-4 text-gray-500 flex-shrink-0" />
                         <div className="flex flex-col gap-1">
                           {editingId === file.id ? (
                             <>
                               <Input value={editingName} onChange={(e) => setEditingName(e.target.value)} className="h-8"/>
-                              <Input value={editingTrigger} onChange={(e)=> setEditingTrigger(e.target.value.toLowerCase())} className="h-8" placeholder="Trigger keyword (optional)" />
+                              {(category==='sfx' || category==='commercial') && (
+                                <Input value={editingTrigger} onChange={(e)=> setEditingTrigger(e.target.value.toLowerCase())} className="h-8" placeholder="Trigger keyword (optional)" />
+                              )}
                             </>
                           ) : (
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm">{file.friendly_name || file.filename.split('_').slice(1).join('_')}</span>
-                              {file.trigger_keyword && <span className="text-[10px] uppercase tracking-wide bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{file.trigger_keyword}</span>}
+                            <div className="flex items-start gap-2 flex-col">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm">{file.friendly_name || file.filename.split('_').slice(1).join('_')}</span>
+                                {file.trigger_keyword && (category==='sfx' || category==='commercial') && <span className="text-[10px] uppercase tracking-wide bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{file.trigger_keyword}</span>}
+                              </div>
+                              {(category==='intro' || category==='outro') && (file.transcript_text || file.transcript || file.subtitle) && (
+                                <span className="text-xs italic text-gray-500">{file.transcript_text || file.transcript || file.subtitle}</span>
+                              )}
                             </div>
                           )}
                         </div>
                     </div>
                     <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          aria-label={previewingId===file.id? 'Pause preview':'Play preview'}
+                          onClick={()=>togglePreview(file)}
+                          className={`inline-flex items-center justify-center h-8 w-8 rounded border mr-1 ${previewingId===file.id? 'bg-blue-600 text-white border-blue-600':'bg-white text-foreground border-muted-foreground/30'}`}
+                          title="Preview"
+                          disabled={isCommercial}
+                        >
+                          {previewingId===file.id ? <Pause className="w-4 h-4"/> : <Play className="w-4 h-4"/>}
+                        </button>
                         {editingId === file.id ? (
                            <>
                             <Button onClick={() => handleSaveName(file.id)} variant="ghost" size="icon" className="h-8 w-8 text-green-600 hover:text-green-700"><Save className="w-4 h-4" /></Button>
                             <Button onClick={cancelEditing} variant="ghost" size="icon" className="h-8 w-8 text-gray-500 hover:text-gray-700"><XCircle className="w-4 h-4" /></Button>
                            </>
                         ) : (
-                            <Button onClick={() => startEditing(file)} variant="ghost" size="icon" className="h-8 w-8 text-gray-500 hover:text-gray-700"><Edit className="w-4 h-4" /></Button>
+                            <Button onClick={() => startEditing(file)} variant="ghost" size="icon" className="h-8 w-8 text-gray-500 hover:text-gray-700" disabled={isCommercial}><Edit className="w-4 h-4" /></Button>
                         )}
-                        <Button onClick={() => handleDelete(file.id)} variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4" /></Button>
+                        <Button onClick={() => handleDelete(file.id)} variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-700" disabled={isCommercial}><Trash2 className="w-4 h-4" /></Button>
                     </div>
                   </div>
                 ))}
               </div>
             </CardContent>
           </Card>
-        ))}
+        );})}
       </div>
     </div>
   );

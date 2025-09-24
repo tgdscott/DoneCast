@@ -43,7 +43,7 @@ function FadeSlide({ children, keyProp }) {
   );
 }
 
-export default function OnboardingWrapper({ steps, index, setIndex, onComplete, prefs, greetingName, nextDisabled = false, hideNext = false, hideBack = false }) {
+export default function OnboardingWrapper({ steps, index, setIndex, onComplete, prefs, greetingName, nextDisabled = false, hideNext = false, hideBack = false, showExitDiscard = false, onExitDiscard }) {
   const step = steps[index];
   const total = steps.length;
   const pct = Math.round(((index + 1) / total) * 100);
@@ -90,6 +90,7 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
       showDetails: FileText,
   format: FileText,
       coverArt: ImageIcon,
+  introOutro: Sparkles,
   music: Sparkles,
       spreaker: Globe,
       elevenlabs: Sparkles,
@@ -103,6 +104,7 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
   choosePath: GitBranch,
   publishCadence: Repeat,
   publishSchedule: CalendarDays,
+  ttsReview: Sparkles,
     };
     return step?.id && map[step.id] ? map[step.id] : null;
   }, [step?.id]);
@@ -300,6 +302,19 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
               )}
             </div>
           </div>
+
+          {/* Exit & Discard at bottom-right near the right rail */}
+          {showExitDiscard && (
+            <div className="flex justify-end mt-3">
+              <button
+                type="button"
+                onClick={() => onExitDiscard?.()}
+                className="inline-flex items-center rounded-full border border-red-600 text-red-600 px-3 py-1 text-xs bg-white hover:bg-red-50"
+              >
+                Exit and Discard
+              </button>
+            </div>
+          )}
         </section>
 
         {/* Right rail (1 col) */}
@@ -329,7 +344,7 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
                 <Button variant="outline" className="rounded-[var(--radius)] h-11 min-h-[44px] px-5" asChild>
                   <a href="/help" target="_blank" rel="noreferrer">Guides</a>
                 </Button>
-                <Button className="rounded-[var(--radius)] h-11 min-h-[44px] px-5" asChild>
+                <Button className="rounded-[var(--radius)] h-11 min-h-[44px] px-5 text-white" asChild>
                   <a href="mailto:support@example.com">Contact</a>
                 </Button>
               </div>

@@ -51,6 +51,149 @@ class PodcastUpdate(SQLModel):
     category_3_id: Optional[int] = None
 
 
+@router.post("/{podcast_id}/link-spreaker-episodes", status_code=200)
+async def link_imported_to_spreaker(
+    podcast_id: UUID,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Link existing local episodes (e.g., imported via RSS) to Spreaker episodes for playback.
+    - Requires the podcast to have a spreaker_show_id and user to be connected to Spreaker.
+    - Heuristic match by normalized title and publish date (day).
+    - Updates spreaker_episode_id and prefers remote stream_url for playback when available.
+    Returns: { mapped: int, total_candidates: int }
+    """
+    # Validate podcast and auth
+    pod = session.exec(select(Podcast).where(Podcast.id == podcast_id, Podcast.user_id == current_user.id)).first()
+    if not pod:
+        raise HTTPException(status_code=404, detail="Podcast not found.")
+    if not pod.spreaker_show_id or not getattr(current_user, 'spreaker_access_token', None):
+        raise HTTPException(status_code=400, detail="Podcast not linked to Spreaker or user not connected.")
+
+    token_str: str = str(current_user.spreaker_access_token)
+    client = SpreakerClient(api_token=token_str)
+    ok, spk_data = client.get_all_episodes_for_show(str(pod.spreaker_show_id))
+    if not ok or not isinstance(spk_data, dict):
+        raise HTTPException(status_code=502, detail="Failed to fetch episodes from Spreaker.")
+    spk_items = spk_data.get("items", []) or []
+
+    # Load local episodes lacking spreaker_episode_id
+    local_eps = session.exec(
+        select(Episode).where(Episode.podcast_id == pod.id, Episode.user_id == current_user.id)
+    ).all()
+    # Build index by (normalized_title, date_key)
+    from datetime import datetime, timezone
+    def norm_title(t: str | None) -> str:
+        try:
+            return (t or '').strip().lower()
+        except Exception:
+            return ''
+    def date_key(dt: datetime | None) -> str:
+        try:
+            return dt.date().isoformat() if dt else ''
+        except Exception:
+            return ''
+    local_index: dict[tuple[str, str], Episode] = {}
+    for le in local_eps:
+        if getattr(le, 'spreaker_episode_id', None):
+            continue
+        local_index[(norm_title(le.title), date_key(getattr(le, 'publish_at', None)))] = le
+
+    mapped = 0
+    total_candidates = len(local_index)
+    for it in spk_items:
+        if not isinstance(it, dict):
+            continue
+        spk_title = it.get('title') or ''
+        spk_id = str(it.get('episode_id')) if it.get('episode_id') is not None else None
+        pub_dt = None
+        pub_str = it.get('published_at')
+        if pub_str:
+            try:
+                pub_dt = datetime.strptime(pub_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            except Exception:
+                pub_dt = None
+        key = (norm_title(spk_title), date_key(pub_dt))
+        cand = local_index.get(key)
+        if cand and not getattr(cand, 'spreaker_episode_id', None) and spk_id:
+            cand.spreaker_episode_id = spk_id
+            # Prefer remote stream URL if local final path missing
+            if not getattr(cand, 'final_audio_path', None):
+                cand.final_audio_path = it.get('stream_url') or it.get('download_url')
+            # If we recovered a publish date, persist and potentially set status
+            if pub_dt:
+                try:
+                    cand.publish_at = cand.publish_at or pub_dt
+                    if pub_dt <= datetime.now(timezone.utc):
+                        cand.status = EpisodeStatus.published
+                except Exception:
+                    pass
+            session.add(cand)
+            mapped += 1
+
+    if mapped:
+        session.commit()
+    return {"mapped": mapped, "total_candidates": total_candidates}
+
+
+@router.post("/{podcast_id}/publish-all", status_code=200)
+async def publish_all_to_spreaker(
+    podcast_id: UUID,
+    publish_state: Optional[str] = Body("public", embed=True),
+    include_already_linked: bool = Body(False, embed=True, description="If true, will also republish episodes that already have a spreaker_episode_id"),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Batch-publish all episodes for this podcast to Spreaker using existing mirrored audio.
+    Requires the podcast to have a numeric spreaker_show_id and the user to be connected to Spreaker.
+    Returns counters and job ids are not tracked here (jobs are enqueued per-episode).
+    """
+    pod = session.exec(select(Podcast).where(Podcast.id == podcast_id, Podcast.user_id == current_user.id)).first()
+    if not pod:
+        raise HTTPException(status_code=404, detail="Podcast not found.")
+    if not getattr(current_user, 'spreaker_access_token', None):
+        raise HTTPException(status_code=401, detail="User is not connected to Spreaker.")
+    sid = getattr(pod, 'spreaker_show_id', None)
+    if not sid or not str(sid).isdigit():
+        raise HTTPException(status_code=400, detail="Podcast must have a numeric spreaker_show_id.")
+
+    # Select candidates
+    eps = session.exec(select(Episode).where(Episode.podcast_id == pod.id, Episode.user_id == current_user.id)).all()
+    started = 0
+    skipped_no_audio = 0
+    skipped_already_linked = 0
+    errors = 0
+    from api.services.episodes import publisher as _ep_pub
+    for ep in eps:
+        if not getattr(ep, 'final_audio_path', None):
+            skipped_no_audio += 1
+            continue
+        if getattr(ep, 'spreaker_episode_id', None) and not include_already_linked:
+            skipped_already_linked += 1
+            continue
+        try:
+            _ = _ep_pub.publish(
+                session=session,
+                current_user=current_user,
+                episode_id=ep.id,
+                derived_show_id=str(sid),
+                publish_state=publish_state,
+                auto_publish_iso=None,
+            )
+            started += 1
+        except Exception:
+            errors += 1
+    return {
+        "message": "Batch publish enqueued",
+        "show_id": str(sid),
+        "started": started,
+        "skipped_no_audio": skipped_no_audio,
+        "skipped_already_linked": skipped_already_linked,
+        "errors": errors,
+        "total": len(eps),
+    }
+
+
 @router.post("/", response_model=Podcast, status_code=status.HTTP_201_CREATED)
 async def create_podcast(
     name: str = Form(...),

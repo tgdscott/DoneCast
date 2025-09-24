@@ -69,6 +69,7 @@ export default function EpisodeHistory({ token, onBack }) {
   const [saving, setSaving] = useState(false);
   // Add state for numbering duplicates near other edit state declarations
   const [numberingConflict, setNumberingConflict] = useState(false);
+  const [hasGlobalNumberingConflict, setHasGlobalNumberingConflict] = useState(false);
   // Deletion & unpublish flows
   const [deletingIds, setDeletingIds] = useState(new Set());
   const [unpublishEp, setUnpublishEp] = useState(null);
@@ -144,6 +145,22 @@ export default function EpisodeHistory({ token, onBack }) {
     setScheduleDate(`${yyyy}-${mm}-${dd}`);
     setScheduleTime(`${hh}:${mi}`);
   };
+  // Recompute whether any duplicate (season, episode) exists across list
+  const recomputeGlobalNumberingConflicts = useCallback((list) => {
+    try {
+      const seen = new Set();
+      for (const e of list || []) {
+        if (e && e.season_number != null && e.episode_number != null) {
+          const key = `${e.podcast_id || 'pod'}:${e.season_number}:${e.episode_number}`;
+          if (seen.has(key)) { setHasGlobalNumberingConflict(true); return; }
+          seen.add(key);
+        }
+      }
+      setHasGlobalNumberingConflict(false);
+    } catch {
+      setHasGlobalNumberingConflict(false);
+    }
+  }, []);
   const closeSchedule = () => { if(scheduleSubmitting) return; setScheduleEp(null); };
   const submitSchedule = async () => {
     if(!scheduleEp) return;
@@ -174,6 +191,13 @@ export default function EpisodeHistory({ token, onBack }) {
     setSaving(true);
     const body = {};
     try {
+      const origSeason = editing.season_number ?? null;
+      const origEpisode = editing.episode_number ?? null;
+      const newSeason = editValues.season_number ?? null;
+      const newEpisode = editValues.episode_number ?? null;
+      const seasonChanged = newSeason !== origSeason;
+      const episodeIncreased = (newEpisode != null && origEpisode != null && newEpisode > origEpisode);
+
       if(editValues.title !== (editing.title||'')) body.title = editValues.title.trim();
       if(editValues.description !== (editing.description||'')) body.description = editValues.description;
       if(editValues.publish_state) body.publish_state = editValues.publish_state;
@@ -214,6 +238,13 @@ export default function EpisodeHistory({ token, onBack }) {
       }
       if(coverPath) body.cover_image_path = coverPath;
       const api = makeApi(token);
+      // If the target episode number would collide with another in the same season, offer swap
+      if (newSeason != null && newEpisode != null) {
+        const conflictEp = episodes.find(e => e.id !== editing.id && (e.season_number ?? null) === newSeason && (e.episode_number ?? null) === newEpisode && (e.podcast_id === editing.podcast_id));
+        if (conflictEp && window.confirm(`Episode number E${newEpisode} is already used in season S${newSeason} by "${conflictEp.title || 'Untitled'}". Swap numbers (that one becomes E${origEpisode || '—'})?`)) {
+          try { await api.patch(`/api/episodes/${conflictEp.id}`, { episode_number: origEpisode }); } catch {}
+        }
+      }
       const j = await api.patch(`/api/episodes/${editing.id}`, body);
       setEpisodes(prev => prev.map(p => p.id===editing.id ? { ...p, ...(j?.episode||{}), ...(j?.episode?{}:{
         title: body.title ?? p.title,
@@ -225,7 +256,35 @@ export default function EpisodeHistory({ token, onBack }) {
         season_number: body.season_number ?? p.season_number,
         episode_number: body.episode_number ?? p.episode_number,
       }) } : p));
+      // Optional cascades for season change and episode increments
+      if ((seasonChanged || episodeIncreased) && episodes && episodes.length) {
+        const sorted = [...episodes].sort((a,b)=> episodeSortDate(a) - episodeSortDate(b));
+        const idx = sorted.findIndex(e=> e.id===editing.id);
+        const subsequent = idx>=0 ? sorted.slice(idx+1) : [];
+        // Season cascade
+        if (seasonChanged && subsequent.length>0) {
+          const apply = window.confirm(`Also change the season to ${newSeason ?? '—'} for ${subsequent.length} episode(s) after this one?`);
+          if (apply) {
+            for (const e of subsequent) {
+              try { await api.patch(`/api/episodes/${e.id}`, { season_number: newSeason }); } catch {}
+            }
+          }
+        }
+        // Episode increment cascade
+        if (episodeIncreased && subsequent.length>0 && origEpisode != null) {
+          const delta = newEpisode - origEpisode;
+          const apply = window.confirm(`Increment the episode number by +${delta} for ${subsequent.length} episode(s) after this one?`);
+          if (apply) {
+            for (const e of subsequent) {
+              const en = (e.episode_number ?? 0) + delta;
+              try { await api.patch(`/api/episodes/${e.id}`, { episode_number: en }); } catch {}
+            }
+          }
+        }
+      }
       closeEdit();
+      // Refresh to recompute duplicate warnings
+      try { await fetchEpisodes(); } catch {}
     } catch(e){
       const msg = isApiError(e) ? (e.detail || e.error || e.message) : String(e);
       alert(msg || 'Failed to save changes');
@@ -257,7 +316,9 @@ export default function EpisodeHistory({ token, onBack }) {
           list = list.map(e => ({ ...e, plays_total: map.has(String(e.id)) ? map.get(String(e.id)) : e.plays_total }));
         }
       } catch {}
-      setEpisodes(list);
+  setEpisodes(list);
+  // recompute duplicates
+  recomputeGlobalNumberingConflicts(list);
     } catch (e) {
       if(e.name !== 'AbortError') {
         const msg = isApiError(e) ? (e.detail || e.error || e.message) : String(e);
@@ -265,8 +326,17 @@ export default function EpisodeHistory({ token, onBack }) {
       }
     } finally { setLoading(false); }
     return () => controller.abort();
-  }, [token]);
+  }, [token, recomputeGlobalNumberingConflicts]);
   useEffect(() => { fetchEpisodes(); }, [fetchEpisodes]);
+  // Per-edit duplicate detection for the current edit form
+  useEffect(() => {
+    if (!editing) { setNumberingConflict(false); return; }
+    const s = editValues.season_number ?? null;
+    const n = editValues.episode_number ?? null;
+    if (s == null || n == null) { setNumberingConflict(false); return; }
+    const dup = episodes.some(e => e.id !== editing.id && (e.season_number ?? null) === s && (e.episode_number ?? null) === n && (e.podcast_id === editing.podcast_id));
+    setNumberingConflict(dup);
+  }, [editing, editValues.season_number, editValues.episode_number, episodes]);
   // Open unpublish confirmation modal
   const openUnpublish = (ep) => {
     setUnpublishEp(ep);
@@ -386,7 +456,7 @@ export default function EpisodeHistory({ token, onBack }) {
               <Button
                 variant="destructive"
                 size="sm"
-                className="absolute top-2 right-2 flex items-center gap-1 bg-white/90 text-red-600 hover:bg-white shadow-sm"
+                className="absolute top-2 right-2 flex items-center gap-1 bg-white/90 text-red-600 hover:bg-white shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
                 title="Delete episode"
                 onClick={() => handleDeleteEpisode(ep.id)}
                 disabled={deletingIds.has(ep.id)}
@@ -394,9 +464,6 @@ export default function EpisodeHistory({ token, onBack }) {
                 {deletingIds.has(ep.id) ? <Loader2 className="w-4 h-4 animate-spin"/> : <Trash2 className="w-4 h-4"/>}
                 Delete
               </Button>
-              <div className="absolute bottom-1 left-1 text-[10px] text-gray-600 bg-white/70 px-1 rounded hidden group-hover:block">
-                Deleting doesn't return minutes.
-              </div>
               {ep.status === 'processed' && (
                 <div className="absolute bottom-1 right-1 flex gap-1">
                   <button
@@ -495,7 +562,7 @@ export default function EpisodeHistory({ token, onBack }) {
               <Button
                 variant="destructive"
                 size="sm"
-                className="flex items-center gap-1"
+                className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
                 title="Delete episode"
                 onClick={() => handleDeleteEpisode(ep.id)}
                 disabled={deletingIds.has(ep.id)}
@@ -503,7 +570,6 @@ export default function EpisodeHistory({ token, onBack }) {
                 {deletingIds.has(ep.id) ? <Loader2 className="w-4 h-4 animate-spin"/> : <Trash2 className="w-4 h-4"/>}
                 Delete
               </Button>
-              <span className="ml-2 text-[10px] text-gray-500 hidden md:inline">Deleting doesn't return minutes.</span>
               <Button variant="outline" size="sm" className="ml-2 flex items-center gap-1" onClick={()=>startEdit(ep)}><Pencil className="w-4 h-4" />Edit</Button>
               {ep.status === 'processed' && (
                 <button
@@ -612,6 +678,9 @@ export default function EpisodeHistory({ token, onBack }) {
         <div className="flex items-center gap-4 text-xs text-gray-500">
           <span>{episodes.length} total</span>
           {search && <span>• {displayEpisodes.length} match</span>}
+          {hasGlobalNumberingConflict && (
+            <span className="text-red-600">• Warning: duplicate Season/Episode combinations exist. Edit to resolve.</span>
+          )}
         </div>
       </div>
   {loading && <div className="flex items-center text-gray-600"><Loader2 className="w-5 h-5 mr-2 animate-spin"/>Loading...</div>}

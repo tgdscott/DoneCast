@@ -167,14 +167,16 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                     api.get('/api/media/'),
                     api.get('/api/podcasts/')
                 ]);
-                setMediaFiles(mediaData);
-                setPodcasts(podcastsData || []);
+                const mediaArr = Array.isArray(mediaData) ? mediaData : (mediaData?.items || []);
+                const podcastsArr = Array.isArray(podcastsData) ? podcastsData : (podcastsData?.items || []);
+                setMediaFiles(mediaArr);
+                setPodcasts(podcastsArr);
 
     if (isNewTemplate) {
           setTemplate({
             name: 'My New Podcast Template',
             is_active: true,
-                        podcast_id: (podcastsData && podcastsData.length > 0) ? podcastsData[podcastsData.length - 1].id : null, // assume last = most recent
+                        podcast_id: (podcastsArr && podcastsArr.length > 0) ? podcastsArr[podcastsArr.length - 1].id : null, // assume last = most recent
             segments: [
         { id: crypto.randomUUID(), segment_type: 'intro', source: { source_type: 'static', filename: '' } },
         { id: crypto.randomUUID(), segment_type: 'content', source: { source_type: 'static', filename: '' } },
@@ -890,7 +892,7 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
                     <GripVertical className="w-5 h-5 text-gray-400" />
                     {segmentIcons[segment.segment_type]}
                     <span className="font-semibold text-gray-800">{segment.segment_type.charAt(0).toUpperCase() + segment.segment_type.slice(1)}</span>
-                    {justCreated ? (
+                    {justCreatedTs ? (
                         <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">Created from TTS</span>
                     ) : null}
                     {segment?.source?.source_type === 'static' && isMissing && (

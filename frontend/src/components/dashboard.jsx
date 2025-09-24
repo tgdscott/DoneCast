@@ -421,12 +421,7 @@ export default function PodcastPlusDashboard() {
                 {statsError}
               </div>
             )}
-            {!statsError && stats?.spreaker_connected === false && (
-              <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded p-3 mb-4 text-sm flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                <span>Connect your Spreaker account to unlock listening stats and analytics.</span>
-                <Button variant="outline" size="sm" onClick={() => setCurrentView('settings')}>Connect Spreaker</Button>
-              </div>
-            )}
+            {/* Removed top Connect Spreaker banner; pill moved into Create Episode section when applicable */}
             <div className="grid lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 space-y-6">
                 {/* Create Episode Card */}
@@ -437,24 +432,17 @@ export default function PodcastPlusDashboard() {
                   </CardHeader>
                   <CardContent className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                     <div className="flex items-center gap-6 text-sm">
-                      <div>
+                      <div className="text-center">
                         <div className="text-[11px] tracking-wide text-gray-500">Shows</div>
                         <div className="font-semibold text-gray-800 mt-0.5">{podcasts.length}</div>
                       </div>
-                      <div>
+                      <div className="text-center">
                         <div className="text-[11px] tracking-wide text-gray-500">Episodes</div>
                         <div className="font-semibold text-gray-800 mt-0.5">{stats?.total_episodes ?? '–'}</div>
                       </div>
-                      <div>
+                      <div className="text-center">
                         <div className="text-[11px] tracking-wide text-gray-500">Ready?</div>
                         <div className={`font-semibold mt-0.5 ${canCreateEpisode ? 'text-green-600' : 'text-amber-600'}`}>{canCreateEpisode ? 'Yes' : 'Setup needed'}</div>
-                        {!canCreateEpisode && (
-                          <div className="text-[11px] text-amber-600 max-w-[12rem]">
-                            {podcasts.length === 0 && templates.length === 0 && 'Add a show and create a template to unlock the episode builder.'}
-                            {podcasts.length === 0 && templates.length > 0 && 'Add a show to unlock the episode builder.'}
-                            {podcasts.length > 0 && templates.length === 0 && 'Create a template to unlock the episode builder.'}
-                          </div>
-                        )}
                       </div>
                     </div>
                     <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
@@ -477,17 +465,27 @@ export default function PodcastPlusDashboard() {
                           </DropdownMenuContent>
                         </DropdownMenu>
                       ) : (
-                        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 space-y-1">
-                          <span className="font-medium text-amber-800">Finish setup to start publishing.</span>
-                          <span>
-                            {podcasts.length === 0 && templates.length === 0 && 'Add a show and create a template to unlock the episode builder.'}
-                            {podcasts.length === 0 && templates.length > 0 && 'Add a show to unlock the episode builder.'}
-                            {podcasts.length > 0 && templates.length === 0 && 'Create a template to unlock the episode builder.'}
-                          </span>
-                          <div className="flex gap-2 flex-wrap">
-                            {podcasts.length === 0 && <Button variant="outline" size="sm" onClick={() => setCurrentView('podcastManager')}>Add show</Button>}
-                            {templates.length === 0 && <Button variant="outline" size="sm" onClick={() => setCurrentView('templateManager')}>Create template</Button>}
-                          </div>
+                        <div className="flex gap-2 flex-wrap">
+                          {templates.length === 0 && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setCurrentView('templateManager')}
+                              className="border-red-500 text-red-700"
+                            >
+                              Create Template
+                            </Button>
+                          )}
+                          {stats?.spreaker_connected === false && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setCurrentView('settings')}
+                              className="border-red-500 text-red-700"
+                            >
+                              Connect Spreaker
+                            </Button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -507,7 +505,7 @@ export default function PodcastPlusDashboard() {
                       </div>
                       <div className="p-3 rounded border bg-white flex flex-col gap-1">
                         <span className="text-[11px] tracking-wide text-gray-500">Episodes scheduled</span>
-                        <span className="text-lg font-semibold">{stats?.upcoming_scheduled ?? 0}</span>
+                        <span className="text-lg font-semibold">{typeof stats?.upcoming_scheduled === 'number' ? stats.upcoming_scheduled : '–'}</span>
                       </div>
                       <div className="p-3 rounded border bg-white flex flex-col gap-1">
                         <span className="text-[11px] tracking-wide text-gray-500">Last episode published</span>
@@ -518,7 +516,7 @@ export default function PodcastPlusDashboard() {
                         <span className={`text-sm font-medium ${stats?.last_assembly_status==='error'?'text-red-600': stats?.last_assembly_status==='success'?'text-green-600': stats?.last_assembly_status==='pending'?'text-amber-600':'text-gray-600'}`}>{formatAssemblyStatus(stats?.last_assembly_status)}</span>
                       </div>
                     </div>
-          {(typeof stats?.plays_last_30d === 'number' || typeof stats?.show_total_plays === 'number' || (stats?.recent_episode_plays?.length)) && (
+          {(typeof stats?.plays_last_30d === 'number' || typeof stats?.show_total_plays === 'number' || (Array.isArray(stats?.recent_episode_plays) && stats.recent_episode_plays.length > 0)) && (
                       <div className="space-y-3">
                         <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Listening</div>
                         <div className="grid md:grid-cols-2 gap-3">
@@ -671,7 +669,15 @@ export default function PodcastPlusDashboard() {
                   ))}
                 </div>) }
             </div>
-            <div className="flex items-center space-x-3"><Avatar className="h-8 w-8"><AvatarImage src={user?.picture} /><AvatarFallback>{user?.email ? user.email.substring(0, 2).toUpperCase() : '...'}</AvatarFallback></Avatar><span className="hidden md:block text-sm font-medium" style={{ color: "#2C3E50" }}>{user ? user.email : 'Loading...'}</span></div>
+            <div className="flex items-center space-x-3">
+              {user?.picture ? (
+                <Avatar className="h-8 w-8">
+                  <AvatarImage src={user.picture} />
+                  <AvatarFallback>{user?.email ? user.email.substring(0, 2).toUpperCase() : '…'}</AvatarFallback>
+                </Avatar>
+              ) : null}
+              <span className="hidden md:block text-sm font-medium" style={{ color: "#2C3E50" }}>{user ? user.email : 'Loading...'}</span>
+            </div>
             <Button onClick={logout} variant="ghost" size="sm" className="text-gray-600 hover:text-gray-800"><LogOut className="w-4 h-4 mr-1" /><span className="hidden md:inline">Logout</span></Button>
           </div>
         </div>

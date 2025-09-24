@@ -8,7 +8,7 @@ import { ArrowLeft, Mic, Square, Loader2, CheckCircle } from "lucide-react";
 import { makeApi } from "@/lib/apiClient";
 import { useToast } from "@/hooks/use-toast";
 
-export default function Recorder({ onBack, token, onFinish, onSaved }) {
+export default function Recorder({ onBack, token, onFinish, onSaved, source="A" }) {
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [hasPreview, setHasPreview] = useState(false);
@@ -18,6 +18,8 @@ export default function Recorder({ onBack, token, onFinish, onSaved }) {
   const [selectedDeviceId, setSelectedDeviceId] = useState("");
   const [mimeType, setMimeType] = useState("");
   const [isMicChecking, setIsMicChecking] = useState(false);
+  const [micCheckCountdown, setMicCheckCountdown] = useState(0);
+  const micCheckTimerRef = useRef(null);
   const [levelPct, setLevelPct] = useState(0); // 0..1
   const [recordingName, setRecordingName] = useState("");
   const [audioUrl, setAudioUrl] = useState("");
@@ -36,6 +38,7 @@ export default function Recorder({ onBack, token, onFinish, onSaved }) {
   const mediaRecorderRef = useRef(null);
   const streamRef = useRef(null);
   const chunksRef = useRef([]);
+  const discardOnStopRef = useRef(false);
   const timerRef = useRef(null);
   const rafRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -244,7 +247,11 @@ export default function Recorder({ onBack, token, onFinish, onSaved }) {
       try {
         const devs = await navigator.mediaDevices.enumerateDevices();
         // Only include devices with a non-empty deviceId; some browsers obfuscate until permission is granted
-        const inputs = devs.filter((d) => d.kind === "audioinput" && d.deviceId);
+        const inputs = devs.filter((d) => d.kind === "audioinput" && d.deviceId).map((d)=>{
+          // Clean trailing hex noise if present in label (e.g., "USB Mic (abcd:1234)")
+          const clean = (d.label || '').replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)$/i, '').trim();
+          return { ...d, label: clean || d.label };
+        });
         setDevices(inputs);
         if (!selectedDeviceId && inputs[0]?.deviceId) setSelectedDeviceId(inputs[0].deviceId);
       } finally {
@@ -341,6 +348,18 @@ export default function Recorder({ onBack, token, onFinish, onSaved }) {
         // Allow any final ondataavailable to land before assembling
         Promise.resolve().then(async () => {
           try {
+            if (discardOnStopRef.current) {
+              // Discard short take
+              chunksRef.current = [];
+              discardOnStopRef.current = false;
+              setHasPreview(false);
+              setAudioBlob(null);
+              setAudioUrl((u)=>{ if(u) URL.revokeObjectURL(u); return ""; });
+              setRecordingName("");
+              setElapsed(0);
+              toast({ title: 'Discarded', description: 'Short take discarded (<30s).' });
+              return;
+            }
             const parts = chunksRef.current || [];
             const rawBlob = new Blob(parts, { type: m });
             // Re-encode to WAV to normalize and remove any duplicated 1s chunk artifacts
@@ -477,6 +496,12 @@ export default function Recorder({ onBack, token, onFinish, onSaved }) {
 
   const handleStop = () => {
     if (isPaused) {
+      // If less than 30 seconds captured, warn that stopping will discard
+      if (elapsed < 30) {
+        const ok = window.confirm('You have recorded less than 30 seconds. Stopping now will discard this take. Do you want to stop and discard?');
+        if (!ok) return;
+        discardOnStopRef.current = true;
+      }
       stopRecording();
     }
   };
@@ -490,8 +515,40 @@ export default function Recorder({ onBack, token, onFinish, onSaved }) {
         try { await ensurePermissionAndDevices(); } catch {}
       }
       const s = await startStream(selectedDeviceId);
-      // Show meter for ~3s
-      await new Promise((res) => setTimeout(res, 3000));
+      // 5s mic check with visible countdown and auto-replay of captured sample
+      let count = 5;
+      setMicCheckCountdown(count);
+      await new Promise((resolve) => {
+        micCheckTimerRef.current = setInterval(() => {
+          count -= 1;
+          setMicCheckCountdown(count);
+          if (count <= 0) {
+            try { clearInterval(micCheckTimerRef.current); } catch {}
+            micCheckTimerRef.current = null;
+            resolve();
+          }
+        }, 1000);
+      });
+      // Capture ~0.8s sample of the live stream and replay it
+      try {
+        const dest = audioCtxRef.current?.createMediaStreamDestination?.();
+        if (dest && sourceRef.current) {
+          sourceRef.current.connect(dest);
+          const rec = new MediaRecorder(dest.stream);
+          const chunks = [];
+          await new Promise((r) => {
+            rec.ondataavailable = (e) => { if (e.data?.size) chunks.push(e.data); };
+            rec.onstop = () => r();
+            rec.start();
+            setTimeout(() => { try { rec.stop(); } catch {} }, 800);
+          });
+          const blob = new Blob(chunks, { type: 'audio/webm' });
+          const url = URL.createObjectURL(blob);
+          const a = new Audio(url);
+          a.play().catch(()=>{});
+          a.onended = () => { try { URL.revokeObjectURL(url); } catch {} };
+        }
+      } catch {}
       stopAudioGraph();
       s.getTracks().forEach((t) => t.stop());
     } catch (e) {
@@ -505,6 +562,7 @@ export default function Recorder({ onBack, token, onFinish, onSaved }) {
       }
     } finally {
       setIsMicChecking(false);
+      setMicCheckCountdown(0);
     }
   };
 
@@ -577,7 +635,12 @@ export default function Recorder({ onBack, token, onFinish, onSaved }) {
         }
   const devs = await navigator.mediaDevices.enumerateDevices();
   // Filter out entries lacking a stable deviceId (common pre-permission)
-  const inputs = devs.filter((d) => d.kind === "audioinput" && d.deviceId);
+  const inputs = devs
+        .filter((d) => d.kind === "audioinput" && d.deviceId)
+        .map((d)=>{
+          const clean = (d.label || '').replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)$/i, '').trim();
+          return { ...d, label: clean || d.label };
+        });
         if (inputs.length) {
           setDevices(inputs);
           // Respect previously selected device if available
@@ -713,7 +776,7 @@ export default function Recorder({ onBack, token, onFinish, onSaved }) {
         </Button>
         <div>
           <h1 className="text-2xl font-semibold">Record an Episode</h1>
-          <p className="text-sm text-muted-foreground">Capture audio directly in your browser and save it to your library.</p>
+          <p className="text-sm text-muted-foreground">{source === 'A' ? 'Capture audio directly in your browser and edit it afterwards' : 'Capture audio directly in your browser and save it to your library.'}</p>
         </div>
       </div>
 
@@ -794,9 +857,12 @@ export default function Recorder({ onBack, token, onFinish, onSaved }) {
                   try { await ensurePermissionAndDevices(); } catch {}
                 }
                 handleMicCheck();
-              }}>Mic check (3s)</Button>
+              }}>Mic check (5s)</Button>
             </div>
           </div>
+          {isMicChecking && micCheckCountdown > 0 && (
+            <div className="text-center text-xs text-muted-foreground" aria-live="polite">Mic check… {micCheckCountdown}s</div>
+          )}
 
           {/* Preview & save area (shown after stop) */}
           {hasPreview && (
