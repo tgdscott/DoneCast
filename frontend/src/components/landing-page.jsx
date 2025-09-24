@@ -379,8 +379,8 @@ export default function PodcastPlusLanding() {
             <a href="#faq" className="text-gray-600 hover:text-gray-800 transition-colors">
               FAQ
             </a>
-            <a href="/pricing" className="text-gray-600 hover:text-gray-800 transition-colors">
-              Pricing
+            <a href="/subscriptions" className="text-gray-600 hover:text-gray-800 transition-colors">
+              Subscriptions
             </a>
             {/* Temporary dev link to A/B preview */}
             <a href="/ab" className="text-gray-600 hover:text-gray-800 transition-colors">
