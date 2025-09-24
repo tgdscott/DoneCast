@@ -364,6 +364,20 @@ export default function Onboarding() {
   async function handleFinish() {
     try {
       setSaving(true);
+      // If this user already has a podcast, skip creation and go to dashboard
+      try {
+        const data = await makeApi(token).get('/api/podcasts/');
+        const items = Array.isArray(data) ? data : (data?.items || []);
+        if (items.length > 0) {
+          try { toast({ title: 'All set', description: 'Your workspace is ready.' }); } catch {}
+          try {
+            localStorage.removeItem('ppp.onboarding.step');
+            localStorage.setItem('ppp.onboarding.completed', '1');
+          } catch {}
+          try { window.location.replace('/?onboarding=0'); } catch {}
+          return;
+        }
+      } catch (_) { /* non-fatal: proceed with creation flow */ }
       if (formData.elevenlabsApiKey) {
         try {
           await makeApi(token).put('/api/users/me/elevenlabs-key', { api_key: formData.elevenlabsApiKey });
@@ -435,8 +449,13 @@ export default function Onboarding() {
         // Import path: nothing to create here; finishing just returns to dashboard
         try { toast({ title: 'Imported', description: 'Your show has been imported.' }); } catch {}
       }
-      // Send user to dashboard in either case
-      try { window.location.href = '/'; } catch {}
+      // Mark onboarding complete and avoid reopening wizard if podcast count hasn't propagated yet
+      try {
+        localStorage.removeItem('ppp.onboarding.step');
+        localStorage.setItem('ppp.onboarding.completed', '1');
+      } catch {}
+      // Redirect with flag to skip onboarding rerender
+      try { window.location.replace('/?onboarding=0'); } catch {}
     } catch (error) {
       try { toast({ title: 'An Error Occurred', description: error.message, variant: 'destructive' }); } catch {}
     } finally {
@@ -691,15 +710,36 @@ export default function Onboarding() {
               </div>
             );
           }
-          // bi-weekly or month: simple two-month calendar picker
-          const months = (()=>{
-            const start = new Date();
-            start.setDate(1);
-            const next = new Date(start.getFullYear(), start.getMonth()+1, 1);
-            return [start, next];
+          // bi-weekly or month: calendar picker that hides past days and carries over end-of-month into next month if only same-week days remain
+          const today = (() => { const t = new Date(); return new Date(t.getFullYear(), t.getMonth(), t.getDate()); })();
+          const startOfThisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+          const startOfNextMonth = new Date(today.getFullYear(), today.getMonth()+1, 1);
+          const endOfThisMonth = new Date(today.getFullYear(), today.getMonth()+1, 0);
+          const nextMonthWeekStart = (() => {
+            // Sunday start of the week that contains the first of next month
+            const d = new Date(startOfNextMonth);
+            const dow = d.getDay(); // 0=Sun..6=Sat
+            const start = new Date(d);
+            start.setDate(d.getDate() - dow);
+            return start;
           })();
+          const nextMonthWeekEnd = new Date(nextMonthWeekStart.getFullYear(), nextMonthWeekStart.getMonth(), nextMonthWeekStart.getDate()+6);
+
+          // Collect remaining days in current month (>= today)
+          const remainingThisMonthDates = (() => {
+            const arr = [];
+            for (let d = today.getDate(); d <= endOfThisMonth.getDate(); d++) {
+              arr.push(new Date(today.getFullYear(), today.getMonth(), d));
+            }
+            return arr;
+          })();
+          // If all remaining days fall within the same week as next month's 1st, drop current month and carry them over
+          const dropCurrentMonth = remainingThisMonthDates.length > 0 && remainingThisMonthDates.every(dt => dt >= nextMonthWeekStart && dt <= nextMonthWeekEnd);
+          const months = dropCurrentMonth ? [startOfNextMonth] : [startOfThisMonth, startOfNextMonth];
+
           const daysInMonth = (y,m)=> new Date(y, m+1, 0).getDate();
           const pad = (n)=> String(n).padStart(2,'0');
+          const toISO = (d)=> `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
           const toggleDate = (iso)=> setSelectedDates((prev)=> prev.includes(iso) ? prev.filter(x=>x!==iso) : [...prev, iso]);
           // Sunday-first calendar headers
           const HEADERS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -708,17 +748,41 @@ export default function Onboarding() {
               {months.map((m, idx)=>{
                 const year = m.getFullYear();
                 const month = m.getMonth();
+                const isNextMonth = (month === startOfNextMonth.getMonth() && year === startOfNextMonth.getFullYear());
                 const total = daysInMonth(year, month);
                 const first = new Date(year, month, 1);
-                // JS: 0=Sun..6=Sat; convert to Monday-first (0..6)
-                const jsFirst = first.getDay(); // 0=Sun..6=Sat
-                const leadBlanks = jsFirst; // Sunday-first alignment
+                const jsFirst = first.getDay(); // 0=Sun..6=Sat (Sunday-first)
                 const cells = [];
-                for (let i=0;i<leadBlanks;i++) cells.push({ key: `b-${i}`, blank: true });
+
+                // Leading cells for alignment. If we're only showing next month and dropping current month,
+                // fill the leading cells with carryover days from previous month that are >= today.
+                if (isNextMonth && dropCurrentMonth) {
+                  for (let i = 0; i < jsFirst; i++) {
+                    const prevDate = new Date(year, month, 1 - (jsFirst - i)); // dates from previous month
+                    if (prevDate >= today && prevDate >= nextMonthWeekStart && prevDate <= nextMonthWeekEnd) {
+                      const iso = toISO(prevDate);
+                      cells.push({ key: iso, iso, day: prevDate.getDate(), carry: true });
+                    } else {
+                      cells.push({ key: `b-${i}`, blank: true });
+                    }
+                  }
+                } else {
+                  for (let i = 0; i < jsFirst; i++) cells.push({ key: `b-${i}`, blank: true });
+                }
+
+                // Current month days
                 for (let d=1; d<=total; d++) {
-                  const iso = `${year}-${pad(month+1)}-${pad(d)}`;
+                  const dateObj = new Date(year, month, d);
+                  // Hide past days for the current (visible) month that includes today
+                  if (dateObj < today) {
+                    // Only blank out past days in the month that contains today; future months are all in the future
+                    const isThisMonth = (month === today.getMonth() && year === today.getFullYear());
+                    if (isThisMonth) { cells.push({ key: `p-${d}`, blank: true }); continue; }
+                  }
+                  const iso = toISO(dateObj);
                   cells.push({ key: iso, iso, day: d });
                 }
+
                 // Pad trailing blanks to complete the last week row
                 while (cells.length % 7 !== 0) cells.push({ key: `t-${cells.length}`, blank: true });
                 return (
