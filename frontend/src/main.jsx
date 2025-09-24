@@ -85,6 +85,7 @@ const router = createBrowserRouter([
   { path: '/privacy', element: <PrivacyPolicy /> },
   { path: '/terms', element: <TermsOfUse /> },
   { path: '/pricing', element: <Pricing /> },
+  { path: '/subscriptions', element: <Pricing /> },
   // Fallback 404 for any unknown route
   { path: '*', element: <NotFound /> },
 ]);
