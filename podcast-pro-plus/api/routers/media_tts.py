@@ -11,6 +11,9 @@ from api.routers.auth import get_current_user
 from api.core.paths import MEDIA_DIR
 from api.models.podcast import MediaItem, MediaCategory
 import api.services.ai_enhancer as enhancer
+from api.services import tts_quota
+from api.services.billing import usage as billing_usage
+import math
 
 router = APIRouter(prefix="/media", tags=["Media Library"])
 log = logging.getLogger(__name__)
@@ -24,6 +27,15 @@ class TTSCREATEBody(BaseModel):
     speaking_rate: Optional[float] = Field(default=1.0)
     category: MediaCategory
     friendly_name: Optional[str] = None
+    # When a precheck indicates this request may incur minutes, the client must set this to true
+    # to proceed. If not set, we'll respond with a warning and refuse to generate.
+    confirm_charge: Optional[bool] = Field(default=False)
+
+
+class TTSPRECHECKBody(BaseModel):
+    text: str = Field(..., min_length=1)
+    speaking_rate: Optional[float] = Field(default=1.0)
+    category: MediaCategory
 
 
 def _safe_slug(text: str) -> str:
@@ -54,6 +66,44 @@ async def create_tts_media(
             sr = 3.0
     except Exception:
         sr = 1.0
+
+    # Precheck quota and spam guard
+    try:
+        pre = tts_quota.precheck(
+            session,
+            current_user.id,
+            body.category,
+            text=text,
+            speaking_rate=float(body.speaking_rate or 1.0),
+        )
+    except Exception:
+        pre = {"ok": True, "spam_block": False, "warn_may_cost": False}
+
+    if pre.get("spam_block"):
+        raise HTTPException(status_code=429, detail={
+            "message": "You recently created a similar TTS clip. Please wait a few seconds or reuse the one you just generated.",
+            "code": "tts_spam_block"
+        })
+
+    if pre.get("warn_may_cost") and not bool(body.confirm_charge):
+        # Do not synthesize; require explicit confirmation from client
+        raise HTTPException(status_code=409, detail={
+            "message": "We noticed high usage here. Anything else you create may count against your plan's minutes.",
+            "code": "tts_confirm_required",
+        })
+
+    # Record the intent so we can finalize with actual seconds after generation
+    try:
+        usage_row = tts_quota.record_request(
+            session,
+            current_user.id,
+            body.category,
+            text=text,
+            speaking_rate=float(body.speaking_rate or 1.0),
+        )
+        usage_id = getattr(usage_row, "id", None)
+    except Exception:
+        usage_id = None
 
     # Synthesize
     try:
@@ -118,4 +168,71 @@ async def create_tts_media(
     session.commit()
     session.refresh(item)
 
+    # Finalize usage actual seconds and optionally post a minute debit if confirmed path
+    try:
+        ms = len(audio)  # pydub segment length in ms
+        seconds_actual = max(0.0, float(ms) / 1000.0)
+        if usage_id is not None:
+            tts_quota.finalize_actual_seconds(session, usage_id, seconds_actual)
+        # Determine charge only when client confirmed they were warned
+        if pre.get("warn_may_cost") and bool(body.confirm_charge):
+            # Compute daily usage BEFORE this generation
+            used_s_before, _ = tts_quota.daily_usage(session, current_user.id, body.category)
+            free_left_s = max(0.0, float(tts_quota.DailyQuota().free_seconds_per_type) - used_s_before)
+            charge_seconds = max(0.0, seconds_actual - free_left_s)
+            minutes_to_debit = int(math.ceil(charge_seconds / 60.0)) if charge_seconds > 0 else 0
+            if minutes_to_debit > 0:
+                try:
+                    billing_usage.post_debit(
+                        session,
+                        current_user.id,
+                        minutes=minutes_to_debit,
+                        episode_id=None,
+                        reason=str(billing_usage.LedgerReason.TTS_LIBRARY.value) if hasattr(billing_usage, 'LedgerReason') else "TTS_LIBRARY",
+                        correlation_id=f"tts:{current_user.id.hex}:{item.id}",
+                        notes=f"TTS {body.category.value} library generation charge ({seconds_actual:.2f}s)",
+                    )
+                except Exception:
+                    # Don't fail the request if billing posting fails; log only
+                    log.exception("Failed to post minutes debit for TTS library generation")
+        # If not warned path, we charge 0 minutes, even if this exceeded the daily free seconds (grace applied)
+    except Exception:
+        # Non-fatal; ensure we don't break the happy path
+        log.exception("Failed to finalize TTS usage/billing")
+
     return item
+
+
+@router.post("/tts/precheck")
+async def tts_precheck(
+    body: TTSPRECHECKBody,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is required")
+    sr = 1.0
+    try:
+        sr = float(body.speaking_rate or 1.0)
+        if sr <= 0:
+            sr = 1.0
+        if sr > 3.0:
+            sr = 3.0
+    except Exception:
+        sr = 1.0
+
+    res = tts_quota.precheck(
+        session,
+        current_user.id,
+        body.category,
+        text=text,
+        speaking_rate=sr,
+    )
+    # Keep messaging generic and do not expose numeric policy publicly
+    message = None
+    if res.get("spam_block"):
+        message = "You recently created a similar TTS clip. Please wait a few seconds or reuse the one you just generated."
+    elif res.get("warn_may_cost"):
+        message = "We noticed high usage here. Anything else you create may count against your plan's minutes."
+    return {"ok": bool(res.get("ok", True)), "spam_block": bool(res.get("spam_block")), "warn_may_cost": bool(res.get("warn_may_cost")), "message": message}

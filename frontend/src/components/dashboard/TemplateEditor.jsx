@@ -88,7 +88,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     const [ttsFriendlyName, setTtsFriendlyName] = useState("");
     const [ttsVoices, setTtsVoices] = useState([]);
     const [ttsLoading, setTtsLoading] = useState(false);
-    const [createdFromTTS, setCreatedFromTTS] = useState({}); // { segmentId: true }
+    const [createdFromTTS, setCreatedFromTTS] = useState({}); // { segmentId: timestampMs }
     const [showAdvanced, setShowAdvanced] = useState(false);
 
         // Load voices when TTS modal opens
@@ -503,7 +503,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                                                 setTtsFriendlyName(prefill?.friendly_name ?? '');
                                                 setTtsOpen(true);
                                             }}
-                                            justCreated={!!createdFromTTS[segment.id]}
+                                            justCreatedTs={createdFromTTS[segment.id] || null}
                                             templateVoiceId={voiceId || null}
                                             token={token}
                                             onMediaUploaded={onMediaUploaded}
@@ -691,6 +691,28 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                                 try {
                                     const segType = ttsTargetSegment.segment_type;
                                     const category = (segType === 'intro' || segType === 'outro' || segType === 'commercial') ? segType : 'sfx';
+                                    // Precheck quota and spam window
+                                    let confirmCharge = false;
+                                    try {
+                                        const api = makeApi(token);
+                                        const pre = await api.post('/api/media/tts/precheck', {
+                                            text: ttsScript,
+                                            speaking_rate: (ttsSpeakingRate && !Number.isNaN(ttsSpeakingRate)) ? ttsSpeakingRate : 1.0,
+                                            category,
+                                        });
+                                        if (pre?.spam_block) {
+                                            toast({ variant: 'destructive', title: 'Please wait', description: pre?.message || 'You just created a similar clip. Please wait a few seconds or reuse it.' });
+                                            setTtsLoading(false);
+                                            return;
+                                        }
+                                        if (pre?.warn_may_cost) {
+                                            const proceed = window.confirm(pre?.message || "We noticed high usage here. Anything else you create may count against your plan's minutes. Continue?");
+                                            if (!proceed) { setTtsLoading(false); return; }
+                                            confirmCharge = true;
+                                        }
+                                    } catch (_) {
+                                        // If precheck fails, allow proceed without confirm flag
+                                    }
                                     const item = await createTTS({
                                         text: ttsScript,
                                         voice_id: ttsVoiceId,
@@ -698,6 +720,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                                         category,
                                         friendly_name: ttsFriendlyName && ttsFriendlyName.trim() ? ttsFriendlyName.trim() : undefined,
                                         speaking_rate: (ttsSpeakingRate && !Number.isNaN(ttsSpeakingRate)) ? ttsSpeakingRate : undefined,
+                                        confirm_charge: confirmCharge,
                                     });
                                     const filename = item?.filename;
                                     if (!filename) throw new Error('TTS did not return a filename');
@@ -712,7 +735,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                                     setMediaFiles(prev => [...prev, newMedia]);
                                     // Link segment to static file
                                     handleSourceChange(ttsTargetSegment.id, { source_type: 'static', filename });
-                                    setCreatedFromTTS(prev => ({ ...prev, [ttsTargetSegment.id]: true }));
+                                    setCreatedFromTTS(prev => ({ ...prev, [ttsTargetSegment.id]: Date.now() }));
                                     try { toast({ title: 'TTS created', description: 'Audio saved to Media and linked to this segment.' }); } catch {}
                                     setTtsOpen(false);
                                 } catch (e) {
@@ -736,7 +759,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
 // Voice name display is optional; here we show the id compactly
 {/* The modal is rendered at the root of this component's return via conditional below */}
 
-const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDragging, onOpenTTS, justCreated, templateVoiceId, token, onMediaUploaded }) => {
+const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDragging, onOpenTTS, justCreatedTs, templateVoiceId, token, onMediaUploaded }) => {
     const filesForType = mediaFiles[segment.segment_type] || [];
     const [relinkOpen, setRelinkOpen] = useState(false);
     const filename = (segment?.source?.filename || '').trim();
@@ -749,6 +772,22 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
     const [localVoiceName, setLocalVoiceName] = useState(null);
     const uploadInputRef = useRef(null);
     const [isUploading, setIsUploading] = useState(false);
+    const [cooldown, setCooldown] = useState(0); // seconds remaining on 30s cooldown after creation
+
+    useEffect(() => {
+        if (!justCreatedTs) { setCooldown(0); return; }
+        let timer;
+        const update = () => {
+            const elapsed = Math.floor((Date.now() - justCreatedTs) / 1000);
+            const left = Math.max(0, 30 - elapsed);
+            setCooldown(left);
+        };
+        update();
+        if (30 - Math.floor((Date.now() - justCreatedTs) / 1000) > 0) {
+            timer = setInterval(update, 1000);
+        }
+        return () => { if (timer) clearInterval(timer); };
+    }, [justCreatedTs]);
 
     // Resolve friendly name for any existing per-segment voice_id when present
     useEffect(() => {
@@ -902,7 +941,15 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
                                 </SelectContent>
                             </Select>
                         </div>
-                        <Button type="button" variant="outline" onClick={() => onOpenTTS()}><Mic className="w-4 h-4 mr-2" />Create with TTS (one-time)</Button>
+                        <Button type="button" variant="outline" onClick={() => onOpenTTS()} disabled={cooldown > 0}>
+                            <Mic className="w-4 h-4 mr-2" />
+                            {cooldown > 0 ? `Create with TTS (${cooldown}s)` : 'Create with TTS (one-time)'}
+                        </Button>
+                        {justCreatedTs && cooldown > 0 && (
+                            <span className="text-xs text-muted-foreground" title="We saved the last TTS in your Media. Reuse it or wait a moment before creating another.">
+                                Recently created — reuse the saved file or wait a moment.
+                            </span>
+                        )}
                         {segment?.source?.source_type === 'static' && isMissing && (
                             <Button type="button" variant="secondary" size="sm" title="Select an existing audio file for this segment" onClick={() => { setRelinkChoice(filename || ''); setRelinkOpen(true); }}>Choose audio</Button>
                         )}

@@ -6,6 +6,7 @@ export type CreateTTSPayload = {
   speaking_rate?: number;
   category: 'intro' | 'outro' | 'commercial' | 'sfx' | 'music';
   friendly_name?: string;
+  confirm_charge?: boolean;
 };
 
 export type MediaItemDTO = {

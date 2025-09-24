@@ -18,6 +18,8 @@ class LedgerReason(str, Enum):
     PROCESS_AUDIO = "PROCESS_AUDIO"
     REFUND_ERROR = "REFUND_ERROR"
     MANUAL_ADJUST = "MANUAL_ADJUST"
+    # Minutes charged for TTS generated assets saved to the media library (outside episode assembly)
+    TTS_LIBRARY = "TTS_LIBRARY"
 
 
 class ProcessingMinutesLedger(SQLModel, table=True):
@@ -67,3 +69,24 @@ __all__ = [
     "LedgerDirection",
     "LedgerReason",
 ]
+
+# --- TTS usage tracking (for daily free quota and anti-spam heuristics) ---
+from .podcast import MediaCategory  # late import to avoid circulars at module import time
+
+
+class TTSUsage(SQLModel, table=True):
+    """
+    Track individual TTS generations (outside episode creation) for quota and guardrails.
+    Stores both an estimate at request time and the actual duration we saved.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: UUID = Field(index=True)
+    category: MediaCategory = Field(index=True)
+    characters: int = Field(default=0)
+    seconds_estimated: float = Field(default=0.0)
+    seconds_actual: Optional[float] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+__all__.extend(["TTSUsage"]) 
