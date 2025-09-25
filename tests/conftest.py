@@ -9,6 +9,25 @@ from typing import Iterator
 
 import pytest
 
+_REQUIRED_DEFAULTS = {
+    "DB_USER": "test",
+    "DB_PASS": "test",
+    "DB_NAME": "test",
+    "INSTANCE_CONNECTION_NAME": "local",
+    "GEMINI_API_KEY": "gemini_dummy",
+    "ELEVENLABS_API_KEY": "eleven_dummy_key",
+    "ASSEMBLYAI_API_KEY": "aai_dummy_key",
+    "SPREAKER_API_TOKEN": "spreaker_token",
+    "SPREAKER_CLIENT_ID": "spreaker_client",
+    "SPREAKER_CLIENT_SECRET": "spreaker_secret",
+    "GOOGLE_CLIENT_ID": "google_client",
+    "GOOGLE_CLIENT_SECRET": "google_secret",
+    "STRIPE_SECRET_KEY": "sk_test_dummy",
+    "STRIPE_WEBHOOK_SECRET": "whsec_dummy",
+}
+for _k, _v in _REQUIRED_DEFAULTS.items():
+    os.environ.setdefault(_k, _v)
+
 # Guard against local modules shadowing third-party packages
 import importlib as _importlib
 _m = _importlib.import_module("pydub")  # should be the installed package

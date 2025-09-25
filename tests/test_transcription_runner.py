@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 import pytest
 
 from api.services.transcription.transcription_runner import run_assemblyai_job
+from api.services.transcription.assemblyai_webhook import AssemblyAIWebhookManager
 
 
 class FakeResponse:
@@ -14,6 +15,25 @@ class FakeResponse:
 
     def json(self) -> Dict[str, Any]:
         return dict(self._payload)
+
+
+class FakeSession:
+    def __init__(self, post, get):
+        self._post = post
+        self._get = get
+
+    def post(self, url, headers=None, data=None, json=None):
+        kwargs = {}
+        if headers is not None:
+            kwargs["headers"] = headers
+        if data is not None:
+            kwargs["data"] = data
+        if json is not None:
+            kwargs["json"] = json
+        return self._post(url, **kwargs)
+
+    def get(self, url, headers=None):
+        return self._get(url, headers=headers)
 
 
 def test_runner_happy_path(tmp_path, monkeypatch, caplog):
@@ -52,8 +72,11 @@ def test_runner_happy_path(tmp_path, monkeypatch, caplog):
         calls.append("get_poll")
         return FakeResponse(200, seq.pop(0))
 
-    monkeypatch.setattr("requests.post", fake_post)
-    monkeypatch.setattr("requests.get", fake_get)
+    session = FakeSession(fake_post, fake_get)
+    monkeypatch.setattr(
+        "api.services.transcription.assemblyai_client._get_session",
+        lambda: session,
+    )
 
     # Avoid delays
     monkeypatch.setattr("time.sleep", lambda s: None)
@@ -83,3 +106,16 @@ def test_runner_happy_path(tmp_path, monkeypatch, caplog):
     assert "[assemblyai] payload=" in msgs
     assert "[assemblyai] created transcript id=" in msgs
     assert "[assemblyai] server flags" in msgs
+
+
+def test_webhook_manager_handles_out_of_order_notifications():
+    manager = AssemblyAIWebhookManager()
+
+    # Webhook arrives before register()
+    manager.notify({"id": "job123", "status": "completed", "text": "hi"})
+
+    manager.register("job123", timeout_s=1.0)
+    data = manager.wait_for_completion("job123", timeout_s=0.1)
+
+    assert data is not None
+    assert data["status"] == "completed"

@@ -13,6 +13,32 @@ from api.services.transcription.assemblyai_client import (
 )
 
 
+class FakeSession:
+    def __init__(self, *, post=None, get=None, delete=None):
+        self._post = post
+        self._get = get
+        self._delete = delete
+
+    def post(self, url, headers=None, data=None, json=None):
+        assert self._post is not None, "post handler not configured"
+        kwargs = {}
+        if headers is not None:
+            kwargs["headers"] = headers
+        if data is not None:
+            kwargs["data"] = data
+        if json is not None:
+            kwargs["json"] = json
+        return self._post(url, **kwargs)
+
+    def get(self, url, headers=None):
+        assert self._get is not None, "get handler not configured"
+        return self._get(url, headers=headers)
+
+    def delete(self, url, headers=None):
+        assert self._delete is not None, "delete handler not configured"
+        return self._delete(url, headers=headers)
+
+
 class FakeResponse:
     def __init__(self, status_code: int, payload: Dict[str, Any]):
         self.status_code = status_code
@@ -40,7 +66,10 @@ def test_upload_audio_success(tmp_path, monkeypatch, caplog):
         assert all(isinstance(c, (bytes, bytearray)) for c in chunks)
         return FakeResponse(200, {"upload_url": "https://mock/upload/123"})
 
-    monkeypatch.setattr("requests.post", fake_post)
+    monkeypatch.setattr(
+        "api.services.transcription.assemblyai_client._get_session",
+        lambda: FakeSession(post=fake_post),
+    )
 
     # Act
     out = upload_audio(audio, api_key="KEY", base_url="https://mock", log=[])
@@ -61,7 +90,10 @@ def test_upload_audio_failure(tmp_path, monkeypatch):
     def fake_post(url, headers=None, data=None):
         return FakeResponse(500, {"error": "oops"})
 
-    monkeypatch.setattr("requests.post", fake_post)
+    monkeypatch.setattr(
+        "api.services.transcription.assemblyai_client._get_session",
+        lambda: FakeSession(post=fake_post),
+    )
 
     with pytest.raises(AssemblyAITranscriptionError) as ei:
         upload_audio(audio, api_key="K", base_url="https://mock", log=[])
@@ -78,7 +110,10 @@ def test_start_transcription_success(monkeypatch, caplog):
         captured["headers"] = dict(headers or {})
         return FakeResponse(200, {"id": "job_1", "status": "queued"})
 
-    monkeypatch.setattr("requests.post", fake_post)
+    monkeypatch.setattr(
+        "api.services.transcription.assemblyai_client._get_session",
+        lambda: FakeSession(post=fake_post),
+    )
 
     out = start_transcription(
         upload_url="https://mock/upload/123",
@@ -104,7 +139,10 @@ def test_start_transcription_failure(monkeypatch):
     def fake_post(url, json=None, headers=None):
         return FakeResponse(400, {"error": "bad"})
 
-    monkeypatch.setattr("requests.post", fake_post)
+    monkeypatch.setattr(
+        "api.services.transcription.assemblyai_client._get_session",
+        lambda: FakeSession(post=fake_post),
+    )
 
     with pytest.raises(AssemblyAITranscriptionError) as ei:
         start_transcription(
@@ -126,7 +164,10 @@ def test_get_transcription_success(monkeypatch, caplog):
         captured["headers"] = dict(headers or {})
         return FakeResponse(200, {"id": "job_1", "status": "completed", "text": "hello"})
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr(
+        "api.services.transcription.assemblyai_client._get_session",
+        lambda: FakeSession(get=fake_get),
+    )
 
     out = get_transcription("job_1", api_key="KEY", base_url="https://mock", log=[])
     assert out["status"] == "completed"
@@ -140,7 +181,10 @@ def test_get_transcription_failure(monkeypatch):
     def fake_get(url, headers=None):
         return FakeResponse(503, {"error": "down"})
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr(
+        "api.services.transcription.assemblyai_client._get_session",
+        lambda: FakeSession(get=fake_get),
+    )
 
     with pytest.raises(AssemblyAITranscriptionError) as ei:
         get_transcription("job_1", api_key="KEY", base_url="https://mock", log=[])

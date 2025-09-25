@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from threading import Lock
 from typing import Any, Dict, Iterable, Optional, Union
 
 import requests
+from requests import Session
+from requests.adapters import HTTPAdapter
 
 
 class AssemblyAITranscriptionError(Exception):
@@ -27,11 +30,40 @@ def _stream_file(path: Path, chunk_size: int = 5_242_880) -> Iterable[bytes]:
 from .types import UploadResp, StartResp, TranscriptResp
 
 
+_session_lock = Lock()
+_shared_session: Optional[Session] = None
+
+
+def _build_shared_session() -> Session:
+    session = requests.Session()
+    adapter = HTTPAdapter(pool_connections=8, pool_maxsize=16)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
+def _get_session() -> Session:
+    global _shared_session
+    if _shared_session is None:
+        with _session_lock:
+            if _shared_session is None:
+                _shared_session = _build_shared_session()
+    return _shared_session
+
+
+def get_http_session() -> Session:
+    """Return the shared Session used for AssemblyAI requests."""
+
+    return _get_session()
+
+
 def upload_audio(
     file_path: Union[str, Path],
     api_key: str,
     base_url: str,
     log: Optional[list[str]] = None,
+    *,
+    session: Optional[Session] = None,
 ) -> Union[UploadResp, str]:
     """Upload audio to AssemblyAI's /upload endpoint.
 
@@ -42,7 +74,8 @@ def upload_audio(
         "authorization": api_key.strip(),
         "content-type": "application/octet-stream",
     }
-    resp = requests.post(f"{base_url}/upload", headers=headers, data=_stream_file(p))
+    http = session or _get_session()
+    resp = http.post(f"{base_url}/upload", headers=headers, data=_stream_file(p))
     if resp.status_code != 200:
         raise AssemblyAITranscriptionError(f"Upload failed: {resp.status_code} {resp.text}")
     upload_url = resp.json().get("upload_url")
@@ -57,6 +90,8 @@ def start_transcription(
     params: Optional[Dict[str, Any]] = None,
     base_url: str = "https://api.assemblyai.com/v2",
     log: Optional[list[str]] = None,
+    *,
+    session: Optional[Session] = None,
 ) -> StartResp:
     """Create a transcription job. Returns the create JSON (must include 'id').
 
@@ -98,7 +133,8 @@ def start_transcription(
         pass
 
     headers_json = {"authorization": api_key.strip()}
-    create = requests.post(f"{base_url}/transcript", json=payload, headers=headers_json)
+    http = session or _get_session()
+    create = http.post(f"{base_url}/transcript", json=payload, headers=headers_json)
     if create.status_code != 200:
         raise AssemblyAITranscriptionError(
             f"Transcription request failed: {create.status_code} {create.text}"
@@ -116,10 +152,13 @@ def get_transcription(
     api_key: str,
     base_url: str = "https://api.assemblyai.com/v2",
     log: Optional[list[str]] = None,
+    *,
+    session: Optional[Session] = None,
 ) -> TranscriptResp:
     """Fetch a transcription job by id. Returns response JSON. Error texts match monolith."""
     headers_json = {"authorization": api_key.strip()}
-    poll = requests.get(f"{base_url}/transcript/{job_id}", headers=headers_json)
+    http = session or _get_session()
+    poll = http.get(f"{base_url}/transcript/{job_id}", headers=headers_json)
     if poll.status_code != 200:
         raise AssemblyAITranscriptionError(f"Polling failed: {poll.status_code} {poll.text}")
     return poll.json()
@@ -130,13 +169,16 @@ def cancel_transcription(
     api_key: str,
     base_url: str = "https://api.assemblyai.com/v2",
     log: Optional[list[str]] = None,
+    *,
+    session: Optional[Session] = None,
 ) -> Dict[str, Any]:
     """Attempt to cancel a transcription job. Only used if wired by callers.
 
     Keeps error text format consistent if API returns non-200.
     """
     headers_json = {"authorization": api_key.strip()}
-    resp = requests.delete(f"{base_url}/transcript/{job_id}", headers=headers_json)
+    http = session or _get_session()
+    resp = http.delete(f"{base_url}/transcript/{job_id}", headers=headers_json)
     if resp.status_code not in (200, 204):
         raise AssemblyAITranscriptionError(
             f"Cancel failed: {resp.status_code} {resp.text}"
@@ -153,4 +195,5 @@ __all__ = [
     "start_transcription",
     "get_transcription",
     "cancel_transcription",
+    "get_http_session",
 ]
