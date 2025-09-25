@@ -137,8 +137,17 @@
     background-color: #ffffff;
     color: #000000;
   }
-  html.pref-high-contrast a {
-    text-decoration: underline;
+  /* Contrast utilities (light-weight) */
+  .contrast-on-primary, .brand-nsc .bg-primary {
+    color: hsl(var(--primary-foreground)) !important;
+  }
+  .brand-nsc .btn, .brand-nsc button.bg-primary, .brand-nsc .badge.bg-primary {
+    color: hsl(var(--primary-foreground));
+    fill: currentColor;
+  }
+  /* Teal boxes with text-teal issue: normalize text color */
+  .brand-nsc .teal-box, .brand-nsc .bg-secondary, .brand-nsc .bg-muted {
+    color: hsl(var(--foreground));
   }
   html.pref-high-contrast *:focus-visible {
     outline-color: hsl(var(--ring));

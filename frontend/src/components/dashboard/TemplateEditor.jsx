@@ -53,6 +53,41 @@ const sourceIcons = {
     tts: <Mic className="w-4 h-4 mr-2" />,
 };
 
+const MUSIC_VOLUME_LEVELS = [
+    { level: 1, db: -35, description: 'Barely there under the host' },
+    { level: 2, db: -30, description: 'Very soft background' },
+    { level: 3, db: -25, description: 'Soft and warm' },
+    { level: 4, db: -20, description: 'Low but noticeable' },
+    { level: 5, db: -15, description: 'Comfortable blend' },
+    { level: 6, db: -8, description: 'Present but not overpowering' },
+    { level: 7, db: -3, description: 'Energetic backing (similar to -3 dB)' },
+    { level: 8, db: -2, description: 'Almost level with the voice' },
+    { level: 9, db: -1, description: 'Bold background mix' },
+    { level: 10, db: 0, description: 'Same volume as everything else' },
+];
+
+const DEFAULT_VOLUME_LEVEL = 7;
+
+const volumeLevelToDb = (level) => {
+    const preset = MUSIC_VOLUME_LEVELS.find(item => item.level === level);
+    const fallback = MUSIC_VOLUME_LEVELS.find(item => item.level === DEFAULT_VOLUME_LEVEL);
+    return preset ? preset.db : (fallback ? fallback.db : -6);
+};
+
+const volumeDbToLevel = (db) => {
+    if (typeof db !== 'number' || Number.isNaN(db)) return DEFAULT_VOLUME_LEVEL;
+    return MUSIC_VOLUME_LEVELS.reduce((closest, item) => {
+        const currentDiff = Math.abs(item.db - db);
+        const closestDiff = Math.abs(volumeLevelToDb(closest) - db);
+        return currentDiff < closestDiff ? item.level : closest;
+    }, DEFAULT_VOLUME_LEVEL);
+};
+
+const describeVolumeLevel = (level) => {
+    const preset = MUSIC_VOLUME_LEVELS.find(item => item.level === level);
+    return preset ? preset.description : '';
+};
+
 const AddSegmentButton = ({ type, onClick, disabled }) => (
     <Button 
         variant="outline" 
@@ -75,11 +110,11 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     const [podcasts, setPodcasts] = useState([]);
     const [baselineTemplate, setBaselineTemplate] = useState(null);
     const skipExitPromptRef = useRef(false);
-    // Default AI voice for TTS (template-level)
+    // Default AI voice for template prompts
     const [voiceId, setVoiceId] = useState(null);
     const [showVoicePicker, setShowVoicePicker] = useState(false);
     const [voiceName, setVoiceName] = useState(null);
-    // One-time TTS modal state
+    // One-time AI voice modal state
     const [ttsOpen, setTtsOpen] = useState(false);
     const [ttsTargetSegment, setTtsTargetSegment] = useState(null);
     const [ttsScript, setTtsScript] = useState("");
@@ -91,7 +126,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     const [createdFromTTS, setCreatedFromTTS] = useState({}); // { segmentId: timestampMs }
     const [showAdvanced, setShowAdvanced] = useState(false);
 
-        // Load voices when TTS modal opens
+        // Load voices when AI voice modal opens
         useEffect(() => {
             const loadVoices = async () => {
                 try {
@@ -459,7 +494,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                     <CardContent className="p-6">
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                             <div>
-                                <Label className="text-sm font-medium text-gray-600 flex items-center gap-1">Default AI Voice<HelpCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" title="Set a default voice for template TTS prompts." /></Label>
+                                <Label className="text-sm font-medium text-gray-600 flex items-center gap-1">Default AI Voice<HelpCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" title="Set a default voice for template AI voice prompts." /></Label>
                                 <div className="text-sm text-gray-800 mt-1">{voiceName || 'Not set'}</div>
                             </div>
                             <div className="mt-2 sm:mt-0">
@@ -559,69 +594,83 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                                 <HelpCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" title="Apply looping music or stingers to specific sections." />
                             </h4>
                             <div className="space-y-4">
-                                {(template.background_music_rules || []).map((rule, index) => (
-                                    <div key={rule.id} className="p-4 border rounded-lg bg-gray-50 space-y-4">
-                                        <div className="flex justify-between items-center">
-                                            <Label className="font-semibold">Music Rule #{index + 1}</Label>
-                                            <Button variant="destructive" size="sm" onClick={() => removeBackgroundMusicRule(index)}>
-                                                <Trash2 className="w-4 h-4 mr-2" />Remove
-                                            </Button>
+                                {(template.background_music_rules || []).map((rule, index) => {
+                                    const volumeLevel = volumeDbToLevel(rule.volume_db);
+                                    const volumeDescription = describeVolumeLevel(volumeLevel);
+                                    return (
+                                        <div key={rule.id} className="p-4 border rounded-lg bg-gray-50 space-y-4">
+                                            <div className="flex justify-between items-center">
+                                                <Label className="font-semibold">Music Rule #{index + 1}</Label>
+                                                <Button variant="destructive" size="sm" onClick={() => removeBackgroundMusicRule(index)}>
+                                                    <Trash2 className="w-4 h-4 mr-2" />Remove
+                                                </Button>
+                                            </div>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div>
+                                                    <Label>Apply to Section</Label>
+                                                    <Select value={rule.apply_to_segments[0]} onValueChange={(v) => handleBackgroundMusicChange(index, 'apply_to_segments', [v])}>
+                                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="intro">Intro Section</SelectItem>
+                                                            <SelectItem value="content">Content Section</SelectItem>
+                                                            <SelectItem value="outro">Outro Section</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                                <div>
+                                                    <Label>Music File</Label>
+                                                    <Select value={rule.music_filename} onValueChange={(v) => handleBackgroundMusicChange(index, 'music_filename', v)}>
+                                                        <SelectTrigger><SelectValue placeholder="Select music..." /></SelectTrigger>
+                                                        <SelectContent>{musicFiles.map(f => <SelectItem key={f.id} value={f.filename}>{f.friendly_name || f.filename.split('_').slice(1).join('_')}</SelectItem>)}</SelectContent>
+                                                    </Select>
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                <div>
+                                                    <Label>Start Offset (sec)</Label>
+                                                    <Input type="number" step="0.5" value={rule.start_offset_s} onChange={(e) => handleBackgroundMusicChange(index, 'start_offset_s', parseFloat(e.target.value || 0))} />
+                                                </div>
+                                                <div>
+                                                    <Label>End Offset (sec)</Label>
+                                                    <Input type="number" step="0.5" value={rule.end_offset_s} onChange={(e) => handleBackgroundMusicChange(index, 'end_offset_s', parseFloat(e.target.value || 0))} />
+                                                </div>
+                                                <div>
+                                                    <Label>Fade In (sec)</Label>
+                                                    <Input type="number" step="0.5" value={rule.fade_in_s} onChange={(e) => handleBackgroundMusicChange(index, 'fade_in_s', parseFloat(e.target.value || 0))} />
+                                                </div>
+                                                <div>
+                                                    <Label>Fade Out (sec)</Label>
+                                                    <Input type="number" step="0.5" value={rule.fade_out_s} onChange={(e) => handleBackgroundMusicChange(index, 'fade_out_s', parseFloat(e.target.value || 0))} />
+                                                </div>
+                                            </div>
+                                            <div className="mt-4">
+                                                <Label>Music loudness</Label>
+                                                <div className="flex flex-col gap-2">
+                                                    <Input
+                                                        type="range"
+                                                        min="1"
+                                                        max="10"
+                                                        step="1"
+                                                        value={volumeLevel}
+                                                        onChange={(e) => {
+                                                            const nextLevel = parseInt(e.target.value, 10);
+                                                            const targetLevel = Number.isNaN(nextLevel) ? volumeLevel : nextLevel;
+                                                            handleBackgroundMusicChange(index, 'volume_db', volumeLevelToDb(targetLevel));
+                                                        }}
+                                                        className="w-full"
+                                                    />
+                                                    <div className="flex justify-between text-xs text-muted-foreground">
+                                                        <span>1</span>
+                                                        <span>10</span>
+                                                    </div>
+                                                    <div className="text-sm text-muted-foreground">
+                                                        Level {volumeLevel}: {volumeDescription || 'Balanced with your voice'}
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <div>
-                                                <Label>Apply to Section</Label>
-                                                <Select value={rule.apply_to_segments[0]} onValueChange={(v) => handleBackgroundMusicChange(index, 'apply_to_segments', [v])}>
-                                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="intro">Intro Section</SelectItem>
-                                                        <SelectItem value="content">Content Section</SelectItem>
-                                                        <SelectItem value="outro">Outro Section</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
-                                            <div>
-                                                <Label>Music File</Label>
-                                                <Select value={rule.music_filename} onValueChange={(v) => handleBackgroundMusicChange(index, 'music_filename', v)}>
-                                                    <SelectTrigger><SelectValue placeholder="Select music..." /></SelectTrigger>
-                                                    <SelectContent>{musicFiles.map(f => <SelectItem key={f.id} value={f.filename}>{f.friendly_name || f.filename.split('_').slice(1).join('_')}</SelectItem>)}</SelectContent>
-                                                </Select>
-                                            </div>
-                                        </div>
-                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                            <div>
-                                                <Label>Start Offset (sec)</Label>
-                                                <Input type="number" step="0.5" value={rule.start_offset_s} onChange={(e) => handleBackgroundMusicChange(index, 'start_offset_s', parseFloat(e.target.value || 0))} />
-                                            </div>
-                                            <div>
-                                                <Label>End Offset (sec)</Label>
-                                                <Input type="number" step="0.5" value={rule.end_offset_s} onChange={(e) => handleBackgroundMusicChange(index, 'end_offset_s', parseFloat(e.target.value || 0))} />
-                                            </div>
-                                            <div>
-                                                <Label>Fade In (sec)</Label>
-                                                <Input type="number" step="0.5" value={rule.fade_in_s} onChange={(e) => handleBackgroundMusicChange(index, 'fade_in_s', parseFloat(e.target.value || 0))} />
-                                            </div>
-                                            <div>
-                                                <Label>Fade Out (sec)</Label>
-                                                <Input type="number" step="0.5" value={rule.fade_out_s} onChange={(e) => handleBackgroundMusicChange(index, 'fade_out_s', parseFloat(e.target.value || 0))} />
-                                            </div>
-                                        </div>
-                                        <div className="mt-4">
-                                            <Label>Volume (dB)</Label>
-                                            <div className="flex items-center gap-2">
-                                                <Input
-                                                    type="range"
-                                                    min="-60"
-                                                    max="0"
-                                                    step="1"
-                                                    value={rule.volume_db}
-                                                    onChange={(e) => handleBackgroundMusicChange(index, 'volume_db', parseInt(e.target.value, 10))}
-                                                    className="w-full"
-                                                />
-                                                <span className="text-sm font-mono w-16 text-center">{rule.volume_db} dB</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                             <Button onClick={addBackgroundMusicRule} variant="outline" className="mt-4">
                                 <Plus className="w-4 h-4 mr-2" />Add Music Rule
@@ -651,12 +700,12 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                             />
                         )}
 
-                {/* One-time TTS Modal */}
+                {/* One-time AI Voice Modal */}
                 <Dialog open={ttsOpen} onOpenChange={(v) => { setTtsOpen(v); }}>
                     <DialogContent className="sm:max-w-[600px]">
                         <DialogHeader>
-                            <DialogTitle>Create with TTS (one-time)</DialogTitle>
-                            <DialogDescription>We’ll synthesize this once and save it to your library. You won’t need to re-generate it every episode.</DialogDescription>
+                            <DialogTitle>Generate with AI voice (one-time)</DialogTitle>
+                            <DialogDescription>We'll synthesize this once and save it to your library. You won't need to regenerate it every episode.</DialogDescription>
                         </DialogHeader>
                         <div className="space-y-4 py-2">
                             <div>
@@ -666,7 +715,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                                     // Auto-suggest friendly name from first 6 words
                                     const words = (e.target.value || '').trim().split(/\s+/).slice(0, 6).join(' ');
                                     const segLabel = ttsTargetSegment ? (ttsTargetSegment.segment_type.charAt(0).toUpperCase() + ttsTargetSegment.segment_type.slice(1)) : 'Segment';
-                                    if (!ttsFriendlyName) setTtsFriendlyName(`${segLabel} TTS – ${words}`.trim());
+                                    if (!ttsFriendlyName) setTtsFriendlyName(`${segLabel} AI voice – ${words}`.trim());
                                 }} placeholder="e.g., Welcome to the show..." className="mt-1" rows={5} />
                             </div>
                             <div>
@@ -725,7 +774,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                                         confirm_charge: confirmCharge,
                                     });
                                     const filename = item?.filename;
-                                    if (!filename) throw new Error('TTS did not return a filename');
+                                    if (!filename) throw new Error('AI voice did not return a filename');
                                     // Add to media list so it appears immediately
                                     const newMedia = {
                                         id: item?.id || crypto.randomUUID(),
@@ -738,17 +787,17 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                                     // Link segment to static file
                                     handleSourceChange(ttsTargetSegment.id, { source_type: 'static', filename });
                                     setCreatedFromTTS(prev => ({ ...prev, [ttsTargetSegment.id]: Date.now() }));
-                                    try { toast({ title: 'TTS created', description: 'Audio saved to Media and linked to this segment.' }); } catch {}
+                                    try { toast({ title: 'AI voice ready', description: 'Audio saved to Media and linked to this segment.' }); } catch {}
                                     setTtsOpen(false);
                                 } catch (e) {
                                     // Try to extract a meaningful error message from the API response.
                                     const apiMessage = e?.detail?.error?.message || e?.detail;
                                     const detail = (typeof apiMessage === 'string' ? apiMessage : e?.message) || 'Could not create audio.';
-                                    toast({ variant: 'destructive', title: 'TTS Failed', description: detail });
+                                    toast({ variant: 'destructive', title: 'AI voice failed', description: detail });
                                 } finally {
                                     setTtsLoading(false);
                                 }
-                            }}>{ttsLoading ? 'Creating…' : 'Create'}</Button>
+                            }}>{ttsLoading ? 'Creating clip...' : 'Create clip'}</Button>
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>
@@ -893,7 +942,7 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
                     {segmentIcons[segment.segment_type]}
                     <span className="font-semibold text-gray-800">{segment.segment_type.charAt(0).toUpperCase() + segment.segment_type.slice(1)}</span>
                     {justCreatedTs ? (
-                        <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">Created from TTS</span>
+                        <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">Created with AI voice</span>
                     ) : null}
                     {segment?.source?.source_type === 'static' && isMissing && (
                         <span
@@ -920,7 +969,7 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
                                         script: segment?.source?.script || segment?.source?.prompt || '',
                                         voice_id: segment?.source?.voice_id || undefined,
                                         speaking_rate: segment?.source?.speaking_rate || undefined,
-                                        friendly_name: `${segment.segment_type.charAt(0).toUpperCase() + segment.segment_type.slice(1)} TTS – Legacy`,
+                                        friendly_name: `${segment.segment_type.charAt(0).toUpperCase() + segment.segment_type.slice(1)} AI voice – Legacy`,
                                     };
                                     onOpenTTS(prefill);
                                 }}
@@ -930,7 +979,7 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
                     </div>
                 )}
                 <div>
-                    <Label className="text-sm font-medium text-gray-600 flex items-center gap-1">Audio Source<HelpCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" title="Choose between existing audio files or per-episode TTS prompts." /></Label>
+                    <Label className="text-sm font-medium text-gray-600 flex items-center gap-1">Audio Source<HelpCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" title="Choose between existing audio files or per-episode AI voice prompts." /></Label>
                     <div className="flex items-center gap-3 mt-1">
                         <div className="flex-1">
                             <Select value={segment?.source?.source_type || 'static'} onValueChange={(v) => handleSourceChangeLocal('source_type', v)}>
@@ -939,16 +988,16 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
                                 </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="static">{sourceIcons.static} Audio file (upload or choose)</SelectItem>
-                                    <SelectItem value="tts">{sourceIcons.tts} Per Episode TTS</SelectItem>
+                                    <SelectItem value="tts">{sourceIcons.tts} Per episode AI voice</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
                         <Button type="button" variant="outline" onClick={() => onOpenTTS()} disabled={cooldown > 0}>
                             <Mic className="w-4 h-4 mr-2" />
-                            {cooldown > 0 ? `Create with TTS (${cooldown}s)` : 'Create with TTS (one-time)'}
+                            {cooldown > 0 ? `Generate with AI voice (${cooldown}s)` : 'Generate with AI voice (one-time)'}
                         </Button>
                         {justCreatedTs && cooldown > 0 && (
-                            <span className="text-xs text-muted-foreground" title="We saved the last TTS in your Media. Reuse it or wait a moment before creating another.">
+                            <span className="text-xs text-muted-foreground" title="We saved the last AI voice clip in your Media. Reuse it or wait a moment before creating another.">
                                 Recently created — reuse the saved file or wait a moment.
                             </span>
                         )}
@@ -1062,3 +1111,6 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
         </Card>
     )
 }
+
+
+

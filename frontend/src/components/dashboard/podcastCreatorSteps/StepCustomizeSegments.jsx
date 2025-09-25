@@ -41,7 +41,7 @@ export default function StepCustomizeSegments({
             </Button>
           </div>
           <Label htmlFor={segment.id} className="text-sm font-medium text-gray-700 mb-2 block">
-            {segment.source.text_prompt || 'TTS Script'}
+            {segment.source.text_prompt || 'AI voice script'}
           </Label>
           <Textarea
             id={segment.id}
@@ -108,3 +108,4 @@ export default function StepCustomizeSegments({
     </div>
   );
 }
+

@@ -21,6 +21,7 @@ class EmailVerification(SQLModel, table=True):
     jwt_token: Optional[str] = Field(default=None)
     expires_at: datetime
     verified_at: Optional[datetime] = Field(default=None)
+    used: bool = Field(default=False, index=True, description="Set true once successfully applied (single-use guard)")
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -50,3 +51,17 @@ class OwnershipVerification(SQLModel, table=True):
     # For logging/audit
     requested_title: Optional[str] = Field(default=None)
     verifier: Optional[str] = Field(default=None, description="email|dns when verified")
+
+
+class PasswordReset(SQLModel, table=True):
+    """Single-use password reset token. Token is stored directly (short-lived) for MVP; can be hashed later."""
+    __tablename__: ClassVar[str] = "passwordreset"
+    __table_args__ = {"extend_existing": True}
+    id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
+    user_id: UUID = Field(foreign_key="user.id", index=True)
+    token: str = Field(index=True, max_length=200)
+    expires_at: datetime
+    used_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    ip: Optional[str] = Field(default=None, max_length=64)
+    user_agent: Optional[str] = Field(default=None, max_length=300)

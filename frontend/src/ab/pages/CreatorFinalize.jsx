@@ -464,7 +464,7 @@ export default function CreatorFinalize({ token, drafts, uploads, uploadById, go
                     </div>
                     {s?.source?.source_type === 'tts' && (
                       <label className="block text-sm mt-2">
-                        TTS Script
+                        AI voice script
                         <textarea className="mt-1 w-full rounded border p-2 min-h-28" value={ioEdits?.[s.id]?.source?.script || ''} onChange={(e)=>setIoEdits(prev=>({ ...prev, [s.id]: { source: { ...prev?.[s.id]?.source, script: e.target.value } } }))} />
                       </label>
                     )}
@@ -528,7 +528,7 @@ export default function CreatorFinalize({ token, drafts, uploads, uploadById, go
                       }
                     }
                     setDraftMeta(showId, fileId, { segment_overrides: merged, introoutro: true, introoutro_status: 'manual' });
-                    // Persist a history section per TTS segment when tagged
+                    // Persist a history section per AI voice segment when tagged
                     (async ()=>{
                       try {
                         if (showId){
@@ -579,3 +579,4 @@ export default function CreatorFinalize({ token, drafts, uploads, uploadById, go
     </>
   );
 }
+

@@ -81,18 +81,39 @@ async def upload_media_files(
         return base[:200]
 
     def _validate_meta(f: UploadFile, cat: MediaCategory) -> None:
+        # Content-type & extension gate
         ct = (getattr(f, "content_type", None) or "").lower()
         type_prefix = CATEGORY_TYPE_PREFIX.get(cat)
         if type_prefix and not ct.startswith(type_prefix):
             expected = "audio" if type_prefix == AUDIO_PREFIX else "image"
             raise HTTPException(status_code=400, detail=f"Invalid file type '{ct or 'unknown'}'. Expected {expected} file for category '{cat.value}'.")
-        # Extension check
         ext = Path(f.filename or "").suffix.lower()
         if not ext:
             raise HTTPException(status_code=400, detail="File must have an extension.")
         allowed = AUDIO_EXTS if type_prefix == AUDIO_PREFIX else IMAGE_EXTS
         if ext not in allowed:
             raise HTTPException(status_code=400, detail=f"Unsupported file extension '{ext}'.")
+        # Light magic-byte sniff: read a small sample to validate claimed type (reset pointer after)
+        try:
+            head = f.file.read(16)
+            f.file.seek(0)
+            if type_prefix == AUDIO_PREFIX:
+                # WAV RIFF, OGG, ID3 (MP3), fLaC
+                sigs = [b"RIFF", b"OggS", b"ID3", b"fLaC", b"\xff\xfb"]
+                if not any(head.startswith(s) for s in sigs):
+                    # Allow webm/mp4 detection by 'ftyp' / 0x1A45DFA3 (Matroska)
+                    if b"ftyp" not in head and head[:4] != b"\x1A\x45\xDF\xA3":
+                        raise HTTPException(status_code=400, detail="Unrecognized or unsupported audio file signature.")
+            else:
+                # PNG (89 50 4E 47), JPEG (FF D8)
+                if not (head.startswith(b"\x89PNG") or head.startswith(b"\xff\xd8")):
+                    raise HTTPException(status_code=400, detail="Unrecognized image file signature.")
+        except HTTPException:
+            raise
+        except Exception:
+            # Non-fatal; continue (defense-in-depth only)
+            try: f.file.seek(0)
+            except Exception: pass
 
     def _copy_with_limit(src, dest_path: Path, max_bytes: int) -> int:
         """Stream copy to file enforcing a max size. Returns bytes written.

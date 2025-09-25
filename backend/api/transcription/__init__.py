@@ -13,9 +13,9 @@ from typing import List, Dict, Any
 import logging
 from pathlib import Path
 
-from ...core.paths import MEDIA_DIR
-from ..transcription_assemblyai import assemblyai_transcribe_with_speakers
-from ..transcription_google import google_transcribe_with_words
+from ..core.paths import MEDIA_DIR
+from ..services.transcription_assemblyai import assemblyai_transcribe_with_speakers
+from ..services.transcription_google import google_transcribe_with_words  # type: ignore
 
 
 def get_word_timestamps(filename: str) -> List[Dict[str, Any]]:

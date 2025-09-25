@@ -258,16 +258,12 @@ export default function BillingPage({ token, onBack }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           {onBack && <Button variant="ghost" onClick={onBack}>Back</Button>}
           <h2 className="text-2xl font-semibold">Subscriptions</h2>
         </div>
-        <div className="inline-flex items-center gap-3 rounded-full border px-3 py-1 text-sm">
-          <button type="button" onClick={()=>setAnnual(false)} className={!annual? 'font-semibold':'text-slate-500'} aria-pressed={!annual}>Monthly</button>
-          <span className="text-slate-300">|</span>
-          <button type="button" onClick={()=>setAnnual(true)} className={annual? 'font-semibold':'text-slate-500'} aria-pressed={annual}>Annual (Save 20%)</button>
-        </div>
+        <p className="text-sm text-muted-foreground sm:text-right">Toggle monthly or annual billing inside the plans table.</p>
       </div>
       {error && <div className="text-red-600 text-sm">{error}</div>}
 
@@ -301,7 +297,23 @@ export default function BillingPage({ token, onBack }) {
 
       {/* Pricing table */}
       <Card>
-        <CardHeader><CardTitle>Subscription Plans</CardTitle></CardHeader>
+        <CardHeader className="flex flex-col gap-3 border-b border-slate-100 pb-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <CardTitle>Subscription Plans</CardTitle>
+            <p className="text-sm text-muted-foreground">Compare plans and switch billing with the slider.</p>
+          </div>
+          <div className="flex flex-col items-end gap-1 sm:items-start">
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Billing</span>
+              <div className="relative inline-flex h-9 w-44 items-center rounded-full bg-slate-200/80 p-1 shadow-inner">
+                <span aria-hidden="true" className="pointer-events-none absolute inset-y-1 left-1 rounded-full bg-white shadow transition-transform duration-200 ease-in-out" style={{ width: 'calc(50% - 0.25rem)', transform: annual ? 'translateX(calc(100% + 0.5rem))' : 'translateX(0)' }} />
+                <button type="button" onClick={()=>setAnnual(false)} aria-pressed={!annual} className={`relative z-10 flex-1 rounded-full px-2 text-center text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${!annual ? 'text-slate-900' : 'text-slate-500'}`}>Monthly</button>
+                <button type="button" onClick={()=>setAnnual(true)} aria-pressed={annual} className={`relative z-10 flex-1 rounded-full px-2 text-center text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${annual ? 'text-slate-900' : 'text-slate-500'}`}>Annual</button>
+              </div>
+            </div>
+            <span className="text-xs text-muted-foreground">Annual saves about 20%.</span>
+          </div>
+        </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
             <table className="w-full border-collapse align-top min-w-[860px]">

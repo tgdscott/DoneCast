@@ -81,7 +81,7 @@ export default function CreatorUpload({ token, shows, uploads, setUploads, draft
       const type = base?.source_type || 'static';
       if (type === 'tts') {
         const script = (edit.script ?? base.script ?? '').trim();
-        if (!script) errs.push(`${s.segment_type}: TTS script is required`);
+        if (!script) errs.push(`${s.segment_type}: AI voice script is required`);
       } else if (type === 'ai_generated') {
         const prompt = (edit.prompt ?? base.prompt ?? '').trim();
         if (!prompt) errs.push(`${s.segment_type}: AI prompt is required`);
@@ -703,7 +703,7 @@ export default function CreatorUpload({ token, shows, uploads, setUploads, draft
                           className="px-2 py-1 rounded border text-xs disabled:opacity-50"
                           disabled={ioSuggesting}
                           onClick={async ()=>{
-                          // AI suggest: generate scripts for TTS intro/outro without opening the modal
+                          // AI suggest: generate scripts for AI voice intro/outro without opening the modal
                           if (!selectedShowId || !selectedFileId) { window.alert('Select an upload first.'); return; }
                           const meta = getDraftMeta(selectedShowId, selectedFileId);
                           const tplId = meta?.template;
@@ -830,12 +830,12 @@ export default function CreatorUpload({ token, shows, uploads, setUploads, draft
             )}
             {!ioLoading && ioTemplate && (
               <div className="space-y-4">
-                <div className="text-sm text-muted-foreground">Customize only intro/outro segments for this episode. These edits won’t change the saved template. Required: TTS needs a script; AI needs a prompt; static needs a selected file.</div>
+                <div className="text-sm text-muted-foreground">Customize only intro/outro segments for this episode. These edits won't change the saved template. Required: AI voice needs a script; AI text needs a prompt; static needs a selected file.</div>
                 <div className="flex items-end justify-end gap-2">
                   <button
                     className="px-2 py-1 text-xs border rounded"
                     onClick={async ()=>{
-                      // Suggest scripts for all TTS intro/outro segments with auto tags
+                      // Suggest scripts for all AI voice intro/outro segments with auto tags
                       const f = uploads.find(u=>u.id===selectedFileId);
                       const meta = getDraftMeta(selectedShowId, selectedFileId);
                       const tpl = ioTemplate;
@@ -881,7 +881,7 @@ export default function CreatorUpload({ token, shows, uploads, setUploads, draft
                       </div>
                       {s?.source?.source_type === 'tts' && (
                         <label className="block text-sm mt-2">
-                          TTS Script
+                          AI voice script
                           <textarea
                             className="mt-1 w-full rounded border p-2 min-h-28"
                             value={ioEdits?.[s.id]?.source?.script || ''}
@@ -962,7 +962,7 @@ export default function CreatorUpload({ token, shows, uploads, setUploads, draft
                         const type = base?.source_type || 'static';
                         if (type === 'tts') {
                           const script = (edit.script ?? base.script ?? '').trim();
-                          if (!script) errors.push(`${s.segment_type}: TTS script is required`);
+                          if (!script) errors.push(`${s.segment_type}: AI voice script is required`);
                         } else if (type === 'ai_generated') {
                           const prompt = (edit.prompt ?? base.prompt ?? '').trim();
                           if (!prompt) errors.push(`${s.segment_type}: AI prompt is required`);
@@ -998,7 +998,7 @@ export default function CreatorUpload({ token, shows, uploads, setUploads, draft
                         }
                       }
                       setDraftMeta(selectedShowId, selectedFileId, { segment_overrides: merged, introoutro: true });
-                      // Persist sections (one row per intro/outro TTS) with tag to backend for history
+                      // Persist sections (one row per intro/outro AI voice) with tag to backend for history
                       (async ()=>{
                         try {
                           if (selectedShowId){
@@ -1081,3 +1081,6 @@ export default function CreatorUpload({ token, shows, uploads, setUploads, draft
     </div>
   );
 }
+
+
+

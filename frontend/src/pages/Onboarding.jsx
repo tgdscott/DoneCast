@@ -430,36 +430,57 @@ export default function Onboarding() {
   }, [stepId, token]);
 
   const toggleIoPreview = (kind) => {
-    let asset = null;
-    if (needsTtsReview) {
-      asset = (kind === 'intro') ? (ttsGeneratedIntro || introAsset) : (ttsGeneratedOutro || outroAsset);
-    } else {
-      asset = kind === 'intro' ? (introOptions.find(x => String(x.id || x.filename) === selectedIntroId) || introAsset || null)
-                               : (outroOptions.find(x => String(x.id || x.filename) === selectedOutroId) || outroAsset || null);
-    }
-    if (!asset) return;
-    let url = asset.preview_url || asset.url || asset.filename;
-    if (url && !/^https?:\/\//i.test(url)) {
-      // Normalize relative paths from API into absolute URLs
-      url = buildApiUrl(url.startsWith('/') ? url : `/${url}`);
-    }
-    if (!url) return;
-    const isPlaying = kind === 'intro' ? introPreviewing : outroPreviewing;
-    if (isPlaying && ioAudioRef.current) {
-      try { ioAudioRef.current.pause(); } catch {}
-      ioAudioRef.current = null;
-      setIntroPreviewing(false);
-      setOutroPreviewing(false);
-      return;
-    }
     try {
-      if (ioAudioRef.current) { try { ioAudioRef.current.pause(); } catch {} }
-      const a = new Audio(url);
-      ioAudioRef.current = a;
-      setIntroPreviewing(kind === 'intro');
-      setOutroPreviewing(kind === 'outro');
-      a.onended = () => { setIntroPreviewing(false); setOutroPreviewing(false); };
-      a.play().catch(() => { setIntroPreviewing(false); setOutroPreviewing(false); });
+      let asset = null;
+      if (needsTtsReview) {
+        asset = (kind === 'intro') ? (ttsGeneratedIntro || introAsset) : (ttsGeneratedOutro || outroAsset);
+      } else {
+        asset = kind === 'intro'
+          ? (introOptions.find(x => String(x.id || x.filename) === selectedIntroId) || introAsset || null)
+          : (outroOptions.find(x => String(x.id || x.filename) === selectedOutroId) || outroAsset || null);
+      }
+      if (!asset) return;
+
+      // If we have an id (persisted media), attempt to resolve an authoritative preview path like MediaLibrary does
+      const resolvePreviewUrl = async () => {
+        if (asset.id) {
+          try {
+            const api = makeApi(token);
+            const res = await api.get(`/api/media/preview?id=${encodeURIComponent(asset.id)}&resolve=true`);
+            return res?.path || res?.url || asset.preview_url || asset.url || asset.filename || null;
+          } catch { /* fall through to local fields */ }
+        }
+        return asset.preview_url || asset.url || asset.filename || null;
+      };
+
+      const run = async () => {
+        let url = await resolvePreviewUrl();
+        if (!url) { toast?.({ title: 'No audio', description: 'Could not determine preview URL', variant: 'destructive' }); return; }
+        // Normalize relative paths (so vite proxy / same-origin cookies work)
+        if (!/^https?:\/\//i.test(url)) url = buildApiUrl(url.startsWith('/') ? url : `/${url}`);
+
+        const isPlaying = kind === 'intro' ? introPreviewing : outroPreviewing;
+        if (isPlaying && ioAudioRef.current) {
+          try { ioAudioRef.current.pause(); } catch {}
+          ioAudioRef.current = null;
+          setIntroPreviewing(false); setOutroPreviewing(false);
+          return;
+        }
+        // Stop any current
+        if (ioAudioRef.current) { try { ioAudioRef.current.pause(); } catch {} }
+        const a = new Audio(url);
+        a.crossOrigin = 'anonymous';
+        ioAudioRef.current = a;
+        setIntroPreviewing(kind === 'intro');
+        setOutroPreviewing(kind === 'outro');
+        a.onended = () => { setIntroPreviewing(false); setOutroPreviewing(false); };
+        a.onerror = () => { setIntroPreviewing(false); setOutroPreviewing(false); toast?.({ title: 'Playback failed', description: 'Could not play audio preview', variant: 'destructive' }); };
+        a.play().catch(err => {
+          setIntroPreviewing(false); setOutroPreviewing(false);
+          toast?.({ title: 'Playback blocked', description: err?.message || 'User gesture or CORS issue', variant: 'destructive' });
+        });
+      };
+      run();
     } catch {
       setIntroPreviewing(false); setOutroPreviewing(false);
     }
@@ -838,8 +859,8 @@ export default function Onboarding() {
                   <label className={`border rounded p-2 cursor-pointer ${introMode==='tts'?'border-blue-600':'hover:border-gray-400'}`}>
                     <input type="radio" name="introMode" value="tts" checked={introMode==='tts'} onChange={()=> setIntroMode('tts')} />
                     <span className="ml-2 inline-flex flex-col items-center text-center">
-                      <span>Generate with AI</span>
-                      <span className="text-xs italic text-muted-foreground">(Text-To-Speech)</span>
+                      <span>Generate with AI voice</span>
+                      <span className="text-xs italic text-muted-foreground">(We read your script aloud)</span>
                     </span>
                   </label>
                   <label className={`border rounded p-2 cursor-pointer ${introMode==='upload'?'border-blue-600':'hover:border-gray-400'}`}>
@@ -897,8 +918,8 @@ export default function Onboarding() {
                   <label className={`border rounded p-2 cursor-pointer ${outroMode==='tts'?'border-blue-600':'hover:border-gray-400'}`}>
                     <input type="radio" name="outroMode" value="tts" checked={outroMode==='tts'} onChange={()=> setOutroMode('tts')} />
                     <span className="ml-2 inline-flex flex-col items-center text-center">
-                      <span>Generate with AI</span>
-                      <span className="text-xs italic text-muted-foreground">(Text-To-Speech)</span>
+                      <span>Generate with AI voice</span>
+                      <span className="text-xs italic text-muted-foreground">(We read your script aloud)</span>
                     </span>
                   </label>
                   <label className={`border rounded p-2 cursor-pointer ${outroMode==='upload'?'border-blue-600':'hover:border-gray-400'}`}>
@@ -1487,3 +1508,4 @@ export default function Onboarding() {
     />
   );
 }
+
