@@ -3,7 +3,7 @@ from pydantic import BaseModel, EmailStr
 from datetime import datetime, timezone
 from typing import Optional
 from api.core.paths import WS_ROOT
-from api.routers.auth import get_current_user
+from api.core.auth import get_current_user
 from api.models.user import User
 
 router = APIRouter(prefix="/public", tags=["Public"])

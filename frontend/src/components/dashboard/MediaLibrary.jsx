@@ -158,27 +158,24 @@ export default function MediaLibrary({ onBack, token }) {
     return order.filter(k => keys.includes(k)).concat(keys.filter(k => !order.includes(k)));
   }, [groupedMedia]);
 
-  const resolvePreviewUrl = (file) => {
-    let url = file.preview_url || file.url || file.filename;
-    if (!url) return null;
-    // Handle gs:// URIs via a backend proxy endpoint if needed
-    if (/^gs:\/\//i.test(url)) {
-      // Expect backend to serve a signed redirect at /api/media/preview?id=UUID or ?path=gs://...
-      // Prefer id for auth and permissions.
-      return buildApiUrl(`/api/media/preview?id=${encodeURIComponent(file.id)}`);
+  const resolvePreviewUrl = async (file) => {
+    // Resolve to a direct, playable URL by asking backend to compute it (no redirect),
+    // using auth so the <audio> element doesn't need headers.
+    if (!file?.id) return null;
+    try {
+      const api = makeApi(token);
+  const res = await api.get(`/api/media/preview?id=${encodeURIComponent(file.id)}&resolve=true`);
+  // Prefer relative path when provided (so Vite proxy can handle it), else use absolute URL
+  return res?.path || res?.url || null;
+    } catch (e) {
+      toast({ variant: 'destructive', title: 'Preview failed', description: e?.message || 'Could not resolve preview URL' });
+      return null;
     }
-    if (!/^https?:\/\//i.test(url)) {
-      url = url.startsWith('/') ? url : `/${url}`;
-      url = buildApiUrl(url);
-    }
-    return url;
   };
 
-  const togglePreview = (file) => {
+  const togglePreview = async (file) => {
     try {
       if (!file) return;
-      const url = resolvePreviewUrl(file);
-      if (!url) return;
       if (previewingId === file.id) {
         try { audioEl?.pause(); } catch {}
         setPreviewingId(null);
@@ -186,14 +183,21 @@ export default function MediaLibrary({ onBack, token }) {
         return;
       }
       if (audioEl) { try { audioEl.pause(); } catch {} }
+      const url = await resolvePreviewUrl(file);
+      if (!url) return;
       const a = new Audio(url);
       setAudioEl(a);
       setPreviewingId(file.id);
       a.onended = () => { setPreviewingId(null); setAudioEl(null); };
-      a.play().catch(() => { setPreviewingId(null); setAudioEl(null); });
-    } catch {
+      a.play().catch((err) => {
+        setPreviewingId(null);
+        setAudioEl(null);
+        toast({ variant: 'destructive', title: 'Preview failed to play', description: err?.message || 'Unknown error' });
+      });
+    } catch (err) {
       setPreviewingId(null);
       setAudioEl(null);
+      toast({ variant: 'destructive', title: 'Preview failed', description: err?.message || 'Unknown error' });
     }
   };
 

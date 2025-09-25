@@ -9,7 +9,7 @@ from ..models.user import User, UserPublic
 from ..core.database import get_session
 from ..core import crud
 from ..core.paths import MEDIA_DIR
-from .auth import get_current_user
+from api.core.auth import get_current_user
 from ..models.podcast import Podcast, PodcastTemplate, TemplateSegment, StaticSegmentSource, SegmentTiming, BackgroundMusicRule, PodcastTemplateCreate
 from ..models.podcast import Episode, MusicAsset, MusicAssetSource
 from pydantic import BaseModel

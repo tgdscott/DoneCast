@@ -25,7 +25,7 @@ from api.services.ai_content.generators.title import suggest_title
 from api.services.ai_content.generators.notes import suggest_notes
 from api.services.ai_content.generators.tags import suggest_tags
 from api.services.intent_detection import analyze_intents, get_user_commands
-from .auth import get_current_user
+from api.core.auth import get_current_user
 from api.models.user import User
 
 try:

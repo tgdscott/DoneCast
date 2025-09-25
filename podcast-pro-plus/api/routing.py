@@ -21,15 +21,23 @@ def _safe_import(mod: str, name: str = "router"):
     # some older code used module names like `billing_router` while newer
     # files are `billing.py`). Log each failure to aid debugging.
     tried = []
-    candidates = [mod]
-    if mod.endswith("_router"):
-        candidates.append(mod[: -len("_router")])
-    # Also try the bare module name without package prefix if caller passed
-    # something like 'billing' accidentally.
-    if mod.startswith("api.routers."):
-        bare = mod.split("api.routers.", 1)[1]
-        if bare and bare not in candidates:
-            candidates.append(f"api.routers.{bare}")
+    candidates = []
+    # Only consider the provided module path as-is, plus a de-suffixed
+    # variant when the caller uses a name like "billing_router".
+    # Importing the same file under different module names (e.g., both
+    # "api.routers.auth" and bare "auth") causes Python to execute the
+    # module twice, which with SQLModel leads to duplicate table/class
+    # registration and crashes under the reloader. Avoid that.
+    if "." in mod:
+        candidates.append(mod)
+        if mod.endswith("_router"):
+            candidates.append(mod[: -len("_router")])
+    else:
+        # Caller provided a short name (e.g., "billing"). Try the fully
+        # qualified module first, then fall back to the bare name.
+        fq = f"api.routers.{mod}"
+        candidates.append(fq)
+        candidates.append(mod)
 
     for candidate in candidates:
         try:

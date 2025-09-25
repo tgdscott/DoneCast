@@ -250,7 +250,7 @@ export default function StepEpisodeDetails({
             className="px-8 py-3 text-lg font-semibold text-white disabled:opacity-70"
             style={{ backgroundColor: '#2C3E50' }}
           >
-            {isAssembling ? 'Assembling...' : 'Assemble & Review'}
+            {isAssembling ? 'Assembling...' : 'Save and continue'}
             <ArrowLeft className="w-5 h-5 ml-2 rotate-180" />
           </Button>
           {!canProceed && (

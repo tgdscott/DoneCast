@@ -800,9 +800,21 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source="A" 
                 className={`rounded-full w-28 h-28 text-lg font-semibold shadow ${!isRecording ? (isCountingDown ? 'bg-amber-600 hover:bg-amber-500' : 'bg-green-600 hover:bg-green-500') : (isPaused ? 'bg-green-600 hover:bg-green-500' : 'bg-amber-600 hover:bg-amber-500')} text-white focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary`}
               >
                 {!isRecording ? (
-                  <span className="flex items-center gap-2"><Mic className="w-5 h-5" /> {isCountingDown ? `Starting in ${countdown}…` : 'Record'}</span>
+                  <span className="flex flex-col items-center leading-tight">
+                    <Mic className="w-5 h-5 mb-1" />
+                    <span>{isCountingDown ? `Starting in ${countdown}…` : 'Record'}</span>
+                  </span>
                 ) : (
-                  <span className="flex items-center gap-2">{isPaused ? <><Mic className="w-5 h-5" /> {isCountingDown ? `Resuming in ${countdown}…` : 'Resume'}</> : <>Pause</>}</span>
+                  <span className="flex flex-col items-center leading-tight">
+                    {isPaused ? (
+                      <>
+                        <Mic className="w-5 h-5 mb-1" />
+                        <span>{isCountingDown ? `Resuming in ${countdown}…` : 'Resume'}</span>
+                      </>
+                    ) : (
+                      <span>Pause</span>
+                    )}
+                  </span>
                 )}
               </Button>
               <Button variant="outline" disabled={!isPaused} onClick={handleStop} aria-label="Stop recording (available when paused)" className="h-10">
@@ -878,13 +890,13 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source="A" 
                 <div className="flex gap-2 md:justify-end">
                   <Button
                     className="flex-1 md:flex-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary"
-                    aria-label="Save to My Library"
+                    aria-label="Save and continue"
                     disabled={!audioBlob || isSaving || (audioBlob && audioBlob.size > MAX_UPLOAD_BYTES) || !!serverFilename}
                     onClick={handleSave}
                   >
                     {isSaving ? (
                       <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Saving…</span>
-                    ) : (!!serverFilename ? 'Saved' : 'Save to My Library')}
+                    ) : (!!serverFilename ? 'Saved' : 'Save and continue')}
                   </Button>
                   <Button variant="outline" className="flex-1 md:flex-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary" aria-label="Discard recording" disabled={isSaving} onClick={()=>{ setHasPreview(false); setAudioBlob(null); setAudioUrl((u)=>{ if(u) URL.revokeObjectURL(u); return ""; }); setRecordingName(""); }}>Discard</Button>
                 </div>

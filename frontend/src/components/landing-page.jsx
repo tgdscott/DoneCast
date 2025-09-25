@@ -48,7 +48,8 @@ const LoginModal = ({ onClose }) => {
   const emailRef = useRef(null);
   const passwordRef = useRef(null);
   const fallbackTermsVersion = import.meta?.env?.VITE_TERMS_VERSION || "2025-09-19";
-  const [acceptTerms, setAcceptTerms] = useState(false);
+  // Terms acceptance moved to onboarding; no checkbox needed here
+  const [acceptTerms, setAcceptTerms] = useState(true);
   const [termsInfo, setTermsInfo] = useState({ version: fallbackTermsVersion, url: "/terms" });
   const [termsLoading, setTermsLoading] = useState(false);
   const [registerSubmitting, setRegisterSubmitting] = useState(false);
@@ -151,14 +152,11 @@ const LoginModal = ({ onClose }) => {
   const handleRegister = async (e) => {
     e.preventDefault();
     setError("");
-    if (!acceptTerms) {
-      setError("Please confirm you agree to the Terms of Use to continue.");
-      return;
-    }
+    // No terms gating at signup — handled later in onboarding
     const trimmedEmail = ensureFields();
     if (!trimmedEmail) return;
     setEmail(trimmedEmail);
-    const versionToSend = termsInfo?.version || fallbackTermsVersion;
+  const versionToSend = termsInfo?.version || fallbackTermsVersion;
     setRegisterSubmitting(true);
     try {
       const res = await fetch(apiUrl("/api/auth/register"), {
@@ -167,6 +165,7 @@ const LoginModal = ({ onClose }) => {
         body: JSON.stringify({
           email: trimmedEmail,
           password,
+          // Keep fields for backward compatibility; server ignores them now
           accept_terms: true,
           terms_version: versionToSend,
         }),
@@ -184,7 +183,7 @@ const LoginModal = ({ onClose }) => {
         return;
       }
       await attemptEmailLogin(trimmedEmail, password);
-      setAcceptTerms(false);
+  // No need to keep acceptance state here
     } catch (err) {
       setError((prev) => prev || "Registration error. Please try again.");
     } finally {
@@ -196,7 +195,7 @@ const LoginModal = ({ onClose }) => {
   const submitDisabled =
     mode === "login"
       ? !email.trim() || !password
-      : registerSubmitting || termsLoading || !acceptTerms || !email.trim() || !password;
+      : registerSubmitting || !email.trim() || !password;
 
   const submitText =
     mode === "login" ? "Sign In" : registerSubmitting ? "Creating…" : "Create Account";
@@ -259,45 +258,7 @@ const LoginModal = ({ onClose }) => {
                 </Button>
               </div>
             </div>
-            {mode === "register" && (
-              <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
-                <div className="flex items-start gap-2">
-                  <Checkbox
-                    id="accept-terms"
-                    checked={acceptTerms}
-                    disabled={termsLoading || registerSubmitting}
-                    onCheckedChange={(checked) => setAcceptTerms(Boolean(checked))}
-                  />
-                  <label htmlFor="accept-terms" className="text-sm leading-5 text-slate-700">
-                    I agree to the{" "}
-                    <a
-                      href={termsInfo?.url || "/terms"}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="font-medium text-blue-600 hover:text-blue-700"
-                    >
-                      Terms of Use
-                    </a>{" "}
-                    and acknowledge the
-                    <span className="whitespace-nowrap">&nbsp;</span>
-                    <a
-                      href="/privacy"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="font-medium text-blue-600 hover:text-blue-700"
-                    >
-                      Privacy Policy
-                    </a>
-                    .
-                    {termsInfo?.version && (
-                      <span className="mt-1 block text-xs text-muted-foreground">
-                        Current version: {termsInfo.version}
-                      </span>
-                    )}
-                  </label>
-                </div>
-              </div>
-            )}
+            {/* Terms box removed: acceptance is handled later in onboarding */}
             <Button type="submit" className="w-full" disabled={submitDisabled}>
               {submitText}
             </Button>
@@ -307,7 +268,6 @@ const LoginModal = ({ onClose }) => {
                 setMode((m) => (m === "login" ? "register" : "login"));
                 setError("");
                 setRegisterSubmitting(false);
-                setAcceptTerms(false);
               }}
               className="w-full text-xs text-blue-600 hover:underline"
             >

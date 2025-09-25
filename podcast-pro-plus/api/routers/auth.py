@@ -7,14 +7,18 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from sqlmodel import Session
+from sqlmodel import Session, select
+from pydantic import BaseModel, EmailStr
+from typing import cast
 
 from ..core.config import settings
 from ..core.security import verify_password
 from ..models.user import User, UserCreate, UserPublic
+from ..models.verification import EmailVerification
 from ..core.database import get_session
 from ..core import crud
 from ..models.settings import load_admin_settings
+from ..services.mailer import mailer
 
 try:  # pragma: no cover - executed only when python-jose is missing in prod builds
     from jose import JWTError, jwt
@@ -116,7 +120,9 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     else:
         expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    # jwt is ensured non-None above; cast for type-checkers
+    jwt_mod = cast(Any, jwt)
+    encoded_jwt = jwt_mod.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
 # --- Dependency for getting current user ---
@@ -132,7 +138,8 @@ async def get_current_user(
     if jwt is None:
         _raise_jwt_missing("validating credentials")
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        jwt_mod = cast(Any, jwt)
+        payload = jwt_mod.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         email = payload.get("sub")
         if not isinstance(email, str) or not email:
             raise credentials_exception
@@ -158,8 +165,9 @@ def _to_user_public(user: User) -> UserPublic:
 
 
 class UserRegisterPayload(UserCreate):
-    accept_terms: bool
-    terms_version: str
+    # Terms acceptance moved to post-signup onboarding flow
+    accept_terms: bool | None = None
+    terms_version: str | None = None
 
 
 # --- Standard Authentication Endpoints ---
@@ -172,16 +180,7 @@ async def register_user(
     session: Session = Depends(get_session),
 ):
     """Register a new user with email and password."""
-    if not user_in.accept_terms:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You must accept the terms of use to create an account.",
-        )
-    if user_in.terms_version != getattr(settings, "TERMS_VERSION", ""):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Terms version mismatch. Please refresh and try again.",
-        )
+    # No longer require terms acceptance at sign-up; this is handled later in onboarding
 
     db_user = crud.get_user_by_email(session=session, email=user_in.email)
     if db_user:
@@ -190,11 +189,12 @@ async def register_user(
             detail="A user with this email already exists.",
         )
 
+    # Force inactive until email confirmed for email/password signups
     try:
         admin_settings = load_admin_settings(session)
-        default_active = bool(getattr(admin_settings, "default_user_active", True))
+        default_active = False
     except Exception:
-        default_active = True
+        default_active = False
 
     base_user = UserCreate(**user_in.model_dump(exclude={"accept_terms", "terms_version"}))
     base_user.is_active = default_active
@@ -207,15 +207,80 @@ async def register_user(
         session.commit()
         session.refresh(user)
 
-    ip = request.client.host if request and request.client else None
-    user_agent = request.headers.get("user-agent") if request else None
-    crud.record_terms_acceptance(
-        session=session,
-        user=user,
-        version=user_in.terms_version,
-        ip=ip,
-        user_agent=user_agent,
+    # Terms acceptance is deferred; do not record here
+
+    # Create email verification code and send mail
+    import random
+    code = f"{random.randint(100000, 999999)}"
+    expires = datetime.utcnow() + timedelta(minutes=15)
+    token = create_access_token({"sub": user.email, "purpose": "email_verify"}, expires_delta=timedelta(minutes=15))
+    ev = EmailVerification(user_id=user.id, code=code, jwt_token=token, expires_at=expires)
+    session.add(ev)
+    session.commit()
+
+    app_base = (settings.APP_BASE_URL or "https://app.getpodcastplus.com").rstrip("/")
+    verify_url = f"{app_base}/verify?token={token}"
+    subj = f"Confirm your email"
+    body = (
+        f"Code: {code}\n"
+        f"Or click: {verify_url}\n"
+        f"This code expires in 15 minutes. If you didn’t request this, ignore this email."
     )
+    try:
+        mailer.send(to=user.email, subject=subj, text=body)
+    except Exception:
+        pass
+
+    return _to_user_public(user)
+
+class ConfirmEmailPayload(BaseModel):
+    email: Optional[EmailStr] = None
+    code: Optional[str] = None
+    token: Optional[str] = None
+
+@router.post("/confirm-email", response_model=UserPublic)
+async def confirm_email(payload: ConfirmEmailPayload, session: Session = Depends(get_session)):
+    """Confirm a user's email via 6-digit code or token. Activates the user account."""
+    user: Optional[User] = None
+    ev: Optional[EmailVerification] = None
+
+    # If token is provided, prefer to look up by token (no email needed)
+    if payload.token:
+        ev = session.exec(
+            select(EmailVerification)
+            .where(EmailVerification.jwt_token == payload.token)
+        ).first()
+        if not ev:
+            raise HTTPException(status_code=400, detail="Invalid or expired verification")
+        user = session.get(User, ev.user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+    else:
+        # Fallback: email + code path
+        if not payload.email:
+            raise HTTPException(status_code=400, detail="Email is required when no token is provided")
+        user = crud.get_user_by_email(session=session, email=payload.email)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+    now = datetime.utcnow()
+    if not ev and payload.code:
+        ev = session.exec(
+            select(EmailVerification)
+            .where(EmailVerification.user_id == user.id)
+            .where(EmailVerification.code == payload.code)
+        ).first()
+
+    if not ev:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification")
+    if ev.expires_at < now:
+        raise HTTPException(status_code=400, detail="Verification expired")
+
+    ev.verified_at = now
+    user.is_active = True
+    session.add(ev)
+    session.add(user)
+    session.commit()
     session.refresh(user)
     return _to_user_public(user)
 
@@ -236,6 +301,12 @@ async def login_for_access_token(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Please confirm your email to sign in.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     if _is_admin_email(user.email):
@@ -273,6 +344,12 @@ async def login_for_access_token_json(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Please confirm your email to sign in.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     if _is_admin_email(user.email):

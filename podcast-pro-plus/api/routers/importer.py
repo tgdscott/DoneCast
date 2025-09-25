@@ -13,7 +13,7 @@ import json
 from ..core.database import get_session
 from ..models.user import User
 from ..models.podcast import Podcast, Episode, EpisodeStatus
-from .auth import get_current_user
+from api.core.auth import get_current_user
 from api.core.paths import FINAL_DIR
 from infrastructure.gcs import upload_fileobj
 
@@ -55,38 +55,83 @@ async def import_from_rss(
             except httpx.RequestError as e:
                 logger.error(f"Failed to fetch RSS feed from {payload.rss_url}: {e}")
                 raise HTTPException(status_code=400, detail=f"Failed to fetch RSS feed: {e}")
-
-        feed = feedparser.parse(response.content)
-
-        if not getattr(feed, 'feed', None) or not getattr(feed, 'entries', None):
-            logger.error(f"RSS feed from {payload.rss_url} is invalid or empty.")
-            raise HTTPException(status_code=400, detail="Invalid or empty RSS feed.")
-
-        feed_info = getattr(feed, 'feed', {}) or {}
+    
+        # Parse feed and enforce acceptance criteria
         try:
-            logger.info(f"Parsing feed: {feed_info.get('title')}")
-        except Exception:
-            logger.info("Parsing feed: (unknown title)")
-        
-        title_str = None
-        if isinstance(feed_info, dict):
-            t = feed_info.get("title")
-            title_str = str(t) if t is not None else None
-            desc = feed_info.get("summary") or feed_info.get("subtitle")
-            desc_str = str(desc) if desc is not None else None
-            img = feed_info.get("image") or {}
-            img_href = img.get("href") if isinstance(img, dict) else None
-        else:
-            title_str = str(feed_info) if feed_info is not None else None
-            desc_str = None
-            img_href = None
+            feed = feedparser.parse(response.content)
+
+            if not getattr(feed, 'feed', None) or not getattr(feed, 'entries', None):
+                logger.error(f"RSS feed from {payload.rss_url} is invalid or empty.")
+                raise HTTPException(status_code=400, detail="Invalid or empty RSS feed.")
+
+            feed_info = getattr(feed, 'feed', {}) or {}
+            try:
+                logger.info(f"Parsing feed: {feed_info.get('title')}")
+            except Exception:
+                logger.info("Parsing feed: (unknown title)")
+
+            title_str = None
+            if isinstance(feed_info, dict):
+                t = feed_info.get("title")
+                title_str = str(t) if t is not None else None
+                desc = feed_info.get("summary") or feed_info.get("subtitle")
+                desc_str = str(desc) if desc is not None else None
+                img = feed_info.get("image") or {}
+                img_href = img.get("href") if isinstance(img, dict) else None
+                # Ownership/metadata fields
+                locked = str(feed_info.get("podcast_locked") or feed_info.get("podcast:locked") or "").strip().lower() in {"1", "true", "yes"}
+                podcast_guid = str(feed_info.get("podcast_guid") or feed_info.get("podcast:guid") or "").strip() or None
+                owner_email = None
+                try:
+                    it_owner = feed_info.get("itunes_owner") or feed_info.get("itunes:owner")
+                    if isinstance(it_owner, dict):
+                        owner_email = it_owner.get("email") or it_owner.get("itunes:email")
+                except Exception:
+                    owner_email = None
+            else:
+                title_str = str(feed_info) if feed_info is not None else None
+                desc_str = None
+                img_href = None
+                locked = False
+                podcast_guid = None
+                owner_email = None
+
+            # 1) Import only if podcast:locked != yes
+            if locked:
+                raise HTTPException(status_code=423, detail={"code": "feed_locked", "message": "Your current host has locked this feed (industry standard). Ask them to switch <podcast:locked> to no, then try again."})
+
+            # Canonical URL after redirects
+            canonical_url = str(getattr(response, 'url', payload.rss_url))
+
+            # Check for existing podcast with the same podcast:guid (collision)
+            if podcast_guid:
+                existing_guid_claim = session.exec(select(Podcast).where(Podcast.podcast_guid == podcast_guid)).first()
+                if existing_guid_claim and existing_guid_claim.user_id != current_user.id:
+                    raise HTTPException(status_code=409, detail={"code": "guid_collision", "message": "This show is already claimed here. To proceed, re-verify ownership."})
+
+            # 2) Email or DNS TXT verification gate
+            verification_method = None
+            if owner_email:
+                verification_method = "email"
+            else:
+                raise HTTPException(status_code=400, detail={"code": "no_owner_email", "message": "We couldn’t find a verified owner email in this feed. Quick alternative: add a DNS TXT record (takes ~2 minutes)."})
+        except HTTPException:
+            raise
+        except Exception as parse_ex:
+            logger.exception(f"Feed parse/validation error: {parse_ex}")
+            raise HTTPException(status_code=400, detail="Unable to parse or validate RSS feed.")
 
         new_podcast = Podcast(
             name=title_str or "Untitled Podcast",
             description=desc_str,
             rss_url=payload.rss_url,
             user_id=current_user.id,
-            cover_path=img_href  # We save the original URL
+            cover_path=img_href,  # We save the original URL
+            podcast_guid=podcast_guid,
+            feed_url_canonical=canonical_url,
+            contact_email=owner_email,
+            verification_method=verification_method,
+            verified_at=datetime.utcnow() if verification_method else None,
         )
         session.add(new_podcast)
         session.commit()
@@ -183,6 +228,7 @@ async def import_from_rss(
 
             title_val = entry.get("title") if isinstance(entry, dict) else getattr(entry, 'title', None)
             notes_val = entry.get("summary") if isinstance(entry, dict) else getattr(entry, 'summary', None)
+            item_guid = entry.get('guid') if isinstance(entry, dict) else getattr(entry, 'guid', None)
 
             # Optional audio mirroring: download enclosure to FINAL_DIR and also upload to GCS
             final_audio_path = audio_url  # default to remote URL
@@ -278,6 +324,9 @@ async def import_from_rss(
                 season_number=season_number,
                 episode_number=episode_number,
                 is_explicit=explicit,
+                original_guid=(str(item_guid) if item_guid else None),
+                source_media_url=audio_url,
+                source_published_at=publish_date,
             )
             # Attach meta details if present
             try:
@@ -436,13 +485,27 @@ async def import_from_rss(
             "episodes_imported": len(episodes_to_add),
             "mirrored_count": mirrored_ok,
             "gcs_mirrored_count": gcs_ok,
+            "log": {
+                "feed_url": payload.rss_url,
+                "feed_url_canonical": canonical_url,
+                "podcast_guid": podcast_guid,
+                "email_used": owner_email,
+                "verifier": verification_method,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
             "spreaker_attempted": spreaker_attempted,
             "spreaker_linked": spreaker_linked,
             "spreaker_show_id": (chosen_show_id or getattr(new_podcast, 'spreaker_show_id', None)),
             "auto_publish_started": publish_jobs_started,
             "auto_publish_skipped": auto_publish_skipped,
         }
+    except HTTPException:
+        # Propagate expected HTTP errors
+        raise
     except Exception as e:
         logger.exception(f"An unexpected error occurred during RSS import: {e}")
-        session.rollback()
+        try:
+            session.rollback()
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")

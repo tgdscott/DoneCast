@@ -5,7 +5,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from fastapi import status
 from typing import Optional
 
-from .auth import get_current_user
+from api.core.auth import get_current_user
 from ..models.user import User
 from api.core.paths import MEDIA_DIR
 

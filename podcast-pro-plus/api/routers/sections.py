@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlmodel import Session, select
 
 # Use the same auth dependency style as other routers
-from api.routers.auth import get_current_user
+from api.core.auth import get_current_user
 from api.core.database import get_session
 from api.models.user import User
 from api.models.podcast import (

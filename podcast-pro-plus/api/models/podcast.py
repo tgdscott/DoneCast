@@ -50,6 +50,11 @@ class PodcastBase(SQLModel):
     category_id: Optional[int] = Field(default=None, description="Primary Spreaker category id")
     category_2_id: Optional[int] = Field(default=None, description="Secondary Spreaker category id")
     category_3_id: Optional[int] = Field(default=None, description="Tertiary Spreaker category id")
+    # Ownership & source provenance
+    podcast_guid: Optional[str] = Field(default=None, index=True, description="podcast:guid from RSS feed")
+    feed_url_canonical: Optional[str] = Field(default=None, description="Final fetched URL after redirects")
+    verification_method: Optional[str] = Field(default=None, description="email|dns when ownership verified")
+    verified_at: Optional[datetime] = Field(default=None)
 
 class Podcast(PodcastBase, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
@@ -250,6 +255,12 @@ class Episode(SQLModel, table=True):
             self.tags_json = json.dumps([t for t in tags if t])
         except Exception:
             self.tags_json = json.dumps([])
+
+    # Source provenance fields (from original feed)
+    original_guid: Optional[str] = Field(default=None, index=True, description="Original RSS item GUID")
+    source_media_url: Optional[str] = Field(default=None, description="Original enclosure URL")
+    source_published_at: Optional[datetime] = Field(default=None, description="Original published datetime from feed")
+    source_checksum: Optional[str] = Field(default=None, description="Optional checksum of source media")
 
 
 class SectionType(str, Enum):

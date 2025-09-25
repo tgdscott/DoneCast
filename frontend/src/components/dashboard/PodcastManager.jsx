@@ -21,9 +21,11 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
   const [podcastToEdit, setPodcastToEdit] = useState(null);
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [recoveringId, setRecoveringId] = useState(null);
+  const [publishingAllId, setPublishingAllId] = useState(null);
   const { toast } = useToast();
   const [isSpreakerConnected, setIsSpreakerConnected] = useState(false);
   const [me, setMe] = useState(null);
+  const [episodeSummaryByPodcast, setEpisodeSummaryByPodcast] = useState({});
 
   useEffect(() => {
     (async () => {
@@ -34,6 +36,32 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
       } catch { setIsSpreakerConnected(false); }
     })();
   }, [token]);
+
+  // Fetch a tiny summary per podcast so we can decide whether to show "Publish All"
+  useEffect(() => {
+    if (!token || !podcasts || podcasts.length === 0) return;
+    let aborted = false;
+    (async () => {
+      try {
+        const api = makeApi(token);
+        const entries = await Promise.all(
+          podcasts.map(async (p) => {
+            try {
+              const s = await api.get(`/api/episodes/summary?podcast_id=${encodeURIComponent(p.id)}`);
+              return [String(p.id), s];
+            } catch {
+              return [String(p.id), { total: 0, unpublished_or_unscheduled: 0 }];
+            }
+          })
+        );
+        if (!aborted) {
+          const map = Object.fromEntries(entries);
+          setEpisodeSummaryByPodcast(map);
+        }
+      } catch {}
+    })();
+    return () => { aborted = true; };
+  }, [token, podcasts]);
 
   const getComplianceIssues = (p) => {
     const issues = [];
@@ -177,6 +205,33 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
     }
   };
 
+  const handlePublishAll = async (podcast, opts = {}) => {
+    if (!podcast || !podcast.id) return;
+    const summary = episodeSummaryByPodcast[String(podcast.id)] || { unpublished_or_unscheduled: 0 };
+    const eligible = summary.unpublished_or_unscheduled || 0;
+    if (eligible < 2) {
+      toast({ title: 'Nothing to publish', description: 'There are fewer than 2 unpublished or unscheduled episodes.' });
+      return;
+    }
+    if (!window.confirm(`Publish ${eligible} episode(s) from "${podcast.name}" to Spreaker now?`)) {
+      return;
+    }
+    setPublishingAllId(podcast.id);
+    try {
+      const api = makeApi(token);
+      const body = { publish_state: opts.publish_state || 'public', include_already_linked: false };
+      const res = await api.post(`/api/podcasts/${podcast.id}/publish-all`, body);
+      const started = res?.started ?? 0;
+      const skipped = (res?.skipped_no_audio ?? 0) + (res?.skipped_already_linked ?? 0);
+      toast({ title: 'Batch publish enqueued', description: `Started ${started}. Skipped ${skipped}. Errors ${res?.errors ?? 0}.` });
+    } catch (error) {
+      const detail = error?.detail || error?.message || 'Failed to start batch publish.';
+      toast({ variant: 'destructive', title: 'Publish All failed', description: detail });
+    } finally {
+      setPublishingAllId(null);
+    }
+  };
+
   return (
     <div className="p-6">
   <Button onClick={onBack} variant="ghost" className="mb-4"><Icons.ArrowLeft className="w-4 h-4 mr-2" />Back to Dashboard</Button>
@@ -271,6 +326,25 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
                           )}
                           <span>Recover Missing Episodes</span>
                         </DropdownMenuItem>
+                        {(() => {
+                          const summary = episodeSummaryByPodcast[String(podcast.id)] || { unpublished_or_unscheduled: 0 };
+                          const eligible = summary.unpublished_or_unscheduled || 0;
+                          const canShow = isSpreakerConnected && !!podcast.spreaker_show_id && eligible >= 2;
+                          if (!canShow) return null;
+                          return (
+                            <DropdownMenuItem
+                              onClick={() => handlePublishAll(podcast)}
+                              disabled={publishingAllId === podcast.id}
+                            >
+                              {publishingAllId === podcast.id ? (
+                                <Icons.Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              ) : (
+                                <Icons.Send className="w-4 h-4 mr-2" />
+                              )}
+                              <span>Publish All to Spreaker</span>
+                            </DropdownMenuItem>
+                          );
+                        })()}
                       </DropdownMenuContent>
                     </DropdownMenu>
                     <Button variant="outline" size="sm" onClick={() => openEditDialog(podcast)}>Edit</Button>

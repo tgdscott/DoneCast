@@ -2,6 +2,11 @@ from typing import Optional
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings
+try:
+    # pydantic-settings v2 preferred config style
+    from pydantic_settings import SettingsConfigDict  # type: ignore
+except Exception:  # pragma: no cover
+    SettingsConfigDict = None  # type: ignore
 
 class Settings(BaseSettings):
     # --- Core Infrastructure ---
@@ -9,8 +14,8 @@ class Settings(BaseSettings):
     DB_PASS: str
     DB_NAME: str
     INSTANCE_CONNECTION_NAME: str
-    SECRET_KEY: str # Used for signing JWTs
-    SESSION_SECRET_KEY: str # Used for signing session cookies
+    SECRET_KEY: str = "dev-secret-key-change-me"  # Used for signing JWTs
+    SESSION_SECRET_KEY: str = "dev-session-secret-change-me"  # Used for signing session cookies
 
     # --- Service API Keys ---
     GEMINI_API_KEY: str
@@ -32,11 +37,11 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: str
 
     # --- Application Behavior ---
-    ADMIN_EMAIL: str
+    ADMIN_EMAIL: str = ""
     MEDIA_ROOT: str = "/tmp"
     OAUTH_BACKEND_BASE: Optional[str] = None
-    APP_BASE_URL: Optional[str] = None # For frontend redirects
-    CORS_ALLOWED_ORIGINS: str
+    APP_BASE_URL: Optional[str] = None  # For frontend redirects
+    CORS_ALLOWED_ORIGINS: str = "http://127.0.0.1:5173,http://localhost:5173"
 
     # --- Legal ---
     TERMS_VERSION: str = "2025-09-19"
@@ -79,9 +84,9 @@ class Settings(BaseSettings):
             self.SPREAKER_REDIRECT_URI = f"{base}/api/auth/spreaker/callback"
         return self
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    # pydantic-settings v2 uses model_config; keep fallback Config for older versions
+    if SettingsConfigDict is not None:  # type: ignore
+        model_config = SettingsConfigDict(env_file=(".env.local", ".env"), extra="ignore")  # type: ignore
 
 # Create a single, immutable instance of the settings
 settings = Settings()

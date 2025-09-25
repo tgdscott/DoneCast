@@ -330,6 +330,50 @@ def list_episodes(
 	return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
+@router.get("/summary", status_code=200)
+def episodes_summary(
+	podcast_id: Optional[str] = Query(None, description="Filter by podcast id (UUID)"),
+	session: Session = Depends(get_session),
+	current_user: User = Depends(get_current_user),
+):
+	"""Return small counters for episodes owned by the user (optionally for a podcast).
+
+	Response: { total, unpublished_or_unscheduled }
+	- unpublished_or_unscheduled counts episodes that are not published yet OR have a future publish_at.
+	"""
+	from uuid import UUID as _UUID
+	try:
+		q = select(Episode).where(Episode.user_id == current_user.id)
+		if podcast_id:
+			pid = _UUID(str(podcast_id))
+			q = q.where(Episode.podcast_id == pid)
+		eps = session.exec(q).all()
+	except Exception:
+		eps = []
+	total = len(eps)
+	from datetime import datetime, timezone
+	now = datetime.now(timezone.utc)
+	def _status_val(s):
+		try:
+			return s.value if hasattr(s, 'value') else str(s)
+		except Exception:
+			return str(s)
+	unpub = 0
+	for e in eps:
+		st = _status_val(getattr(e, 'status', None))
+		pub_at = getattr(e, 'publish_at', None)
+		is_future = False
+		try:
+			if pub_at and (pub_at.tzinfo is None or pub_at.tzinfo.utcoffset(pub_at) is None):
+				pub_at = pub_at.replace(tzinfo=timezone.utc)
+			is_future = bool(pub_at and pub_at > now)
+		except Exception:
+			is_future = False
+		if st != 'published' or is_future:
+			unpub += 1
+	return {"total": total, "unpublished_or_unscheduled": unpub}
+
+
 @router.get("/{episode_id}/diagnostics", status_code=200)
 def episode_diagnostics(
 	episode_id: str,

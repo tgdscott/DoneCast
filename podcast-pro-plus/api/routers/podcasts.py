@@ -16,7 +16,7 @@ from ..models.user import User
 from ..models.podcast import Podcast, PodcastBase, PodcastType, Episode, EpisodeStatus
 from ..services.publisher import SpreakerClient
 from ..services.image_utils import ensure_cover_image_constraints
-from .auth import get_current_user
+from api.core.auth import get_current_user
 from datetime import datetime, timezone
 
 logging.basicConfig(level=logging.INFO)

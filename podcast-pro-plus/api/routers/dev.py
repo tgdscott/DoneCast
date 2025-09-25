@@ -3,7 +3,7 @@ from sqlmodel import Session, SQLModel
 
 from ..core.database import get_session, engine
 from ..models.user import User
-from .auth import get_current_user
+from api.core.auth import get_current_user
 
 router = APIRouter(
     prefix="/dev",

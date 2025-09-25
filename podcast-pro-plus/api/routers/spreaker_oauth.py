@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 import os
 from api.core.config import settings
 from api.core.database import get_session
-from api.routers.auth import create_access_token
+# Import create_access_token lazily inside functions to avoid circular imports
 from api.models.user import User
 from jose import jwt, JWTError
 from sqlmodel import select

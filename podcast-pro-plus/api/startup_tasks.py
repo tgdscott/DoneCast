@@ -158,6 +158,23 @@ def _ensure_user_subscription_column() -> None:
                 conn.exec_driver_sql("ALTER TABLE episode ADD COLUMN created_at TIMESTAMP NULL")
                 log.info("[migrate] Added episode.created_at")
 
+            # Episode provenance columns
+            try:
+                if "original_guid" not in cols_ep:
+                    conn.exec_driver_sql("ALTER TABLE episode ADD COLUMN original_guid VARCHAR NULL")
+                    log.info("[migrate] Added episode.original_guid")
+                if "source_media_url" not in cols_ep:
+                    conn.exec_driver_sql("ALTER TABLE episode ADD COLUMN source_media_url VARCHAR NULL")
+                    log.info("[migrate] Added episode.source_media_url")
+                if "source_published_at" not in cols_ep:
+                    conn.exec_driver_sql("ALTER TABLE episode ADD COLUMN source_published_at TIMESTAMP NULL")
+                    log.info("[migrate] Added episode.source_published_at")
+                if "source_checksum" not in cols_ep:
+                    conn.exec_driver_sql("ALTER TABLE episode ADD COLUMN source_checksum VARCHAR NULL")
+                    log.info("[migrate] Added episode.source_checksum")
+            except Exception as pe:
+                log.info("[migrate] Could not alter episode provenance columns: %s", pe)
+
             # --- podcast table
             res_pod = conn.exec_driver_sql("PRAGMA table_info(podcast)")
             cols_pod = [row[1] for row in res_pod]
@@ -187,6 +204,32 @@ def _ensure_user_subscription_column() -> None:
                         log.info("[migrate] Added podcast.%s", cat_col)
                     except Exception as ce:
                         log.info("[migrate] Could not add %s: %s", cat_col, ce)
+
+            # Ownership & provenance columns on podcast
+            if "podcast_guid" not in cols_pod:
+                try:
+                    conn.exec_driver_sql("ALTER TABLE podcast ADD COLUMN podcast_guid VARCHAR NULL")
+                    log.info("[migrate] Added podcast.podcast_guid")
+                except Exception as pe:
+                    log.info("[migrate] Could not add podcast_guid: %s", pe)
+            if "feed_url_canonical" not in cols_pod:
+                try:
+                    conn.exec_driver_sql("ALTER TABLE podcast ADD COLUMN feed_url_canonical VARCHAR NULL")
+                    log.info("[migrate] Added podcast.feed_url_canonical")
+                except Exception as fe:
+                    log.info("[migrate] Could not add feed_url_canonical: %s", fe)
+            if "verification_method" not in cols_pod:
+                try:
+                    conn.exec_driver_sql("ALTER TABLE podcast ADD COLUMN verification_method VARCHAR NULL")
+                    log.info("[migrate] Added podcast.verification_method")
+                except Exception as ve:
+                    log.info("[migrate] Could not add verification_method: %s", ve)
+            if "verified_at" not in cols_pod:
+                try:
+                    conn.exec_driver_sql("ALTER TABLE podcast ADD COLUMN verified_at TIMESTAMP NULL")
+                    log.info("[migrate] Added podcast.verified_at")
+                except Exception as ve2:
+                    log.info("[migrate] Could not add verified_at: %s", ve2)
 
             # --- subscription table
             res_sub = conn.exec_driver_sql(

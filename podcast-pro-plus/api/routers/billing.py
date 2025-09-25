@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlmodel import Session
 from ..core.database import get_session
 from ..models.user import User
-from .auth import get_current_user
+from api.core.auth import get_current_user
 import os, stripe
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP

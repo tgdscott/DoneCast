@@ -7,7 +7,7 @@ import logging
 
 from api.core.database import get_session
 from api.models.user import User
-from api.routers.auth import get_current_user
+from api.core.auth import get_current_user
 from api.core.paths import MEDIA_DIR
 from api.models.podcast import MediaItem, MediaCategory
 import api.services.ai_enhancer as enhancer
