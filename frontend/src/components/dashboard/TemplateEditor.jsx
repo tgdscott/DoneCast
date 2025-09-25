@@ -166,42 +166,42 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
       setBaselineTemplate(null);
       setIsLoading(true);
       try {
-                // Fetch media + podcasts in parallel via centralized API client
-                const api = makeApi(token);
-                const [mediaData, podcastsData] = await Promise.all([
-                    api.get('/api/media/'),
-                    api.get('/api/podcasts/')
-                ]);
-                const mediaArr = Array.isArray(mediaData) ? mediaData : (mediaData?.items || []);
-                const podcastsArr = Array.isArray(podcastsData) ? podcastsData : (podcastsData?.items || []);
-                setMediaFiles(mediaArr);
-                setPodcasts(podcastsArr);
+        const api = makeApi(token);
+        const [mediaData, podcastsData, templateData] = await Promise.all([
+          api.get('/api/media/'),
+          api.get('/api/podcasts/'),
+          isNewTemplate ? Promise.resolve(null) : api.get(`/api/templates/${templateId}`),
+        ]);
 
-    if (isNewTemplate) {
+        const mediaArr = Array.isArray(mediaData) ? mediaData : mediaData?.items || [];
+        const podcastsArr = Array.isArray(podcastsData) ? podcastsData : podcastsData?.items || [];
+        setMediaFiles(mediaArr);
+        setPodcasts(podcastsArr);
+
+        if (isNewTemplate) {
           setTemplate({
             name: 'My New Podcast Template',
             is_active: true,
-                        podcast_id: (podcastsArr && podcastsArr.length > 0) ? podcastsArr[podcastsArr.length - 1].id : null, // assume last = most recent
+            podcast_id: podcastsArr.length > 0 ? podcastsArr[podcastsArr.length - 1].id : null,
             segments: [
-        { id: crypto.randomUUID(), segment_type: 'intro', source: { source_type: 'static', filename: '' } },
-        { id: crypto.randomUUID(), segment_type: 'content', source: { source_type: 'static', filename: '' } },
-        { id: crypto.randomUUID(), segment_type: 'outro', source: { source_type: 'static', filename: '' } },
+              { id: crypto.randomUUID(), segment_type: 'intro', source: { source_type: 'static', filename: '' } },
+              { id: crypto.randomUUID(), segment_type: 'content', source: { source_type: 'static', filename: '' } },
+              { id: crypto.randomUUID(), segment_type: 'outro', source: { source_type: 'static', filename: '' } },
             ],
             background_music_rules: [],
             timing: { content_start_offset_s: 0, outro_start_offset_s: 0 },
           });
-                } else {
-                    const api = makeApi(token);
-                    const templateData = await api.get(`/api/templates/${templateId}`);
-                    setTemplate(templateData);
-                }
+        } else {
+          setTemplate(templateData || null);
+        }
         setError(null);
       } catch (err) {
-                setError(err.message || String(err));
+        setError(err?.message || String(err));
       } finally {
         setIsLoading(false);
       }
     };
+
     fetchInitialData();
   }, [templateId, token, isNewTemplate]);
   useEffect(() => {
