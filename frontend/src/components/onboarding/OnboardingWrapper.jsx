@@ -17,6 +17,8 @@ import {
   GitBranch,
   Repeat,
   CalendarDays,
+  Lightbulb,
+  ClipboardList,
 } from "lucide-react";
 import ComfortControls from "./ComfortControls.jsx";
 
@@ -88,26 +90,128 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
     const map = {
       welcome: HandHeart,
       showDetails: FileText,
-  format: FileText,
+      format: FileText,
       coverArt: ImageIcon,
-  introOutro: Sparkles,
-  music: Sparkles,
+      introOutro: Sparkles,
+      music: Sparkles,
       spreaker: Globe,
       elevenlabs: Sparkles,
-  publishDay: CheckCircle2,
-  finish: CheckCircle2,
-  rss: Globe,
-  analyze: FileText,
-  assets: ImageIcon,
-  // Added explicit icons for steps lacking one
-  yourName: User,
-  choosePath: GitBranch,
-  publishCadence: Repeat,
-  publishSchedule: CalendarDays,
-  ttsReview: Sparkles,
+      publishDay: CheckCircle2,
+      finish: CheckCircle2,
+      rss: Globe,
+      analyze: FileText,
+      assets: ImageIcon,
+      // Added explicit icons for steps lacking one
+      yourName: User,
+      choosePath: GitBranch,
+      publishCadence: Repeat,
+      publishSchedule: CalendarDays,
+      ttsReview: Sparkles,
     };
     return step?.id && map[step.id] ? map[step.id] : null;
   }, [step?.id]);
+
+  const guideScripts = useMemo(() => ({
+    welcome: {
+      headline: "What to expect",
+      summary: "You'll answer a few quick questions so we can pre-fill your show settings and connect the tools you already use.",
+      steps: [
+        "Have your show name, a short description, and any cover art handy.",
+        "If you're importing, keep the RSS URL nearby.",
+        "Prefer a walkthrough? Use the Guides button below to open the full getting started article.",
+      ],
+    },
+    yourName: {
+      headline: "Why we ask",
+      summary: "We personalize reminders and drafts using your first name only.",
+      steps: [
+        "Use the name you'd like to appear in emails and episode copy.",
+      ],
+    },
+    showDetails: {
+      headline: "Describe your show",
+      summary: "A clear name and description help us draft intros, titles, and marketing copy that sound like you.",
+      steps: [
+        "Aim for a 4+ character name that's easy to search.",
+        "Mention your audience and value proposition in the description.",
+        "You can tweak these later inside Show Settings.",
+      ],
+    },
+    format: {
+      headline: "Pick a starting format",
+      summary: "Formats determine which segments we auto-generate (intro, interview cues, outro, etc.).",
+      steps: [
+        "Choose the option that best matches your recurring structure—it's easy to adjust per episode.",
+        "Need something custom? Select the closest match and refine the template in the next step.",
+      ],
+    },
+    introOutro: {
+      headline: "Plan your openings",
+      summary: "Decide whether you want AI narration, an uploaded intro, or both.",
+      steps: [
+        "Upload any must-use clips so we can stitch them into every episode.",
+        "Prefer AI voiceovers? You'll preview voices in the ElevenLabs step.",
+      ],
+    },
+    music: {
+      headline: "Choose music rules",
+      summary: "Music rules control when theme tracks fade in or out across segments.",
+      steps: [
+        "Pick a library track now—we'll let you fine-tune timing inside the Template Editor.",
+        "Unsure? Select “Let CloudPod decide” and we'll recommend something calm to start.",
+      ],
+    },
+    elevenlabs: {
+      headline: "Preview voices",
+      summary: "Test a few AI voices and lock in the tone you want for narration or ad reads.",
+      steps: [
+        "Click preview to hear an example line.",
+        "Use the notes field to tell us about pronunciation or pacing preferences.",
+      ],
+    },
+    publishCadence: {
+      headline: "Set your cadence",
+      summary: "We use this to schedule reminders and auto-build episode timelines.",
+      steps: [
+        "Weekly cadence works best for most shows; bi-weekly expects every other week.",
+        "Not sure yet? Pick your best guess—you can change it any time.",
+      ],
+    },
+    publishSchedule: {
+      headline: "Pick preferred days",
+      summary: "Scheduling helps us plan drafts, reminders, and auto-publishing windows.",
+      steps: [
+        "Select the days you usually publish.",
+        "If you mark “I’m not sure,” we’ll pause scheduling nudges for now.",
+      ],
+    },
+    rss: {
+      headline: "Importing via RSS",
+      summary: "Drop your RSS feed URL and we'll pull recent episodes to learn your style.",
+      steps: [
+        "You can find the RSS link in Spotify for Podcasters, Apple Podcasts Connect, or your current host dashboard.",
+        "We'll never publish to that feed—this is read-only for setup.",
+      ],
+    },
+    spreaker: {
+      headline: "Connect Spreaker",
+      summary: "Connecting lets us publish directly for you without manual uploads.",
+      steps: [
+        "Have your Spreaker login ready; we only request episode-management scopes.",
+        "Prefer to skip? You can connect later in Integrations.",
+      ],
+    },
+    confirm: {
+      headline: "Review & finish",
+      summary: "Double-check the summary and continue—we'll start generating your workspace immediately.",
+      steps: [
+        "You can revisit any step later from Settings.",
+      ],
+    },
+  }), []);
+
+  const activeGuide = step?.id ? guideScripts[step.id] : null;
+  const StepGlyph = activeGuide?.icon || StepIcon;
 
   // Keyboard handling: Enter advances; Backspace won't navigate; Esc does nothing
   useEffect(() => {
@@ -319,6 +423,32 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
 
         {/* Right rail (1 col) */}
         <aside className="space-y-4">
+          {activeGuide && (
+            <Card data-tour-id="onboarding-dynamic-guide">
+              <CardHeader className="flex flex-row items-center gap-2 pb-2">
+                {(StepGlyph || Lightbulb) && (
+                  <div className="rounded-full bg-primary/10 p-2 text-primary">
+                    {StepGlyph ? <StepGlyph className="h-5 w-5" aria-hidden="true" /> : <Lightbulb className="h-5 w-5" aria-hidden="true" />}
+                  </div>
+                )}
+                <CardTitle className="text-base">{activeGuide.headline}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm text-muted-foreground">{activeGuide.summary}</p>
+                {Array.isArray(activeGuide.steps) && activeGuide.steps.length > 0 && (
+                  <ul className="space-y-2 rounded-md border border-dashed border-muted-foreground/40 bg-muted/40 p-3 text-sm">
+                    {activeGuide.steps.map((tipLine, idx) => (
+                      <li key={idx} className="flex items-start gap-2">
+                        <ClipboardList className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
+                        <span>{tipLine}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardHeader className="flex flex-row items-center gap-2 pb-2">
               <Info className="h-5 w-5 text-primary" />
@@ -326,7 +456,7 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
             </CardHeader>
             <CardContent>
               <p className="text-sm text-muted-foreground">
-                {step?.tip || "Short and sweet: you can change this later in Settings."}
+                {step?.tip || activeGuide?.summary || "Short and sweet: you can change this later in Settings."}
               </p>
             </CardContent>
           </Card>

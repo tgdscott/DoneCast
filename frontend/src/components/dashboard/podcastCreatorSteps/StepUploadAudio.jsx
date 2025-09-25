@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
-import { FileAudio, Loader2, Mic, Upload, ArrowLeft } from 'lucide-react';
+import { FileAudio, Loader2, Mic, Upload, ArrowLeft, Lightbulb } from 'lucide-react';
 
 // Inline intent questions were removed in favor of the floating modal.
 
@@ -80,6 +80,38 @@ export default function StepUploadAudio({
       <CardHeader className="text-center">
         <CardTitle style={{ color: '#2C3E50' }}>Step 2: Upload Main Content</CardTitle>
       </CardHeader>
+      <Card className="border border-slate-200 bg-slate-50" data-tour-id="episode-upload-guide">
+        <CardHeader className="flex flex-col gap-1 pb-2 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle className="text-base flex items-center gap-2 text-slate-800">
+            <Lightbulb className="h-4 w-4 text-amber-500" aria-hidden="true" />
+            Audio prep checklist
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-slate-700">
+          <p>
+            Give the automation a strong starting point with a clean, final mix. We’ll normalize levels on upload, but the
+            clearer the file the better the downstream edit.
+          </p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>Use WAV or MP3 files under 200&nbsp;MB for the smoothest upload.</li>
+            <li>Trim long silences and keep background music subtle—we re-check loudness automatically.</li>
+            <li>Re-uploading? Drop the same filename and we’ll detect it so you can skip the wait.</li>
+          </ul>
+          <details className="rounded-lg border border-dashed border-slate-300 bg-white/80 p-3">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-800">How intent questions work</summary>
+            <div className="mt-2 space-y-2 text-slate-600">
+              <p>
+                When we ask about episode intent or offers, those answers steer intro/outro copy, ad reads, and show notes.
+                Update them any time before you assemble.
+              </p>
+              <p>
+                Skip for now if you’re unsure—we’ll remind you before publishing and you can fill them in from Automations.
+              </p>
+            </div>
+          </details>
+        </CardContent>
+      </Card>
+
       <Card className="border-2 border-dashed border-gray-200 bg-white">
         <CardContent className="p-8">
           <div

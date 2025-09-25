@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
+import Joyride, { EVENTS, STATUS } from "react-joyride";
 import TemplateAIContent from "./TemplateAIContent";
 import {
     Plus,
@@ -20,8 +21,11 @@ import {
   Bot,
   Settings2,
   HelpCircle,
+  Lightbulb,
+  ListChecks,
+  Compass,
 } from "lucide-react";
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { makeApi } from "@/lib/apiClient";
 import { createTTS } from "@/api/media";
 import { toast } from "@/hooks/use-toast";
@@ -125,6 +129,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     const [ttsLoading, setTtsLoading] = useState(false);
     const [createdFromTTS, setCreatedFromTTS] = useState({}); // { segmentId: timestampMs }
     const [showAdvanced, setShowAdvanced] = useState(false);
+    const [runTemplateTour, setRunTemplateTour] = useState(false);
 
         // Load voices when AI voice modal opens
         useEffect(() => {
@@ -437,8 +442,72 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
 
   const hasContentSegment = template.segments.some(s => s.segment_type === 'content');
 
+  const templateTourSteps = useMemo(() => [
+    {
+      target: '[data-tour="template-quickstart"]',
+      title: 'Template overview',
+      content: 'We will walk through the three key tasks: link a show, build your segment flow, and fine-tune timing before saving.',
+      disableBeacon: true,
+    },
+    {
+      target: '[data-tour="template-basics"]',
+      title: 'Start with the basics',
+      content: podcasts.length === 0
+        ? 'Create a show first so you can attach this template. Once a show exists, you will unlock publishing options here.'
+        : 'Give the template a clear name and connect it to the show it belongs to. That ensures new episodes pick up the right defaults.',
+    },
+    {
+      target: '[data-tour="template-add"]',
+      title: 'Add your building blocks',
+      content: 'Use these buttons to add intro, content, outro, or ad segments. You can always drag to reorder later.',
+    },
+    {
+      target: '[data-tour="template-structure"]',
+      title: 'Customize each segment',
+      content: hasContentSegment
+        ? 'Edit scripts, upload clips, and adjust voices right inside this list. Drag handles let you reorder in seconds.'
+        : 'Drop in a Content segment so you can drag your uploaded audio into the right spot, then adjust intros, outros, and ads here.',
+    },
+    {
+      target: '[data-tour="template-advanced"]',
+      title: 'Fine-tune timing & music',
+      content: 'Advanced controls handle crossfades, background music rules, and AI defaults. Open this panel whenever you need detailed tweaks.',
+    },
+    {
+      target: '[data-tour="template-save"]',
+      title: 'Save & reuse',
+      content: 'When everything looks right, save the template. New episodes will use these defaults automatically.',
+    },
+  ], [podcasts.length, hasContentSegment]);
+
+  const handleTourCallback = useCallback((data) => {
+    const { status, type, step } = data;
+    if ([STATUS.FINISHED, STATUS.SKIPPED].includes(status)) {
+      setRunTemplateTour(false);
+      return;
+    }
+    if (type === EVENTS.TARGET_NOT_FOUND) {
+      setRunTemplateTour(false);
+      return;
+    }
+    if (type === EVENTS.STEP_BEFORE && step?.target === '[data-tour="template-advanced"]') {
+      setShowAdvanced(true);
+    }
+  }, [setRunTemplateTour, setShowAdvanced]);
+
   return (
     <div className="p-6 bg-gray-50 min-h-screen space-y-6">
+        <Joyride
+            steps={templateTourSteps}
+            run={runTemplateTour}
+            continuous
+            showSkipButton
+            scrollToFirstStep
+            disableOverlayClose
+            callback={handleTourCallback}
+            styles={{ options: { zIndex: 10000 } }}
+            spotlightClicks
+        />
         <div className="flex justify-between items-center">
             <Button onClick={handleBackClick} variant="ghost" className="text-gray-700"><ArrowLeft className="w-4 h-4 mr-2" />Back</Button>
             <h1 className="text-2xl font-bold text-gray-800">Template Editor</h1>
@@ -450,7 +519,39 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
             </div>
         </div>
 
-                <Card className="shadow-sm">
+                <Card className="border border-slate-200 bg-slate-50" data-tour="template-quickstart">
+                    <CardHeader className="flex flex-col gap-1 pb-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-2 text-slate-800">
+                            <Compass className="h-5 w-5 text-primary" aria-hidden="true" />
+                            <CardTitle className="text-base">Template quickstart</CardTitle>
+                        </div>
+                        <CardDescription className="text-sm text-slate-600 sm:text-right">
+                            Three checkpoints to get from blank template to publish-ready episodes.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3 text-sm text-slate-700">
+                        <ol className="list-decimal space-y-1 pl-5">
+                            <li>Name the template and attach it to the show it powers.</li>
+                            <li>Add intro, content, and outro segments—drag to match your flow.</li>
+                            <li>Open Advanced options to dial in timing, music, and AI defaults.</li>
+                        </ol>
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <span className="text-xs text-slate-500">Prefer a tour? We’ll highlight each area for you.</span>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                    setShowAdvanced(false);
+                                    setRunTemplateTour(true);
+                                }}
+                            >
+                                Start guided tour
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                <Card className="shadow-sm" data-tour="template-status">
                     <CardContent className="p-6 flex items-center justify-between">
                         <div>
                             <CardTitle className="text-lg">Template status</CardTitle>
@@ -467,7 +568,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                     </CardContent>
                 </Card>
 
-                <Card className="shadow-sm"><CardContent className="p-6 space-y-6">
+                <Card className="shadow-sm" data-tour="template-basics"><CardContent className="p-6 space-y-6">
                         <div>
                             <Label htmlFor="template-name" className="text-sm font-medium text-gray-600">Template Name</Label>
                             <Input id="template-name" className="text-2xl font-bold border-0 border-b-2 border-gray-200 focus:border-blue-500 transition-colors p-0" value={template.name || ''} onChange={(e) => handleTemplateChange('name', e.target.value)} />
@@ -504,14 +605,14 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                     </CardContent>
                 </Card>
 
-        <Card><CardHeader><CardTitle>Add Segments</CardTitle><CardDescription>Add the building blocks for your episode.</CardDescription></CardHeader><CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card data-tour="template-add"><CardHeader><CardTitle>Add Segments</CardTitle><CardDescription>Add the building blocks for your episode.</CardDescription></CardHeader><CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <AddSegmentButton type="intro" onClick={addSegment} />
             <AddSegmentButton type="content" onClick={addSegment} disabled={hasContentSegment} />
             <AddSegmentButton type="outro" onClick={addSegment} />
             <AddSegmentButton type="commercial" onClick={addSegment} />
         </CardContent></Card>
 
-        <Card><CardHeader><CardTitle>Episode Structure</CardTitle><CardDescription>Drag and drop segments to reorder them.</CardDescription></CardHeader><CardContent>
+        <Card data-tour="template-structure"><CardHeader><CardTitle>Episode Structure</CardTitle><CardDescription>Drag and drop segments to reorder them.</CardDescription></CardHeader><CardContent>
             <DragDropContext onDragEnd={onDragEnd}>
                 <Droppable droppableId="segments">
                     {(provided) => (
@@ -563,41 +664,39 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
             </Button>
         </div>
         {showAdvanced && (
-            <>
-                <Card>
-                    <CardHeader>
-                        <CardTitle className="flex items-center gap-2"><Settings2 className="w-6 h-6 text-gray-600" /> Advanced Settings</CardTitle>
-                        <CardDescription>Fine-tune the timing and background music for your podcast.</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-6 pt-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div>
-                                <Label className="flex items-center gap-1">
-                                    Content Start Delay (seconds)
-                                    <HelpCircle className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" title="Delay before main content begins after intro. Use negatives to overlap." />
-                                </Label>
-                                <Input type="number" step="0.5" value={template.timing?.content_start_offset_s} onChange={(e) => handleTimingChange('content_start_offset_s', parseFloat(e.target.value || 0))} />
-                                <p className="text-xs text-gray-500 mt-1">Delay / overlap (negative overlaps intro). Default 0.</p>
+            <div className="grid gap-6 lg:grid-cols-[2fr_1fr]" data-tour="template-advanced">
+                <div className="space-y-6">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2"><Settings2 className="w-6 h-6 text-gray-600" /> Advanced Settings</CardTitle>
+                            <CardDescription>Fine-tune the timing and background music for your podcast.</CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-6 pt-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <Label className="flex items-center gap-1">
+                                        Content Start Delay (seconds)
+                                        <HelpCircle className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" title="Delay before main content begins after intro. Use negatives to overlap." />
+                                    </Label>
+                                    <Input type="number" step="0.5" value={template.timing?.content_start_offset_s} onChange={(e) => handleTimingChange('content_start_offset_s', parseFloat(e.target.value || 0))} />
+                                    <p className="text-xs text-gray-500 mt-1">Delay / overlap (negative overlaps intro). Default 0.</p>
+                                </div>
+                                <div>
+                                    <Label className="flex items-center gap-1">
+                                        Outro Start Delay (seconds)
+                                        <HelpCircle className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" title="Delay before the outro begins. Use negatives to overlap." />
+                                    </Label>
+                                    <Input type="number" step="0.5" value={template.timing?.outro_start_offset_s} onChange={(e) => handleTimingChange('outro_start_offset_s', parseFloat(e.target.value || 0))} />
+                                    <p className="text-xs text-gray-500 mt-1">Delay / overlap (negative overlaps content tail). Default 0.</p>
+                                </div>
                             </div>
                             <div>
-                                <Label className="flex items-center gap-1">
-                                    Outro Start Delay (seconds)
-                                    <HelpCircle className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" title="Delay before the outro begins. Use negatives to overlap." />
-                                </Label>
-                                <Input type="number" step="0.5" value={template.timing?.outro_start_offset_s} onChange={(e) => handleTimingChange('outro_start_offset_s', parseFloat(e.target.value || 0))} />
-                                <p className="text-xs text-gray-500 mt-1">Delay / overlap (negative overlaps content tail). Default 0.</p>
-                            </div>
-                        </div>
-                        <div>
-                            <h4 className="text-lg font-semibold mb-2 flex items-center gap-1">
-                                Background Music
-                                <HelpCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" title="Apply looping music or stingers to specific sections." />
-                            </h4>
-                            <div className="space-y-4">
-                                {(template.background_music_rules || []).map((rule, index) => {
-                                    const volumeLevel = volumeDbToLevel(rule.volume_db);
-                                    const volumeDescription = describeVolumeLevel(volumeLevel);
-                                    return (
+                                <h4 className="text-lg font-semibold mb-2 flex items-center gap-1">
+                                    Background Music
+                                    <HelpCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" title="Apply looping music or stingers to specific sections." />
+                                </h4>
+                                <div className="space-y-4">
+                                    {(template.background_music_rules || []).map((rule, index) => (
                                         <div key={rule.id} className="p-4 border rounded-lg bg-gray-50 space-y-4">
                                             <div className="flex justify-between items-center">
                                                 <Label className="font-semibold">Music Rule #{index + 1}</Label>
@@ -644,49 +743,66 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                                                 </div>
                                             </div>
                                             <div className="mt-4">
-                                                <Label>Music loudness</Label>
-                                                <div className="flex flex-col gap-2">
+                                                <Label>Volume (dB)</Label>
+                                                <div className="flex items-center gap-2">
                                                     <Input
                                                         type="range"
-                                                        min="1"
-                                                        max="10"
+                                                        min="-60"
+                                                        max="0"
                                                         step="1"
-                                                        value={volumeLevel}
-                                                        onChange={(e) => {
-                                                            const nextLevel = parseInt(e.target.value, 10);
-                                                            const targetLevel = Number.isNaN(nextLevel) ? volumeLevel : nextLevel;
-                                                            handleBackgroundMusicChange(index, 'volume_db', volumeLevelToDb(targetLevel));
-                                                        }}
+                                                        value={rule.volume_db}
+                                                        onChange={(e) => handleBackgroundMusicChange(index, 'volume_db', parseInt(e.target.value, 10))}
                                                         className="w-full"
                                                     />
-                                                    <div className="flex justify-between text-xs text-muted-foreground">
-                                                        <span>1</span>
-                                                        <span>10</span>
-                                                    </div>
-                                                    <div className="text-sm text-muted-foreground">
-                                                        Level {volumeLevel}: {volumeDescription || 'Balanced with your voice'}
-                                                    </div>
+                                                    <span className="text-sm font-mono w-16 text-center">{rule.volume_db} dB</span>
                                                 </div>
                                             </div>
                                         </div>
-                                    );
-                                })}
+                                    ))}
+                                </div>
+                                <Button onClick={addBackgroundMusicRule} variant="outline" className="mt-4">
+                                    <Plus className="w-4 h-4 mr-2" />Add Music Rule
+                                </Button>
                             </div>
-                            <Button onClick={addBackgroundMusicRule} variant="outline" className="mt-4">
-                                <Plus className="w-4 h-4 mr-2" />Add Music Rule
-                            </Button>
-                        </div>
+                        </CardContent>
+                    </Card>
+
+                    <TemplateAIContent
+                        value={(template?.ai_settings) || AI_DEFAULT}
+                        onChange={(next) => setTemplate(prev => ({ ...prev, ai_settings: next }))}
+                    />
+                </div>
+
+                <Card className="border border-slate-200 bg-slate-50 self-start">
+                    <CardHeader>
+                        <CardTitle className="text-base flex items-center gap-2 text-slate-800">
+                            <Lightbulb className="h-4 w-4 text-amber-500" aria-hidden="true" />
+                            Background music cheat sheet
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3 text-sm text-slate-700">
+                        <p>Need a refresher on how the controls interact? Keep these guidelines in mind while you dial things in.</p>
+                        <ul className="space-y-2">
+                            <li className="flex items-start gap-2">
+                                <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
+                                <span><strong>Offsets</strong> slide music earlier or later. Negative values create crossfades with the neighboring segment.</span>
+                            </li>
+                            <li className="flex items-start gap-2">
+                                <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
+                                <span><strong>Fade in/out</strong> smooth the transitions. Longer fades work best for ambient tracks, shorter fades for stingers.</span>
+                            </li>
+                            <li className="flex items-start gap-2">
+                                <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
+                                <span><strong>Volume</strong> is in dB. -12&nbsp;dB keeps music behind the voice, while -20&nbsp;dB is ideal for subtle underscoring.</span>
+                            </li>
+                        </ul>
+                        <p className="text-xs text-slate-500">Save when things sound right—your episode builder will inherit these timing rules.</p>
                     </CardContent>
                 </Card>
-
-                <TemplateAIContent
-                    value={(template?.ai_settings) || AI_DEFAULT}
-                    onChange={(next) => setTemplate(prev => ({ ...prev, ai_settings: next }))}
-                />
-            </>
+            </div>
         )}
-                <div className="flex justify-end items-center mt-6">
-            <Button onClick={handleSave} disabled={isSaving || !template.podcast_id || podcasts.length === 0} className="bg-blue-600 hover:bg-blue-700 text-white">
+        <div className="flex justify-end items-center mt-6">
+            <Button data-tour="template-save" onClick={handleSave} disabled={isSaving || !template.podcast_id || podcasts.length === 0} className="bg-blue-600 hover:bg-blue-700 text-white">
                 {isSaving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Saving...</> : <><Save className="w-4 h-4 mr-2" />Save Template</>}
             </Button>
         </div>
