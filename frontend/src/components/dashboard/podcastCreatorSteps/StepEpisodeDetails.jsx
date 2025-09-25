@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import { Textarea } from '../../ui/textarea';
-import { ArrowLeft, Loader2, Wand2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Wand2, Lightbulb, ListChecks } from 'lucide-react';
 
 export default function StepEpisodeDetails({
   episodeDetails,
@@ -36,6 +36,37 @@ export default function StepEpisodeDetails({
       <CardHeader className="text-center">
         <CardTitle style={{ color: '#2C3E50' }}>Step 5: Episode Details &amp; Scheduling</CardTitle>
       </CardHeader>
+      <Card className="border border-slate-200 bg-slate-50" data-tour-id="episode-details-guide">
+        <CardHeader className="flex flex-col gap-1 pb-2 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle className="text-base flex items-center gap-2 text-slate-800">
+            <Lightbulb className="h-4 w-4 text-amber-500" aria-hidden="true" />
+            Publishing checklist
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-slate-700">
+          <p>
+            This is the last stop before you assemble or publish. Use it as a quick final review so you never miss a required
+            field.
+          </p>
+          <ul className="space-y-2">
+            <li className="flex items-start gap-2">
+              <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
+              <span><strong>Title &amp; description</strong>: keep keywords up front. Try the AI helpers for a punchy first draft.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
+              <span><strong>Numbering &amp; tags</strong>: confirm season/episode numbers and add 3–5 tags so auto-generated show notes stay relevant.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
+              <span><strong>Scheduling</strong>: choosing “Schedule” opens the calendar—pick a local date/time and we’ll convert it to UTC for you.</span>
+            </li>
+          </ul>
+          <p className="text-xs text-slate-500">
+            Need to brainstorm? The front-page guide has examples for titles, calls-to-action, and launch checklists.
+          </p>
+        </CardContent>
+      </Card>
       <Card className="border-0 shadow-lg bg-white">
         <CardContent className="p-6 space-y-6">
           <div className="grid md:grid-cols-2 gap-6">
