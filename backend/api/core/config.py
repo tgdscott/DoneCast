@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str
     ELEVENLABS_API_KEY: str
     ASSEMBLYAI_API_KEY: str
+    ASSEMBLYAI_WEBHOOK_SECRET: Optional[str] = None
+    ASSEMBLYAI_WEBHOOK_URL: Optional[str] = None
+    ASSEMBLYAI_WEBHOOK_HEADER: str = "X-AssemblyAI-Signature"
 
     # --- Spreaker API ---
     SPREAKER_API_TOKEN: str

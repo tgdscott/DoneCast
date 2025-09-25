@@ -1,21 +1,33 @@
+"""AssemblyAI low-level client (deduplicated after merge conflict cleanup).
+
+Exposes thin wrappers used by higher-level transcription orchestration code.
+Adds:
+ - Shared requests.Session with connection pooling.
+ - Clearer 401 Unauthorized diagnostics referencing env loading.
+ - Consistent error text patterns preserved from legacy implementation.
+"""
+
 from __future__ import annotations
 
 import logging
 from pathlib import Path
+from threading import Lock
 from typing import Any, Dict, Iterable, Optional, Union
 
 import requests
+from requests import Session
+from requests.adapters import HTTPAdapter
+
+from .types import UploadResp, StartResp, TranscriptResp
 
 
 class AssemblyAITranscriptionError(Exception):
+    """Domain error for AssemblyAI operations."""
     pass
 
 
 def _stream_file(path: Path, chunk_size: int = 5_242_880) -> Iterable[bytes]:
-    """Yield file in ~5MB chunks to avoid loading whole audio into memory.
-
-    Copied from the monolith to preserve streaming behavior.
-    """
+    """Yield file in ~5MB chunks (legacy behavior to limit memory)."""
     with open(path, "rb") as f:
         while True:
             chunk = f.read(chunk_size)
@@ -24,26 +36,49 @@ def _stream_file(path: Path, chunk_size: int = 5_242_880) -> Iterable[bytes]:
             yield chunk
 
 
-from .types import UploadResp, StartResp, TranscriptResp
+_session_lock = Lock()
+_shared_session: Optional[Session] = None
+
+
+def _build_shared_session() -> Session:
+    session = requests.Session()
+    adapter = HTTPAdapter(pool_connections=8, pool_maxsize=16)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
+def _get_session() -> Session:
+    global _shared_session
+    if _shared_session is None:
+        with _session_lock:
+            if _shared_session is None:  # double-checked locking
+                _shared_session = _build_shared_session()
+    return _shared_session
+
+
+def get_http_session() -> Session:  # exported for optional reuse elsewhere
+    return _get_session()
 
 
 def upload_audio(
     file_path: Union[str, Path],
     api_key: str,
     base_url: str,
-    log: Optional[list[str]] = None,
+    log: Optional[list[str]] = None,  # retained for signature compatibility
+    *,
+    session: Optional[Session] = None,
 ) -> Union[UploadResp, str]:
-    """Upload audio to AssemblyAI's /upload endpoint.
-
-    Returns the upload URL (string) like the monolith flow expects. Error texts match monolith.
-    """
+    """Upload the audio file; return AssemblyAI's upload_url string."""
     p = Path(file_path)
-    headers = {
-        "authorization": api_key.strip(),
-        "content-type": "application/octet-stream",
-    }
-    resp = requests.post(f"{base_url}/upload", headers=headers, data=_stream_file(p))
+    headers = {"authorization": api_key.strip(), "content-type": "application/octet-stream"}
+    http = session or _get_session()
+    resp = http.post(f"{base_url}/upload", headers=headers, data=_stream_file(p))
     if resp.status_code != 200:
+        if resp.status_code == 401:
+            raise AssemblyAITranscriptionError(
+                "Upload failed: 401 Unauthorized. Check ASSEMBLYAI_API_KEY (missing/invalid) and that the server loaded the correct .env file."
+            )
         raise AssemblyAITranscriptionError(f"Upload failed: {resp.status_code} {resp.text}")
     upload_url = resp.json().get("upload_url")
     if not upload_url:
@@ -57,12 +92,10 @@ def start_transcription(
     params: Optional[Dict[str, Any]] = None,
     base_url: str = "https://api.assemblyai.com/v2",
     log: Optional[list[str]] = None,
+    *,
+    session: Optional[Session] = None,
 ) -> StartResp:
-    """Create a transcription job. Returns the create JSON (must include 'id').
-
-    Preserves payload defaults and logging text from monolith.
-    """
-    # Defaults taken from monolith
+    """Kick off a transcription job and return the creation JSON."""
     payload: Dict[str, Any] = {
         "audio_url": upload_url,
         "language_code": "en_us",
@@ -77,8 +110,7 @@ def start_transcription(
     }
     if params:
         payload.update(params)
-
-    try:
+    try:  # best-effort logging
         logging.info(
             "[assemblyai] payload=%s",
             {
@@ -96,10 +128,14 @@ def start_transcription(
         )
     except Exception:
         pass
-
     headers_json = {"authorization": api_key.strip()}
-    create = requests.post(f"{base_url}/transcript", json=payload, headers=headers_json)
+    http = session or _get_session()
+    create = http.post(f"{base_url}/transcript", json=payload, headers=headers_json)
     if create.status_code != 200:
+        if create.status_code == 401:
+            raise AssemblyAITranscriptionError(
+                "Transcription request failed: 401 Unauthorized. Verify ASSEMBLYAI_API_KEY is set and valid; ensure uvicorn loaded the intended .env file."
+            )
         raise AssemblyAITranscriptionError(
             f"Transcription request failed: {create.status_code} {create.text}"
         )
@@ -116,12 +152,21 @@ def get_transcription(
     api_key: str,
     base_url: str = "https://api.assemblyai.com/v2",
     log: Optional[list[str]] = None,
+    *,
+    session: Optional[Session] = None,
 ) -> TranscriptResp:
-    """Fetch a transcription job by id. Returns response JSON. Error texts match monolith."""
+    """Fetch current transcript status JSON."""
     headers_json = {"authorization": api_key.strip()}
-    poll = requests.get(f"{base_url}/transcript/{job_id}", headers=headers_json)
+    http = session or _get_session()
+    poll = http.get(f"{base_url}/transcript/{job_id}", headers=headers_json)
     if poll.status_code != 200:
-        raise AssemblyAITranscriptionError(f"Polling failed: {poll.status_code} {poll.text}")
+        if poll.status_code == 401:
+            raise AssemblyAITranscriptionError(
+                "Polling failed: 401 Unauthorized. ASSEMBLYAI_API_KEY missing/invalid or not loaded by the server."
+            )
+        raise AssemblyAITranscriptionError(
+            f"Polling failed: {poll.status_code} {poll.text}"
+        )
     return poll.json()
 
 
@@ -130,14 +175,18 @@ def cancel_transcription(
     api_key: str,
     base_url: str = "https://api.assemblyai.com/v2",
     log: Optional[list[str]] = None,
+    *,
+    session: Optional[Session] = None,
 ) -> Dict[str, Any]:
-    """Attempt to cancel a transcription job. Only used if wired by callers.
-
-    Keeps error text format consistent if API returns non-200.
-    """
+    """Attempt to cancel a job (best effort)."""
     headers_json = {"authorization": api_key.strip()}
-    resp = requests.delete(f"{base_url}/transcript/{job_id}", headers=headers_json)
+    http = session or _get_session()
+    resp = http.delete(f"{base_url}/transcript/{job_id}", headers=headers_json)
     if resp.status_code not in (200, 204):
+        if resp.status_code == 401:
+            raise AssemblyAITranscriptionError(
+                "Cancel failed: 401 Unauthorized. ASSEMBLYAI_API_KEY missing/invalid or not loaded by the server."
+            )
         raise AssemblyAITranscriptionError(
             f"Cancel failed: {resp.status_code} {resp.text}"
         )
@@ -153,4 +202,6 @@ __all__ = [
     "start_transcription",
     "get_transcription",
     "cancel_transcription",
+    "get_http_session",
 ]
+
