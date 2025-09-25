@@ -43,6 +43,7 @@ const LoginModal = ({ onClose }) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [errorTone, setErrorTone] = useState("error");
   const [mode, setMode] = useState("login"); // 'login' | 'register'
   const [showPassword, setShowPassword] = useState(false);
   const emailRef = useRef(null);
@@ -53,6 +54,61 @@ const LoginModal = ({ onClose }) => {
   const [termsInfo, setTermsInfo] = useState({ version: fallbackTermsVersion, url: "/terms" });
   const [termsLoading, setTermsLoading] = useState(false);
   const [registerSubmitting, setRegisterSubmitting] = useState(false);
+
+  const normalizeMessage = (value, fallback) => {
+    if (value == null || value === "") {
+      return fallback;
+    }
+    if (typeof value === "string") {
+      return value;
+    }
+    if (Array.isArray(value)) {
+      const joined = value
+        .map((item) => {
+          if (!item) return "";
+          if (typeof item === "string") return item;
+          if (item?.msg) {
+            const loc = Array.isArray(item.loc) ? item.loc.join(".") : item.loc;
+            return loc ? `${item.msg} (${loc})` : item.msg;
+          }
+          try {
+            return JSON.stringify(item);
+          } catch (err) {
+            return String(item);
+          }
+        })
+        .filter(Boolean)
+        .join(" ");
+      return joined || fallback;
+    }
+    if (typeof value === "object") {
+      if (value.detail && value.detail !== value) {
+        return normalizeMessage(value.detail, fallback);
+      }
+      if (value.message && value.message !== value) {
+        return normalizeMessage(value.message, fallback);
+      }
+      try {
+        const serialized = JSON.stringify(value);
+        if (serialized && serialized !== "{}") {
+          return serialized;
+        }
+      } catch (err) {
+        return fallback;
+      }
+    }
+    return String(value) || fallback;
+  };
+
+  const showError = (message, tone = "error") => {
+    setError(message);
+    setErrorTone(tone);
+  };
+
+  const clearError = () => {
+    setError("");
+    setErrorTone("error");
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -108,14 +164,27 @@ const LoginModal = ({ onClose }) => {
         return;
       }
       if (res.status === 401) {
-        setError("Invalid email or password.");
+        const detail = normalizeMessage(
+          data?.detail || data?.message,
+          "Invalid email or password."
+        );
+        if (/confirm your email/i.test(detail)) {
+          showError(detail, "info");
+        } else {
+          showError(detail, "error");
+        }
       } else {
-        setError(data?.detail || data?.message || "An unexpected error occurred. Please try again.");
+        showError(
+          normalizeMessage(
+            data?.detail || data?.message,
+            "An unexpected error occurred. Please try again."
+          )
+        );
       }
       throw new Error("login_failed");
     } catch (err) {
       if (err.message !== "login_failed") {
-        setError("An unexpected error occurred. Please try again.");
+        showError("An unexpected error occurred. Please try again.");
       }
       throw err;
     }
@@ -124,12 +193,12 @@ const LoginModal = ({ onClose }) => {
   const ensureFields = () => {
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
-      setError("Email is required.");
+      showError("Email is required.");
       emailRef.current?.focus();
       return null;
     }
     if (!password) {
-      setError("Password is required.");
+      showError("Password is required.");
       passwordRef.current?.focus();
       return null;
     }
@@ -138,7 +207,7 @@ const LoginModal = ({ onClose }) => {
 
   const handleEmailLogin = async (e) => {
     e.preventDefault();
-    setError("");
+    clearError();
     const trimmedEmail = ensureFields();
     if (!trimmedEmail) return;
     setEmail(trimmedEmail);
@@ -151,13 +220,14 @@ const LoginModal = ({ onClose }) => {
 
   const handleRegister = async (e) => {
     e.preventDefault();
-    setError("");
+    clearError();
     // No terms gating at signup — handled later in onboarding
     const trimmedEmail = ensureFields();
     if (!trimmedEmail) return;
     setEmail(trimmedEmail);
-  const versionToSend = termsInfo?.version || fallbackTermsVersion;
+    const versionToSend = termsInfo?.version || fallbackTermsVersion;
     setRegisterSubmitting(true);
+    let encounteredError = false;
     try {
       const res = await fetch(apiUrl("/api/auth/register"), {
         method: "POST",
@@ -173,19 +243,45 @@ const LoginModal = ({ onClose }) => {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
+        encounteredError = true;
         if (res.status === 400) {
-          setError(data?.detail || "A user with this email already exists.");
+          showError(
+            normalizeMessage(
+              data?.detail || data?.message,
+              "A user with this email already exists."
+            )
+          );
         } else if (res.status === 422) {
-          setError("Invalid email or password format.");
+          showError("Invalid email or password format.");
         } else {
-          setError(data?.detail || data?.message || "Registration error. Please try again.");
+          showError(
+            normalizeMessage(
+              data?.detail || data?.message,
+              "Registration error. Please try again."
+            )
+          );
         }
         return;
       }
+      const data = await res.json().catch(() => null);
+      const activeFlag =
+        (data && typeof data === "object" && "is_active" in data && data.is_active === false) ||
+        (data && typeof data === "object" && "isActive" in data && data.isActive === false);
+      if (activeFlag) {
+        encounteredError = true;
+        showError(
+          "Account created! Check your email for a verification link before signing in.",
+          "info"
+        );
+        setMode("login");
+        return;
+      }
       await attemptEmailLogin(trimmedEmail, password);
-  // No need to keep acceptance state here
+      // No need to keep acceptance state here
     } catch (err) {
-      setError((prev) => prev || "Registration error. Please try again.");
+      if (!encounteredError) {
+        showError("Registration error. Please try again.");
+      }
     } finally {
       setRegisterSubmitting(false);
     }
@@ -213,7 +309,13 @@ const LoginModal = ({ onClose }) => {
           <form onSubmit={mode === "login" ? handleEmailLogin : handleRegister} className="space-y-4">
             {error && (
               <div
-                className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+                className={`rounded-md border px-3 py-2 text-sm ${
+                  errorTone === "info"
+                    ? "border-blue-200 bg-blue-50 text-blue-700"
+                    : errorTone === "success"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : "border-red-200 bg-red-50 text-red-700"
+                }`}
                 role="alert"
                 aria-live="assertive"
               >
@@ -266,7 +368,7 @@ const LoginModal = ({ onClose }) => {
               type="button"
               onClick={() => {
                 setMode((m) => (m === "login" ? "register" : "login"));
-                setError("");
+                clearError();
                 setRegisterSubmitting(false);
               }}
               className="w-full text-xs text-blue-600 hover:underline"
