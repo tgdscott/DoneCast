@@ -3,7 +3,7 @@ import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Label } from '../../ui/label';
 import { Textarea } from '../../ui/textarea';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Lightbulb, ListChecks } from 'lucide-react';
 
 export default function StepCustomizeSegments({
   selectedTemplate,
@@ -73,6 +73,34 @@ export default function StepCustomizeSegments({
         <CardTitle style={{ color: '#2C3E50' }}>Step 3: Customize Your Episode</CardTitle>
         <p className="text-md text-gray-500 pt-2">Review the structure and fill in the required text for any AI-generated segments.</p>
       </CardHeader>
+      <Card className="border border-slate-200 bg-slate-50" data-tour-id="episode-segment-guide">
+        <CardHeader className="flex flex-col gap-1 pb-2 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle className="text-base flex items-center gap-2 text-slate-800">
+            <Lightbulb className="h-4 w-4 text-amber-500" aria-hidden="true" />
+            What you’re looking at
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-slate-700">
+          <p>
+            This page shows the pieces we’ll stitch together around your upload. Everything saves as you go—no extra buttons.
+          </p>
+          <ul className="space-y-2">
+            <li className="flex items-start gap-2">
+              <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
+              <span><strong>Content</strong> is your recording. We wrap intros, outros, and automation around it automatically.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
+              <span><strong>AI narration boxes</strong> show the words we’ll speak for you. Edit the text or change the voice if you want a different tone.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
+              <span><strong>Library clips</strong> are the intro/outro audio you’ve already saved. We’ll drop them in without extra work.</span>
+            </li>
+          </ul>
+          <p className="text-xs text-slate-500">If everything looks good, you can continue without changing a thing.</p>
+        </CardContent>
+      </Card>
       <Card className="border-0 shadow-lg bg-white">
         <CardContent className="p-6 space-y-4">
           {selectedTemplate && selectedTemplate.segments ? (

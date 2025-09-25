@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
-import { FileAudio, Loader2, Mic, Upload, ArrowLeft } from 'lucide-react';
+import { FileAudio, Loader2, Mic, Upload, ArrowLeft, Lightbulb } from 'lucide-react';
 
 // Inline intent questions were removed in favor of the floating modal.
 
@@ -57,6 +57,26 @@ export default function StepUploadAudio({
       <CardHeader className="text-center">
         <CardTitle style={{ color: '#2C3E50' }}>Step 2: Upload Main Content</CardTitle>
       </CardHeader>
+      <Card className="border border-slate-200 bg-slate-50" data-tour-id="episode-upload-guide">
+        <CardHeader className="flex flex-col gap-1 pb-2 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle className="text-base flex items-center gap-2 text-slate-800">
+            <Lightbulb className="h-4 w-4 text-amber-500" aria-hidden="true" />
+            Before you upload
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-slate-700">
+          <p>
+            Just choose the episode file you recorded. We handle leveling, silence trimming, filler removal, copywriting, and
+            uploading the finished show for you.
+          </p>
+          <p>If the file is over 200&nbsp;MB it may take a little longer, but everything else is on us.</p>
+          <p className="text-xs text-slate-500">
+            We may ask quick intent questions about extras like flubbers or SFX. Answer if you know them, or skip and we’ll
+            keep moving—the automation still finishes.
+          </p>
+        </CardContent>
+      </Card>
+
       <Card className="border-2 border-dashed border-gray-200 bg-white">
         <CardContent className="p-8">
           <div
