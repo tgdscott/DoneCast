@@ -31,9 +31,9 @@ RUN mkdir -p /app/static_ui
 COPY --from=frontend-builder /app/frontend/dist /app/static_ui
 
 # Install python deps
-RUN python -m pip install --upgrade pip setuptools wheel     && pip install --no-cache-dir -r /app/podcast-pro-plus/requirements.txt     && pip check     && python -c "import importlib; [importlib.import_module(m) for m in ('jose','passlib','feedparser','stripe','celery','google.cloud.storage','authlib','psycopg')]"
+RUN python -m pip install --upgrade pip setuptools wheel     && pip install --no-cache-dir -r /app/backend/requirements.txt     && pip check     && python -c "import importlib; [importlib.import_module(m) for m in ('jose','passlib','feedparser','stripe','celery','google.cloud.storage','authlib','psycopg')]"
 
-ENV PYTHONPATH=/app/podcast-pro-plus
+ENV PYTHONPATH=/app/backend
 
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8080"]
 

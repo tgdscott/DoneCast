@@ -1,9 +1,0 @@
-.git
-__pycache__/
-*.py[cod]
-*.log
-.env
-.vscode/
-node_modules/
-dist/
-build/

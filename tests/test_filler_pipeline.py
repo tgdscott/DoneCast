@@ -4,7 +4,7 @@ import unittest
 
 # Ensure package import path
 ROOT = Path(__file__).resolve().parents[1]
-PKG_ROOT = ROOT / 'podcast-pro-plus'
+PKG_ROOT = ROOT / 'backend'
 if str(PKG_ROOT) not in sys.path:
     sys.path.insert(0, str(PKG_ROOT))
 

@@ -2,7 +2,7 @@
 
 _Last updated: September 16, 2025_
 
-These Terms of Use (the **"Terms"**) form a binding agreement between **Chainsaw Enterprises**, doing business as **Podcast Plus** ("**we**," "**us**," or "**our**"), and you ("**you**" or "**user**"). By accessing or using **getpodcastplus.com (and related apps/subdomains)** and any related apps, products, and services (collectively, the "**Service**"), you agree to these Terms and to our **https://getpodcastplus.com/privacy**. If you do not agree, do not use the Service.
+These Terms of Use (the **"Terms"**) form a binding agreement between **Chainsaw Enterprises**, doing business as **Podcast Plus Plus** ("**we**," "**us**," or "**our**"), and you ("**you**" or "**user**"). By accessing or using **podcastplusplus.com (and related apps/subdomains)** and any related apps, products, and services (collectively, the "**Service**"), you agree to these Terms and to our **https://podcastplusplus.com/privacy**. (Legacy references to getpodcastplus.com refer to the same Service.) If you do not agree, do not use the Service.
 
 > **Important notes**
 > - If you are accepting on behalf of an organization, you represent that you have authority to bind that organization to these Terms.

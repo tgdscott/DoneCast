@@ -7,9 +7,9 @@ pydub_stub = types.ModuleType('pydub')
 setattr(pydub_stub, 'AudioSegment', type('AudioSegment', (), {}))  # type: ignore[attr-defined]
 sys.modules['pydub'] = pydub_stub
 
-# Make 'api' package importable by adding podcast-pro-plus to sys.path
+# Make 'api' package importable by adding backend to sys.path
 ROOT = os.path.dirname(os.path.dirname(__file__))
-PKG_ROOT = os.path.join(ROOT, 'podcast-pro-plus')
+PKG_ROOT = os.path.join(ROOT, 'backend')
 if PKG_ROOT not in sys.path:
     sys.path.insert(0, PKG_ROOT)
 

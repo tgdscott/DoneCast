@@ -37,7 +37,7 @@ call %VENV_DIR%\Scripts\activate.bat
 echo Upgrading pip...
 python.exe -m pip install --upgrade pip > nul
 echo Installing requirements...
-pip install -r podcast-pro-plus\requirements.txt
+pip install -r backend\requirements.txt
 pip install "psycopg[binary]" bcrypt "pydantic>=2.0" "pydantic-settings"
 echo Dependencies installed.
 echo.
@@ -54,7 +54,7 @@ echo Docker services started.
 echo.
 
 echo [4/5] Creating database schema...
-cd podcast-pro-plus
+cd backend
 python create_db.py
 IF %ERRORLEVEL% NEQ 0 (
     echo.

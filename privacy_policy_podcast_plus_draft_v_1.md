@@ -2,7 +2,7 @@
 
 _Last updated: September 16, 2025_
 
-This Privacy Policy explains how **Chainsaw Enterprises**, doing business as **Podcast Plus** ("**Podcast Plus**," "**we**," "**us**," or "**our**"), collects, uses, and shares information when you use **getpodcastplus.com** and related apps, products, and services (the "**Services**"). If you do not agree with this Policy, please do not use the Services.
+This Privacy Policy explains how **Chainsaw Enterprises**, doing business as **Podcast Plus Plus** ("**Podcast Plus Plus**," "**we**," "**us**," or "**our**"), collects, uses, and shares information when you use **podcastplusplus.com** and related apps, products, and services (the "**Services**"). (Legacy references to getpodcastplus.com refer to the same Services.) If you do not agree with this Policy, please do not use the Services.
 
 We pair this Policy with our **Terms of Use**. Capitalized terms not defined here have the meanings in the Terms.
 

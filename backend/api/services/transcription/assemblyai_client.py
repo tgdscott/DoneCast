@@ -1,0 +1,156 @@
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import Any, Dict, Iterable, Optional, Union
+
+import requests
+
+
+class AssemblyAITranscriptionError(Exception):
+    pass
+
+
+def _stream_file(path: Path, chunk_size: int = 5_242_880) -> Iterable[bytes]:
+    """Yield file in ~5MB chunks to avoid loading whole audio into memory.
+
+    Copied from the monolith to preserve streaming behavior.
+    """
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            yield chunk
+
+
+from .types import UploadResp, StartResp, TranscriptResp
+
+
+def upload_audio(
+    file_path: Union[str, Path],
+    api_key: str,
+    base_url: str,
+    log: Optional[list[str]] = None,
+) -> Union[UploadResp, str]:
+    """Upload audio to AssemblyAI's /upload endpoint.
+
+    Returns the upload URL (string) like the monolith flow expects. Error texts match monolith.
+    """
+    p = Path(file_path)
+    headers = {
+        "authorization": api_key.strip(),
+        "content-type": "application/octet-stream",
+    }
+    resp = requests.post(f"{base_url}/upload", headers=headers, data=_stream_file(p))
+    if resp.status_code != 200:
+        raise AssemblyAITranscriptionError(f"Upload failed: {resp.status_code} {resp.text}")
+    upload_url = resp.json().get("upload_url")
+    if not upload_url:
+        raise AssemblyAITranscriptionError("Upload URL missing in response")
+    return upload_url
+
+
+def start_transcription(
+    upload_url: str,
+    api_key: str,
+    params: Optional[Dict[str, Any]] = None,
+    base_url: str = "https://api.assemblyai.com/v2",
+    log: Optional[list[str]] = None,
+) -> StartResp:
+    """Create a transcription job. Returns the create JSON (must include 'id').
+
+    Preserves payload defaults and logging text from monolith.
+    """
+    # Defaults taken from monolith
+    payload: Dict[str, Any] = {
+        "audio_url": upload_url,
+        "language_code": "en_us",
+        "speaker_labels": True,
+        "punctuate": True,
+        "format_text": False,
+        "disfluencies": True,
+        "filter_profanity": False,
+        "language_detection": False,
+        "custom_spelling": [],
+        "multichannel": False,
+    }
+    if params:
+        payload.update(params)
+
+    try:
+        logging.info(
+            "[assemblyai] payload=%s",
+            {
+                k: payload[k]
+                for k in (
+                    "speaker_labels",
+                    "punctuate",
+                    "format_text",
+                    "disfluencies",
+                    "filter_profanity",
+                    "language_code",
+                )
+                if k in payload
+            },
+        )
+    except Exception:
+        pass
+
+    headers_json = {"authorization": api_key.strip()}
+    create = requests.post(f"{base_url}/transcript", json=payload, headers=headers_json)
+    if create.status_code != 200:
+        raise AssemblyAITranscriptionError(
+            f"Transcription request failed: {create.status_code} {create.text}"
+        )
+    try:
+        tid = create.json().get("id")
+        logging.info("[assemblyai] created transcript id=%s", tid)
+    except Exception:
+        pass
+    return create.json()
+
+
+def get_transcription(
+    job_id: str,
+    api_key: str,
+    base_url: str = "https://api.assemblyai.com/v2",
+    log: Optional[list[str]] = None,
+) -> TranscriptResp:
+    """Fetch a transcription job by id. Returns response JSON. Error texts match monolith."""
+    headers_json = {"authorization": api_key.strip()}
+    poll = requests.get(f"{base_url}/transcript/{job_id}", headers=headers_json)
+    if poll.status_code != 200:
+        raise AssemblyAITranscriptionError(f"Polling failed: {poll.status_code} {poll.text}")
+    return poll.json()
+
+
+def cancel_transcription(
+    job_id: str,
+    api_key: str,
+    base_url: str = "https://api.assemblyai.com/v2",
+    log: Optional[list[str]] = None,
+) -> Dict[str, Any]:
+    """Attempt to cancel a transcription job. Only used if wired by callers.
+
+    Keeps error text format consistent if API returns non-200.
+    """
+    headers_json = {"authorization": api_key.strip()}
+    resp = requests.delete(f"{base_url}/transcript/{job_id}", headers=headers_json)
+    if resp.status_code not in (200, 204):
+        raise AssemblyAITranscriptionError(
+            f"Cancel failed: {resp.status_code} {resp.text}"
+        )
+    try:
+        return resp.json()
+    except Exception:
+        return {"status": resp.status_code}
+
+
+__all__ = [
+    "AssemblyAITranscriptionError",
+    "upload_audio",
+    "start_transcription",
+    "get_transcription",
+    "cancel_transcription",
+]

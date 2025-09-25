@@ -5,7 +5,8 @@ $ErrorActionPreference = 'Stop'
 
 # Resolve paths
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$apiDir = Join-Path $repoRoot 'podcast-pro-plus'
+# Updated after directory rename
+$apiDir = Join-Path $repoRoot 'backend'
 $envFile = Join-Path $apiDir '.env.local'
 $pythonExe = Join-Path $repoRoot '.venv\Scripts\python.exe'
 

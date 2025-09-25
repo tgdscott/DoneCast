@@ -35,7 +35,8 @@ const googleLoginUrl = (() => {
   if (base) {
     return `${base.replace(/\/+$/, "")}/api/auth/login/google`;
   }
-  return "https://api.getpodcastplus.com/api/auth/login/google";
+  // Rebrand: point to new API host (legacy host still accepted for a transition period)
+  return "https://api.podcastplusplus.com/api/auth/login/google";
 })();
 
 const LoginModal = ({ onClose }) => {
@@ -44,7 +45,13 @@ const LoginModal = ({ onClose }) => {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [errorTone, setErrorTone] = useState("error");
-  const [mode, setMode] = useState("login"); // 'login' | 'register'
+  const [mode, setMode] = useState("login"); // 'login' | 'register' | 'verify'
+  const [verifyCode, setVerifyCode] = useState("");
+  const [verificationEmail, setVerificationEmail] = useState("");
+  const [verifyExpiresAt, setVerifyExpiresAt] = useState(null); // timestamp ms
+  const [resendPending, setResendPending] = useState(false);
+  const [changeEmail, setChangeEmail] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const emailRef = useRef(null);
   const passwordRef = useRef(null);
@@ -264,19 +271,18 @@ const LoginModal = ({ onClose }) => {
         return;
       }
       const data = await res.json().catch(() => null);
-      const activeFlag =
-        (data && typeof data === "object" && "is_active" in data && data.is_active === false) ||
-        (data && typeof data === "object" && "isActive" in data && data.isActive === false);
-      if (activeFlag) {
-        encounteredError = true;
-        showError(
-          "Account created! Check your email for a verification link before signing in.",
-          "info"
-        );
-        setMode("login");
+      const inactive = data && typeof data === 'object' && (data.is_active === false || data.isActive === false);
+      if (inactive) {
+        // Switch to verification mode
+        setVerificationEmail(trimmedEmail);
+        setVerifyExpiresAt(Date.now() + 15 * 60 * 1000);
+        setMode('verify');
+        setVerifyCode("");
+        setChangeEmail(false);
+        setNewEmail("");
         return;
       }
-      await attemptEmailLogin(trimmedEmail, password);
+      await attemptEmailLogin(trimmedEmail, password); // auto-login if already active
       // No need to keep acceptance state here
     } catch (err) {
       if (!encounteredError) {
@@ -291,7 +297,9 @@ const LoginModal = ({ onClose }) => {
   const submitDisabled =
     mode === "login"
       ? !email.trim() || !password
-      : registerSubmitting || !email.trim() || !password;
+      : mode === 'register'
+        ? registerSubmitting || !email.trim() || !password
+        : false; // verify mode uses its own buttons
 
   const submitText =
     mode === "login" ? "Sign In" : registerSubmitting ? "Creating…" : "Create Account";
@@ -306,6 +314,7 @@ const LoginModal = ({ onClose }) => {
           </Button>
         </CardHeader>
         <CardContent>
+          {mode !== 'verify' && (
           <form onSubmit={mode === "login" ? handleEmailLogin : handleRegister} className="space-y-4">
             {error && (
               <div
@@ -376,20 +385,108 @@ const LoginModal = ({ onClose }) => {
               {mode === "login" ? "Need an account? Sign up" : "Have an account? Sign in"}
             </button>
           </form>
-          <div className="relative my-4">
+          )}
+          {mode === 'verify' && (
+            <div className="space-y-4" data-state="verify-flow">
+              <div className="text-sm text-muted-foreground">We sent a 6‑digit code to <strong>{verificationEmail}</strong>. Enter it below or click the link in the email. This code expires in {verifyExpiresAt ? Math.max(0, Math.floor((verifyExpiresAt-Date.now())/60000)) : 15}m.</div>
+              <div className="space-y-2">
+                <Label htmlFor="verifyCode">Verification Code</Label>
+                <Input
+                  id="verifyCode"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  value={verifyCode}
+                  autoFocus
+                  onChange={(e)=> setVerifyCode(e.target.value.replace(/[^0-9]/g,''))}
+                  placeholder="123456"
+                  className="tracking-widest text-center text-lg"
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  disabled={verifyCode.length !== 6}
+                  onClick={async ()=>{
+                    clearError();
+                    try {
+                      const res = await fetch(apiUrl('/api/auth/confirm-email'), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email: verificationEmail, code: verifyCode }),
+                        credentials: 'include'
+                      });
+                      const data = await res.json().catch(()=>({}));
+                      if (!res.ok) {
+                        showError(normalizeMessage(data?.detail || data?.message, 'Invalid or expired code.'));
+                        return;
+                      }
+                      // Auto-login after successful activation
+                      try { await attemptEmailLogin(verificationEmail, password); } catch {}
+                    } catch (err) {
+                      showError('Verification failed.');
+                    }
+                  }}
+                >Confirm</Button>
+                <Button variant="outline" onClick={async ()=>{
+                  clearError();
+                  if (resendPending) return;
+                  setResendPending(true);
+                  try {
+                    await fetch(apiUrl('/api/auth/resend-verification'), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email: verificationEmail }) });
+                    setVerifyExpiresAt(Date.now() + 15*60*1000);
+                    showError('New code sent (check spam folder if not visible).','info');
+                  } catch {}
+                  setResendPending(false);
+                }}>Resend</Button>
+                <Button variant="ghost" onClick={()=>{ setMode('login'); clearError(); }}>Cancel</Button>
+              </div>
+              <div className="space-y-2">
+                {!changeEmail && (
+                  <button className="text-xs text-blue-600 hover:underline" type="button" onClick={()=>{ setChangeEmail(true); setNewEmail(verificationEmail); }}>Wrong email? Change it</button>
+                )}
+                {changeEmail && (
+                  <div className="space-y-2 border rounded p-3">
+                    <Label htmlFor="newEmail">New Email</Label>
+                    <Input id="newEmail" type="email" value={newEmail} onChange={(e)=> setNewEmail(e.target.value)} />
+                    <div className="flex gap-2">
+                      <Button size="sm" disabled={!newEmail.trim() || newEmail===verificationEmail} onClick={async ()=>{
+                        clearError();
+                        try {
+                          const res = await fetch(apiUrl('/api/auth/update-pending-email'), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ old_email: verificationEmail, new_email: newEmail.trim() }) });
+                          if (!res.ok) {
+                            const d = await res.json().catch(()=>({}));
+                            showError(normalizeMessage(d?.detail || d?.message, 'Unable to update email.'));
+                            return;
+                          }
+                          setVerificationEmail(newEmail.trim());
+                          setVerifyExpiresAt(Date.now() + 15*60*1000);
+                          setVerifyCode('');
+                          setChangeEmail(false);
+                          showError('Email updated. New code sent.','info');
+                        } catch { showError('Update failed'); }
+                      }}>Save</Button>
+                      <Button size="sm" variant="ghost" onClick={()=>{ setChangeEmail(false); }}>Cancel</Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {mode !== 'verify' && (<div className="relative my-4">
             <div className="absolute inset-0 flex items-center">
               <span className="w-full border-t" />
             </div>
             <div className="relative flex justify-center text-xs uppercase">
               <span className="bg-white px-2 text-muted-foreground">Or continue with</span>
             </div>
-          </div>
-          {/** Build an absolute Google OAuth URL so marketing pages hit the API origin even without env config */}
-          <a href={googleLoginUrl} className="block">
-            <Button variant="outline" className="w-full">
-              Sign In with Google
-            </Button>
-          </a>
+          </div>)}
+          {mode !== 'verify' && (
+            <a href={googleLoginUrl} className="block">
+              <Button variant="outline" className="w-full">
+                Sign In with Google
+              </Button>
+            </a>
+          )}
         </CardContent>
       </Card>
     </div>

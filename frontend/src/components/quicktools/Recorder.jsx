@@ -163,25 +163,17 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source="A" 
         const input = channelData[0];
         for (let i = 0; i < length; i++) writeSample(input[i]);
       } else {
-        const left = channelData[0];
-        const right = channelData[1];
-        for (let i = 0; i < length; i++) { writeSample(left[i]); writeSample(right[i]); }
+        for (let i = 0; i < length; i++) {
+          for (let ch = 0; ch < numChannels; ch++) writeSample(channelData[ch][i]);
+        }
       }
 
-      return new Blob([buffer], { type: "audio/wav" });
+      const wavBlob = new Blob([buffer], { type: "audio/wav" });
+      try { ctx.close(); } catch {}
+      return wavBlob;
     } finally {
-      try { await ctx.close(); } catch {}
+      try { ctx.close(); } catch {}
     }
-  };
-
-  const formatDateName = () => {
-    const d = new Date();
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    const HH = String(d.getHours()).padStart(2, "0");
-    const MM = String(d.getMinutes()).padStart(2, "0");
-    return `My Recording ${yyyy}-${mm}-${dd} ${HH}${MM}`;
   };
 
   const extractStemFromFilename = (filename) => {
@@ -817,7 +809,7 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source="A" 
                   </span>
                 )}
               </Button>
-              <Button variant="outline" disabled={!isPaused} onClick={handleStop} aria-label="Stop recording (available when paused)" className="h-10">
+              <Button variant="outline" disabled={!isPaused || isCountingDown} onClick={handleStop} aria-label="Stop recording (available when paused)" className="h-10">
                 <Square className="w-4 h-4 mr-2" /> Stop
               </Button>
             </div>

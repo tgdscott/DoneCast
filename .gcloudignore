@@ -25,9 +25,9 @@ edited_audio/
 final_episodes/
 media_uploads/
 transcripts/
-podcast-pro-plus/cleaned_audio/
-podcast-pro-plus/media_uploads/
-podcast-pro-plus/final_episodes/
+backend/cleaned_audio/
+backend/media_uploads/
+backend/final_episodes/
 logs.txt
 recent_logs*.txt
 recent_logs*.json

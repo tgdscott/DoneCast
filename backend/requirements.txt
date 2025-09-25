@@ -1,0 +1,28 @@
+fastapi
+uvicorn[standard]
+gunicorn
+starlette
+pydantic
+python-multipart
+aiofiles
+sqlmodel
+sqlalchemy
+httpx
+email-validator
+itsdangerous
+pydantic-settings
+requests
+google-cloud-speech
+pydub
+
+# Required by various routers: JWT handling, password hashing, and feed parsing
+python-jose[cryptography]
+# Pin passlib & bcrypt to avoid ambiguous backend warning about __about__.__version__
+passlib[bcrypt]==1.7.4
+bcrypt==4.1.3
+feedparser
+stripe
+psycopg[binary]
+celery
+google-cloud-storage
+authlib

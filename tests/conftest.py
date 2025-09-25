@@ -14,9 +14,9 @@ import importlib as _importlib
 _m = _importlib.import_module("pydub")  # should be the installed package
 assert hasattr(_m, "AudioSegment"), "Local file/folder named 'pydub' is shadowing the real package."
 
-# Ensure the backend package root (podcast-pro-plus) is importable as 'api.*'
+# Ensure the backend package root is importable as 'api.*'
 WS_ROOT = Path(__file__).resolve().parents[1]
-PKG_ROOT = WS_ROOT / "podcast-pro-plus"
+PKG_ROOT = WS_ROOT / "backend"  # Updated after directory rename
 if str(PKG_ROOT) not in sys.path:
     sys.path.insert(0, str(PKG_ROOT))
 

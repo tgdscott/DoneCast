@@ -13,7 +13,7 @@ __pycache__
 .env
 .env.local
 
-# Keep bulky local-only dirs out of the image, but KEEP podcast-pro-plus/*
+# Keep bulky local-only dirs out of the image, but KEEP backend/* (renamed from podcast-pro-plus)
 assembly_logs
 cleaned_audio
 edited_audio

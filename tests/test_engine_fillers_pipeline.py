@@ -48,7 +48,7 @@ sys.modules['pydub'] = pydub_stub
 
 # --- Point sys.path to the package root ---
 ROOT = os.path.dirname(os.path.dirname(__file__))
-PKG_ROOT = os.path.join(ROOT, 'podcast-pro-plus')
+PKG_ROOT = os.path.join(ROOT, 'backend')
 if PKG_ROOT not in sys.path:
     sys.path.insert(0, PKG_ROOT)
 
