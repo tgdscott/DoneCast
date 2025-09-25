@@ -3,7 +3,7 @@ import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Label } from '../../ui/label';
 import { Textarea } from '../../ui/textarea';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Lightbulb, ListChecks } from 'lucide-react';
 
 export default function StepCustomizeSegments({
   selectedTemplate,
@@ -73,6 +73,37 @@ export default function StepCustomizeSegments({
         <CardTitle style={{ color: '#2C3E50' }}>Step 3: Customize Your Episode</CardTitle>
         <p className="text-md text-gray-500 pt-2">Review the structure and fill in the required text for any AI-generated segments.</p>
       </CardHeader>
+      <Card className="border border-slate-200 bg-slate-50" data-tour-id="episode-segment-guide">
+        <CardHeader className="flex flex-col gap-1 pb-2 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle className="text-base flex items-center gap-2 text-slate-800">
+            <Lightbulb className="h-4 w-4 text-amber-500" aria-hidden="true" />
+            How these segments play out
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-slate-700">
+          <p>
+            Each block below becomes a chapter in your final episode. Tweak the script, switch voices, or swap in uploaded
+            clips—changes are saved immediately.
+          </p>
+          <ul className="space-y-2">
+            <li className="flex items-start gap-2">
+              <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
+              <span><strong>Content</strong> anchors your uploaded audio. Intro/outro and ad slots wrap around it automatically.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
+              <span><strong>TTS segments</strong> use the template’s default voice—edit the script here or tap “Change voice” for a different tone.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
+              <span><strong>Static clips</strong> pull from your media library. Upload new stingers or music in the Template step if you need variety.</span>
+            </li>
+          </ul>
+          <p className="text-xs text-slate-500">
+            Pro tip: want to reuse this structure later? Save these updates back to the template once you love the flow.
+          </p>
+        </CardContent>
+      </Card>
       <Card className="border-0 shadow-lg bg-white">
         <CardContent className="p-6 space-y-4">
           {selectedTemplate && selectedTemplate.segments ? (
