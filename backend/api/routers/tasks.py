@@ -1,97 +1,62 @@
-from __future__ import annotations
-import os, json, uuid, logging, pathlib
-from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel
-from api.services.transcription import get_word_timestamps
+"""Tasks router providing /api/tasks/transcribe for dev + prod.
 
-router = APIRouter(prefix="/api/tasks", tags=["tasks"])
+Historically this endpoint was inlined in app.py backups. Some code (media
+upload pipeline) enqueues a task to POST /api/tasks/transcribe with JSON
+{"filename": <stored_name>} in dev mode via the synchronous tasks client.
+
+If the route is missing (regression) the dev tasks client will hit the Vite
+dev server (when APP_BASE_URL points to :5173), proxy fails (backend down) or
+returns HTML, leading to confusing timeouts / body parse errors. Restoring a
+dedicated router keeps concerns separated and ensures attach_routers() always
+mounts it early.
+"""
+from __future__ import annotations
+
+import os
+import logging
+from fastapi import APIRouter, HTTPException, Header, Request
+from pydantic import BaseModel
+
+from api.services.transcription import transcribe_media_file  # type: ignore
+
+log = logging.getLogger("tasks.transcribe")
+
+router = APIRouter(prefix="/api/tasks", tags=["tasks"])  # explicit /api prefix
+
+_TASKS_AUTH = os.getenv("TASKS_AUTH", "a-secure-local-secret")
+_IS_DEV = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").lower().startswith("dev")
+
 
 class TranscribeIn(BaseModel):
-    filename: str  # gs://... or local path
+    filename: str
 
-def _download_if_gcs(src: str) -> tuple[str, dict]:
-    meta: dict = {}
-    if not src.startswith("gs://"):
-        return src, meta
-    from google.cloud import storage  # lazy import
-    _, _, rest = src.partition("gs://")
-    bucket, _, key = rest.partition("/")
-    suffix = pathlib.Path(key).suffix or ".wav"
-    local = f"/tmp/media/tasks/{uuid.uuid4().hex}{suffix}"
-    os.makedirs(os.path.dirname(local), exist_ok=True)
-    storage.Client().bucket(bucket).blob(key).download_to_filename(local)
-    return local, {"bucket": bucket, "key": key}
-
-def _upload_json_gcs(obj: dict, bucket: str, key: str) -> str:
-    from google.cloud import storage
-    storage.Client().bucket(bucket).blob(key) \
-        .upload_from_string(json.dumps(obj, ensure_ascii=False), content_type="application/json")
-    return f"gs://{bucket}/{key}"
 
 @router.post("/transcribe")
-def transcribe(payload: TranscribeIn,
-               x_tasks_auth: str | None = Header(None, alias="X-Tasks-Auth"),
-               request_id: str | None = Header(None, alias="X-Request-Id")):
-    secret = os.environ.get("TASKS_AUTH", "")
-    if not secret or x_tasks_auth != secret:
-        raise HTTPException(401, "Forbidden")
-    logging.info("event=tasks.transcribe.start filename=%s request_id=%s", payload.filename, request_id)
+async def transcribe_endpoint(payload: TranscribeIn, request: Request, x_tasks_auth: str | None = Header(default=None)):
+    """Fire a synchronous transcription attempt.
 
-    local_path, meta = _download_if_gcs(payload.filename)
-    words = get_word_timestamps(local_path)  # uses AssemblyAI (if key) else Google STT
-
-    result = {
-        "request_id": request_id,
-        "source": payload.filename,
-        "word_count": len(words) if isinstance(words, list) else None,
-        "words": words,
-    }
-
-    # If source was in GCS, save JSON next to it under manual_tests/out/
-    if meta:
-        src_name = pathlib.Path(meta["key"]).name
-        base = src_name.rsplit(".", 1)[0]
-        out_key = f"manual_tests/out/{base}.json"
-        url = _upload_json_gcs(result, meta["bucket"], out_key)
-        logging.info("event=tasks.transcribe.done filename=%s request_id=%s output=%s",
-                     payload.filename, request_id, url)
-        return {"ok": True, "result_url": url}
-
-    logging.info("event=tasks.transcribe.done filename=%s request_id=%s", payload.filename, request_id)
-    return {"ok": True, "result": result}
-
-# --- added: GET /api/tasks/result?path=gs://bucket/key.json ---
-import json as _json
-from fastapi import HTTPException as _HTTPException
-try:
-    from google.cloud import storage as _gcs
-except Exception as _e:
-    _gcs = None
-
-@router.get("/result")
-def read_result(path: str):
+    In dev we allow the default secret; in non‑dev envs we require explicit
+    header match. Returns a lightweight status object (does *not* stream
+    transcription results) to keep request size small.
     """
-    Fetch a JSON transcript stored in GCS and return it over HTTPS.
-    Use: GET /api/tasks/result?path=gs://ppp-media-us-west1/manual_tests/out/XXXX.json
-    """
-    if not path.startswith("gs://"):
-        raise _HTTPException(400, "path must start with gs://")
-    if _gcs is None:
-        raise _HTTPException(500, "google-cloud-storage not available in this build")
+    if not _IS_DEV:
+        if not x_tasks_auth or x_tasks_auth != _TASKS_AUTH:
+            raise HTTPException(status_code=401, detail="unauthorized")
 
-    rest = path[5:]
-    if "/" not in rest:
-        raise _HTTPException(400, "malformed gs:// path")
-    bucket, key = rest.split("/", 1)
+    filename = payload.filename.strip()
+    if not filename:
+        raise HTTPException(status_code=400, detail="filename required")
 
-    client = _gcs.Client()
-    blob = client.bucket(bucket).blob(key)
+    log.info("event=tasks.transcribe.start filename=%s request_id=%s", filename, request.headers.get("x-request-id"))
     try:
-        text = blob.download_as_text()
-    except Exception as e:
-        raise _HTTPException(502, f"GCS read failed: {e}")
-    try:
-        return _json.loads(text)
-    except Exception as e:
-        raise _HTTPException(502, f"Object is not valid JSON: {e}")
-# --- end added ---
+        # This call may block for a while; in future we could offload to a thread pool.
+        transcribe_media_file(filename)
+        log.info("event=tasks.transcribe.done filename=%s", filename)
+        return {"started": True}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="file not found")
+    except Exception as e:  # pragma: no cover - defensive
+        log.exception("event=tasks.transcribe.error filename=%s err=%s", filename, e)
+        raise HTTPException(status_code=500, detail="transcription-start-failed")
+
+__all__ = ["router"]

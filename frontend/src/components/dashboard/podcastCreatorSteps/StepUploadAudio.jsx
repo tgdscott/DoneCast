@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { FileAudio, Loader2, Mic, Upload, ArrowLeft } from 'lucide-react';
@@ -37,6 +37,29 @@ export default function StepUploadAudio({
   const hasPendingIntents = Array.isArray(pendingIntentLabels) && pendingIntentLabels.length > 0;
   const pendingLabelText = hasPendingIntents ? pendingIntentLabels.join(', ') : '';
 
+  // Helper to format a filename by dropping UUID / hash prefixes and extension; prettify.
+  const formatDisplayName = (name) => {
+    try {
+      if (!name) return '';
+      let s = name.split(/[\\/]/).pop();
+      s = s.replace(/\.[a-z0-9]{2,5}$/i, '');
+      s = s.replace(/^(?:[a-f0-9]{8,}|[a-f0-9-]{20,})[_-]+/i, '');
+      s = s.replace(/[._-]+/g, ' ').trim();
+      if (s.length) s = s[0].toUpperCase() + s.slice(1);
+      return s;
+    } catch { return name; }
+  };
+
+  const autoOpenedRef = useRef(false);
+  // Auto-open the intent questionnaire immediately after file upload if pending.
+  useEffect(() => {
+    if (!autoOpenedRef.current && (uploadedFile || uploadedFilename) && hasPendingIntents && typeof onEditAutomations === 'function') {
+      autoOpenedRef.current = true;
+      // Slight delay to allow UI to render the success state first.
+      setTimeout(() => { try { onEditAutomations(); } catch {} }, 150);
+    }
+  }, [uploadedFile, uploadedFilename, hasPendingIntents, onEditAutomations]);
+
   const handleIntentSelect = (key, value) => {
     if (typeof onIntentChange === 'function') {
       onIntentChange(key, value);
@@ -68,7 +91,7 @@ export default function StepUploadAudio({
               <div className="space-y-6">
                 <FileAudio className="w-16 h-16 mx-auto text-green-600" />
                 <p className="text-xl font-semibold text-green-600">File Ready!</p>
-                {uploadedFile && <p className="text-gray-600">{uploadedFile.name}</p>}
+                {uploadedFile && <p className="text-gray-600">{formatDisplayName(uploadedFile.name)}</p>}
                 {!uploadedFile && uploadedFilename && (
                   <>
                     <p className="text-gray-600">Server file: {uploadedFilename}</p>
@@ -113,7 +136,7 @@ export default function StepUploadAudio({
           <CardContent className="space-y-4">
             {hasPendingIntents ? (
               <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                We still need your answer about {pendingLabelText}.
+                We need your answer about {pendingLabelText}.
               </div>
             ) : (
               <div className="text-sm text-slate-600">

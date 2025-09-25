@@ -37,6 +37,8 @@ import {
   RefreshCw,
 } from "lucide-react"
 import { useState, useRef, useEffect } from "react"
+import EpisodePublishTimeline from "@/components/EpisodePublishTimeline.jsx"
+import EpisodeSegmentEditor from "@/components/EpisodeSegmentEditor.jsx"
 
 export default function PodcastCreator() {
   const [currentStep, setCurrentStep] = useState(1)
@@ -85,6 +87,32 @@ export default function PodcastCreator() {
     enhancementsApplied: 3,
   })
 
+  // Basic derived total seconds (rough parse of m:ss)
+  const totalSeconds = (() => {
+    const m = /^(\d+):(\d{1,2})$/.exec(audioAnalysis.duration || '');
+    if (!m) return 0;
+    return parseInt(m[1],10)*60 + parseInt(m[2],10);
+  })();
+
+  const [segments, setSegments] = useState(() => [
+    { id: crypto.randomUUID(), label: 'Intro', start: 0, end:  Math.max(15, Math.min(45,  Math.round(totalSeconds*0.05))) || 30, type: 'intro' },
+    { id: crypto.randomUUID(), label: 'Main Segment', start:  Math.max(15, Math.min(45,  Math.round(totalSeconds*0.05))) || 30, end: totalSeconds ? Math.max( Math.round(totalSeconds*0.85), 120) : 240, type: 'main' },
+    { id: crypto.randomUUID(), label: 'Outro', start: totalSeconds ? Math.max( Math.round(totalSeconds*0.85), 120) : 240, end: totalSeconds || 360, type: 'outro' },
+  ]);
+
+  // Recalculate core segment boundaries if duration changes (e.g., after analysis)
+  useEffect(() => {
+    if (!totalSeconds || segments.some(s=>s.type==='ad')) return; // skip if ads inserted or no duration
+    const introLen = Math.max(15, Math.min(45, Math.round(totalSeconds*0.05)));
+    const outroStart = Math.max(Math.round(totalSeconds*0.85), introLen + 60);
+    setSegments([
+      { ...segments[0], start:0, end:introLen, type:'intro', label:segments[0].label || 'Intro' },
+      { ...segments[1], start:introLen, end:Math.min(outroStart, totalSeconds-30), type:'main', label:segments[1].label || 'Main Segment' },
+      { ...segments[2], start:Math.min(outroStart, totalSeconds-30), end: totalSeconds, type:'outro', label:segments[2].label || 'Outro' },
+    ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioAnalysis.duration]);
+
   const steps = [
     { number: 1, title: "Add Content", description: "Upload audio or generate from text", icon: Mic },
     { number: 2, title: "Details & Review", description: "Episode information and settings", icon: Settings },
@@ -114,6 +142,19 @@ export default function PodcastCreator() {
     "Arts",
     "Science",
   ]
+
+  // Helper to format filenames for display (strip UUID/hash prefixes, extension, prettify)
+  const formatDisplayName = (name) => {
+    try {
+      if (!name) return '';
+      let s = name.split(/[\\/]/).pop();
+      s = s.replace(/\.[a-z0-9]{2,5}$/i, '');
+      s = s.replace(/^(?:[a-f0-9]{8,}|[a-f0-9-]{20,})[_-]+/i, '');
+      s = s.replace(/[._-]+/g, ' ').trim();
+      if (s.length) s = s[0].toUpperCase() + s.slice(1);
+      return s;
+    } catch { return name; }
+  };
 
   const handleFileUpload = (file) => {
     setUploadedFile(file)
@@ -353,7 +394,7 @@ export default function PodcastCreator() {
                           </div>
                           <div>
                             <p className="text-xl font-semibold text-green-600 mb-2">File uploaded successfully!</p>
-                            <p className="text-gray-600 mb-1">{uploadedFile.name}</p>
+                            <p className="text-gray-600 mb-1">{formatDisplayName(uploadedFile.name)}</p>
                             <p className="text-sm text-gray-500">{(uploadedFile.size / (1024 * 1024)).toFixed(1)} MB</p>
                           </div>
 
@@ -658,6 +699,12 @@ Example: 'Today I want to talk about my summer adventures. I visited three diffe
                     <CardTitle style={{ color: "#2C3E50" }}>Episode Information</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-6">
+                    <EpisodeSegmentEditor
+                      totalSeconds={totalSeconds}
+                      segments={segments}
+                      onChange={setSegments}
+                    />
+                    <div className="h-px bg-gray-200" />
                     <div>
                       <Label htmlFor="title" className="text-sm font-medium text-gray-700 mb-2 block">
                         Episode Title *
@@ -763,7 +810,7 @@ Example: 'Today I want to talk about my summer adventures. I visited three diffe
                             <span className="text-sm text-gray-600">{audioAnalysis.duration}</span>
                           </div>
                           <p className="text-xs text-gray-500">
-                            {uploadedFile ? uploadedFile.name : "Generated Audio"}
+                            {uploadedFile ? formatDisplayName(uploadedFile.name) : "Generated Audio"}
                           </p>
                         </div>
                       </div>
@@ -1019,8 +1066,8 @@ Example: 'Today I want to talk about my summer adventures. I visited three diffe
                 </Card>
               </div>
 
-              {/* Episode Summary */}
-              <div>
+              {/* Episode Summary + Timeline */}
+              <div className="space-y-6">
                 <Card className="border-0 shadow-lg" style={{ backgroundColor: "#ECF0F1" }}>
                   <CardHeader>
                     <CardTitle style={{ color: "#2C3E50" }}>Episode Summary</CardTitle>
@@ -1078,7 +1125,7 @@ Example: 'Today I want to talk about my summer adventures. I visited three diffe
                   </CardContent>
                 </Card>
 
-                <Card className="border-0 shadow-lg bg-white mt-6">
+                <Card className="border-0 shadow-lg bg-white">
                   <CardHeader>
                     <CardTitle className="flex items-center" style={{ color: "#2C3E50" }}>
                       <MessageSquare className="w-5 h-5 mr-2" />
@@ -1109,6 +1156,15 @@ Example: 'Today I want to talk about my summer adventures. I visited three diffe
                     </Button>
                   </CardContent>
                 </Card>
+
+                <EpisodePublishTimeline
+                  publishOption={formData.publishOption}
+                  scheduleDate={formData.scheduleDate}
+                  scheduleTime={formData.scheduleTime}
+                  durationText={audioAnalysis.duration}
+                  hasArtwork={formData.generateArtwork}
+                  hasSocial={formData.generateSocialPosts}
+                />
               </div>
             </div>
 

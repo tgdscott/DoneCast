@@ -16,6 +16,10 @@ def enqueue_http_task(path: str, body: dict) -> dict:
         import httpx
         # Choose base URL from env, fallback to local API default port (8000)
         base = (os.getenv("TASKS_URL_BASE") or os.getenv("APP_BASE_URL") or f"http://127.0.0.1:{os.getenv('API_PORT','8000')}").rstrip("/")
+        # If APP_BASE_URL points to the Vite dev server (port 5173), prefer direct API port
+        # unless explicitly overridden. This avoids proxy timing issues on long-running tasks.
+        if ":5173" in base and not os.getenv("TASKS_FORCE_VITE_PROXY"):
+            base = f"http://127.0.0.1:{os.getenv('API_PORT','8000')}"
         api_url = f"{base}{path}"
         # Use a local secret for task authentication (must match tasks router dev default)
         auth_secret = os.getenv("TASKS_AUTH", "a-secure-local-secret")
