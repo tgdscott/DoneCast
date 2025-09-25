@@ -435,14 +435,12 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     }
   };
 
-  // --- Render Logic ---
-  if (isLoading) return <div className="flex justify-center items-center p-10"><Loader2 className="w-8 h-8 animate-spin" /></div>;
-  if (error) return <p className="text-red-500 p-4">Error: {error}</p>;
-  if (!template) return null;
+    // --- Render Logic ---
+    // IMPORTANT: Hooks (useMemo/useCallback) must run on every render. We compute them
+    // before any conditional returns so the hook order is stable across renders.
+    const hasContentSegment = template?.segments?.some(s => s.segment_type === 'content') ?? false;
 
-  const hasContentSegment = template.segments.some(s => s.segment_type === 'content');
-
-  const templateTourSteps = useMemo(() => [
+    const templateTourSteps = useMemo(() => [
     {
       target: '[data-tour="template-quickstart"]',
       title: 'Template overview',
@@ -478,9 +476,9 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
       title: 'Save & reuse',
       content: 'When everything looks right, save the template. New episodes will use these defaults automatically.',
     },
-  ], [podcasts.length, hasContentSegment]);
+    ], [podcasts.length, hasContentSegment]);
 
-  const handleTourCallback = useCallback((data) => {
+    const handleTourCallback = useCallback((data) => {
     const { status, type, step } = data;
     if ([STATUS.FINISHED, STATUS.SKIPPED].includes(status)) {
       setRunTemplateTour(false);
@@ -494,6 +492,11 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
       setShowAdvanced(true);
     }
   }, [setRunTemplateTour, setShowAdvanced]);
+
+    // After hooks are defined, we can return early for loading/error states
+    if (isLoading) return <div className="flex justify-center items-center p-10"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+    if (error) return <p className="text-red-500 p-4">Error: {error}</p>;
+    if (!template) return null;
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen space-y-6">

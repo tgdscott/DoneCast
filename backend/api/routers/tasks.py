@@ -12,10 +12,14 @@ mounts it early.
 """
 from __future__ import annotations
 
-import os
+import json
 import logging
-from fastapi import APIRouter, HTTPException, Header, Request
-from pydantic import BaseModel
+import os
+from typing import Any, Dict
+from urllib.parse import parse_qsl
+
+from fastapi import APIRouter, Header, HTTPException, Request
+from pydantic import BaseModel, ValidationError
 
 from api.services.transcription import transcribe_media_file  # type: ignore
 
@@ -31,11 +35,19 @@ class TranscribeIn(BaseModel):
     filename: str
 
 
+def _validate_payload(data: Dict[str, Any]) -> TranscribeIn:
+    """Support both Pydantic v1 and v2 validation entrypoints."""
+    try:
+        return TranscribeIn.model_validate(data)  # type: ignore[attr-defined]
+    except AttributeError:  # pragma: no cover - pydantic v1 fallback
+        return TranscribeIn.parse_obj(data)  # type: ignore[attr-defined]
+
+
 @router.post("/transcribe")
-async def transcribe_endpoint(payload: TranscribeIn, request: Request, x_tasks_auth: str | None = Header(default=None)):
+async def transcribe_endpoint(request: Request, x_tasks_auth: str | None = Header(default=None)):
     """Fire a synchronous transcription attempt.
 
-    In dev we allow the default secret; in non‑dev envs we require explicit
+    In dev we allow the default secret; in non-dev envs we require explicit
     header match. Returns a lightweight status object (does *not* stream
     transcription results) to keep request size small.
     """
@@ -43,7 +55,41 @@ async def transcribe_endpoint(payload: TranscribeIn, request: Request, x_tasks_a
         if not x_tasks_auth or x_tasks_auth != _TASKS_AUTH:
             raise HTTPException(status_code=401, detail="unauthorized")
 
-    filename = payload.filename.strip()
+    raw_body = (await request.body()).strip()
+    if not raw_body:
+        raise HTTPException(status_code=400, detail="request body required")
+
+    payload_data: Dict[str, Any] | None = None
+    try:
+        parsed = json.loads(raw_body)
+        if isinstance(parsed, dict):
+            payload_data = parsed
+    except json.JSONDecodeError:
+        pass
+
+    if payload_data is None:
+        try:
+            decoded = raw_body.decode("utf-8", errors="ignore")
+            payload_data = {k: v for k, v in parse_qsl(decoded) if k}
+        except Exception:
+            payload_data = None
+
+    if not payload_data:
+        preview = raw_body[:128]
+        log.warning(
+            "event=tasks.transcribe.bad_body detail=unparsable body_preview=%r content_type=%s request_id=%s",
+            preview,
+            request.headers.get("content-type"),
+            request.headers.get("x-request-id"),
+        )
+        raise HTTPException(status_code=400, detail="invalid body; expected JSON payload with 'filename'")
+
+    try:
+        payload = _validate_payload(payload_data)
+    except ValidationError:
+        raise HTTPException(status_code=400, detail="filename required")
+
+    filename = (payload.filename or "").strip()
     if not filename:
         raise HTTPException(status_code=400, detail="filename required")
 
@@ -58,5 +104,6 @@ async def transcribe_endpoint(payload: TranscribeIn, request: Request, x_tasks_a
     except Exception as e:  # pragma: no cover - defensive
         log.exception("event=tasks.transcribe.error filename=%s err=%s", filename, e)
         raise HTTPException(status_code=500, detail="transcription-start-failed")
+
 
 __all__ = ["router"]

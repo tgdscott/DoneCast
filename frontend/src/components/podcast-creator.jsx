@@ -38,6 +38,7 @@ import {
 } from "lucide-react"
 import { useState, useRef, useEffect } from "react"
 import EpisodePublishTimeline from "@/components/EpisodePublishTimeline.jsx"
+import EpisodeStructureSummary from "@/components/EpisodeStructureSummary.jsx"
 import EpisodeSegmentEditor from "@/components/EpisodeSegmentEditor.jsx"
 
 export default function PodcastCreator() {
@@ -1165,6 +1166,12 @@ Example: 'Today I want to talk about my summer adventures. I visited three diffe
                   hasArtwork={formData.generateArtwork}
                   hasSocial={formData.generateSocialPosts}
                 />
+                {segments && segments.length > 0 && (
+                  <EpisodeStructureSummary
+                    segments={segments}
+                    totalSeconds={(audioAnalysis.duration.match(/^(\d+):(\d{1,2})$/) ? (parseInt(audioAnalysis.duration.split(':')[0])*60 + parseInt(audioAnalysis.duration.split(':')[1])) : 0) || 0}
+                  />
+                )}
               </div>
             </div>
 
