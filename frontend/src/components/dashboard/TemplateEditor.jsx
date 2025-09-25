@@ -201,42 +201,42 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
       setBaselineTemplate(null);
       setIsLoading(true);
       try {
-                // Fetch media + podcasts in parallel via centralized API client
-                const api = makeApi(token);
-                const [mediaData, podcastsData] = await Promise.all([
-                    api.get('/api/media/'),
-                    api.get('/api/podcasts/')
-                ]);
-                const mediaArr = Array.isArray(mediaData) ? mediaData : (mediaData?.items || []);
-                const podcastsArr = Array.isArray(podcastsData) ? podcastsData : (podcastsData?.items || []);
-                setMediaFiles(mediaArr);
-                setPodcasts(podcastsArr);
+        const api = makeApi(token);
+        const [mediaData, podcastsData, templateData] = await Promise.all([
+          api.get('/api/media/'),
+          api.get('/api/podcasts/'),
+          isNewTemplate ? Promise.resolve(null) : api.get(`/api/templates/${templateId}`),
+        ]);
 
-    if (isNewTemplate) {
+        const mediaArr = Array.isArray(mediaData) ? mediaData : mediaData?.items || [];
+        const podcastsArr = Array.isArray(podcastsData) ? podcastsData : podcastsData?.items || [];
+        setMediaFiles(mediaArr);
+        setPodcasts(podcastsArr);
+
+        if (isNewTemplate) {
           setTemplate({
             name: 'My New Podcast Template',
             is_active: true,
-                        podcast_id: (podcastsArr && podcastsArr.length > 0) ? podcastsArr[podcastsArr.length - 1].id : null, // assume last = most recent
+            podcast_id: podcastsArr.length > 0 ? podcastsArr[podcastsArr.length - 1].id : null,
             segments: [
-        { id: crypto.randomUUID(), segment_type: 'intro', source: { source_type: 'static', filename: '' } },
-        { id: crypto.randomUUID(), segment_type: 'content', source: { source_type: 'static', filename: '' } },
-        { id: crypto.randomUUID(), segment_type: 'outro', source: { source_type: 'static', filename: '' } },
+              { id: crypto.randomUUID(), segment_type: 'intro', source: { source_type: 'static', filename: '' } },
+              { id: crypto.randomUUID(), segment_type: 'content', source: { source_type: 'static', filename: '' } },
+              { id: crypto.randomUUID(), segment_type: 'outro', source: { source_type: 'static', filename: '' } },
             ],
             background_music_rules: [],
             timing: { content_start_offset_s: 0, outro_start_offset_s: 0 },
           });
-                } else {
-                    const api = makeApi(token);
-                    const templateData = await api.get(`/api/templates/${templateId}`);
-                    setTemplate(templateData);
-                }
+        } else {
+          setTemplate(templateData || null);
+        }
         setError(null);
       } catch (err) {
-                setError(err.message || String(err));
+        setError(err?.message || String(err));
       } finally {
         setIsLoading(false);
       }
     };
+
     fetchInitialData();
   }, [templateId, token, isNewTemplate]);
   useEffect(() => {
@@ -497,6 +497,59 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     if (isLoading) return <div className="flex justify-center items-center p-10"><Loader2 className="w-8 h-8 animate-spin" /></div>;
     if (error) return <p className="text-red-500 p-4">Error: {error}</p>;
     if (!template) return null;
+
+  const templateTourSteps = useMemo(() => [
+    {
+      target: '[data-tour="template-quickstart"]',
+      title: 'Template overview',
+      content: 'We will walk through the three key tasks: link a show, build your segment flow, and fine-tune timing before saving.',
+      disableBeacon: true,
+    },
+    {
+      target: '[data-tour="template-basics"]',
+      title: 'Start with the basics',
+      content: podcasts.length === 0
+        ? 'Create a show first so you can attach this template. Once a show exists, you will unlock publishing options here.'
+        : 'Give the template a clear name and connect it to the show it belongs to. That ensures new episodes pick up the right defaults.',
+    },
+    {
+      target: '[data-tour="template-add"]',
+      title: 'Add your building blocks',
+      content: 'Use these buttons to add intro, content, outro, or ad segments. You can always drag to reorder later.',
+    },
+    {
+      target: '[data-tour="template-structure"]',
+      title: 'Customize each segment',
+      content: hasContentSegment
+        ? 'Edit scripts, upload clips, and adjust voices right inside this list. Drag handles let you reorder in seconds.'
+        : 'Drop in a Content segment so you can drag your uploaded audio into the right spot, then adjust intros, outros, and ads here.',
+    },
+    {
+      target: '[data-tour="template-advanced"]',
+      title: 'Fine-tune timing & music',
+      content: 'Advanced controls handle crossfades, background music rules, and AI defaults. Open this panel whenever you need detailed tweaks.',
+    },
+    {
+      target: '[data-tour="template-save"]',
+      title: 'Save & reuse',
+      content: 'When everything looks right, save the template. New episodes will use these defaults automatically.',
+    },
+  ], [podcasts.length, hasContentSegment]);
+
+  const handleTourCallback = useCallback((data) => {
+    const { status, type, step } = data;
+    if ([STATUS.FINISHED, STATUS.SKIPPED].includes(status)) {
+      setRunTemplateTour(false);
+      return;
+    }
+    if (type === EVENTS.TARGET_NOT_FOUND) {
+      setRunTemplateTour(false);
+      return;
+    }
+    if (type === EVENTS.STEP_BEFORE && step?.target === '[data-tour="template-advanced"]') {
+      setShowAdvanced(true);
+    }
+  }, [setRunTemplateTour, setShowAdvanced]);
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen space-y-6">
