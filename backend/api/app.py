@@ -28,6 +28,21 @@ from api.routing import attach_routers
 configure_logging()
 log = get_logger("api.app")
 
+# Suppress noisy passlib bcrypt version warning in dev (harmless but distracting)
+try:  # pragma: no cover - defensive logging tweak
+    import logging as _logging
+    _pl_logger = _logging.getLogger("passlib.handlers.bcrypt")
+    # Downgrade to ERROR so the trapped version attribute warning is hidden
+    _pl_logger.setLevel(_logging.ERROR)
+    # Patch missing __about__.__version__ to satisfy passlib check (older wheels)
+    import bcrypt as _bcrypt  # type: ignore
+    if _bcrypt and not getattr(_bcrypt, "__about__", None):
+        class _About:  # minimal shim
+            __version__ = getattr(_bcrypt, "__version__", "unknown")
+        _bcrypt.__about__ = _About()  # type: ignore[attr-defined]
+except Exception:
+    pass
+
 # --- Sentry (optional) ---
 SENTRY_DSN = os.getenv("SENTRY_DSN")
 ENV = os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev"

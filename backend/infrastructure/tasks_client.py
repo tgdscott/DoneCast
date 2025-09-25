@@ -4,30 +4,58 @@ try:
     from google.protobuf import timestamp_pb2
 except ImportError:
     tasks_v2 = None # type: ignore
-from datetime import datetime, timezone
+from datetime import datetime
 
 IS_DEV_ENV = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower() == "dev"
 
 def enqueue_http_task(path: str, body: dict) -> dict:
     if IS_DEV_ENV:
-        import httpx
+        """Dev-mode lightweight task dispatcher.
 
-        def _kick_local_transcribe(payload: dict) -> None:
+        Previously this attempted a *synchronous* loopback HTTP POST to the
+        running API ( /api/tasks/transcribe ). When invoked from inside the
+        upload request handler this could deadlock the single worker event loop
+        (or at least stall progress) causing a 300s httpx timeout before the
+        fallback thread was spawned. That explains the ~5 minute gap you saw
+        before the transcription actually began.
+
+        To eliminate that delay, we now dispatch the transcription directly in
+        a background thread immediately. An opt-in env var
+        TASKS_FORCE_HTTP_LOOPBACK=true restores the old behavior for debugging.
+        """
+        def _dispatch_thread(payload: dict) -> None:
             filename = str(payload.get("filename") or "").strip()
             if not filename:
                 print("DEV MODE fallback skipped: payload missing 'filename'")
                 return
             try:
                 from api.services.transcription import transcribe_media_file  # type: ignore
-            except Exception as import_err:  # pragma: no cover - import heuristics only
+                from api.core.paths import TRANSCRIPTS_DIR  # type: ignore
+                from pathlib import Path  # local import to avoid heavy import cost during module load
+            except Exception as import_err:  # pragma: no cover
                 print(f"DEV MODE fallback import failed: {import_err}")
                 return
 
             def _runner() -> None:
                 try:
-                    transcribe_media_file(filename)
+                    words = transcribe_media_file(filename)
+                    # Persist a transcript JSON so /api/ai/transcript-ready becomes true.
+                    try:
+                        base_name = filename.split('/')[-1].split('\\')[-1]
+                        stem = Path(base_name).stem
+                        TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+                        out_path = TRANSCRIPTS_DIR / f"{stem}.json"
+                        # Only write if not already present to avoid clobbering later enriched versions
+                        if not out_path.exists():
+                            out_path.write_text(json.dumps(words, ensure_ascii=False, indent=2), encoding="utf-8")
+                            print(f"DEV MODE wrote transcript JSON -> {out_path}")
+                        else:
+                            # Optionally skip overwrite
+                            pass
+                    except Exception as write_err:  # pragma: no cover
+                        print(f"DEV MODE warning: failed to write transcript JSON for {filename}: {write_err}")
                     print(f"DEV MODE fallback transcription finished for {filename}")
-                except Exception as trans_err:  # pragma: no cover - diagnostic only
+                except Exception as trans_err:  # pragma: no cover
                     print(f"DEV MODE fallback transcription error for {filename}: {trans_err}")
 
             threading.Thread(
@@ -37,35 +65,30 @@ def enqueue_http_task(path: str, body: dict) -> dict:
             ).start()
             print(f"DEV MODE fallback transcription dispatched for {filename}")
 
-        # In local dev, we'll make a direct, synchronous HTTP call to the task endpoint.
-        # This is simpler than a full task queue setup and good for most dev scenarios.
-        # For true async behavior, you could integrate Celery here.
-        # Choose base URL from env, fallback to local API default port (8000)
-        base = (os.getenv("TASKS_URL_BASE") or os.getenv("APP_BASE_URL") or f"http://127.0.0.1:{os.getenv('API_PORT','8000')}").rstrip("/")
-        # If APP_BASE_URL points to the Vite dev server (port 5173), prefer direct API port
-        # unless explicitly overridden. This avoids proxy timing issues on long-running tasks.
-        if ":5173" in base and not os.getenv("TASKS_FORCE_VITE_PROXY"):
-            base = f"http://127.0.0.1:{os.getenv('API_PORT','8000')}"
-        api_url = f"{base}{path}"
-        # Use a local secret for task authentication (must match tasks router dev default)
-        auth_secret = os.getenv("TASKS_AUTH", "a-secure-local-secret")
-        headers = {"Content-Type": "application/json", "X-Tasks-Auth": auth_secret}
+        # Allow forcing legacy loopback for debugging perf of the tasks endpoint
+        if os.getenv("TASKS_FORCE_HTTP_LOOPBACK"):
+            import httpx
+            base = (os.getenv("TASKS_URL_BASE") or os.getenv("APP_BASE_URL") or f"http://127.0.0.1:{os.getenv('API_PORT','8000')}").rstrip("/")
+            if ":5173" in base and not os.getenv("TASKS_FORCE_VITE_PROXY"):
+                base = f"http://127.0.0.1:{os.getenv('API_PORT','8000')}"
+            api_url = f"{base}{path}"
+            auth_secret = os.getenv("TASKS_AUTH", "a-secure-local-secret")
+            headers = {"Content-Type": "application/json", "X-Tasks-Auth": auth_secret}
+            print(f"DEV MODE (forced loopback): POST {api_url}")
+            try:
+                with httpx.Client(timeout=30.0) as client:  # shorter timeout since this is optional
+                    r = client.post(api_url, json=body, headers=headers)
+                    r.raise_for_status()
+                    print("DEV MODE loopback call successful.")
+                    return {"name": f"local-loopback-{datetime.utcnow().isoformat()}"}
+            except Exception as e:  # pragma: no cover
+                print(f"DEV MODE loopback failed ({e}); falling back to direct thread dispatch")
+                _dispatch_thread(body)
+                return {"name": "local-loopback-failed"}
 
-        print(f"DEV MODE: Calling task endpoint synchronously: POST {api_url}")
-        try:
-            with httpx.Client(timeout=300.0) as client:  # 5 minute timeout
-                response = client.post(api_url, json=body, headers=headers)
-                response.raise_for_status()
-                print("DEV MODE: Sync task call successful.")
-                return {"name": f"local-sync-call-{datetime.utcnow().isoformat()}"}
-        except (httpx.RequestError, httpx.HTTPStatusError) as e:
-            print(f"ERROR: DEV MODE synchronous task call failed: {e}")
-            _kick_local_transcribe(body)
-            return {"name": "local-sync-call-failed"}
-        except Exception as e:
-            print(f"ERROR: DEV MODE synchronous task call failed: {e}")
-            _kick_local_transcribe(body)
-            return {"name": "local-sync-call-failed"}
+        # Default: immediate background transcription
+        _dispatch_thread(body)
+        return {"name": "local-direct-dispatch"}
 
     if tasks_v2 is None:
         raise ImportError("google-cloud-tasks is not installed")

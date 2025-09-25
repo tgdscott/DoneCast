@@ -12,6 +12,7 @@ mounts it early.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -20,7 +21,9 @@ from urllib.parse import parse_qsl
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, ValidationError
+from starlette.requests import ClientDisconnect
 
+from api.core.paths import MEDIA_DIR
 from api.services.transcription import transcribe_media_file  # type: ignore
 
 log = logging.getLogger("tasks.transcribe")
@@ -43,9 +46,35 @@ def _validate_payload(data: Dict[str, Any]) -> TranscribeIn:
         return TranscribeIn.parse_obj(data)  # type: ignore[attr-defined]
 
 
+async def _dispatch_transcription(filename: str, request_id: str | None, *, suppress_errors: bool) -> None:
+    """Execute transcription in a worker thread, optionally suppressing exceptions."""
+    loop = asyncio.get_running_loop()
+    log.info("event=tasks.transcribe.start filename=%s request_id=%s", filename, request_id)
+    try:
+        await loop.run_in_executor(None, transcribe_media_file, filename)
+        log.info("event=tasks.transcribe.done filename=%s request_id=%s", filename, request_id)
+    except FileNotFoundError as err:
+        log.warning("event=tasks.transcribe.not_found filename=%s request_id=%s", filename, request_id)
+        if not suppress_errors:
+            raise err
+    except Exception as exc:  # pragma: no cover - defensive
+        log.exception("event=tasks.transcribe.error filename=%s err=%s", filename, exc)
+        if not suppress_errors:
+            raise exc
+
+
+def _ensure_local_media_present(filename: str) -> None:
+    """In dev, uploaded files live under MEDIA_DIR; fail fast if missing."""
+    if filename.startswith("gs://"):
+        return
+    candidate = MEDIA_DIR / filename
+    if not candidate.exists():
+        raise HTTPException(status_code=404, detail="file not found")
+
+
 @router.post("/transcribe")
 async def transcribe_endpoint(request: Request, x_tasks_auth: str | None = Header(default=None)):
-    """Fire a synchronous transcription attempt.
+    """Fire a transcription attempt.
 
     In dev we allow the default secret; in non-dev envs we require explicit
     header match. Returns a lightweight status object (does *not* stream
@@ -55,7 +84,13 @@ async def transcribe_endpoint(request: Request, x_tasks_auth: str | None = Heade
         if not x_tasks_auth or x_tasks_auth != _TASKS_AUTH:
             raise HTTPException(status_code=401, detail="unauthorized")
 
-    raw_body = (await request.body()).strip()
+    try:
+        raw_body = await request.body()
+    except ClientDisconnect:
+        log.warning("event=tasks.transcribe.client_disconnect request_id=%s", request.headers.get("x-request-id"))
+        raise HTTPException(status_code=499, detail="client disconnected before body was read")
+
+    raw_body = raw_body.strip()
     if not raw_body:
         raise HTTPException(status_code=400, detail="request body required")
 
@@ -93,16 +128,19 @@ async def transcribe_endpoint(request: Request, x_tasks_auth: str | None = Heade
     if not filename:
         raise HTTPException(status_code=400, detail="filename required")
 
-    log.info("event=tasks.transcribe.start filename=%s request_id=%s", filename, request.headers.get("x-request-id"))
+    request_id = request.headers.get("x-request-id")
+
+    if _IS_DEV:
+        _ensure_local_media_present(filename)
+        asyncio.create_task(_dispatch_transcription(filename, request_id, suppress_errors=True))
+        return {"started": True, "async": True}
+
     try:
-        # This call may block for a while; in future we could offload to a thread pool.
-        transcribe_media_file(filename)
-        log.info("event=tasks.transcribe.done filename=%s", filename)
+        await _dispatch_transcription(filename, request_id, suppress_errors=False)
         return {"started": True}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="file not found")
-    except Exception as e:  # pragma: no cover - defensive
-        log.exception("event=tasks.transcribe.error filename=%s err=%s", filename, e)
+    except Exception:  # pragma: no cover - defensive
         raise HTTPException(status_code=500, detail="transcription-start-failed")
 
 

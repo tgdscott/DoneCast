@@ -19,7 +19,8 @@ if (-not (Test-Path $envFile)) {
 
 Push-Location $apiDir
 try {
-  & $pythonExe -m uvicorn api.main:app --host 127.0.0.1 --port 8010 --env-file $envFile
+  # Standardize on port 8000 (was briefly 8010); frontend proxy and other scripts expect 8000
+  & $pythonExe -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --env-file $envFile
 } finally {
   Pop-Location
 }
