@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import { Textarea } from '../../ui/textarea';
-import { ArrowLeft, Loader2, Wand2, Lightbulb, ListChecks } from 'lucide-react';
+import { ArrowLeft, Loader2, Wand2 } from 'lucide-react';
 
 export default function StepEpisodeDetails({
   episodeDetails,
@@ -36,35 +36,6 @@ export default function StepEpisodeDetails({
       <CardHeader className="text-center">
         <CardTitle style={{ color: '#2C3E50' }}>Step 5: Episode Details &amp; Scheduling</CardTitle>
       </CardHeader>
-      <Card className="border border-slate-200 bg-slate-50" data-tour-id="episode-details-guide">
-        <CardHeader className="flex flex-col gap-1 pb-2 sm:flex-row sm:items-center sm:justify-between">
-          <CardTitle className="text-base flex items-center gap-2 text-slate-800">
-            <Lightbulb className="h-4 w-4 text-amber-500" aria-hidden="true" />
-            Final quick check
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm text-slate-700">
-          <p>
-            We already drafted these details from your recording. Give them a glance and adjust anything you want before you
-            assemble or publish.
-          </p>
-          <ul className="space-y-2">
-            <li className="flex items-start gap-2">
-              <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
-              <span><strong>Title &amp; description</strong>: happy with what you see? Great. Want a new take? Tap the AI buttons for an instant rewrite.</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
-              <span><strong>Episode numbers &amp; explicit flag</strong>: confirm they match what your host expects.</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
-              <span><strong>Scheduling</strong>: choose “Schedule” to pick your local date and time—we handle the background math.</span>
-            </li>
-          </ul>
-          <p className="text-xs text-slate-500">Tags are optional. Add them if your host uses them, otherwise feel free to leave them blank.</p>
-        </CardContent>
-      </Card>
       <Card className="border-0 shadow-lg bg-white">
         <CardContent className="p-6 space-y-6">
           <div className="grid md:grid-cols-2 gap-6">
