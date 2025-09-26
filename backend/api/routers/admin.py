@@ -33,6 +33,14 @@ except Exception:  # pragma: no cover
 # Whitelisted tables for admin DB explorer (avoid arbitrary SQL injection surface)
 DB_EXPLORER_TABLES = ["user", "podcast", "episode", "podcasttemplate", "podcast_template"]
 
+DB_MODEL_MAP = {
+    "user": User,
+    "podcast": Podcast,
+    "episode": Episode,
+    "podcasttemplate": PodcastTemplate,
+    "podcast_template": PodcastTemplate,
+}
+
 
 logger = logging.getLogger(__name__)
 
@@ -1134,12 +1142,30 @@ def admin_db_table_row_delete(
 ):
     if table_name not in DB_EXPLORER_TABLES:
         raise HTTPException(status_code=400, detail="Table not allowed")
-    try:
-        stmt = _sql_text(f"DELETE FROM {table_name} WHERE id = :rid").bindparams(rid=row_id)
-        session.exec(stmt)
-        session.commit()
-        # SQLite cursor rowcount accessible via underlying; we won't rely—assume success if no exception
-    except Exception as e:
-        session.rollback()
-        raise HTTPException(status_code=500, detail=f"Delete failed: {e}")
+    model = DB_MODEL_MAP.get(table_name)
+    if model is not None:
+        try:
+            identifier = row_id
+            try:
+                identifier = UUID(str(row_id))
+            except Exception:
+                identifier = row_id
+            obj = session.get(model, identifier)
+            if not obj:
+                raise HTTPException(status_code=404, detail="Row not found")
+            session.delete(obj)
+            session.commit()
+        except HTTPException:
+            raise
+        except Exception as e:
+            session.rollback()
+            raise HTTPException(status_code=500, detail=f"Delete failed: {e}")
+    else:
+        try:
+            stmt = _sql_text(f"DELETE FROM {table_name} WHERE id = :rid").bindparams(rid=row_id)
+            session.exec(stmt)
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            raise HTTPException(status_code=500, detail=f"Delete failed: {e}")
     return {"deleted": True, "table": table_name, "id": row_id}

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import os
 from typing import Any, Dict, Optional
 from uuid import UUID
 
@@ -7,6 +9,8 @@ from sqlmodel import Session, select
 
 from . import repo
 from api.services.publisher import SpreakerClient
+
+logger = logging.getLogger("ppp.episodes.publisher.service")
 
 
 def publish(session: Session, current_user, episode_id: UUID, derived_show_id: str, publish_state: Optional[str], auto_publish_iso: Optional[str]) -> Dict[str, Any]:
@@ -25,6 +29,25 @@ def publish(session: Session, current_user, episode_id: UUID, derived_show_id: s
         raise HTTPException(status_code=401, detail="User is not connected to Spreaker")
 
     from worker.tasks import publish_episode_to_spreaker_task, celery_app
+    task_kwargs = {
+        'episode_id': str(ep.id),
+        'spreaker_show_id': str(derived_show_id),
+        'title': str(ep.title or "Untitled Episode"),
+        'description': ep.show_notes or "",
+        'auto_published_at': auto_publish_iso,
+        'spreaker_access_token': spreaker_access_token,
+        'publish_state': publish_state,
+    }
+
+    def _run_inline_publish() -> Dict[str, Any]:
+        try:
+            result = publish_episode_to_spreaker_task.apply(args=(), kwargs=task_kwargs)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("[publish] Inline publish task raised", exc_info=True)
+            raise exc
+        payload = getattr(result, 'result', None)
+        return {"job_id": "inline", "result": payload}
+
     eager = False
     try:
         eager = bool(getattr(celery_app.conf, 'task_always_eager', False))
@@ -32,26 +55,29 @@ def publish(session: Session, current_user, episode_id: UUID, derived_show_id: s
         eager = False
     if eager:
         # Execute synchronously for dev reliability
-        result = publish_episode_to_spreaker_task.apply(args=(), kwargs={
-            'episode_id': str(ep.id),
-            'spreaker_show_id': str(derived_show_id),
-            'title': str(ep.title or "Untitled Episode"),
-            'description': ep.show_notes or "",
-            'auto_published_at': auto_publish_iso,
-            'spreaker_access_token': spreaker_access_token,
-            'publish_state': publish_state,
-        })
-        # mimic AsyncResult-like response
-        return {"job_id": "eager", "result": result.result if hasattr(result, 'result') else None}
-    async_result = publish_episode_to_spreaker_task.delay(
-        episode_id=str(ep.id),
-        spreaker_show_id=str(derived_show_id),
-        title=str(ep.title or "Untitled Episode"),
-        description=ep.show_notes or "",
-        auto_published_at=auto_publish_iso,
-        spreaker_access_token=spreaker_access_token,
-        publish_state=publish_state,
-    )
+        result = publish_episode_to_spreaker_task.apply(args=(), kwargs=task_kwargs)
+        return {"job_id": "eager", "result": getattr(result, 'result', None)}
+
+    try:
+        async_result = publish_episode_to_spreaker_task.apply_async(kwargs=task_kwargs)
+    except Exception:
+        logger.warning("[publish] Celery enqueue failed; running inline", exc_info=True)
+        return _run_inline_publish()
+
+    auto_fallback = os.getenv("CELERY_AUTO_FALLBACK", "").strip().lower() in {"1", "true", "yes", "on"}
+    env = os.getenv("APP_ENV", "dev").strip().lower()
+    if auto_fallback or env in {"dev", "development", "local"}:
+        needs_fallback = False
+        try:
+            ping = celery_app.control.ping(timeout=1)
+            if not ping:
+                needs_fallback = True
+        except Exception:
+            needs_fallback = True
+        if needs_fallback:
+            logger.warning("[publish] No Celery workers detected; executing inline fallback")
+            return _run_inline_publish()
+
     return {"job_id": async_result.id}
 
 
