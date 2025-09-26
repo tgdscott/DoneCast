@@ -1,23 +1,30 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Form, File, UploadFile, Request, Body
-from typing import Optional
+from typing import Optional, List
 from uuid import UUID, uuid4
 from pathlib import Path
 import shutil
 import logging
-from typing import List, Optional
-from uuid import UUID, uuid4
-from sqlmodel import Session, select, SQLModel
-import shutil
-from pathlib import Path
-import logging
+from collections import defaultdict
+from urllib.parse import quote_plus
+from datetime import datetime, timezone
+
+from sqlmodel import Session, select, SQLModel, Field
 
 from ..core.database import get_session
 from ..models.user import User
-from ..models.podcast import Podcast, PodcastBase, PodcastType, Episode, EpisodeStatus
+from ..models.podcast import (
+    Podcast,
+    PodcastBase,
+    PodcastType,
+    Episode,
+    EpisodeStatus,
+    PodcastDistributionStatus,
+    DistributionStatus,
+)
 from ..services.publisher import SpreakerClient
 from ..services.image_utils import ensure_cover_image_constraints
 from api.core.auth import get_current_user
-from datetime import datetime, timezone
+from ..services.distribution_directory import get_distribution_hosts, get_distribution_host
 
 logging.basicConfig(level=logging.INFO)
 from sqlmodel import Session, select
@@ -49,6 +56,203 @@ class PodcastUpdate(SQLModel):
     category_id: Optional[int] = None
     category_2_id: Optional[int] = None
     category_3_id: Optional[int] = None
+
+
+class DistributionStatusUpdate(SQLModel):
+    status: DistributionStatus
+    notes: Optional[str] = None
+
+
+class DistributionChecklistItem(SQLModel):
+    key: str
+    name: str
+    summary: Optional[str] = None
+    automation: str = "manual"
+    automation_notes: Optional[str] = None
+    action_label: Optional[str] = None
+    action_url: Optional[str] = None
+    docs_url: Optional[str] = None
+    instructions: List[str] = Field(default_factory=list)
+    requires_rss_feed: bool = False
+    requires_spreaker_show: bool = False
+    disabled_reason: Optional[str] = None
+    status: DistributionStatus = DistributionStatus.not_started
+    notes: Optional[str] = None
+    status_updated_at: Optional[datetime] = None
+
+
+class DistributionChecklistResponse(SQLModel):
+    podcast_id: UUID
+    podcast_name: str
+    rss_feed_url: Optional[str] = None
+    spreaker_show_url: Optional[str] = None
+    items: List[DistributionChecklistItem] = Field(default_factory=list)
+
+
+def _build_distribution_context(podcast: Podcast) -> dict:
+    rss_url = (
+        getattr(podcast, "rss_feed_url", None)
+        or getattr(podcast, "rss_url_locked", None)
+        or getattr(podcast, "rss_url", None)
+    )
+    spreaker_show_id = getattr(podcast, "spreaker_show_id", None)
+    spreaker_show_url = f"https://www.spreaker.com/show/{spreaker_show_id}" if spreaker_show_id else None
+    encoded_rss = quote_plus(rss_url) if rss_url else ""
+    return {
+        "rss_feed_url": rss_url,
+        "rss_feed_encoded": encoded_rss,
+        "rss_feed_or_placeholder": rss_url or "your CloudPod RSS feed",
+        "spreaker_show_id": spreaker_show_id or "",
+        "spreaker_show_url": spreaker_show_url,
+        "podcast_name": getattr(podcast, "name", None) or "",
+    }
+
+
+def _format_template(value: Optional[str], context: dict) -> Optional[str]:
+    if not value:
+        return value
+    safe = defaultdict(str)
+    for key, val in context.items():
+        safe[key] = "" if val is None else str(val)
+    try:
+        return value.format_map(safe)
+    except Exception:
+        return value
+
+
+def _build_distribution_item(
+    host_def: dict,
+    status: Optional[PodcastDistributionStatus],
+    context: dict,
+) -> DistributionChecklistItem:
+    disabled_reason: Optional[str] = None
+    requires_rss_feed = bool(host_def.get("requires_rss_feed"))
+    requires_spreaker_show = bool(host_def.get("requires_spreaker_show"))
+    if requires_rss_feed and not context.get("rss_feed_url"):
+        disabled_reason = host_def.get("rss_missing_help") or "Add your RSS feed first."
+    if requires_spreaker_show and not context.get("spreaker_show_id"):
+        disabled_reason = host_def.get("spreaker_missing_help") or "Link your show to Spreaker first."
+
+    default_status_key = host_def.get("default_status") or DistributionStatus.not_started.value
+    try:
+        default_status = DistributionStatus(default_status_key)
+    except Exception:
+        default_status = DistributionStatus.not_started
+
+    current_status = default_status
+    notes = None
+    updated_at = None
+    if status is not None:
+        try:
+            current_status = DistributionStatus(status.status)
+        except Exception:
+            current_status = default_status
+        notes = status.notes
+        updated_at = getattr(status, "updated_at", None)
+
+    instructions = [
+        _format_template(text, context)
+        for text in (host_def.get("instructions") or [])
+        if text
+    ]
+    action_url = _format_template(host_def.get("action_url_template"), context)
+    if not action_url:
+        action_url = _format_template(host_def.get("action_url"), context)
+    docs_url = _format_template(host_def.get("docs_url"), context)
+
+    return DistributionChecklistItem(
+        key=str(host_def.get("key")),
+        name=str(host_def.get("name") or host_def.get("key")),
+        summary=_format_template(host_def.get("summary"), context),
+        automation=str(host_def.get("automation", "manual")),
+        automation_notes=_format_template(host_def.get("automation_notes"), context),
+        action_label=host_def.get("action_label"),
+        action_url=action_url,
+        docs_url=docs_url,
+        instructions=instructions,
+        requires_rss_feed=requires_rss_feed,
+        requires_spreaker_show=requires_spreaker_show,
+        disabled_reason=disabled_reason,
+        status=current_status,
+        notes=notes,
+        status_updated_at=updated_at,
+    )
+
+
+@router.get("/{podcast_id}/distribution/checklist", response_model=DistributionChecklistResponse)
+async def get_distribution_checklist(
+    podcast_id: UUID,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    podcast = session.exec(
+        select(Podcast).where(Podcast.id == podcast_id, Podcast.user_id == current_user.id)
+    ).first()
+    if not podcast:
+        raise HTTPException(status_code=404, detail="Podcast not found.")
+
+    status_rows = session.exec(
+        select(PodcastDistributionStatus).where(
+            PodcastDistributionStatus.podcast_id == podcast.id,
+            PodcastDistributionStatus.user_id == current_user.id,
+        )
+    ).all()
+    status_map = {str(row.platform_key): row for row in status_rows if getattr(row, "platform_key", None)}
+
+    context = _build_distribution_context(podcast)
+    items = [
+        _build_distribution_item(host, status_map.get(str(host.get("key"))), context)
+        for host in get_distribution_hosts()
+    ]
+
+    return DistributionChecklistResponse(
+        podcast_id=podcast.id,
+        podcast_name=podcast.name,
+        rss_feed_url=context.get("rss_feed_url"),
+        spreaker_show_url=context.get("spreaker_show_url"),
+        items=items,
+    )
+
+
+@router.put("/{podcast_id}/distribution/checklist/{platform_key}", response_model=DistributionChecklistItem)
+async def update_distribution_checklist_item(
+    podcast_id: UUID,
+    platform_key: str,
+    payload: DistributionStatusUpdate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    podcast = session.exec(
+        select(Podcast).where(Podcast.id == podcast_id, Podcast.user_id == current_user.id)
+    ).first()
+    if not podcast:
+        raise HTTPException(status_code=404, detail="Podcast not found.")
+
+    host_def = get_distribution_host(platform_key)
+    if not host_def:
+        raise HTTPException(status_code=404, detail="Unknown distribution platform.")
+
+    status_row = session.exec(
+        select(PodcastDistributionStatus).where(
+            PodcastDistributionStatus.podcast_id == podcast.id,
+            PodcastDistributionStatus.user_id == current_user.id,
+            PodcastDistributionStatus.platform_key == platform_key,
+        )
+    ).first()
+    if not status_row:
+        status_row = PodcastDistributionStatus(
+            podcast_id=podcast.id,
+            user_id=current_user.id,
+            platform_key=platform_key,
+        )
+
+    status_row.mark_status(payload.status, payload.notes)
+    session.add(status_row)
+    session.commit()
+    session.refresh(status_row)
+
+    context = _build_distribution_context(podcast)
+    return _build_distribution_item(host_def, status_row, context)
 
 
 @router.post("/{podcast_id}/link-spreaker-episodes", status_code=200)
