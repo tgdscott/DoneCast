@@ -33,7 +33,7 @@ export default function TermsGate() {
               Updated Terms of Use
             </CardTitle>
             <p className="text-sm text-slate-600">
-              To continue using Podcast Plus we need you to review and accept the most recent terms. The full agreement is below for your records.
+              To continue using Podcast Plus Plus we need you to review and accept the most recent terms. The full agreement is below for your records.
             </p>
           </CardHeader>
           <CardContent>
@@ -63,7 +63,7 @@ export default function TermsGate() {
               Sign out
             </Button>
             <Button onClick={handleAccept} disabled={submitting}>
-              {submitting ? 'Recording acceptance…' : 'I Agree'}
+              {submitting ? 'Recording acceptanceâ€¦' : 'I Agree'}
             </Button>
           </CardFooter>
         </Card>

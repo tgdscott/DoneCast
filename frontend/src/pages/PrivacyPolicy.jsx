@@ -5,7 +5,7 @@ export default function PrivacyPolicy() {
   return (
     <LegalLayout
       title="Privacy Policy"
-      description="Learn how Podcast Plus collects, uses, and protects your information."
+      description="Learn how Podcast Plus Plus collects, uses, and protects your information."
       html={privacyHtml}
     />
   );

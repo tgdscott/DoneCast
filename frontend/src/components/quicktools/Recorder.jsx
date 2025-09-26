@@ -600,7 +600,7 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source="A" 
       setServerStem(extractStemFromFilename(stored));
       // Surface success toast
       toast({ title: "Saved", description: "Saved. Transcription has started." });
-  // Notify host app (A/B upload screen, etc.) so it can surface the new media immediately
+  // Notify host app (Plus Plus workspace upload screen, etc.) so it can surface the new media immediately
   try { window.dispatchEvent(new CustomEvent('ppp:media-uploaded', { detail: first })); } catch {}
   try { if (typeof onSaved === 'function') onSaved(first); } catch {}
     } catch (e) {

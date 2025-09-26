@@ -67,7 +67,7 @@ else:
     log.info("[startup] Sentry disabled (missing DSN or dev/test env)")
 
 # --- Build App ---
-app = FastAPI(title="Podcast Pro Plus API")
+app = FastAPI(title="Podcast Plus Plus API")
 
 # --- Pre-warm password hashing so first signup isn't slow ---
 try:

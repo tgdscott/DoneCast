@@ -297,19 +297,6 @@ export default function Settings({ token }) {
 
       <AdminSettings />
 
-      <div className="pt-6">
-        <button
-          type="button"
-          onClick={() => {
-            try {
-              window.location.href = "/ab";
-            } catch {}
-          }}
-          className="text-xs text-muted-foreground transition hover:text-slate-900"
-        >
-          A/B workspace
-        </button>
-      </div>
     </div>
   );
 }

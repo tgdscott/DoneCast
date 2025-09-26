@@ -1,16 +1,10 @@
 export const BRANDS = {
-  ppp: {
-    key: "ppp",
-    name: "Podcast Plus",
-    shortName: "PPP",
-    logo: "/assets/ppp-logo.svg",
-    colors: { primary: "#0ea5e9", accent: "#f59e0b" }
-  },
-  nsc: {
-    key: "nsc",
-    name: "No Sweat Podcast Studio",
-    shortName: "NSC",
-    logo: "/assets/nsc-logo.svg",
-    colors: { primary: "#22c55e", accent: "#eab308" }
+  plusplus: {
+    key: "plusplus",
+    name: "Podcast Plus Plus",
+    shortName: "Plus Plus",
+    heroH1: "Podcasting magic, doubled.",
+    heroSub: "Plus Plus automates the busywork so you can stay in the creative flow.",
+    colors: { primary: "#0FA3B1", accent: "#FFB703" }
   }
 };

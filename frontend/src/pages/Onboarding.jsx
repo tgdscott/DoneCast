@@ -196,7 +196,7 @@ export default function Onboarding() {
     { id: 'importing', title: 'Importing...', description: 'Fetching episodes and metadata.' },
     { id: 'analyze', title: 'Analyzing', description: "We'll bring over what we can, and you can tidy later." },
     { id: 'assets', title: 'Assets', description: "We'll bring over what we can, and you can tidy later." },
-    { id: 'importSuccess', title: 'Imported', description: 'Your show is now in Podcast Pro Plus.' },
+    { id: 'importSuccess', title: 'Imported', description: 'Your show is now in Podcast Plus Plus.' },
   ]), []);
 
   const newFlowSteps = useMemo(() => {
@@ -1288,7 +1288,7 @@ export default function Onboarding() {
           return (
             <div className="space-y-2">
               <h3 className="text-lg font-semibold">Imported</h3>
-              <p className="text-sm text-muted-foreground">Your show is in Podcast Pro Plus. We&apos;ll continue the setup from step 6 so you can fine-tune everything.</p>
+              <p className="text-sm text-muted-foreground">Your show is in Podcast Plus Plus. We&apos;ll continue the setup from step 6 so you can fine-tune everything.</p>
             </div>
           );
         default:

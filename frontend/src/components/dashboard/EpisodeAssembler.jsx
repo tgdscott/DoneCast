@@ -91,7 +91,7 @@ export default function EpisodeAssembler({ templates, onBack, token }) {
         show_id: selectedShowId,
         title: outputFilename,
         filename: assembledEpisode.output_path.split('/').pop(),
-        description: "Uploaded via Podcast Pro Plus",
+        description: "Uploaded via Podcast Plus Plus",
       });
       setStatusMessage(`Successfully published to Spreaker! Details: ${result.details}`);
       setAssembledEpisode(null); // Clear the episode after successful publish

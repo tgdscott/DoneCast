@@ -13,13 +13,15 @@ import ClosedAlphaGate from '@/components/ClosedAlphaGate.jsx';
 import { Toaster } from '@/components/ui/toaster.jsx';
 import MetaHead from '@/components/MetaHead.jsx';
 import TermsGate from '@/components/common/TermsGate.jsx';
+import AppAB from '@/ab/AppAB.jsx';
+import { useLayout } from '@/layout/LayoutContext.jsx';
 
 // --- IMPORTANT ---
 // Admin is determined by backend role; no hard-coded emails.
 const isAdmin = (user) => !!(user && (user.is_admin || user.role === 'admin'));
 
 export default function App() {
-    const { isAuthenticated, token, login, logout, user, refreshUser, hydrated } = useAuth(); 
+    const { isAuthenticated, token, login, logout, user, refreshUser, hydrated } = useAuth();
     const [isLoading, setIsLoading] = useState(true);
     const [postCheckout, setPostCheckout] = useState(false);
     const [postCheckoutStartedAt, setPostCheckoutStartedAt] = useState(null);
@@ -27,6 +29,7 @@ export default function App() {
     const [adminCheck, setAdminCheck] = useState({ checked: false, allowed: false });
     // Podcast existence check always declared so hooks order stable
     const [podcastCheck, setPodcastCheck] = React.useState({ loading: true, count: 0, fetched: false });
+    const { layoutKey } = useLayout();
 
     useEffect(() => {
         const processAuth = async () => {
@@ -119,7 +122,7 @@ export default function App() {
     if (postCheckout && !isAuthenticated) {
         // If we already have a token, optimistic render dashboard root to allow normal flows
         if (token) {
-            return <PodcastPlusDashboard />; // will internally hit APIs; if 401 occurs AuthContext will reset
+            return layoutKey === 'ab' ? <AppAB token={token} /> : <PodcastPlusDashboard />; // will internally hit APIs; if 401 occurs AuthContext will reset
         }
         const elapsed = postCheckoutStartedAt ? Date.now() - postCheckoutStartedAt : 0;
         return <div className="flex flex-col items-center justify-center h-screen space-y-4">
@@ -161,7 +164,7 @@ export default function App() {
             if (adminCheck.allowed) return <AdminDashboard />;
             // If not allowed, fall through to regular dashboard
         }
-        return <PodcastPlusDashboard />;
+        return layoutKey === 'ab' ? <AppAB token={token} /> : <PodcastPlusDashboard />;
     }
         return <div className="flex items-center justify-center h-screen">Loading...</div>;
 }
@@ -174,4 +177,3 @@ export function AppWithToasterWrapper() {
         <Toaster />
     </>;
 }
-

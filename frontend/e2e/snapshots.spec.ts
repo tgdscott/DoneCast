@@ -18,7 +18,7 @@ test.describe('Visual snapshots: Home, Onboarding, Episode Creator', () => {
     // Ensure anon state
     await page.addInitScript(() => { try { window.localStorage.removeItem('authToken'); } catch {} });
   await page.goto('/');
-  await expect(page.getByRole('heading', { level: 1, name: 'Podcast Plus' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Podcast Plus Plus' })).toBeVisible();
     await expect(page).toHaveScreenshot('home-landing.png', { fullPage: true, animations: 'disabled' });
   });
 
