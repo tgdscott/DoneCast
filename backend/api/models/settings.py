@@ -1,5 +1,8 @@
 from typing import Optional
 from datetime import datetime
+from datetime import datetime
+from typing import Optional
+
 from sqlmodel import SQLModel, Field, Session
 from pydantic import BaseModel
 import json
@@ -22,11 +25,16 @@ class AdminSettings(BaseModel):
 
     - test_mode: legacy toggle used by parts of the system/tests
     - default_user_active: whether newly created users start active (True) or inactive (False)
+    - maintenance_mode: when True, non-admin API requests are rejected with HTTP 503
+    - maintenance_message: optional string surfaced to clients when maintenance is active
     """
+
     test_mode: bool = False
     default_user_active: bool = True
     # Maximum upload size for main content (in MB). Exposed publicly for client hints.
     max_upload_mb: int = 500
+    maintenance_mode: bool = False
+    maintenance_message: Optional[str] = None
 
 
 def load_admin_settings(session: Session) -> AdminSettings:

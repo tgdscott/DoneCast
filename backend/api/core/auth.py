@@ -11,6 +11,7 @@ from api.core.config import settings
 from api.core.database import get_session
 from api.core import crud
 from api.models.user import User
+from api.models.settings import load_admin_settings
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,21 @@ async def get_current_user(
 	user = crud.get_user_by_email(session=session, email=email)
 	if user is None:
 		raise credentials_exception
-	return user
+        try:
+                admin_settings = load_admin_settings(session)
+        except Exception:
+                admin_settings = None
+        if admin_settings and getattr(admin_settings, "maintenance_mode", False):
+                if not getattr(user, "is_admin", False):
+                        detail: dict[str, Any] = {
+                                "detail": "Service is temporarily unavailable for maintenance.",
+                                "maintenance": True,
+                        }
+                        msg = getattr(admin_settings, "maintenance_message", None)
+                        if msg:
+                                detail["message"] = msg
+                        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
+
+        return user
 
 __all__ = ["get_current_user", "oauth2_scheme"]

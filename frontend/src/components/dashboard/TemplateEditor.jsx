@@ -57,38 +57,53 @@ const sourceIcons = {
     tts: <Mic className="w-4 h-4 mr-2" />,
 };
 
+const MUSIC_VOLUME_BOOST_RATIO = 1.35;
 const MUSIC_VOLUME_LEVELS = [
-    { level: 1, db: -35, description: 'Barely there under the host' },
-    { level: 2, db: -30, description: 'Very soft background' },
-    { level: 3, db: -25, description: 'Soft and warm' },
-    { level: 4, db: -20, description: 'Low but noticeable' },
-    { level: 5, db: -15, description: 'Comfortable blend' },
-    { level: 6, db: -8, description: 'Present but not overpowering' },
-    { level: 7, db: -3, description: 'Energetic backing (similar to -3 dB)' },
-    { level: 8, db: -2, description: 'Almost level with the voice' },
-    { level: 9, db: -1, description: 'Bold background mix' },
-    { level: 10, db: 0, description: 'Same volume as everything else' },
+    { level: 1, ratio: 0.1, description: 'Barely audible under the host' },
+    { level: 2, ratio: 0.2, description: 'Very soft background bed' },
+    { level: 3, ratio: 0.3, description: 'Gentle supporting layer' },
+    { level: 4, ratio: 0.4, description: 'Noticeable but still tucked under' },
+    { level: 5, ratio: 0.5, description: 'Balanced bed under the voice' },
+    { level: 6, ratio: 0.6, description: 'Present with a mild punch' },
+    { level: 7, ratio: 0.7, description: 'Energetic mix that rides with the host' },
+    { level: 8, ratio: 0.8, description: 'Almost level with the dialogue' },
+    { level: 9, ratio: 0.9, description: 'Bold mix that demands attention' },
+    { level: 10, ratio: 1.0, description: 'Same volume as the main mix' },
+    { level: 11, ratio: MUSIC_VOLUME_BOOST_RATIO, description: 'Spinal Tap mode – louder than the main mix' },
 ];
 
-const DEFAULT_VOLUME_LEVEL = 7;
+const DEFAULT_VOLUME_LEVEL = 4;
 
 const volumeLevelToDb = (level) => {
-    const preset = MUSIC_VOLUME_LEVELS.find(item => item.level === level);
-    const fallback = MUSIC_VOLUME_LEVELS.find(item => item.level === DEFAULT_VOLUME_LEVEL);
-    return preset ? preset.db : (fallback ? fallback.db : -6);
+    if (typeof level !== 'number' || Number.isNaN(level)) level = DEFAULT_VOLUME_LEVEL;
+    const clamped = Math.max(1, Math.min(11, level));
+    let ratio;
+    if (clamped <= 10) {
+        ratio = clamped / 10;
+    } else {
+        const extra = MUSIC_VOLUME_BOOST_RATIO - 1;
+        ratio = 1 + (clamped - 10) * (extra <= 0 ? 0 : extra);
+    }
+    if (ratio <= 0) return -60;
+    return 20 * Math.log10(ratio);
 };
 
 const volumeDbToLevel = (db) => {
     if (typeof db !== 'number' || Number.isNaN(db)) return DEFAULT_VOLUME_LEVEL;
-    return MUSIC_VOLUME_LEVELS.reduce((closest, item) => {
-        const currentDiff = Math.abs(item.db - db);
-        const closestDiff = Math.abs(volumeLevelToDb(closest) - db);
-        return currentDiff < closestDiff ? item.level : closest;
-    }, DEFAULT_VOLUME_LEVEL);
+    const ratio = Math.pow(10, db / 20);
+    if (!isFinite(ratio) || ratio <= 0) return DEFAULT_VOLUME_LEVEL;
+    if (ratio <= 1) {
+        return Math.max(1, Math.min(10, ratio * 10));
+    }
+    const extra = MUSIC_VOLUME_BOOST_RATIO - 1;
+    if (extra <= 0) return 11;
+    const level = 10 + (ratio - 1) / extra;
+    return Math.max(10, Math.min(11, level));
 };
 
 const describeVolumeLevel = (level) => {
-    const preset = MUSIC_VOLUME_LEVELS.find(item => item.level === level);
+    const rounded = Math.round(level);
+    const preset = MUSIC_VOLUME_LEVELS.find(item => item.level === rounded);
     return preset ? preset.description : '';
 };
 
@@ -164,7 +179,11 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
   }, [template, baselineTemplate]);
 
   const onMediaUploaded = (newFile) => {
-    setMediaFiles(prev => [...prev, newFile]);
+    if (!newFile) return;
+    setMediaFiles(prev => {
+      const filtered = Array.isArray(prev) ? prev.filter(f => f?.filename !== newFile.filename) : [];
+      return [...filtered, newFile];
+    });
   };
 
   useEffect(() => {
@@ -295,7 +314,16 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
   };
 
   const addBackgroundMusicRule = () => {
-    const newRule = { id: crypto.randomUUID(), apply_to_segments: ['content'], music_filename: '', start_offset_s: 0, end_offset_s: 0, fade_in_s: 2, fade_out_s: 3, volume_db: -15 };
+    const newRule = {
+      id: crypto.randomUUID(),
+      apply_to_segments: ['content'],
+      music_filename: '',
+      start_offset_s: 0,
+      end_offset_s: 0,
+      fade_in_s: 2,
+      fade_out_s: 3,
+      volume_db: Number(volumeLevelToDb(DEFAULT_VOLUME_LEVEL).toFixed(1)),
+    };
     setTemplate(prev => ({ ...prev, background_music_rules: [...(prev.background_music_rules || []), newRule] }));
   };
 
@@ -303,6 +331,77 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     const newRules = [...template.background_music_rules];
     newRules.splice(index, 1);
     setTemplate(prev => ({ ...prev, background_music_rules: newRules }));
+  };
+
+  const [musicUploadIndex, setMusicUploadIndex] = useState(null);
+  const [isUploadingMusic, setIsUploadingMusic] = useState(false);
+  const musicUploadInputRef = useRef(null);
+  const musicUploadIndexRef = useRef(null);
+
+  const setMusicVolumeLevel = useCallback((index, level) => {
+    const numeric = typeof level === 'number' ? level : parseFloat(level);
+    const fallback = DEFAULT_VOLUME_LEVEL;
+    const clamped = Math.max(1, Math.min(11, Number.isFinite(numeric) ? numeric : fallback));
+    const dbValue = Number(volumeLevelToDb(clamped).toFixed(1));
+    handleBackgroundMusicChange(index, 'volume_db', dbValue);
+  }, [handleBackgroundMusicChange]);
+
+  const startMusicUpload = useCallback((index) => {
+    if (isUploadingMusic) return;
+    setMusicUploadIndex(index);
+    musicUploadIndexRef.current = index;
+    try {
+      if (musicUploadInputRef.current) {
+        musicUploadInputRef.current.click();
+      }
+    } catch (_) {
+      /* no-op */
+    }
+  }, [isUploadingMusic]);
+
+  const handleMusicFileSelected = async (event) => {
+    const file = event?.target?.files?.[0];
+    const targetIndex = musicUploadIndexRef.current;
+    if (!file || targetIndex == null) {
+      if (event?.target) event.target.value = '';
+      setMusicUploadIndex(null);
+      musicUploadIndexRef.current = null;
+      return;
+    }
+
+    setIsUploadingMusic(true);
+    try {
+      const api = makeApi(token);
+      const fd = new FormData();
+      fd.append('files', file);
+      const data = await api.raw('/api/media/upload/music', { method: 'POST', body: fd });
+      const uploadedItem = Array.isArray(data) ? data[0] : data;
+      if (!uploadedItem?.filename) {
+        throw new Error('Upload succeeded but no file was returned.');
+      }
+      const uploaded = {
+        id: uploadedItem.id || crypto.randomUUID(),
+        filename: uploadedItem.filename,
+        friendly_name: uploadedItem.friendly_name || undefined,
+        category: uploadedItem.category || 'music',
+        content_type: uploadedItem.content_type || 'audio/mpeg',
+      };
+      onMediaUploaded(uploaded);
+      handleBackgroundMusicChange(targetIndex, 'music_filename', uploaded.filename);
+      try {
+        toast({ title: 'Music uploaded', description: 'Your track is now available in the template.' });
+      } catch (_) {}
+    } catch (e) {
+      const message = e?.message || 'Could not upload music.';
+      try { toast({ variant: 'destructive', title: 'Upload failed', description: message }); } catch (_) {}
+    } finally {
+      setIsUploadingMusic(false);
+      setMusicUploadIndex(null);
+      musicUploadIndexRef.current = null;
+      if (event?.target) {
+        try { event.target.value = ''; } catch (_) {}
+      }
+    }
   };
 
   const handleBackClick = () => {
@@ -723,15 +822,31 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                                                 </div>
                                                 <div>
                                                     <Label>Music File</Label>
-                                                    <Select value={rule.music_filename} onValueChange={(v) => handleBackgroundMusicChange(index, 'music_filename', v)}>
-                                                        <SelectTrigger><SelectValue placeholder="Select music..." /></SelectTrigger>
-                                                        <SelectContent>{musicFiles.map(f => <SelectItem key={f.id} value={f.filename}>{f.friendly_name || f.filename.split('_').slice(1).join('_')}</SelectItem>)}</SelectContent>
-                                                    </Select>
+                                                    <div className="flex items-center gap-2">
+                                                        <Select value={rule.music_filename} onValueChange={(v) => handleBackgroundMusicChange(index, 'music_filename', v)}>
+                                                            <SelectTrigger><SelectValue placeholder="Select music..." /></SelectTrigger>
+                                                            <SelectContent>{musicFiles.map(f => <SelectItem key={f.id} value={f.filename}>{f.friendly_name || f.filename.split('_').slice(1).join('_')}</SelectItem>)}</SelectContent>
+                                                        </Select>
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() => startMusicUpload(index)}
+                                                            disabled={isUploadingMusic && musicUploadIndex === index}
+                                                        >
+                                                            {isUploadingMusic && musicUploadIndex === index ? (
+                                                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                                            ) : (
+                                                                <Upload className="w-4 h-4 mr-2" />
+                                                            )}
+                                                            Upload
+                                                        </Button>
+                                                    </div>
                                                 </div>
-                                            </div>
-                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                                <div>
-                                                    <Label>Start Offset (sec)</Label>
+                                                </div>
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                    <div>
+                                                        <Label>Start Offset (sec)</Label>
                                                     <Input type="number" step="0.5" value={rule.start_offset_s} onChange={(e) => handleBackgroundMusicChange(index, 'start_offset_s', parseFloat(e.target.value || 0))} />
                                                 </div>
                                                 <div>
@@ -747,24 +862,58 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                                                     <Input type="number" step="0.5" value={rule.fade_out_s} onChange={(e) => handleBackgroundMusicChange(index, 'fade_out_s', parseFloat(e.target.value || 0))} />
                                                 </div>
                                             </div>
-                                            <div className="mt-4">
-                                                <Label>Volume (dB)</Label>
-                                                <div className="flex items-center gap-2">
-                                                    <Input
-                                                        type="range"
-                                                        min="-60"
-                                                        max="0"
-                                                        step="1"
-                                                        value={rule.volume_db}
-                                                        onChange={(e) => handleBackgroundMusicChange(index, 'volume_db', parseInt(e.target.value, 10))}
-                                                        className="w-full"
-                                                    />
-                                                    <span className="text-sm font-mono w-16 text-center">{rule.volume_db} dB</span>
+                                            <div className="mt-4 space-y-2">
+                                                <div className="flex items-center justify-between">
+                                                    <Label className="flex items-center gap-1">Loudness</Label>
+                                                    <span className="text-xs text-muted-foreground">Scale 1–11</span>
+                                                </div>
+                                                <div className="space-y-2">
+                                                    {(() => {
+                                                        const level = volumeDbToLevel(rule.volume_db);
+                                                        const displayLevel = Number.isFinite(level) ? level : DEFAULT_VOLUME_LEVEL;
+                                                        return (
+                                                            <>
+                                                                <div className="flex items-center gap-3">
+                                                                    <Input
+                                                                        type="range"
+                                                                        min="1"
+                                                                        max="11"
+                                                                        step="0.1"
+                                                                        value={displayLevel}
+                                                                        onChange={(e) => setMusicVolumeLevel(index, parseFloat(e.target.value))}
+                                                                        className="w-full"
+                                                                    />
+                                                                    <Input
+                                                                        type="number"
+                                                                        min="1"
+                                                                        max="11"
+                                                                        step="0.1"
+                                                                        value={displayLevel.toFixed(1)}
+                                                                        onChange={(e) => setMusicVolumeLevel(index, parseFloat(e.target.value))}
+                                                                        className="w-24"
+                                                                    />
+                                                                </div>
+                                                                <div className="grid grid-cols-11 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                                                    {MUSIC_VOLUME_LEVELS.map(({ level: presetLevel }) => (
+                                                                        <span key={presetLevel} className="text-center">{presetLevel}</span>
+                                                                    ))}
+                                                                </div>
+                                                                <p className="text-xs text-gray-500">{describeVolumeLevel(displayLevel)}</p>
+                                                            </>
+                                                        );
+                                                    })()}
                                                 </div>
                                             </div>
                                         </div>
                                     ))}
                                 </div>
+                                <input
+                                    ref={musicUploadInputRef}
+                                    type="file"
+                                    accept="audio/*"
+                                    className="hidden"
+                                    onChange={handleMusicFileSelected}
+                                />
                                 <Button onClick={addBackgroundMusicRule} variant="outline" className="mt-4">
                                     <Plus className="w-4 h-4 mr-2" />Add Music Rule
                                 </Button>
@@ -798,7 +947,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                             </li>
                             <li className="flex items-start gap-2">
                                 <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
-                                <span><strong>Volume</strong> is in dB. -12&nbsp;dB keeps music behind the voice, while -20&nbsp;dB is ideal for subtle underscoring.</span>
+                                <span><strong>Loudness</strong> now uses a 1–11 scale: 1 is barely audible, 10 matches the host, and 11 pushes the music slightly hotter.</span>
                             </li>
                         </ul>
                         <p className="text-xs text-slate-500">Save when things sound right—your episode builder will inherit these timing rules.</p>
@@ -904,7 +1053,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                                         category,
                                         content_type: 'audio/mpeg',
                                     };
-                                    setMediaFiles(prev => [...prev, newMedia]);
+                                    onMediaUploaded(newMedia);
                                     // Link segment to static file
                                     handleSourceChange(ttsTargetSegment.id, { source_type: 'static', filename });
                                     setCreatedFromTTS(prev => ({ ...prev, [ttsTargetSegment.id]: Date.now() }));
