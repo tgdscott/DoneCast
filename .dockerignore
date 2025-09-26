@@ -1,23 +1,46 @@
-.venv
-node_modules
-frontend/node_modules
-__pycache__
+.venv/
+env/
+venv/
+node_modules/
+frontend/node_modules/
+__pycache__/
 *.pyc
 *.pyo
 *.pyd
 *.db
+*.sqlite3
 .DS_Store
-.git
+.git/
 .gitignore
 *.log
+logs.txt
+recent_logs*.txt
 .env
 .env.local
+*.coverage
+.pytest_cache/
+htmlcov/
 
-# Keep bulky local-only dirs out of the image, but KEEP backend/* (renamed from podcast-pro-plus)
+# Keep bulky local-only dirs out of image layers; runtime mounts or stores them elsewhere
 assembly_logs
 cleaned_audio
 edited_audio
 final_episodes
 media_uploads
 transcripts
+backend/local_tmp
+backend/local_media
+
+# Tests not needed in runtime container (they can be in a test-specific build if desired)
 tests
+
+# Temporary / scratch
+tmp/
+*.tmp
+*.bak
+
+# Frontend build output (rebuilt during Docker build stage)
+frontend/dist/
+
+# Backup Dockerfiles
+Dockerfile.bak*

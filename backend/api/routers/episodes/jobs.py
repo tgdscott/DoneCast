@@ -3,6 +3,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
+import os, time
 from sqlalchemy.orm import Session
 from sqlmodel import select
 
@@ -46,7 +47,7 @@ def get_job_status(job_id: str, session: Session = Depends(get_session)):
             _uuid_obj = _UUID(str(ep_id))
         except Exception:
             _uuid_obj = None
-        ep = session.exec(select(Episode).where(Episode.id == _uuid_obj)).first() if _uuid_obj else None
+        ep = session.execute(select(Episode).where(Episode.id == _uuid_obj)).scalars().first() if _uuid_obj else None
         if not ep:
             return {"job_id": job_id, "status": "processed"}
 
@@ -109,12 +110,12 @@ def get_job_status(job_id: str, session: Session = Depends(get_session)):
         try:
             cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
             from sqlalchemy import text as _sa_text
-            recent = session.exec(
+            recent = session.execute(
                 select(Episode)
                 .where(Episode.processed_at >= cutoff)  # type: ignore[arg-type]
                 .order_by(_sa_text("processed_at DESC"))
                 .limit(10)
-            ).all()
+            ).scalars().all()
             for ep in recent:
                 if getattr(ep, 'final_audio_path', None) and getattr(ep, 'status', None) in ("processed", "published"):
                     return {"job_id": job_id, "status": "processed", "episode": {
@@ -135,3 +136,27 @@ def get_job_status(job_id: str, session: Session = Depends(get_session)):
     if not err_text:
         err_text = str(result)
     return {"job_id": job_id, "status": "error", "error": err_text}
+
+@router.get("/dev/job-debug/{job_id}")
+def job_debug(job_id: str):
+    """Return raw celery state for debugging (dev only)."""
+    if os.getenv("APP_ENV","dev").lower() not in {"dev","development","local","test"}:
+        raise HTTPException(status_code=403, detail="Not available in prod")
+    from worker.tasks import celery_app
+    r = celery_app.AsyncResult(job_id)
+    info = {
+        "id": job_id,
+        "state": r.state,
+        "ready": r.ready(),
+        "successful": r.successful() if hasattr(r, 'successful') else None,
+        "failed": r.failed() if hasattr(r, 'failed') else None,
+        "result_type": type(getattr(r, 'result', None)).__name__,
+    }
+    # Attempt to detect broker/worker heartbeat by calling inspect
+    try:
+        insp = celery_app.control.inspect(timeout=1)
+        active = insp.active() if insp else None
+        info['workers_seen'] = list(active.keys()) if isinstance(active, dict) else None
+    except Exception:
+        info['workers_seen'] = None
+    return info

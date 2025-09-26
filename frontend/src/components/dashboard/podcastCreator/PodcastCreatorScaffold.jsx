@@ -47,7 +47,7 @@ export default function PodcastCreatorScaffold({
                   Template: {selectedTemplate.name}
                 </div>
               )}
-              {typeof onCancelBuild === 'function' && currentStep > 1 && buildActive && (
+              {typeof onCancelBuild === 'function' && currentStep > 1 && currentStep < 6 && buildActive && (
                 <Button
                   variant="outline"
                   size="sm"

@@ -19,6 +19,12 @@ class Settings(BaseSettings):
 
     # --- Service API Keys ---
     GEMINI_API_KEY: str
+    # --- AI Provider Selection ---
+    # AI_PROVIDER can be: "gemini" (public generativeai) or "vertex" (Vertex AI Gemini)
+    AI_PROVIDER: str = "gemini"
+    VERTEX_PROJECT: Optional[str] = None
+    VERTEX_LOCATION: str = "us-central1"
+    VERTEX_MODEL: Optional[str] = None  # e.g. "gemini-1.5-flash"
     ELEVENLABS_API_KEY: str
     ASSEMBLYAI_API_KEY: str
     ASSEMBLYAI_WEBHOOK_SECRET: Optional[str] = None

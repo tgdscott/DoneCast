@@ -145,3 +145,80 @@ async def transcribe_endpoint(request: Request, x_tasks_auth: str | None = Heade
 
 
 __all__ = ["router"]
+
+# -------------------- Assemble Episode (Cloud Tasks) --------------------
+
+class AssembleIn(BaseModel):
+    episode_id: str
+    template_id: str
+    main_content_filename: str
+    output_filename: str | None = None
+    tts_values: Dict[str, Any] | None = None
+    episode_details: Dict[str, Any] | None = None
+    user_id: str
+    podcast_id: str | None = None
+    intents: Dict[str, Any] | None = None
+
+
+def _validate_assemble_payload(data: Dict[str, Any]) -> AssembleIn:
+    try:
+        return AssembleIn.model_validate(data)  # type: ignore[attr-defined]
+    except AttributeError:  # pragma: no cover
+        return AssembleIn.parse_obj(data)  # type: ignore[attr-defined]
+
+
+@router.post("/assemble")
+async def assemble_episode_task(request: Request, x_tasks_auth: str | None = Header(default=None)):
+    """Run episode assembly via Cloud Tasks (or any HTTP task runner).
+
+    Security:
+      - In dev, allow default secret.
+      - In non-dev, require X-Tasks-Auth to match TASKS_AUTH env var.
+
+    Behavior:
+      - Process synchronously within the request so Cloud Tasks observes success/failure.
+      - The underlying function is the same implementation used by Celery tasks.
+    """
+    if not _IS_DEV:
+        if not x_tasks_auth or x_tasks_auth != _TASKS_AUTH:
+            raise HTTPException(status_code=401, detail="unauthorized")
+
+    try:
+        raw_body = await request.body()
+    except ClientDisconnect:
+        raise HTTPException(status_code=499, detail="client disconnected")
+    raw_body = (raw_body or b"").strip()
+    if not raw_body:
+        raise HTTPException(status_code=400, detail="request body required")
+
+    try:
+        data = json.loads(raw_body.decode("utf-8", errors="ignore"))
+        if not isinstance(data, dict):
+            raise ValueError
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid JSON body")
+
+    try:
+        payload = _validate_assemble_payload(data)
+    except ValidationError as ve:
+        raise HTTPException(status_code=400, detail=f"invalid payload: {ve}")
+
+    # Execute synchronously inside the request
+    try:
+        from worker.tasks import create_podcast_episode  # lazy import
+        result = create_podcast_episode(
+            episode_id=payload.episode_id,
+            template_id=payload.template_id,
+            main_content_filename=payload.main_content_filename,
+            output_filename=payload.output_filename or "",
+            tts_values=payload.tts_values or {},
+            episode_details=payload.episode_details or {},
+            user_id=payload.user_id,
+            podcast_id=payload.podcast_id or "",
+            intents=payload.intents or None,
+        )
+        return {"ok": True, "result": result}
+    except Exception as exc:  # pragma: no cover - defensive
+        log.exception("event=tasks.assemble.error err=%s", exc)
+        raise HTTPException(status_code=500, detail="assembly-failed")
+

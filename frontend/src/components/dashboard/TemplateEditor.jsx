@@ -440,43 +440,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     // before any conditional returns so the hook order is stable across renders.
     const hasContentSegment = template?.segments?.some(s => s.segment_type === 'content') ?? false;
 
-    const templateTourSteps = useMemo(() => [
-    {
-      target: '[data-tour="template-quickstart"]',
-      title: 'Template overview',
-      content: 'We will walk through the three key tasks: link a show, build your segment flow, and fine-tune timing before saving.',
-      disableBeacon: true,
-    },
-    {
-      target: '[data-tour="template-basics"]',
-      title: 'Start with the basics',
-      content: podcasts.length === 0
-        ? 'Create a show first so you can attach this template. Once a show exists, you will unlock publishing options here.'
-        : 'Give the template a clear name and connect it to the show it belongs to. That ensures new episodes pick up the right defaults.',
-    },
-    {
-      target: '[data-tour="template-add"]',
-      title: 'Add your building blocks',
-      content: 'Use these buttons to add intro, content, outro, or ad segments. You can always drag to reorder later.',
-    },
-    {
-      target: '[data-tour="template-structure"]',
-      title: 'Customize each segment',
-      content: hasContentSegment
-        ? 'Edit scripts, upload clips, and adjust voices right inside this list. Drag handles let you reorder in seconds.'
-        : 'Drop in a Content segment so you can drag your uploaded audio into the right spot, then adjust intros, outros, and ads here.',
-    },
-    {
-      target: '[data-tour="template-advanced"]',
-      title: 'Fine-tune timing & music',
-      content: 'Advanced controls handle crossfades, background music rules, and AI defaults. Open this panel whenever you need detailed tweaks.',
-    },
-    {
-      target: '[data-tour="template-save"]',
-      title: 'Save & reuse',
-      content: 'When everything looks right, save the template. New episodes will use these defaults automatically.',
-    },
-    ], [podcasts.length, hasContentSegment]);
+        // removed duplicate redeclaration of templateTourSteps (defined earlier above)
 
     const handleTourCallback = useCallback((data) => {
     const { status, type, step } = data;
@@ -535,21 +499,6 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
       content: 'When everything looks right, save the template. New episodes will use these defaults automatically.',
     },
   ], [podcasts.length, hasContentSegment]);
-
-  const handleTourCallback = useCallback((data) => {
-    const { status, type, step } = data;
-    if ([STATUS.FINISHED, STATUS.SKIPPED].includes(status)) {
-      setRunTemplateTour(false);
-      return;
-    }
-    if (type === EVENTS.TARGET_NOT_FOUND) {
-      setRunTemplateTour(false);
-      return;
-    }
-    if (type === EVENTS.STEP_BEFORE && step?.target === '[data-tour="template-advanced"]') {
-      setShowAdvanced(true);
-    }
-  }, [setRunTemplateTour, setShowAdvanced]);
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen space-y-6">

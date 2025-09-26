@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import Optional, Iterable, Dict, Any
 from pathlib import Path
-import json
+import json, os
 import uuid
 
 from api.core.paths import TRANSCRIPTS_DIR
@@ -333,8 +333,15 @@ def post_title(request: Request, inp: SuggestTitleIn, session: Session = Depends
     try:
         return suggest_title(inp)
     except RuntimeError as e:
-        # Likely provider not configured
-        raise HTTPException(status_code=503, detail=str(e))
+        # Normalize known runtime markers for structured response
+        msg = str(e)
+        mapped = _map_ai_runtime_error(msg)
+        raise HTTPException(status_code=mapped["status"], detail=mapped)
+    except Exception as e:  # pragma: no cover - defensive catch
+        _log.exception("[ai_title] unexpected error: %s", e)
+        if os.getenv("AI_STUB_MODE") == "1":
+            return SuggestTitleOut(title="Stub Title (error fallback)")
+        raise HTTPException(status_code=500, detail={"error":"AI_INTERNAL_ERROR"})
 
 
 @router.post("/notes", response_model=SuggestNotesOut)
@@ -352,7 +359,13 @@ def post_notes(request: Request, inp: SuggestNotesIn, session: Session = Depends
     try:
         return suggest_notes(inp)
     except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        mapped = _map_ai_runtime_error(str(e))
+        raise HTTPException(status_code=mapped["status"], detail=mapped)
+    except Exception as e:  # pragma: no cover
+        _log.exception("[ai_notes] unexpected error: %s", e)
+        if os.getenv("AI_STUB_MODE") == "1":
+            return SuggestNotesOut(description="Stub Notes (error fallback)", bullets=["stub", "notes"])
+        raise HTTPException(status_code=500, detail={"error":"AI_INTERNAL_ERROR"})
 
 
 @router.post("/tags", response_model=SuggestTagsOut)
@@ -375,7 +388,68 @@ def post_tags(request: Request, inp: SuggestTagsIn, session: Session = Depends(g
     try:
         return suggest_tags(inp)
     except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        mapped = _map_ai_runtime_error(str(e))
+        raise HTTPException(status_code=mapped["status"], detail=mapped)
+    except Exception as e:  # pragma: no cover
+        _log.exception("[ai_tags] unexpected error: %s", e)
+        if os.getenv("AI_STUB_MODE") == "1":
+            return SuggestTagsOut(tags=["stub", "tags"])
+        raise HTTPException(status_code=500, detail={"error":"AI_INTERNAL_ERROR"})
+
+@router.get("/dev-status")
+def ai_dev_status(request: Request):
+    """Diagnostic endpoint reporting AI configuration state."""
+    try:
+        from api.core.config import settings as _settings  # type: ignore
+    except Exception:
+        _settings = None  # type: ignore
+    key_present = bool(os.getenv("GEMINI_API_KEY") or getattr(_settings, "GEMINI_API_KEY", None))
+    provider = (os.getenv("AI_PROVIDER") or getattr(_settings, "AI_PROVIDER", "gemini")).lower()
+    model = (
+        os.getenv("VERTEX_MODEL")
+        or getattr(_settings, "VERTEX_MODEL", None)
+        or os.getenv("GEMINI_MODEL")
+        or getattr(_settings, "GEMINI_MODEL", None)
+        or "gemini-1.5-flash"
+    )
+    vertex_project = (
+        os.getenv("VERTEX_PROJECT")
+        or os.getenv("VERTEX_PROJECT_ID")
+        or getattr(_settings, "VERTEX_PROJECT", None)
+        or getattr(_settings, "VERTEX_PROJECT_ID", None)
+    )
+    return {
+        "provider": provider,
+        "model": model,
+        "stub_mode": os.getenv("AI_STUB_MODE") == "1",
+        "gemini_key_present": key_present,
+        "vertex_project": vertex_project,
+        "vertex_location": os.getenv("VERTEX_LOCATION") or getattr(_settings, "VERTEX_LOCATION", None) or "us-central1",
+    }
+
+
+# --- Internal helpers -------------------------------------------------------
+def _map_ai_runtime_error(msg: str) -> Dict[str, Any]:
+    base = {"error": msg}
+    # Default classification
+    status = 503
+    normalized = msg.upper()
+    if "MODEL_NOT_FOUND" in normalized:
+        base = {"error": "MODEL_NOT_FOUND"}
+    elif "VERTEX_PROJECT_NOT_SET" in normalized:
+        base = {"error": "VERTEX_PROJECT_NOT_SET"}
+    elif "VERTEX_INIT_FAILED" in normalized:
+        base = {"error": "VERTEX_INIT_FAILED"}
+    elif "VERTEX_MODEL_CLASS_UNAVAILABLE" in normalized:
+        base = {"error": "VERTEX_MODEL_CLASS_UNAVAILABLE"}
+    elif "VERTEX_SDK_NOT_AVAILABLE" in normalized:
+        base = {"error": "VERTEX_SDK_NOT_AVAILABLE"}
+    elif "AI_INTERNAL_ERROR" in normalized:
+        status = 500
+        base = {"error": "AI_INTERNAL_ERROR"}
+    # Provide status as int; some type checkers expect str values for JSON but FastAPI will serialize ints fine.
+    base["status"] = int(status)  # type: ignore[assignment]
+    return base
 
 
 @router.get("/transcript-ready")

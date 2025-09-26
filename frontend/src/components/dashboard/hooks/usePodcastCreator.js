@@ -80,10 +80,14 @@ export default function usePodcastCreator({
 
   // Consider a build "active" when something non-trivial is in-flight or staged
   const buildActive = useMemo(() => {
+    // After step 6 (assemble/publish phase reached) we no longer consider the pre-build cancel action valid
+    if (currentStep >= 6) return false;
     const hasAudio = !!(uploadedFile || uploadedFilename);
     const hasCover = !!(episodeDetails?.coverArt || episodeDetails?.cover_image_path);
+    // Active only if user still editing or staging prior to / during assembly start
     return !!(isUploading || isAssembling || isPublishing || autoPublishPending || hasAudio || hasCover);
   }, [
+    currentStep,
     isUploading,
     isAssembling,
     isPublishing,

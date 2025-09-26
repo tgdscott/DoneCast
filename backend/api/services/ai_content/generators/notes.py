@@ -37,23 +37,59 @@ def _compose_prompt(inp: SuggestNotesIn) -> str:
 
 
 def _parse_notes(text: str) -> SuggestNotesOut:
-    desc = ""
+    """Parse the LLM output into description + bullet list.
+
+    Robust against formats like:
+      Description:\nActual first sentence...\nMore sentences...\nBullets:\n- point
+    and single‑line forms: Description: A summary sentence here.\nBullets: ...
+    """
+    desc_lines: List[str] = []
     bullets: List[str] = []
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
-    mode = "desc"
-    for ln in lines:
+    lines = [l.rstrip() for l in text.splitlines() if l.strip()]
+    mode = "scan"  # scan | desc | bullets
+    for raw in lines:
+        ln = raw.strip()
         low = ln.lower()
+        # Header detection
         if low.startswith("description:"):
-            desc = ln.split(":", 1)[1].strip()
-            mode = "bul"
+            after = ln.split(":", 1)[1].strip()
+            if after:
+                desc_lines.append(after)
+            mode = "desc"
             continue
         if low.startswith("bullets:"):
-            mode = "bul"
+            mode = "bullets"
             continue
-        if mode == "bul" and (ln.startswith("- ") or ln.startswith("• ")):
-            bullets.append(ln[2:].strip())
-        elif mode == "desc" and not desc:
-            desc = ln
+        # Mode handling
+        if mode == "scan":
+            # First non-empty line before any headers acts as description seed
+            desc_lines.append(ln)
+            mode = "desc"
+            continue
+        if mode == "desc":
+            if ln.startswith("- ") or ln.startswith("• "):
+                # Implicit start of bullets section
+                mode = "bullets"
+            else:
+                desc_lines.append(ln)
+                continue  # stay in desc until bullets header or bullet marker
+        if mode == "bullets":
+            if ln.startswith("- ") or ln.startswith("• "):
+                bullets.append(ln[2:].strip())
+            else:
+                # tolerate stray lines by appending as additional bullet text
+                if bullets:
+                    bullets[-1] = (bullets[-1] + " " + ln).strip()
+                else:
+                    # No bullet yet: treat as description tail fallback
+                    desc_lines.append(ln)
+
+    # Join description; collapse excessive whitespace
+    desc = " ".join(x.strip() for x in desc_lines if x.strip()).strip()
+    if not desc and text.strip():
+        # Fallback: first non-empty line
+        first = next((l.strip() for l in lines if l.strip()), "")
+        desc = _strip_desc_prefix(first)
     return SuggestNotesOut(description=_strip_desc_prefix(desc), bullets=bullets)
 
 
@@ -71,6 +107,9 @@ def suggest_notes(inp: SuggestNotesIn) -> SuggestNotesOut:
     out = _parse_notes(text)
     if not out.description:
         out.description = _strip_desc_prefix(text.strip().splitlines()[0]) if text.strip() else ""
+        if not out.description:
+            import logging as _logging
+            _logging.getLogger(__name__).debug("[ai_notes] empty description after parse; raw_len=%s", len(text))
     dur_ms = int((time.time() - t0) * 1000)
     est_in = len(prompt) // 4
     est_out = len(text) // 4

@@ -26,3 +26,5 @@ psycopg[binary]
 celery
 google-cloud-storage
 authlib
+google-cloud-aiplatform
+google-cloud-tasks
