@@ -60,7 +60,7 @@ def get_last_numbering(
 	try:
 		from sqlalchemy import text as _sa_text
 		q = select(Episode).where(Episode.user_id == current_user.id)
-		eps = session.exec(q.order_by(_sa_text("season_number DESC"), _sa_text("episode_number DESC"), _sa_text("created_at DESC")).limit(100)).all()
+		eps = session.execute(q.order_by(_sa_text("season_number DESC"), _sa_text("episode_number DESC"), _sa_text("created_at DESC")).limit(100)).scalars().all()
 		latest_season = None
 		latest_episode = None
 		for e in eps:
@@ -203,25 +203,32 @@ def list_episodes(
 	limit: int = Query(100, ge=1, le=1000, description="Max episodes to return"),
 	offset: int = Query(0, ge=0, description="Offset for pagination"),
 ):
-	total = session.exec(select(func.count(Episode.id)).where(Episode.user_id == current_user.id)).one()
+	# total count (avoid direct Episode.id reference for analyzer compatibility)
+	try:
+		# Ensure we get a plain integer, not a Row object
+		total = session.execute(
+			select(func.count()).select_from(Episode).where(Episode.user_id == current_user.id)
+		).scalar_one()
+	except Exception:
+		total = 0
 	try:
 		from sqlalchemy import text as _sa_text
-		eps = session.exec(
+		eps = session.execute(
 			select(Episode)
 			.where(Episode.user_id == current_user.id)
 			.order_by(_sa_text("publish_at DESC"), _sa_text("processed_at DESC"), _sa_text("created_at DESC"), _sa_text("id DESC"))
 			.offset(offset)
 			.limit(limit)
-		).all()
+		).scalars().all()
 	except Exception:
 		from sqlalchemy import text as _sa_text
-		eps = session.exec(
+		eps = session.execute(
 			select(Episode)
 			.where(Episode.user_id == current_user.id)
 			.order_by(_sa_text("processed_at DESC"))
 			.offset(offset)
 			.limit(limit)
-		).all()
+		).scalars().all()
 	items = []
 	now_utc = datetime.utcnow()
 	for e in eps:
@@ -294,9 +301,11 @@ def list_episodes(
 
 		items.append({
 			"id": str(e.id),
+			"podcast_id": getattr(e, 'podcast_id', None),
 			"title": e.title,
 			"status": derived_status,
 			"processed_at": e.processed_at.isoformat() if getattr(e, "processed_at", None) else None,
+			"duration_ms": getattr(e, 'duration_ms', None),
 			"final_audio_url": final_audio_url,
 			"cover_url": _cover_url_for(preferred_cover),
 			"description": getattr(e, "show_notes", None) or "",
@@ -347,7 +356,7 @@ def episodes_summary(
 		if podcast_id:
 			pid = _UUID(str(podcast_id))
 			q = q.where(Episode.podcast_id == pid)
-		eps = session.exec(q).all()
+		eps = session.execute(q).scalars().all()
 	except Exception:
 		eps = []
 	total = len(eps)
@@ -385,7 +394,7 @@ def episode_diagnostics(
 		eid = _uuid.UUID(str(episode_id))
 	except Exception:
 		raise HTTPException(status_code=404, detail="Episode not found")
-	ep = session.exec(select(Episode).where(Episode.id == eid, Episode.user_id == current_user.id)).first()
+	ep = session.execute(select(Episode).where(Episode.id == eid, Episode.user_id == current_user.id)).scalars().first()
 	if not ep:
 		raise HTTPException(status_code=404, detail="Episode not found")
 	final_path = ep.final_audio_path
@@ -432,7 +441,7 @@ def get_assembly_log(
 		eid = _UUID(str(episode_id))
 	except Exception:
 		raise HTTPException(status_code=404, detail="Episode not found")
-	ep = session.exec(select(Episode).where(Episode.id == eid, Episode.user_id == current_user.id)).first()
+	ep = session.execute(select(Episode).where(Episode.id == eid, Episode.user_id == current_user.id)).scalars().first()
 	if not ep:
 		raise HTTPException(status_code=404, detail="Episode not found")
 	log_path = PROJECT_ROOT / "assembly_logs" / f"{ep.id}.log"
@@ -452,11 +461,11 @@ def lookup_episode_by_spreaker(
 	session: Session = Depends(get_session),
 	current_user: User = Depends(get_current_user),
 ):
-	ep = session.exec(
+	ep = session.execute(
 		select(Episode)
 		.where(Episode.user_id == current_user.id)
 		.where(getattr(Episode, 'spreaker_episode_id') == spreaker_episode_id)
-	).first()
+	).scalars().first()
 	if not ep:
 		raise HTTPException(status_code=404, detail="Episode with that Spreaker ID not found for user")
 	_pa = getattr(ep, 'publish_at', None)
@@ -483,7 +492,7 @@ def list_missing_spreaker_ids(
 		.where(or_(getattr(Episode, 'spreaker_episode_id') == None, getattr(Episode, 'spreaker_episode_id') == ""))  # noqa: E711
 		.order_by(_desc(getattr(Episode, 'processed_at')))
 	)
-	rows = session.exec(q).all()
+	rows = session.execute(q).scalars().all()
 	items = []
 	for e in rows:
 		_pa = getattr(e, 'publish_at', None)

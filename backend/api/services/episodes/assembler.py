@@ -201,6 +201,17 @@ def assemble_or_queue(
         meta["main_content_filename"] = str(main_content_filename)
         meta["output_filename"] = str(output_filename or "")
         meta["source_filename"] = str(main_content_filename)
+        # Persist additional context for future retry capability
+        try:
+            meta["template_id"] = str(template_id)
+        except Exception:
+            pass
+        if tts_values:
+            meta["tts_values"] = tts_values
+        if episode_details:
+            meta["episode_details"] = episode_details
+        if intents:
+            meta["intents"] = intents
         ep.meta_json = _json.dumps(meta)
         session.add(ep)
         session.commit()

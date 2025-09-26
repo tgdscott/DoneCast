@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import { Loader2, RefreshCw, ImageOff, Play, CheckCircle2, Clock, AlertTriangle, CalendarClock, Trash2, ArrowLeft, LayoutGrid, List as ListIcon, Search, Undo2, Scissors, Grid3X3, Pencil } from "lucide-react";
+import { Loader2, RefreshCw, ImageOff, Play, CheckCircle2, Clock, AlertTriangle, CalendarClock, Trash2, ArrowLeft, LayoutGrid, List as ListIcon, Search, Undo2, Scissors, Grid3X3, Pencil, RotateCcw } from "lucide-react";
 import EpisodeHistoryPreview from './EpisodeHistoryPreview';
 import FlubberReview from './FlubberReview';
 import CoverCropper from './CoverCropper';
@@ -114,6 +114,29 @@ export default function EpisodeHistory({ token, onBack }) {
   const [scheduleError, setScheduleError] = useState("");
   // Flubber manual review state
   const [flubberEpId, setFlubberEpId] = useState(null);
+  // Retry processing state
+  const [retryingId, setRetryingId] = useState(null);
+  const [retryError, setRetryError] = useState("");
+  // Retry publish (republish) state
+  const [republishingId, setRepublishingId] = useState(null);
+  const [republishError, setRepublishError] = useState("");
+  const doRetry = async (ep) => {
+    if (!ep) return;
+    setRetryError("");
+    setRetryingId(ep.id);
+    try {
+      const api = makeApi(token);
+      await api.post(`/api/episodes/${ep.id}/retry`, {});
+      // Optimistic: mark as processing; refresh shortly
+      setEpisodes(prev => prev.map(e => e.id===ep.id ? { ...e, status:'processing' } : e));
+      setTimeout(fetchEpisodes, 1200);
+    } catch (e) {
+      const msg = isApiError(e) ? (e.detail || e.error || e.message) : String(e);
+      setRetryError(msg || 'Retry failed');
+    } finally {
+      setRetryingId(null);
+    }
+  };
   // One-click publish (makes episode public immediately)
   const quickPublish = async (episodeId) => {
     if(!episodeId) return;
@@ -144,6 +167,22 @@ export default function EpisodeHistory({ token, onBack }) {
     const mi = String(rounded >= 60? 0 : rounded).padStart(2,'0');
     setScheduleDate(`${yyyy}-${mm}-${dd}`);
     setScheduleTime(`${hh}:${mi}`);
+  };
+  const doRepublish = async (ep) => {
+    if (!ep) return;
+    setRepublishError("");
+    setRepublishingId(ep.id);
+    try {
+      const api = makeApi(token);
+      await api.post(`/api/episodes/${ep.id}/republish`, {});
+      setEpisodes(prev => prev.map(e => e.id===ep.id ? { ...e, _republishing: true } : e));
+      setTimeout(fetchEpisodes, 1500);
+    } catch (e) {
+      const msg = isApiError(e) ? (e.detail || e.error || e.message) : String(e);
+      setRepublishError(msg || 'Republish failed');
+    } finally {
+      setRepublishingId(null);
+    }
   };
   // Recompute whether any duplicate (season, episode) exists across list
   const recomputeGlobalNumberingConflicts = useCallback((list) => {
@@ -423,6 +462,17 @@ export default function EpisodeHistory({ token, onBack }) {
         }
   const missingAudio = audioUrl && ep.final_audio_exists === false && ep.playback_type !== 'stream';
   const showUnpublish = statusLabel(ep.status) === 'scheduled' || (statusLabel(ep.status) === 'published' && isWithin24h(ep.publish_at));
+        // Heuristic: show Retry when status is error, or processing exceeds 1.25x duration (fallback 15min)
+        let showRetry = false;
+        const st = statusLabel(ep.status);
+        if (st === 'error') showRetry = true;
+        if (st === 'processing') {
+          const started = normalizeDate(ep.processed_at) || new Date(0);
+          const elapsed = Date.now() - started.getTime();
+          const durMs = (typeof ep.duration_ms === 'number' && ep.duration_ms > 0) ? ep.duration_ms : (15*60*1000);
+          const threshold = Math.round(durMs * 1.25);
+          if (elapsed > threshold) showRetry = true;
+        }
         return (
           <div key={ep.id} className="space-y-2">
           <Card className="group overflow-hidden border border-gray-200 relative">
@@ -464,13 +514,33 @@ export default function EpisodeHistory({ token, onBack }) {
                 {deletingIds.has(ep.id) ? <Loader2 className="w-4 h-4 animate-spin"/> : <Trash2 className="w-4 h-4"/>}
                 Delete
               </Button>
+              {showRetry && (
+                <button
+                  className="absolute bottom-1 left-1 bg-white/90 hover:bg-white text-amber-700 border border-amber-300 rounded px-2 py-1 shadow-sm text-[11px] font-medium flex items-center gap-1"
+                  title="Retry processing"
+                  onClick={() => doRetry(ep)}
+                  disabled={retryingId === ep.id}
+                >
+                  {retryingId === ep.id ? <Loader2 className="w-3 h-3 animate-spin"/> : <RotateCcw className="w-3 h-3"/>}
+                  Retry
+                </button>
+              )}
               {ep.status === 'processed' && (
                 <div className="absolute bottom-1 right-1 flex gap-1">
-                  <button
-                    className="bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-medium px-2 py-1 rounded shadow disabled:opacity-60"
-                    onClick={() => quickPublish(ep.id)}
-                    title="Publish now"
-                  >Publish</button>
+                  {(ep.needs_republish || !!ep.publish_error) ? (
+                    <button
+                      className="bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-medium px-2 py-1 rounded shadow disabled:opacity-60"
+                      onClick={() => doRepublish(ep)}
+                      title="Retry publishing to Spreaker"
+                      disabled={republishingId === ep.id}
+                    >{republishingId === ep.id ? 'Retrying…' : 'Retry Publish'}</button>
+                  ) : (
+                    <button
+                      className="bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-medium px-2 py-1 rounded shadow disabled:opacity-60"
+                      onClick={() => quickPublish(ep.id)}
+                      title="Publish now"
+                    >Publish</button>
+                  )}
                   <button
                     className="bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-medium px-2 py-1 rounded shadow disabled:opacity-60"
                     onClick={() => openSchedule(ep)}
@@ -538,6 +608,18 @@ export default function EpisodeHistory({ token, onBack }) {
           audioUrl = `/${audioUrl}`;
         }
   const showUnpublish = statusLabel(ep.status) === 'scheduled' || (statusLabel(ep.status) === 'published' && isWithin24h(ep.publish_at));
+        let showRetry = false;
+        {
+          const st = statusLabel(ep.status);
+          if (st === 'error') showRetry = true;
+          if (st === 'processing') {
+            const started = normalizeDate(ep.processed_at) || new Date(0);
+            const elapsed = Date.now() - started.getTime();
+            const durMs = (typeof ep.duration_ms === 'number' && ep.duration_ms > 0) ? ep.duration_ms : (15*60*1000);
+            const threshold = Math.round(durMs * 1.25);
+            if (elapsed > threshold) showRetry = true;
+          }
+        }
         return (
           <div key={ep.id} className="group grid grid-cols-12 items-start px-3 py-3 gap-2 text-sm hover:bg-gray-50">
             <div className="col-span-5 flex flex-col">
@@ -559,6 +641,16 @@ export default function EpisodeHistory({ token, onBack }) {
                   onClick={()=>openUnpublish(ep)}
                 >Unpublish</button>
               )}
+              {showRetry && (
+                <button
+                  className="mr-2 text-amber-700 hover:text-amber-800 text-xs underline"
+                  title="Retry processing"
+                  onClick={()=>doRetry(ep)}
+                  disabled={retryingId === ep.id}
+                >
+                  {retryingId === ep.id ? 'Retrying…' : 'Retry'}
+                </button>
+              )}
               <Button
                 variant="destructive"
                 size="sm"
@@ -571,7 +663,13 @@ export default function EpisodeHistory({ token, onBack }) {
                 Delete
               </Button>
               <Button variant="outline" size="sm" className="ml-2 flex items-center gap-1" onClick={()=>startEdit(ep)}><Pencil className="w-4 h-4" />Edit</Button>
-              {ep.status === 'processed' && (
+              {ep.status === 'processed' && (ep.needs_republish || !!ep.publish_error) ? (
+                <button
+                  className="ml-2 text-amber-700 hover:text-amber-800 text-xs underline"
+                  onClick={() => doRepublish(ep)}
+                  disabled={republishingId === ep.id}
+                >{republishingId === ep.id ? 'Retrying…' : 'Retry Publish'}</button>
+              ) : ep.status === 'processed' && (
                 <button
                   className="ml-2 text-green-600 hover:text-green-700 text-xs underline"
                   onClick={() => quickPublish(ep.id)}
@@ -685,6 +783,7 @@ export default function EpisodeHistory({ token, onBack }) {
       </div>
   {loading && <div className="flex items-center text-gray-600"><Loader2 className="w-5 h-5 mr-2 animate-spin"/>Loading...</div>}
   {err && <div className="text-red-600 text-sm">{err}</div>}
+  {retryError && <div className="text-amber-700 text-sm">{retryError}</div>}
   {!loading && (viewMode === 'grid' ? renderGrid() : viewMode === 'mosaic' ? renderMosaic() : renderList())}
       {editing && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-end z-50">

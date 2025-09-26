@@ -10,6 +10,7 @@ from .assemble import router as assemble_router
 from .publish import router as publish_router
 from .jobs import router as jobs_router
 from .edit import router as edit_router
+from .retry import router as retry_router
 
 router.include_router(read_router)
 router.include_router(write_router)
@@ -17,5 +18,6 @@ router.include_router(assemble_router)
 router.include_router(publish_router)
 router.include_router(jobs_router)
 router.include_router(edit_router)
+router.include_router(retry_router)
 
 __all__ = ["router"]

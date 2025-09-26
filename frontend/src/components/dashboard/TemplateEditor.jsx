@@ -457,12 +457,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     }
   }, [setRunTemplateTour, setShowAdvanced]);
 
-    // After hooks are defined, we can return early for loading/error states
-    if (isLoading) return <div className="flex justify-center items-center p-10"><Loader2 className="w-8 h-8 animate-spin" /></div>;
-    if (error) return <p className="text-red-500 p-4">Error: {error}</p>;
-    if (!template) return null;
-
-  const templateTourSteps = useMemo(() => [
+    const templateTourSteps = useMemo(() => [
     {
       target: '[data-tour="template-quickstart"]',
       title: 'Template overview',
@@ -499,6 +494,11 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
       content: 'When everything looks right, save the template. New episodes will use these defaults automatically.',
     },
   ], [podcasts.length, hasContentSegment]);
+
+        // After hooks are defined, we can return early for loading/error states
+        if (isLoading) return <div className="flex justify-center items-center p-10"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+        if (error) return <p className="text-red-500 p-4">Error: {error}</p>;
+        if (!template) return null;
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen space-y-6">

@@ -185,9 +185,19 @@ def generate(content: str, **kwargs) -> str:
         try:
             aiplatform.init(project=project, location=location)
         except Exception as e:
+            # If the configured region doesn't support the model or Vertex GenAI,
+            # fall back to the canonical region 'us-central1' to avoid hard failures.
             if _stub_mode():
                 return "Stub output (vertex init error)"
-            raise RuntimeError("VERTEX_INIT_FAILED") from e
+            try:
+                if str(location) != "us-central1":
+                    _log.warning("[vertex] init failed for location=%s; retrying with us-central1", location)
+                    aiplatform.init(project=project, location="us-central1")
+                    location = "us-central1"
+                else:
+                    raise
+            except Exception:
+                raise RuntimeError("VERTEX_INIT_FAILED") from e
         # Newer SDK deprecates the 'preview' path; prefer stable import first.
         try:
             try:
@@ -211,6 +221,17 @@ def generate(content: str, **kwargs) -> str:
             if _stub_mode():
                 return f"Stub output (vertex exception: {type(e).__name__})"
             name = type(e).__name__
+            # If the region was not 'us-central1', attempt a one-time region fallback and retry once
+            if str(location) != "us-central1":
+                try:
+                    _log.warning("[vertex] generate_content failed in %s (%s); retrying in us-central1", location, name)
+                    from google.cloud import aiplatform as _ai2  # type: ignore
+                    _ai2.init(project=project, location="us-central1")
+                    model = VertexModel(v_model)
+                    resp = model.generate_content(content)
+                    return getattr(resp, "text", "") or ""
+                except Exception:
+                    pass
             if "NotFound" in name or "404" in str(e):
                 raise RuntimeError("AI_MODEL_NOT_FOUND") from e
             raise

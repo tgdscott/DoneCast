@@ -7,6 +7,7 @@ from sqlmodel import select
 
 from worker.tasks import celery_app
 from api.core.paths import WS_ROOT as PROJECT_ROOT
+from api.core.paths import APP_ROOT as APP_ROOT_DIR
 from api.core.database import get_session
 from api.core import crud
 from api.core.config import settings
@@ -51,6 +52,32 @@ def create_podcast_episode(
 	logging.info(f"[assemble] CWD = {os.getcwd()}")
 	session = next(get_session())
 	try:
+		# Helper: resolve existing media file across common dev/prod locations
+		from pathlib import Path as _Path
+		def _resolve_media_file(name: str) -> Optional[Path]:
+			try:
+				p = _Path(str(name))
+				if p.is_absolute() and p.exists():
+					return p
+			except Exception:
+				pass
+			try:
+				base = _Path(str(name)).name
+			except Exception:
+				base = str(name)
+			candidates = [
+				PROJECT_ROOT / 'media_uploads' / base,            # WS_ROOT/media_uploads
+				APP_ROOT_DIR / 'media_uploads' / base,            # backend/media_uploads
+				APP_ROOT_DIR.parent / 'media_uploads' / base,     # repo_root/media_uploads
+				MEDIA_DIR / base,                                 # configured MEDIA_DIR (e.g., local_media)
+			]
+			for c in candidates:
+				try:
+					if c.exists():
+						return c
+				except Exception:
+					continue
+			return None
 		# --- Charge processing minutes at job start (idempotent by task id) ---
 		if not skip_charge:
 			try:
@@ -202,6 +229,12 @@ def create_podcast_episode(
 			pass
 
 		base_audio_name = getattr(episode, 'working_audio_name', None) or main_content_filename
+		# Resolve the actual file path for the base audio (dev may store under backend/media_uploads or media_uploads root)
+		source_audio_path = _resolve_media_file(base_audio_name) or (PROJECT_ROOT / 'media_uploads' / Path(str(base_audio_name)).name)
+		try:
+			logging.info(f"[assemble] resolved base audio path={str(source_audio_path)}")
+		except Exception:
+			pass
 
 		# Snapshot original transcript (*.original.json preferred)
 		try:
@@ -396,7 +429,7 @@ def create_podcast_episode(
 			except Exception:
 				_engine_out = f"cleaned_{Path(base_audio_name).stem}.mp3"
 			engine_result = clean_engine.run_all(
-				audio_path=PROJECT_ROOT / 'media_uploads' / base_audio_name,
+				audio_path=source_audio_path,
 				words_json_path=words_json_path,
 				work_dir=PROJECT_ROOT,
 				user_settings=us,
@@ -423,7 +456,7 @@ def create_podcast_episode(
 					f"[assemble] words.json not found for stems={base_stems} in {', '.join(str(d) for d in search_dirs)}; skipping clean_engine."
 				)
 				if cuts_ms and isinstance(cuts_ms, list) and len(cuts_ms) > 0:
-					src_path = (PROJECT_ROOT / 'media_uploads' / base_audio_name).resolve()
+					src_path = (_resolve_media_file(base_audio_name) or (PROJECT_ROOT / 'media_uploads' / Path(str(base_audio_name)).name)).resolve()
 					if src_path.is_file():
 						audio = AudioSegment.from_file(src_path)
 						precut = apply_flubber_cuts(audio, cuts_ms)
@@ -432,11 +465,12 @@ def create_podcast_episode(
 						precut_name = f"precut_{Path(base_audio_name).stem}.mp3"
 						precut_path = out_dir / precut_name
 						precut.export(precut_path, format='mp3')
-						dest = PROJECT_ROOT / 'media_uploads' / precut_path.name
+						# Mirror the precut audio into canonical MEDIA_DIR so downstream orchestrator can load it
+						dest = MEDIA_DIR / precut_path.name
 						try:
 							shutil.copyfile(precut_path, dest)
 						except Exception:
-							logging.warning("[assemble] Failed to copy precut audio to media_uploads; mixer may not find it", exc_info=True)
+							logging.warning("[assemble] Failed to copy precut audio to MEDIA_DIR; mixer may not find it", exc_info=True)
 						try:
 							episode.working_audio_name = dest.name if dest.exists() else precut_path.name
 							session.add(episode)
@@ -541,22 +575,32 @@ def create_podcast_episode(
 		except Exception:
 			pass
 
-		# Mirror cleaned audio into media_uploads
+		# Mirror cleaned audio into MEDIA_DIR (canonical source for orchestrator)
 		if cleaned_path:
 			try:
 				src = Path(cleaned_path)
-				dest = PROJECT_ROOT / 'media_uploads' / src.name
+				dest = MEDIA_DIR / src.name
 				dest.parent.mkdir(parents=True, exist_ok=True)
 				try:
 					shutil.copyfile(src, dest)
-					logging.info(f"[assemble] Copied cleaned audio to media_uploads: {dest}")
+					logging.info(f"[assemble] Copied cleaned audio to MEDIA_DIR: {dest}")
 				except Exception:
-					logging.warning("[assemble] Failed to copy cleaned audio to media_uploads; mixer may not find it", exc_info=True)
+					logging.warning("[assemble] Failed to copy cleaned audio to MEDIA_DIR; mixer may not find it", exc_info=True)
 				episode.working_audio_name = dest.name
 				session.add(episode)
 				session.commit()
 			except Exception:
 				session.rollback()
+
+		# Ensure the base audio exists under MEDIA_DIR for orchestrator lookup (copy if necessary)
+		try:
+			if source_audio_path and source_audio_path.exists():
+				target = MEDIA_DIR / source_audio_path.name
+				if not target.exists():
+					shutil.copyfile(source_audio_path, target)
+					logging.info(f"[assemble] mirrored base audio into MEDIA_DIR: {target}")
+		except Exception:
+			logging.warning("[assemble] Failed to mirror base audio into MEDIA_DIR", exc_info=True)
 
 		# Phase 2: mixer-only
 		try:

@@ -114,18 +114,41 @@ def get_job_status(job_id: str, session: Session = Depends(get_session)):
                 select(Episode)
                 .where(Episode.processed_at >= cutoff)  # type: ignore[arg-type]
                 .order_by(_sa_text("processed_at DESC"))
-                .limit(10)
+                .limit(20)
             ).scalars().all()
+
+            # First, try to find an exact match via meta_json. This supports Cloud Tasks job_ids.
+            matched = None
             for ep in recent:
-                if getattr(ep, 'final_audio_path', None) and getattr(ep, 'status', None) in ("processed", "published"):
-                    return {"job_id": job_id, "status": "processed", "episode": {
-                        "id": str(ep.id),
-                        "title": ep.title,
-                        "description": ep.show_notes or "",
-                        "final_audio_url": _final_url_for(ep.final_audio_path),
-                        "cover_url": (_cover_url_for(getattr(ep, 'remote_cover_url', None)) or _cover_url_for(ep.cover_path)),
-                        "status": _status_value(ep.status),
-                    }}
+                try:
+                    mj = getattr(ep, 'meta_json', None) or ""
+                    if mj and job_id and f"\"assembly_job_id\": " in mj and job_id in mj:
+                        matched = ep
+                        break
+                except Exception:
+                    continue
+
+            target = matched
+            if target is None:
+                # Fallback heuristic: return the most recent processed episode
+                for ep in recent:
+                    if getattr(ep, 'final_audio_path', None) and getattr(ep, 'status', None) in ("processed", "published"):
+                        target = ep
+                        break
+
+            if target is not None and getattr(target, 'final_audio_path', None):
+                return {
+                    "job_id": job_id,
+                    "status": "processed",
+                    "episode": {
+                        "id": str(target.id),
+                        "title": target.title,
+                        "description": target.show_notes or "",
+                        "final_audio_url": _final_url_for(target.final_audio_path),
+                        "cover_url": (_cover_url_for(getattr(target, 'remote_cover_url', None)) or _cover_url_for(target.cover_path)),
+                        "status": _status_value(target.status),
+                    },
+                }
         except Exception:
             pass
         return {"job_id": job_id, "status": "queued"}

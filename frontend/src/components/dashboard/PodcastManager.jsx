@@ -26,6 +26,8 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
   const [isSpreakerConnected, setIsSpreakerConnected] = useState(false);
   const [me, setMe] = useState(null);
   const [episodeSummaryByPodcast, setEpisodeSummaryByPodcast] = useState({});
+  const [linkingShowId, setLinkingShowId] = useState(null);
+  const [creatingShowId, setCreatingShowId] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -232,6 +234,46 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
     }
   };
 
+  const handleLinkSpreakerShow = async (podcast) => {
+    if (!podcast) return;
+    const val = window.prompt('Enter existing Spreaker show ID (numeric):');
+    if (!val) return;
+    if (!/^[0-9]+$/.test(val)) { toast({ variant: 'destructive', title:'Invalid show id', description:'Must be numeric.'}); return; }
+    setLinkingShowId(podcast.id);
+    try {
+      const api = makeApi(token);
+      const res = await api.post(`/api/podcasts/${podcast.id}/link-spreaker-show`, { show_id: String(val) });
+      const updated = res?.podcast || { ...podcast, spreaker_show_id: String(val) };
+      setPodcasts(prev => prev.map(p => p.id === podcast.id ? updated : p));
+      toast({ title: 'Linked', description: 'Spreaker show linked successfully.' });
+    } catch (e) {
+      toast({ variant: 'destructive', title:'Failed to link', description: e?.detail || e?.message || 'Please try again.' });
+    } finally { setLinkingShowId(null); }
+  };
+
+  const handleCreateSpreakerShow = async (podcast) => {
+    if (!podcast) return;
+    if (!isSpreakerConnected) {
+      toast({ variant:'destructive', title:'Not connected', description:'Connect Spreaker first.' });
+      return;
+    }
+    if (!window.confirm(`Create a new Spreaker show for "${podcast.name}"?`)) return;
+    setCreatingShowId(podcast.id);
+    try {
+      const api = makeApi(token);
+      const res = await api.post(`/api/podcasts/${podcast.id}/create-spreaker-show`, {
+        title: podcast.name,
+        description: podcast.description || '',
+        language: podcast.language || 'en'
+      });
+      const updated = res?.podcast || podcast;
+      setPodcasts(prev => prev.map(p => p.id === podcast.id ? updated : p));
+      toast({ title: 'Show created', description: `Linked Spreaker show ${res?.spreaker_show_id || ''}` });
+    } catch (e) {
+      toast({ variant: 'destructive', title:'Failed to create show', description: e?.detail || e?.message || 'Please try again.' });
+    } finally { setCreatingShowId(null); }
+  };
+
   return (
     <div className="p-6">
   <Button onClick={onBack} variant="ghost" className="mb-4"><Icons.ArrowLeft className="w-4 h-4 mr-2" />Back to Dashboard</Button>
@@ -319,6 +361,27 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
                           onClick={() => handleRecovery(podcast)}
                           disabled={recoveringId === podcast.id || !podcast.spreaker_show_id}
                         >
+                        {/* Link/Create Spreaker show helpers */}
+                        {!podcast.spreaker_show_id && (
+                          <DropdownMenuItem onClick={() => handleLinkSpreakerShow(podcast)} disabled={linkingShowId === podcast.id}>
+                            {linkingShowId === podcast.id ? (
+                              <Icons.Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            ) : (
+                              <Icons.Link2 className="w-4 h-4 mr-2" />
+                            )}
+                            <span>Link existing Spreaker Show…</span>
+                          </DropdownMenuItem>
+                        )}
+                        {!podcast.spreaker_show_id && isSpreakerConnected && (
+                          <DropdownMenuItem onClick={() => handleCreateSpreakerShow(podcast)} disabled={creatingShowId === podcast.id}>
+                            {creatingShowId === podcast.id ? (
+                              <Icons.Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            ) : (
+                              <Icons.Plus className="w-4 h-4 mr-2" />
+                            )}
+                            <span>Create Spreaker Show</span>
+                          </DropdownMenuItem>
+                        )}
                           {recoveringId === podcast.id ? (
                             <Icons.Loader2 className="w-4 h-4 mr-2 animate-spin" />
                           ) : (

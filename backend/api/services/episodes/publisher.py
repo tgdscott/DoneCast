@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 from uuid import UUID
 
-from sqlalchemy.orm import Session
+from sqlmodel import Session, select
 
 from . import repo
 from api.services.publisher import SpreakerClient
@@ -143,7 +143,6 @@ def republish(session: Session, current_user, episode_id: UUID) -> Dict[str, Any
     show_id = None
     try:
         from api.models.podcast import Podcast
-        from sqlmodel import select
         pod = session.exec(select(Podcast).where(Podcast.id == ep.podcast_id)).first()
         if pod and getattr(pod, 'spreaker_show_id', None):
             show_id = str(pod.spreaker_show_id)
@@ -153,6 +152,15 @@ def republish(session: Session, current_user, episode_id: UUID) -> Dict[str, Any
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Associated show spreaker_show_id must be numeric")
 
+    # Clear republish flags before re-sending
+    try:
+        ep.spreaker_publish_error = None
+        ep.spreaker_publish_error_detail = None
+        ep.needs_republish = False
+        session.add(ep)
+        session.commit()
+    except Exception:
+        session.rollback()
     from worker.tasks import publish_episode_to_spreaker_task
     async_result = publish_episode_to_spreaker_task.delay(
         episode_id=str(ep.id),

@@ -589,3 +589,107 @@ async def delete_podcast(
     session.delete(podcast_to_delete)
     session.commit()
     return None
+
+
+@router.post("/{podcast_id}/link-spreaker-show", status_code=200)
+async def link_spreaker_show(
+    podcast_id: UUID,
+    show_id: str = Body(..., embed=True, description="Numeric Spreaker show id to link"),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Link an existing Spreaker show to this podcast by setting spreaker_show_id.
+    Verifies the show exists and captures RSS URL and remote cover URL if available.
+    """
+    pod = session.exec(select(Podcast).where(Podcast.id == podcast_id, Podcast.user_id == current_user.id)).first()
+    if not pod:
+        raise HTTPException(status_code=404, detail="Podcast not found.")
+    if not isinstance(show_id, str) or not show_id.isdigit():
+        raise HTTPException(status_code=400, detail="show_id must be a numeric Spreaker id")
+    token = getattr(current_user, 'spreaker_access_token', None)
+    if not token:
+        raise HTTPException(status_code=401, detail="User is not connected to Spreaker")
+    client = SpreakerClient(api_token=token)
+    ok, resp = client.get_show(show_id)
+    if not ok:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch Spreaker show: {resp}")
+    show_obj = resp.get('show') if isinstance(resp, dict) and 'show' in resp else resp
+    # Update linkage
+    pod.spreaker_show_id = show_id
+    # Capture RSS URL and remote cover URL if present
+    try:
+        rss_candidate = (show_obj.get("rss_url") or show_obj.get("feed_url") or show_obj.get("xml_url")) if isinstance(show_obj, dict) else None
+        if rss_candidate:
+            pod.rss_url_locked = pod.rss_url_locked or rss_candidate
+            if not pod.rss_url:
+                pod.rss_url = rss_candidate
+    except Exception:
+        pass
+    try:
+        if isinstance(show_obj, dict):
+            for k in ('image_url','cover_url','cover_art_url','image'):
+                if show_obj.get(k):
+                    pod.remote_cover_url = show_obj.get(k)
+                    break
+    except Exception:
+        pass
+    session.add(pod)
+    session.commit()
+    session.refresh(pod)
+    return {"message": "Linked to Spreaker show", "podcast": pod}
+
+
+@router.post("/{podcast_id}/create-spreaker-show", status_code=200)
+async def create_spreaker_show_for_podcast(
+    podcast_id: UUID,
+    title: Optional[str] = Body(None, embed=True),
+    description: Optional[str] = Body(None, embed=True),
+    language: Optional[str] = Body("en", embed=True),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Create a new Spreaker show for an existing podcast and store its show id.
+    If the podcast already has a spreaker_show_id, returns a 400 unless client wants to recreate manually.
+    """
+    pod = session.exec(select(Podcast).where(Podcast.id == podcast_id, Podcast.user_id == current_user.id)).first()
+    if not pod:
+        raise HTTPException(status_code=404, detail="Podcast not found.")
+    if getattr(pod, 'spreaker_show_id', None):
+        raise HTTPException(status_code=400, detail="Podcast already linked to a Spreaker show.")
+    token = getattr(current_user, 'spreaker_access_token', None)
+    if not token:
+        raise HTTPException(status_code=401, detail="User is not connected to Spreaker")
+    client = SpreakerClient(api_token=token)
+    t = (title or pod.name or "Untitled").strip()
+    d = description if description is not None else (pod.description or "")
+    ok, result = client.create_show(title=t, description=d, language=language or "en")
+    if not ok:
+        raise HTTPException(status_code=502, detail=f"Failed to create show on Spreaker: {result}")
+    show_id = str(result.get("show_id")) if isinstance(result, dict) else None
+    if not show_id or not show_id.isdigit():
+        raise HTTPException(status_code=502, detail="Spreaker did not return a numeric show_id")
+    pod.spreaker_show_id = show_id
+    # Try to fetch details once to capture RSS and cover
+    try:
+        ok_show, resp_show = client.get_show(show_id)
+        if ok_show:
+            show_obj = resp_show.get("show") or resp_show
+            rss_candidate = (
+                show_obj.get("rss_url")
+                or show_obj.get("feed_url")
+                or show_obj.get("xml_url")
+            )
+            if rss_candidate:
+                pod.rss_url_locked = pod.rss_url_locked or rss_candidate
+                if not pod.rss_url:
+                    pod.rss_url = rss_candidate
+            for k in ('image_url','cover_url','cover_art_url','image'):
+                if isinstance(show_obj, dict) and show_obj.get(k):
+                    pod.remote_cover_url = show_obj.get(k)
+                    break
+    except Exception:
+        pass
+    session.add(pod)
+    session.commit()
+    session.refresh(pod)
+    return {"message": "Spreaker show created and linked", "spreaker_show_id": show_id, "podcast": pod}

@@ -23,7 +23,7 @@ def enqueue_http_task(path: str, body: dict) -> dict:
         a background thread immediately. An opt-in env var
         TASKS_FORCE_HTTP_LOOPBACK=true restores the old behavior for debugging.
         """
-        def _dispatch_thread(payload: dict) -> None:
+        def _dispatch_transcribe(payload: dict) -> None:
             filename = str(payload.get("filename") or "").strip()
             if not filename:
                 print("DEV MODE fallback skipped: payload missing 'filename'")
@@ -49,9 +49,6 @@ def enqueue_http_task(path: str, body: dict) -> dict:
                         if not out_path.exists():
                             out_path.write_text(json.dumps(words, ensure_ascii=False, indent=2), encoding="utf-8")
                             print(f"DEV MODE wrote transcript JSON -> {out_path}")
-                        else:
-                            # Optionally skip overwrite
-                            pass
                     except Exception as write_err:  # pragma: no cover
                         print(f"DEV MODE warning: failed to write transcript JSON for {filename}: {write_err}")
                     print(f"DEV MODE fallback transcription finished for {filename}")
@@ -64,6 +61,53 @@ def enqueue_http_task(path: str, body: dict) -> dict:
                 daemon=True,
             ).start()
             print(f"DEV MODE fallback transcription dispatched for {filename}")
+
+        def _dispatch_assemble(payload: dict) -> None:
+            # Expect the same payload as /api/tasks/assemble
+            try:
+                from worker.tasks import create_podcast_episode  # type: ignore
+            except Exception as import_err:  # pragma: no cover
+                print(f"DEV MODE assemble import failed: {import_err}")
+                return
+
+            episode_id = str(payload.get("episode_id") or "").strip()
+            template_id = str(payload.get("template_id") or "").strip()
+            main_content_filename = str(payload.get("main_content_filename") or "").strip()
+            output_filename = str(payload.get("output_filename") or "").strip()
+            user_id = str(payload.get("user_id") or "").strip()
+            podcast_id = str(payload.get("podcast_id") or "").strip()
+            tts_values = payload.get("tts_values") or {}
+            episode_details = payload.get("episode_details") or {}
+            intents = payload.get("intents") or None
+
+            if not (episode_id and template_id and main_content_filename):
+                print("DEV MODE assemble skipped: missing required fields (episode_id, template_id, main_content_filename)")
+                return
+
+            def _runner() -> None:
+                try:
+                    print(f"DEV MODE assemble start for episode {episode_id}")
+                    create_podcast_episode(
+                        episode_id=episode_id,
+                        template_id=template_id,
+                        main_content_filename=main_content_filename,
+                        output_filename=output_filename,
+                        tts_values=tts_values,
+                        episode_details=episode_details,
+                        user_id=user_id,
+                        podcast_id=podcast_id,
+                        intents=intents,
+                    )
+                    print(f"DEV MODE assemble finished for episode {episode_id}")
+                except Exception as exc:  # pragma: no cover
+                    print(f"DEV MODE assemble error for {episode_id}: {exc}")
+
+            threading.Thread(
+                target=_runner,
+                name=f"dev-assemble-{episode_id}",
+                daemon=True,
+            ).start()
+            print(f"DEV MODE assemble dispatched for episode {episode_id}")
 
         # Allow forcing legacy loopback for debugging perf of the tasks endpoint
         if os.getenv("TASKS_FORCE_HTTP_LOOPBACK"):
@@ -83,11 +127,17 @@ def enqueue_http_task(path: str, body: dict) -> dict:
                     return {"name": f"local-loopback-{datetime.utcnow().isoformat()}"}
             except Exception as e:  # pragma: no cover
                 print(f"DEV MODE loopback failed ({e}); falling back to direct thread dispatch")
-                _dispatch_thread(body)
+                if "/assemble" in path:
+                    _dispatch_assemble(body)
+                else:
+                    _dispatch_transcribe(body)
                 return {"name": "local-loopback-failed"}
 
-        # Default: immediate background transcription
-        _dispatch_thread(body)
+        # Default: immediate background dispatch based on path
+        if "/assemble" in path:
+            _dispatch_assemble(body)
+        else:
+            _dispatch_transcribe(body)
         return {"name": "local-direct-dispatch"}
 
     if tasks_v2 is None:
