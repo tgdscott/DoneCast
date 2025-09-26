@@ -5,6 +5,7 @@ import { Badge } from "../ui/badge";
 import { Loader2, RefreshCw, ImageOff, Play, CheckCircle2, Clock, AlertTriangle, CalendarClock, Trash2, ArrowLeft, LayoutGrid, List as ListIcon, Search, Undo2, Scissors, Grid3X3, Pencil, RotateCcw } from "lucide-react";
 import EpisodeHistoryPreview from './EpisodeHistoryPreview';
 import FlubberReview from './FlubberReview';
+import ManualEditorModal from './ManualEditorModal';
 import CoverCropper from './CoverCropper';
 import { makeApi, isApiError } from "@/lib/apiClient";
 // ------------------------------
@@ -114,6 +115,8 @@ export default function EpisodeHistory({ token, onBack }) {
   const [scheduleError, setScheduleError] = useState("");
   // Flubber manual review state
   const [flubberEpId, setFlubberEpId] = useState(null);
+  // Manual editor state
+  const [manualEpId, setManualEpId] = useState(null);
   // Retry processing state
   const [retryingId, setRetryingId] = useState(null);
   const [retryError, setRetryError] = useState("");
@@ -144,7 +147,27 @@ export default function EpisodeHistory({ token, onBack }) {
     try {
   const api = makeApi(token);
   await api.post(`/api/episodes/${episodeId}/publish`, { publish_state:'public' });
-      setEpisodes(prev => prev.map(e => e.id===episodeId ? { ...e, status:'published', _publishing:false } : e));
+      // Do not optimistically flip to published; refresh shortly to reflect actual server state
+      setEpisodes(prev => prev.map(e => e.id===episodeId ? { ...e, _publishing:false } : e));
+      // Poll status briefly to surface errors promptly
+      const start = Date.now();
+      const poll = async () => {
+        try {
+          const st = await api.get(`/api/episodes/${episodeId}/publish/status`);
+          if (st && (st.status === 'published' || st.spreaker_episode_id || st.last_error)) {
+            await fetchEpisodes();
+            if (st.last_error) alert(st.last_error);
+            return;
+          }
+        } catch {}
+        if (Date.now() - start < 4000) {
+          setTimeout(poll, 600);
+        } else {
+          // final refresh
+          try { await fetchEpisodes(); } catch {}
+        }
+      };
+      setTimeout(poll, 600);
     } catch(err){
   const msg = isApiError(err) ? (err.detail || err.error || err.message) : String(err);
   alert(msg || 'Failed to publish');
@@ -467,7 +490,8 @@ export default function EpisodeHistory({ token, onBack }) {
         const st = statusLabel(ep.status);
         if (st === 'error') showRetry = true;
         if (st === 'processing') {
-          const started = normalizeDate(ep.processed_at) || new Date(0);
+          // Use processed_at if present, otherwise fall back to created_at so we can detect long-running items reliably
+          const started = normalizeDate(ep.processed_at) || normalizeDate(ep.created_at) || new Date(0);
           const elapsed = Date.now() - started.getTime();
           const durMs = (typeof ep.duration_ms === 'number' && ep.duration_ms > 0) ? ep.duration_ms : (15*60*1000);
           const threshold = Math.round(durMs * 1.25);
@@ -496,13 +520,7 @@ export default function EpisodeHistory({ token, onBack }) {
                   <Undo2 className="w-3 h-3 inline mr-1"/>Unpublish
                 </button>
               )}
-              <button
-                className="absolute top-1 right-10 bg-white/80 hover:bg-white text-blue-700 border border-blue-300 rounded p-1 shadow-sm"
-                title="Manual Flubber Review"
-                onClick={() => setFlubberEpId(prev => prev===ep.id? null : ep.id)}
-              >
-                <Scissors className="w-4 h-4" />
-              </button>
+              {/* Move Cut for edits to bottom-right cluster */}
               <Button
                 variant="destructive"
                 size="sm"
@@ -526,7 +544,23 @@ export default function EpisodeHistory({ token, onBack }) {
                 </button>
               )}
               {ep.status === 'processed' && (
-                <div className="absolute bottom-1 right-1 flex gap-1">
+                <div className="absolute bottom-1 right-1 flex gap-1 items-center">
+                  {/* Cut for edits */}
+                  <button
+                    className="bg-white/85 hover:bg-white text-purple-700 border border-purple-300 rounded p-1 shadow-sm"
+                    title="Cut for edits"
+                    onClick={() => setFlubberEpId(prev => prev===ep.id? null : ep.id)}
+                  >
+                    <Scissors className="w-4 h-4" />
+                  </button>
+                  {/* Manual Editor */}
+                  <button
+                    className="bg-white/85 hover:bg-white text-blue-700 border border-blue-300 rounded p-1 shadow-sm"
+                    title="Open Manual Editor"
+                    onClick={() => setManualEpId(prev => prev===ep.id? null : ep.id)}
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
                   {(ep.needs_republish || !!ep.publish_error) ? (
                     <button
                       className="bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-medium px-2 py-1 rounded shadow disabled:opacity-60"
@@ -585,6 +619,9 @@ export default function EpisodeHistory({ token, onBack }) {
               {missingAudio && <div className="text-[10px] text-red-600">File missing on server</div>}
             </CardContent>
             </Card>
+            {manualEpId === ep.id && (
+              <ManualEditorModal episodeId={ep.id} token={token} onClose={()=>setManualEpId(null)} />
+            )}
             {flubberEpId === ep.id && (
               <FlubberReview episodeId={ep.id} token={token} onClose={()=>setFlubberEpId(null)} />
             )}
@@ -613,7 +650,7 @@ export default function EpisodeHistory({ token, onBack }) {
           const st = statusLabel(ep.status);
           if (st === 'error') showRetry = true;
           if (st === 'processing') {
-            const started = normalizeDate(ep.processed_at) || new Date(0);
+            const started = normalizeDate(ep.processed_at) || normalizeDate(ep.created_at) || new Date(0);
             const elapsed = Date.now() - started.getTime();
             const durMs = (typeof ep.duration_ms === 'number' && ep.duration_ms > 0) ? ep.duration_ms : (15*60*1000);
             const threshold = Math.round(durMs * 1.25);
@@ -663,6 +700,11 @@ export default function EpisodeHistory({ token, onBack }) {
                 Delete
               </Button>
               <Button variant="outline" size="sm" className="ml-2 flex items-center gap-1" onClick={()=>startEdit(ep)}><Pencil className="w-4 h-4" />Edit</Button>
+              <button
+                className="ml-2 text-purple-600 hover:text-purple-700 text-xs underline"
+                title="Cut for edits"
+                onClick={() => setFlubberEpId(prev => prev===ep.id? null : ep.id)}
+              >Cut for edits</button>
               {ep.status === 'processed' && (ep.needs_republish || !!ep.publish_error) ? (
                 <button
                   className="ml-2 text-amber-700 hover:text-amber-800 text-xs underline"

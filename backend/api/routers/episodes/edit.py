@@ -19,12 +19,18 @@ _CUT_STATE: Dict[str, List[Dict[str, int]]] = {}
 
 @router.get("/{episode_id}/edit-context")
 async def get_edit_context(episode_id: str, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
-    ep = session.execute(select(Episode).where(Episode.id == episode_id)).scalars().first()
+    # Normalize ID and enforce ownership
+    try:
+        from uuid import UUID as _UUID
+        eid = _UUID(str(episode_id))
+    except Exception:
+        raise HTTPException(status_code=404, detail="Episode not found")
+    try:
+        ep = session.execute(select(Episode).where(Episode.id == eid, Episode.user_id == current_user.id)).scalars().first()
+    except Exception:
+        ep = None
     if not ep:
         raise HTTPException(status_code=404, detail="Episode not found")
-    # Basic ownership / access (admin or owner). Adjust as needed.
-    if not (current_user.is_admin or getattr(ep, 'user_id', None) == current_user.id):
-        raise HTTPException(status_code=403, detail="Forbidden")
 
     duration_ms = getattr(ep, 'duration_ms', None)
     transcript_segments = []  # placeholder: would load from transcript store

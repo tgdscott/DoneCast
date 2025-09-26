@@ -607,32 +607,36 @@ async def link_spreaker_show(
     if not isinstance(show_id, str) or not show_id.isdigit():
         raise HTTPException(status_code=400, detail="show_id must be a numeric Spreaker id")
     token = getattr(current_user, 'spreaker_access_token', None)
-    if not token:
-        raise HTTPException(status_code=401, detail="User is not connected to Spreaker")
-    client = SpreakerClient(api_token=token)
-    ok, resp = client.get_show(show_id)
-    if not ok:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch Spreaker show: {resp}")
-    show_obj = resp.get('show') if isinstance(resp, dict) and 'show' in resp else resp
-    # Update linkage
+    # Always set the numeric show id; enrich when token present.
     pod.spreaker_show_id = show_id
-    # Capture RSS URL and remote cover URL if present
-    try:
-        rss_candidate = (show_obj.get("rss_url") or show_obj.get("feed_url") or show_obj.get("xml_url")) if isinstance(show_obj, dict) else None
-        if rss_candidate:
-            pod.rss_url_locked = pod.rss_url_locked or rss_candidate
-            if not pod.rss_url:
-                pod.rss_url = rss_candidate
-    except Exception:
-        pass
-    try:
-        if isinstance(show_obj, dict):
-            for k in ('image_url','cover_url','cover_art_url','image'):
-                if show_obj.get(k):
-                    pod.remote_cover_url = show_obj.get(k)
-                    break
-    except Exception:
-        pass
+    if token:
+        try:
+            client = SpreakerClient(api_token=token)
+            ok, resp = client.get_show(show_id)
+            if ok and isinstance(resp, dict):
+                show_obj = resp.get('show') or resp
+                try:
+                    rss_candidate = (
+                        show_obj.get("rss_url")
+                        or show_obj.get("feed_url")
+                        or show_obj.get("xml_url")
+                    )
+                    if rss_candidate:
+                        pod.rss_url_locked = pod.rss_url_locked or rss_candidate
+                        if not pod.rss_url:
+                            pod.rss_url = rss_candidate
+                except Exception:
+                    pass
+                try:
+                    for k in ('image_url','cover_url','cover_art_url','image'):
+                        if show_obj.get(k):
+                            pod.remote_cover_url = show_obj.get(k)
+                            break
+                except Exception:
+                    pass
+        except Exception:
+            # If enrichment fails, we still keep the linked id
+            pass
     session.add(pod)
     session.commit()
     session.refresh(pod)
@@ -664,6 +668,14 @@ async def create_spreaker_show_for_podcast(
     d = description if description is not None else (pod.description or "")
     ok, result = client.create_show(title=t, description=d, language=language or "en")
     if not ok:
+        # Provide a friendlier error when user hits Spreaker's free plan show limit.
+        msg = str(result)
+        low = msg.lower()
+        if "free account" in low or "can't create any more shows" in low or "cant create any more shows" in low:
+            raise HTTPException(
+                status_code=403,
+                detail="You can only have one show on a free Spreaker account. Please upgrade your Spreaker plan to create additional shows.",
+            )
         raise HTTPException(status_code=502, detail=f"Failed to create show on Spreaker: {result}")
     show_id = str(result.get("show_id")) if isinstance(result, dict) else None
     if not show_id or not show_id.isdigit():

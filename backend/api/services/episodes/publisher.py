@@ -24,7 +24,25 @@ def publish(session: Session, current_user, episode_id: UUID, derived_show_id: s
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="User is not connected to Spreaker")
 
-    from worker.tasks import publish_episode_to_spreaker_task
+    from worker.tasks import publish_episode_to_spreaker_task, celery_app
+    eager = False
+    try:
+        eager = bool(getattr(celery_app.conf, 'task_always_eager', False))
+    except Exception:
+        eager = False
+    if eager:
+        # Execute synchronously for dev reliability
+        result = publish_episode_to_spreaker_task.apply(args=(), kwargs={
+            'episode_id': str(ep.id),
+            'spreaker_show_id': str(derived_show_id),
+            'title': str(ep.title or "Untitled Episode"),
+            'description': ep.show_notes or "",
+            'auto_published_at': auto_publish_iso,
+            'spreaker_access_token': spreaker_access_token,
+            'publish_state': publish_state,
+        })
+        # mimic AsyncResult-like response
+        return {"job_id": "eager", "result": result.result if hasattr(result, 'result') else None}
     async_result = publish_episode_to_spreaker_task.delay(
         episode_id=str(ep.id),
         spreaker_show_id=str(derived_show_id),

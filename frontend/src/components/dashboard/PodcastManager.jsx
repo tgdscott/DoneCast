@@ -357,11 +357,7 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={() => handleRecovery(podcast)}
-                          disabled={recoveringId === podcast.id || !podcast.spreaker_show_id}
-                        >
-                        {/* Link/Create Spreaker show helpers */}
+                        {/* Link/Create appear only when no show is linked */}
                         {!podcast.spreaker_show_id && (
                           <DropdownMenuItem onClick={() => handleLinkSpreakerShow(podcast)} disabled={linkingShowId === podcast.id}>
                             {linkingShowId === podcast.id ? (
@@ -382,6 +378,10 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
                             <span>Create Spreaker Show</span>
                           </DropdownMenuItem>
                         )}
+                        <DropdownMenuItem
+                          onClick={() => handleRecovery(podcast)}
+                          disabled={recoveringId === podcast.id || !podcast.spreaker_show_id}
+                        >
                           {recoveringId === podcast.id ? (
                             <Icons.Loader2 className="w-4 h-4 mr-2 animate-spin" />
                           ) : (
@@ -410,6 +410,12 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
                         })()}
                       </DropdownMenuContent>
                     </DropdownMenu>
+                    {/* Small inline CTA when not linked to Spreaker */}
+                    {!podcast.spreaker_show_id && (
+                      <Button variant="secondary" size="sm" onClick={() => handleLinkSpreakerShow(podcast)} title="Link Spreaker show id">
+                        <Icons.Link2 className="w-4 h-4 mr-1" /> Link Spreaker Show
+                      </Button>
+                    )}
                     <Button variant="outline" size="sm" onClick={() => openEditDialog(podcast)}>Edit</Button>
                     <Button variant="destructive" size="sm" onClick={() => openDeleteDialog(podcast)}>
                       <Icons.Trash2 className="w-4 h-4 mr-2" /> Delete

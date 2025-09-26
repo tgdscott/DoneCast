@@ -272,7 +272,9 @@ def list_episodes(
 		else:
 			derived_status = base_status
 
-		preferred_cover = getattr(e, 'remote_cover_url', None) or e.cover_path
+		# Prefer local cover_path first so newly uploaded covers display immediately;
+		# remote_cover_url will override later once publish sync updates it.
+		preferred_cover = e.cover_path or getattr(e, 'remote_cover_url', None)
 		stream_url = None
 		try:
 			spk_id = getattr(e, 'spreaker_episode_id', None)

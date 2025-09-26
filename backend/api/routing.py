@@ -92,6 +92,7 @@ media_tts_router       = _safe_import("api.routers.media_tts")
 dashboard_router       = _safe_import("api.routers.dashboard")
 recurring              = _safe_import("api.routers.recurring")
 assemblyai_router      = _safe_import("api.routers.assemblyai_webhook")
+media_upload_alias     = _safe_import("api.routers.media_upload_alias")
 
 def _maybe(app: FastAPI, r, prefix: str = "/api"):
     if r is not None:
@@ -109,6 +110,8 @@ def attach_routers(app: FastAPI) -> dict:
     availability['auth'] = auth is not None
     _maybe(app, media)
     availability['media'] = media is not None
+    _maybe(app, media_upload_alias)
+    availability['media_upload_alias'] = media_upload_alias is not None
     _maybe(app, gcs_uploads)
     availability['gcs_uploads'] = gcs_uploads is not None
 

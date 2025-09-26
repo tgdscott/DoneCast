@@ -52,7 +52,7 @@ const CoverCropper = forwardRef(function CoverCropper({ sourceFile, existingUrl,
       }
     }
     if (sourceFile) {
-      // New upload: auto-center largest square
+      // New upload: auto-center largest square (maximum size by default)
       const size = Math.min(w, h);
       const x = (w - size) / 2;
       const y = (h - size) / 2;

@@ -45,6 +45,51 @@ try {
 
   Import-DotEnv $envFile
 
+  # --- Google ADC (Application Default Credentials) bootstrap ---
+  # If the backend is likely to call Google services (Vertex, Cloud Tasks, GCS),
+  # verify Application Default Credentials are available. If not, either auto-run
+  # an interactive login (when AUTO_GCLOUD_ADC=1) or print a clear instruction.
+  $needsGcp = ($env:VERTEX_PROJECT -or $env:VERTEX_PROJECT_ID -or $env:USE_CLOUD_TASKS -or $env:GCS_BUCKET -or $env:GOOGLE_CLOUD_PROJECT)
+  $hasStubAI = ([string]::IsNullOrWhiteSpace($env:AI_STUB_MODE) -eq $false -and $env:AI_STUB_MODE -in @('1','true','yes','on'))
+  if ($needsGcp -and -not $hasStubAI) {
+    $adcOk = $false
+    if (-not [string]::IsNullOrWhiteSpace($env:GOOGLE_APPLICATION_CREDENTIALS) -and (Test-Path $env:GOOGLE_APPLICATION_CREDENTIALS)) {
+      $adcOk = $true
+      Write-Host "[dev_start_api] Using GOOGLE_APPLICATION_CREDENTIALS at $($env:GOOGLE_APPLICATION_CREDENTIALS)"
+    } else {
+      $gcloudCmd = Get-Command gcloud -ErrorAction SilentlyContinue
+      if ($null -ne $gcloudCmd) {
+        try {
+          $prevEA = $ErrorActionPreference; $ErrorActionPreference = 'SilentlyContinue'
+          $token = & gcloud auth application-default print-access-token
+          $ErrorActionPreference = $prevEA
+          if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($token)) { $adcOk = $true }
+        } catch { $adcOk = $false }
+        if (-not $adcOk) {
+          if ($env:AUTO_GCLOUD_ADC -in @('1','true','yes','on')) {
+            Write-Host "[dev_start_api] No ADC found. Launching 'gcloud auth application-default login'..." -ForegroundColor Yellow
+            try {
+              & gcloud auth application-default login
+              if ($LASTEXITCODE -ne 0) { throw "gcloud ADC login failed with exit code $LASTEXITCODE" }
+              $adcOk = $true
+            } catch {
+              Write-Warning "[dev_start_api] Could not complete ADC login automatically: $_"
+            }
+          } else {
+            Write-Warning "[dev_start_api] Google ADC missing. To enable Google APIs locally, run:";
+            Write-Host "    gcloud auth application-default login" -ForegroundColor Cyan
+            Write-Host "  Or set GOOGLE_APPLICATION_CREDENTIALS to a service account JSON path." -ForegroundColor Cyan
+          }
+        }
+      } else {
+        Write-Warning "[dev_start_api] 'gcloud' not found in PATH; Google APIs may fail locally. Install Google Cloud SDK or set GOOGLE_APPLICATION_CREDENTIALS."
+      }
+    }
+    if ($adcOk) {
+      Write-Host "[dev_start_api] Google ADC detected and ready."
+    }
+  }
+
   # If no Gemini or Vertex creds are present and developer hasn't explicitly opted out, enable stub mode
   if (-not $env:AI_STUB_MODE) {
     $hasGemini = -not [string]::IsNullOrWhiteSpace($env:GEMINI_API_KEY)
@@ -60,8 +105,10 @@ try {
   if (-not [string]::IsNullOrWhiteSpace($env:API_PORT)) {
     try { $apiPort = [int]$env:API_PORT } catch { $apiPort = 8000 }
   }
-  Write-Host "[dev_start_api] Starting uvicorn on $apiHost:$apiPort"
-  & $pythonExe -m uvicorn api.main:app --host $apiHost --port $apiPort --env-file $envFile
+  Write-Host ("[dev_start_api] Starting uvicorn on {0}:{1}" -f $apiHost, $apiPort)
+  # In dev, prefer Celery eager mode so background tasks (publish, etc.) run synchronously
+  $env:CELERY_EAGER = if ($env:CELERY_EAGER) { $env:CELERY_EAGER } else { '1' }
+  & $pythonExe -m uvicorn api.app:app --host $apiHost --port $apiPort --env-file $envFile
 } finally {
   Pop-Location
 }
