@@ -8,6 +8,7 @@ import * as Icons from "lucide-react";
 import { useState, useEffect } from "react";
 import EditPodcastDialog from "./EditPodcastDialog";
 import NewUserWizard from "./NewUserWizard";
+import DistributionChecklistDialog from "./DistributionChecklistDialog";
 import { useToast } from "@/hooks/use-toast";
 import { makeApi, buildApiUrl } from "@/lib/apiClient";
 
@@ -22,6 +23,8 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [recoveringId, setRecoveringId] = useState(null);
   const [publishingAllId, setPublishingAllId] = useState(null);
+  const [distributionOpen, setDistributionOpen] = useState(false);
+  const [distributionPodcast, setDistributionPodcast] = useState(null);
   const { toast } = useToast();
   const [isSpreakerConnected, setIsSpreakerConnected] = useState(false);
   const [me, setMe] = useState(null);
@@ -169,6 +172,18 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
       toast({ title: "Error", description: err.message, variant: "destructive" });
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const openDistributionDialog = (podcast) => {
+    setDistributionPodcast(podcast);
+    setDistributionOpen(true);
+  };
+
+  const handleDistributionOpenChange = (open) => {
+    setDistributionOpen(open);
+    if (!open) {
+      setDistributionPodcast(null);
     }
   };
 
@@ -320,6 +335,9 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
                     </div>
                   </div>
                   <div className="flex items-center space-x-2">
+                    <Button variant="outline" size="sm" onClick={() => openDistributionDialog(podcast)}>
+                      <Icons.Share2 className="w-4 h-4 mr-2" /> Distribution
+                    </Button>
                     {/* Spreaker publish/setup pills */}
                     {(() => {
                       const issues = getComplianceIssues(podcast);
@@ -491,6 +509,13 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
           onPodcastCreated={handlePodcastCreated}
         />
       )}
+
+      <DistributionChecklistDialog
+        open={distributionOpen}
+        onOpenChange={handleDistributionOpenChange}
+        podcast={distributionPodcast}
+        token={token}
+      />
     </div>
   );
 }
