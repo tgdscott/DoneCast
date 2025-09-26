@@ -4,6 +4,7 @@ from datetime import datetime
 from uuid import UUID, uuid4
 import json
 from enum import Enum
+from sqlalchemy import UniqueConstraint
 
 from .user import User
 
@@ -29,6 +30,15 @@ from enum import Enum
 class PodcastType(str, Enum):
     episodic = "episodic"
     serial = "serial"
+
+
+class DistributionStatus(str, Enum):
+    """Progress states for 3rd-party distribution destinations."""
+
+    not_started = "not_started"
+    in_progress = "in_progress"
+    completed = "completed"
+    skipped = "skipped"
 
 class PodcastBase(SQLModel):
     name: str
@@ -198,6 +208,30 @@ class MusicAsset(SQLModel, table=True):
             return json.loads(self.mood_tags_json)
         except Exception:
             return []
+
+
+class PodcastDistributionStatus(SQLModel, table=True):
+    """User-managed checklist items for submitting shows to external platforms."""
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
+    user_id: UUID = Field(foreign_key="user.id", index=True)
+    podcast_id: UUID = Field(foreign_key="podcast.id", index=True)
+    platform_key: str = Field(index=True, max_length=64, description="Stable key for the distribution platform")
+    status: DistributionStatus = Field(default=DistributionStatus.not_started)
+    notes: Optional[str] = Field(default=None, description="User-provided notes or reminders for this destination")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("podcast_id", "platform_key", name="uq_distribution_platform"),
+    )
+
+    def mark_status(self, new_status: DistributionStatus, notes: Optional[str] = None) -> None:
+        self.status = new_status
+        self.updated_at = datetime.utcnow()
+        if notes is not None:
+            cleaned = notes.strip()
+            self.notes = cleaned or None
 
 class Episode(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
