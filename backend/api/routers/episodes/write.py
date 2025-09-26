@@ -4,7 +4,7 @@ from typing import Optional, Dict, Any
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Body, status
-from sqlalchemy.orm import Session
+from sqlmodel import Session
 from sqlmodel import select
 
 from api.core.database import get_session
@@ -51,19 +51,19 @@ def update_episode_metadata(
 	if description is not None and description != ep.show_notes:
 		ep.show_notes = description
 		changed = True
-        if "cover_image_path" in payload:
-                cover_image_path = payload.get("cover_image_path")
-                if cover_image_path and cover_image_path != getattr(ep, 'cover_path', None):
-                        ep.cover_path = cover_image_path
-                        # When switching to a freshly uploaded cover, prefer the local path until publish sync updates remote.
-                        if hasattr(ep, 'remote_cover_url'):
-                                ep.remote_cover_url = None
-                        changed = True
-                elif cover_image_path is None and getattr(ep, 'cover_path', None):
-                        ep.cover_path = None
-                        if hasattr(ep, 'remote_cover_url'):
-                                ep.remote_cover_url = None
-                        changed = True
+	if "cover_image_path" in payload:
+		cover_image_path = payload.get("cover_image_path")
+		if cover_image_path and cover_image_path != getattr(ep, 'cover_path', None):
+			ep.cover_path = cover_image_path
+			# When switching to a freshly uploaded cover, prefer the local path until publish sync updates remote.
+			if hasattr(ep, 'remote_cover_url'):
+				ep.remote_cover_url = None
+			changed = True
+		elif cover_image_path is None and getattr(ep, 'cover_path', None):
+			ep.cover_path = None
+			if hasattr(ep, 'remote_cover_url'):
+				ep.remote_cover_url = None
+			changed = True
 	publish_state = payload.get("publish_state")
 	if publish_state is not None:
 		changed = True
