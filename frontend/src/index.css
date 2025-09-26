@@ -57,25 +57,8 @@
     --chart-5: 340 75% 55%
   }
 
-  /* PPP (current defaults) */
-  .brand-ppp {
-    /* Optional: mirror :root to be explicit */
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
-    --foreground: 240 10% 3.9%;
-    --background: 0 0% 100%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --border: 240 5.9% 90%;
-    --ring: 240 10% 3.9%;
-    /* PPP look (dark ink on white; smaller radius; default font) */
-    --radius: 8px;
-  }
-
-  /* No Sweat palette */
-  .brand-nsc {
+  /* Podcast Plus Plus palette */
+  .brand-plusplus {
     --background: 0 0% 100%;
     --foreground: 210 59% 11%;        /* Ink #0B1B2B */
     --primary: 185 84% 38%;           /* Breeze Teal #0FA3B1 */
@@ -88,25 +71,25 @@
     --muted-foreground: 180 59% 14%;
     --border: 220 13% 91%;
     --ring: 185 84% 38%;
-    /* NSC look (softer, friendlier, clearly different) */
+    /* Plus Plus look (softer, friendlier, clearly different) */
     --radius: 14px;
   }
 
-  /* NSC background accent behind hero and global font */
-  html.brand-nsc body {
+  /* Plus Plus background accent behind hero and global font */
+  html.brand-plusplus body {
     background-image:
       radial-gradient(80rem 40rem at 120% -10%, hsl(185 84% 93%) 0%, transparent 60%),
       radial-gradient(60rem 30rem at -20% 0%, hsl(168 69% 92%) 0%, transparent 60%);
     background-repeat: no-repeat;
-  /* NSC font (more legible): Inter (replaced Atkinson Hyperlegible) */
+  /* Plus Plus font (more legible): Inter (replaced Atkinson Hyperlegible) */
   font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
     font-size: 18px;
     line-height: 1.7;
   }
 
-  /* NSC links and accents clearly teal */
-  html.brand-nsc a { color: hsl(var(--primary)); }
-  html.brand-nsc a:hover { opacity: .9; }
+  /* Plus Plus links and accents clearly teal */
+  html.brand-plusplus a { color: hsl(var(--primary)); }
+  html.brand-plusplus a:hover { opacity: .9; }
   html.pref-large-text {
     font-size: 18px;
   }
@@ -138,15 +121,15 @@
     color: #000000;
   }
   /* Contrast utilities (light-weight) */
-  .contrast-on-primary, .brand-nsc .bg-primary {
+  .contrast-on-primary, .brand-plusplus .bg-primary {
     color: hsl(var(--primary-foreground)) !important;
   }
-  .brand-nsc .btn, .brand-nsc button.bg-primary, .brand-nsc .badge.bg-primary {
+  .brand-plusplus .btn, .brand-plusplus button.bg-primary, .brand-plusplus .badge.bg-primary {
     color: hsl(var(--primary-foreground));
     fill: currentColor;
   }
   /* Teal boxes with text-teal issue: normalize text color */
-  .brand-nsc .teal-box, .brand-nsc .bg-secondary, .brand-nsc .bg-muted {
+  .brand-plusplus .teal-box, .brand-plusplus .bg-secondary, .brand-plusplus .bg-muted {
     color: hsl(var(--foreground));
   }
   html.pref-high-contrast *:focus-visible {

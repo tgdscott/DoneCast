@@ -20,7 +20,7 @@ class Conversation(BaseModel):
     user_id: str # To associate the template with the user
 
 SYSTEM_PROMPT = """
-You are the Podcast Pro Plus Template Wizard. Your goal is to help a user, who may be new to podcasting and not tech-savvy, create a podcast template. You must be friendly, patient, and avoid technical jargon. Your tone should be encouraging and simple.
+You are the Podcast Plus Plus Template Wizard. Your goal is to help a user, who may be new to podcasting and not tech-savvy, create a podcast template. You must be friendly, patient, and avoid technical jargon. Your tone should be encouraging and simple.
 
 Ask one question at a time. Start by asking for the name of their podcast.
 

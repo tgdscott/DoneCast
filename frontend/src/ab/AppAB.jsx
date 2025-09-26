@@ -6,7 +6,7 @@ import Dashboard from "./pages/Dashboard";
 import CreatorUpload from "./pages/CreatorUpload";
 import CreatorFinalize from "./pages/CreatorFinalize";
 import Settings from "./pages/Settings";
-// In-context views from the main app to avoid leaving A/B mode
+// In-context views from the main app to avoid leaving the Plus Plus workspace
 import MediaLibrary from "@/components/dashboard/MediaLibrary.jsx";
 import TemplateManager from "@/components/dashboard/TemplateManager.jsx";
 import BillingPage from "@/components/dashboard/BillingPage.jsx";
@@ -15,6 +15,7 @@ import PodcastManager from "@/components/dashboard/PodcastManager.jsx";
 import PodcastCreator from "@/components/dashboard/PodcastCreator.jsx";
 import { abApi } from "./lib/abApi";
 import Recorder from "@/components/quicktools/Recorder.jsx";
+import { makeApi } from "@/lib/apiClient";
 
 export default function AppAB({ token }) {
   const [active, setActive] = useState("dashboard");
@@ -27,14 +28,14 @@ export default function AppAB({ token }) {
   const [drafts, setDrafts] = useState([]);
   const [templates, setTemplates] = useState([]);
   
-  // When auth changes, reset in-memory A/B state to avoid cross-account mixing
+  // When auth changes, reset in-memory workspace state to avoid cross-account mixing
   useEffect(() => {
     setUploads([]);
     setDrafts([]);
     setShows([]);
   }, [token]);
 
-  // Rehydrate client-side A/B state from localStorage (for immediate UX, even before server fetch)
+  // Rehydrate client-side workspace state from localStorage (for immediate UX, even before server fetch)
   useEffect(() => {
     try {
       const k = token ? `ab_state_${token.slice(0,6)}` : 'ab_state_demo';
@@ -47,7 +48,7 @@ export default function AppAB({ token }) {
     } catch {}
   }, [token]);
 
-  // Persist minimal A/B state so uploads don’t disappear if server lags
+  // Persist minimal workspace state so uploads don’t disappear if server lags
   useEffect(() => {
     try {
       const k = token ? `ab_state_${token.slice(0,6)}` : 'ab_state_demo';
@@ -67,7 +68,7 @@ export default function AppAB({ token }) {
     return () => { abort = true; };
   }, [token]);
 
-  // Load real podcasts for A/B dashboard when signed in
+  // Load real podcasts for Plus Plus dashboard when signed in
   useEffect(() => {
     let aborted = false;
     (async () => {
@@ -201,7 +202,7 @@ export default function AppAB({ token }) {
       <div className="flex-1 flex">
         <SideBar collapsed={collapsed} setCollapsed={setCollapsed} onNavigate={setActive} active={active} />
         <main className="flex-1">
-          {/* Subtle breadcrumbs to keep context inside A/B */}
+          {/* Subtle breadcrumbs to keep context inside the Plus Plus workspace */}
           <div className="px-4 pt-3 text-xs text-muted-foreground">
             {(() => {
               const labels = {
@@ -216,7 +217,7 @@ export default function AppAB({ token }) {
                 settings: 'Settings',
               };
               const here = labels[active] || '—';
-              return (<span>A/B Workspace / <span className="text-foreground">{here}</span></span>);
+              return (<span>Plus Plus workspace / <span className="text-foreground">{here}</span></span>);
             })()}
           </div>
           

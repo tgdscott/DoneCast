@@ -541,10 +541,6 @@ export default function PodcastPlusLanding() {
             <a href="/subscriptions" className="text-gray-600 hover:text-gray-800 transition-colors">
               Subscriptions
             </a>
-            {/* Temporary dev link to A/B preview */}
-            <a href="/ab" className="text-gray-600 hover:text-gray-800 transition-colors">
-              A/B
-            </a>
             <Button
               onClick={() => setIsLoginModalOpen(true)}
               variant="outline"
@@ -562,7 +558,7 @@ export default function PodcastPlusLanding() {
         <div className="absolute inset-0 bg-gradient-to-br from-blue-50 to-purple-50 opacity-30"></div>
         <div className="container mx-auto max-w-5xl text-center relative z-10">
           <Badge className="mb-6 px-4 py-2 text-sm font-medium" style={{ backgroundColor: "#ECF0F1", color: "#2C3E50" }}>
-            🎉 Over 10,000 podcasters trust Podcast Plus
+            🎉 Over 10,000 podcasters trust Podcast Plus Plus
           </Badge>
 
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold mb-6 leading-tight" style={{ color: "#2C3E50" }}>
@@ -729,7 +725,7 @@ export default function PodcastPlusLanding() {
         <div className="container mx-auto max-w-6xl">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-8" style={{ color: "#2C3E50" }}>
-              Why 10,000+ Creators Choose Podcast Plus
+              Why 10,000+ Creators Choose Podcast Plus Plus
             </h2>
 
             <div className="grid md:grid-cols-3 gap-8">
@@ -779,7 +775,7 @@ export default function PodcastPlusLanding() {
           {publicEpisodes.length > 0 && (
             <div className="mb-16">
               <h2 className="text-3xl font-bold mb-6" style={{ color: "#2C3E50" }}>
-                Recently Published with Podcast Plus
+                Recently Published with Plus Plus
               </h2>
               <div className="grid md:grid-cols-3 gap-6">
                 {publicEpisodes.map((ep) => (
@@ -826,7 +822,7 @@ export default function PodcastPlusLanding() {
                   ))}
                 </div>
                 <p className="text-gray-700 leading-relaxed mb-6 text-lg">
-                  "I was terrified of the technical side of podcasting. Podcast Plus made it so simple that I launched
+                  "I was terrified of the technical side of podcasting. Podcast Plus Plus made it so simple that I launched
                   my first episode in under 30 minutes! Now I have 50+ episodes and growing."
                 </p>
                 <div className="flex items-center">
@@ -841,7 +837,7 @@ export default function PodcastPlusLanding() {
                     <h4 className="font-semibold text-lg" style={{ color: "#2C3E50" }}>
                       Sarah Johnson
                     </h4>
-                    <p className="text-gray-600">Small Business Owner • 6 months on Podcast Plus</p>
+                    <p className="text-gray-600">Small Business Owner • 6 months on Plus Plus</p>
                   </div>
                 </div>
               </CardContent>
@@ -855,7 +851,7 @@ export default function PodcastPlusLanding() {
                   ))}
                 </div>
                 <p className="text-gray-700 leading-relaxed mb-6 text-lg">
-                  "I've saved 15+ hours every week since switching to Podcast Plus. The AI editing is incredible - it
+                  "I've saved 15+ hours every week since switching to Podcast Plus Plus. The AI editing is incredible - it
                   sounds better than when I did it manually!"
                 </p>
                 <div className="flex items-center">
@@ -870,7 +866,7 @@ export default function PodcastPlusLanding() {
                     <h4 className="font-semibold text-lg" style={{ color: "#2C3E50" }}>
                       Robert Chen
                     </h4>
-                    <p className="text-gray-600">Retired Teacher • 1 year on Podcast Plus</p>
+                    <p className="text-gray-600">Retired Teacher • 1 year on Plus Plus</p>
                   </div>
                 </div>
               </CardContent>
@@ -899,7 +895,7 @@ export default function PodcastPlusLanding() {
                     <h4 className="font-semibold text-lg" style={{ color: "#2C3E50" }}>
                       Maria Rodriguez
                     </h4>
-                    <p className="text-gray-600">Community Leader • 8 months on Podcast Plus</p>
+                    <p className="text-gray-600">Community Leader • 8 months on Plus Plus</p>
                   </div>
                 </div>
               </CardContent>
@@ -915,14 +911,14 @@ export default function PodcastPlusLanding() {
             <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-6" style={{ color: "#2C3E50" }}>
               Frequently Asked Questions
             </h2>
-            <p className="text-xl text-gray-600">Everything you need to know about getting started with Podcast Plus</p>
+            <p className="text-xl text-gray-600">Everything you need to know about getting started with Podcast Plus Plus</p>
           </div>
 
           <div className="space-y-6">
             {[
               {
-                q: "Do I need any technical experience to use Podcast Plus?",
-                a: "Absolutely not! Podcast Plus is designed for complete beginners. If you can use email, you can create professional podcasts with our platform.",
+                q: "Do I need any technical experience to use Podcast Plus Plus?",
+                a: "Absolutely not! Plus Plus is designed for complete beginners. If you can use email, you can create professional podcasts with our platform.",
               },
               {
                 q: "How long does it take to publish my first episode?",
@@ -1008,7 +1004,7 @@ export default function PodcastPlusLanding() {
               <div className="flex items-center space-x-2 mb-4">
                 <Headphones className="w-6 h-6" style={{ color: "#2C3E50" }} />
                 <span className="text-xl font-bold" style={{ color: "#2C3E50" }}>
-                  Podcast Plus
+                  Podcast Plus Plus
                 </span>
               </div>
               <p className="text-gray-600 mb-4">
@@ -1107,7 +1103,7 @@ export default function PodcastPlusLanding() {
           </div>
 
           <div className="border-t border-gray-200 pt-8 flex flex-col md:flex-row justify-between items-center">
-            <p className="text-gray-600 mb-4 md:mb-0">Podcast Plus © 2025. All rights reserved.</p>
+            <p className="text-gray-600 mb-4 md:mb-0">Podcast Plus Plus © 2025. All rights reserved.</p>
             <div className="flex space-x-6">
               <a href="/privacy" className="text-gray-600 hover:text-gray-800 transition-colors">
                 Privacy Policy

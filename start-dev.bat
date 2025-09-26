@@ -77,10 +77,10 @@ echo [4/4] Starting API and Frontend servers in new windows...
 echo.
 
 REM Start the backend API server in a new window.
-start "Podcast Pro Plus API" cmd /k "call %VENV_DIR%\Scripts\activate.bat && cd backend && uvicorn api.main:app --reload --env-file .env.local"
+start "Podcast Plus Plus API" cmd /k "call %VENV_DIR%\Scripts\activate.bat && cd backend && uvicorn api.main:app --reload --env-file .env.local"
 
 REM Start the frontend development server in a new window.
-start "Podcast Pro Plus Frontend" cmd /k "cd frontend && npm run dev"
+start "Podcast Plus Plus Frontend" cmd /k "cd frontend && npm run dev"
 
 echo =================================================================
 echo  All systems go! Your servers are starting in new windows.

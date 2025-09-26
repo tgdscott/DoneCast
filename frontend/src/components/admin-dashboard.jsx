@@ -43,7 +43,7 @@ import { makeApi, buildApiUrl } from "@/lib/apiClient";
 import DbExplorer from '@/components/admin/DbExplorer.jsx';
 import { useToast } from '@/hooks/use-toast';
 import AdminFeatureToggles from '@/components/admin/AdminFeatureToggles.jsx';
-import AdminBrandToggle from '@/components/admin/AdminBrandToggle.jsx';
+import AdminLayoutToggle from '@/components/admin/AdminLayoutToggle.jsx';
 import AdminTierEditor from '@/components/admin/AdminTierEditor.jsx';
 import AdminMusicLibrary from '@/components/admin/AdminMusicLibrary.jsx';
 
@@ -1265,7 +1265,7 @@ export default function AdminDashboard() {
                     <p className="text-sm text-gray-500">Loading admin settings…</p>
                   )}
 
-                  <AdminBrandToggle />
+                  <AdminLayoutToggle />
 
                   <div className="flex items-center justify-between">
                     <div>

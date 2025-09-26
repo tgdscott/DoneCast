@@ -414,7 +414,7 @@ export default function PodcastPlusDashboard() {
                 </h1>
                 <p className="text-sm md:text-base text-gray-600 mt-1">Quick launch your next episode or jump into a tool.</p>
               </div>
-              {/* A/B link moved to Settings footer per request */}
+              {/* Layout experiment toggled from the admin dashboard */}
             </div>
             {statsError && (
               <div className="bg-red-100 border border-red-300 text-red-700 rounded p-3 mb-4 text-sm">

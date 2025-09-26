@@ -5,7 +5,7 @@ import { useAuth } from "@/AuthContext";
 export default function ABPreview() {
   const { token, isAuthenticated } = useAuth() || {};
   if (!isAuthenticated) {
-    // Hard gate: unauth users cannot access A/B
+    // Hard gate: unauth users cannot access the experimental workspace
     try { window.location.replace('/'); } catch(_) {}
     return null;
   }

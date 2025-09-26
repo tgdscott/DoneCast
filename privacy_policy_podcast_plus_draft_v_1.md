@@ -130,7 +130,7 @@ We may update this Policy from time to time. If changes are material, we will pr
 ---
 
 ## 13) Contact Us
-**Chainsaw Enterprises (Podcast Plus)**  
+**Chainsaw Enterprises (Podcast Plus Plus)**  
 **121 W Lexington Dr Suite 236, Glendale, CA 91203**  
 **Email:** Scott@thebsgcompany.com
 

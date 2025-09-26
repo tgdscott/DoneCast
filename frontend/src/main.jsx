@@ -16,6 +16,7 @@ import Pricing from '@/pages/Pricing.jsx';
 import { AuthProvider } from './AuthContext.jsx';
 import { BrandProvider } from './brand/BrandContext.jsx';
 import { ComfortProvider } from './ComfortContext.jsx';
+import { LayoutProvider } from './layout/LayoutContext.jsx';
 import './index.css' // <-- This line imports all the styles
 import { assetUrl } from './lib/apiClient';
 
@@ -96,9 +97,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <AuthProvider>
       <BrandProvider>
-        <ComfortProvider>
-          <RouterProvider router={router} />
-        </ComfortProvider>
+        <LayoutProvider>
+          <ComfortProvider>
+            <RouterProvider router={router} />
+          </ComfortProvider>
+        </LayoutProvider>
       </BrandProvider>
     </AuthProvider>
   </React.StrictMode>,

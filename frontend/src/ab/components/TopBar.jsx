@@ -4,6 +4,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Bell } from "lucide-react";
 import { makeApi } from "@/lib/apiClient";
+import { useBrand } from "@/brand/BrandContext.jsx";
 
 function formatShort(iso) {
   if (!iso) return "";
@@ -21,6 +22,7 @@ function formatShort(iso) {
 
 export default function TopBar({ onSwitch, active }) {
   const { token, user } = useAuth() || {};
+  const { brand } = useBrand();
   const tabs = [
     { id: "dashboard", label: "Dashboard" },
     { id: "creator-upload", label: "New Episode" },
@@ -107,8 +109,10 @@ export default function TopBar({ onSwitch, active }) {
     <header className="sticky top-0 z-40 w-full border-b bg-background/80 backdrop-blur">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="size-8 rounded-xl bg-indigo-600" />
-          <span className="font-semibold tracking-tight">Podcast-Pro-Plus</span>
+          <div className="size-8 rounded-xl bg-primary/15 text-primary font-semibold flex items-center justify-center">
+            ++
+          </div>
+          <span className="font-semibold tracking-tight">{brand.shortName}</span>
         </div>
         <nav className="hidden md:flex items-center gap-1">
           {tabs.map((tab) => (
