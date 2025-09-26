@@ -12,6 +12,8 @@ import FlubberRetryModal from './podcastCreator/FlubberRetryModal';
 import FlubberQuickReview from './FlubberQuickReview';
 import IntentQuestions from './IntentQuestions';
 import VoicePicker from '@/components/VoicePicker';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 
 export default function PodcastCreator({
   onBack,
@@ -106,6 +108,8 @@ export default function PodcastCreator({
     usage,
     minutesNearCap,
     minutesRemaining,
+    minutesDialog,
+    setMinutesDialog,
     handleRecurringApply,
     activeSegment,
     showVoicePicker,
@@ -138,6 +142,44 @@ export default function PodcastCreator({
         sfx: baseIntentHide.sfx || intentDetectionCounts.sfx === 0,
       }
     : baseIntentHide;
+
+  const formatDuration = (seconds) => {
+    if (!seconds || !isFinite(seconds) || seconds <= 0) return null;
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.round(seconds % 60);
+    const parts = [];
+    if (mins > 0) parts.push(`${mins} min${mins === 1 ? '' : 's'}`);
+    parts.push(`${secs} sec${secs === 1 ? '' : 's'}`);
+    return parts.join(' ');
+  };
+
+  const minutesDialogDuration = minutesDialog?.durationSeconds != null
+    ? formatDuration(minutesDialog.durationSeconds)
+    : (minutesDialog?.requiredMinutes ? formatDuration(minutesDialog.requiredMinutes * 60) : null);
+  const minutesDialogRemaining = typeof minutesDialog?.remainingMinutes === 'number'
+    ? formatDuration(Math.max(0, minutesDialog.remainingMinutes) * 60)
+    : null;
+  const minutesDialogRenewal = minutesDialog?.renewalDate
+    ? (() => {
+        try {
+          return new Date(minutesDialog.renewalDate).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
+        } catch {
+          return minutesDialog.renewalDate;
+        }
+      })()
+    : null;
+
+  const closeMinutesDialog = () => setMinutesDialog(null);
+  const goToUpgrade = () => {
+    try { localStorage.setItem('ppp_billing_intent', 'upgrade'); } catch {}
+    window.dispatchEvent(new Event('ppp:navigate-billing'));
+    closeMinutesDialog();
+  };
+  const goToBuyMinutes = () => {
+    try { localStorage.setItem('ppp_billing_intent', 'purchase-minutes'); } catch {}
+    window.dispatchEvent(new Event('ppp:navigate-billing'));
+    closeMinutesDialog();
+  };
 
   const stepContent = (() => {
     switch (currentStep) {
@@ -314,6 +356,46 @@ export default function PodcastCreator({
         onRetry={retryFlubberSearch}
         onSkip={skipFlubberRetry}
       />
+
+      <Dialog open={!!minutesDialog} onOpenChange={(open) => { if (!open) closeMinutesDialog(); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Not enough processing minutes</DialogTitle>
+            <DialogDescription>
+              {minutesDialog?.message || 'This episode cannot be assembled because it exceeds your remaining processing minutes.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 text-sm">
+            {minutesDialogDuration && (
+              <p>
+                This episode is <strong>{minutesDialogDuration}</strong> long.
+              </p>
+            )}
+            {minutesDialogRemaining && (
+              <p>
+                Your plan has <strong>{minutesDialogRemaining}</strong> remaining
+                {minutesDialogRenewal ? ` until ${minutesDialogRenewal}` : ''}.
+              </p>
+            )}
+            {!minutesDialogDuration && minutesDialog?.requiredMinutes && (
+              <p>
+                Estimated processing time: <strong>{minutesDialog.requiredMinutes} minute{minutesDialog.requiredMinutes === 1 ? '' : 's'}</strong>.
+              </p>
+            )}
+          </div>
+          <DialogFooter className="flex flex-col space-y-2 sm:flex-row sm:space-y-0 sm:space-x-2 sm:justify-end">
+            <Button variant="outline" onClick={goToUpgrade} className="w-full sm:w-auto">
+              Upgrade Plan
+            </Button>
+            <Button variant="outline" onClick={goToBuyMinutes} className="w-full sm:w-auto">
+              Buy Minutes
+            </Button>
+            <Button variant="ghost" onClick={closeMinutesDialog} className="w-full sm:w-auto">
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {showVoicePicker && activeSegment && (
         <VoicePicker

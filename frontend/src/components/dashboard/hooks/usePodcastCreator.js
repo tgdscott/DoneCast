@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from '@/hooks/use-toast';
 import { makeApi } from '@/lib/apiClient';
 import { fetchVoices as fetchElevenVoices } from '@/api/elevenlabs';
@@ -41,6 +41,7 @@ export default function usePodcastCreator({
   const [fuzzyThreshold, setFuzzyThreshold] = useState(0.8);
   const [testMode, setTestMode] = useState(false);
   const [usage, setUsage] = useState(null);
+  const [minutesDialog, setMinutesDialog] = useState(null);
   const [episodeDetails, setEpisodeDetails] = useState({
     season: '1',
     episodeNumber: '',
@@ -156,6 +157,17 @@ export default function usePodcastCreator({
     }
   }, [templates, selectedTemplate, currentStep]);
 
+  const refreshUsage = useCallback(async () => {
+    try {
+      const api = makeApi(token);
+      const u = await api.get('/api/billing/usage');
+      if (u) setUsage(u);
+      return u;
+    } catch (_) {
+      return null;
+    }
+  }, [token]);
+
   useEffect(() => {
     const api = makeApi(token);
     const fetchMedia = async () => {
@@ -181,12 +193,7 @@ export default function usePodcastCreator({
         setTestMode(false);
       }
     })();
-    (async () => {
-      try {
-        const u = await api.get('/api/billing/usage');
-        if (u) setUsage(u);
-      } catch (_) {}
-    })();
+    refreshUsage();
     (async () => {
       try {
         const caps = await api.get('/api/users/me/capabilities');
@@ -197,7 +204,7 @@ export default function usePodcastCreator({
         }); }
       } catch(_) {}
     })();
-  }, [token, authUser]);
+  }, [token, authUser, refreshUsage]);
 
   const requireIntern = capabilities.has_elevenlabs || capabilities.has_google_tts;
   const requireSfx = capabilities.has_any_sfx_triggers;
@@ -999,6 +1006,27 @@ export default function usePodcastCreator({
         });
       } catch(e) {
         if (e && e.status === 402) {
+          const detail = (e.detail && typeof e.detail === 'object') ? e.detail : {};
+          if (detail.code === 'INSUFFICIENT_MINUTES') {
+            const required = Number(detail.minutes_required) || 0;
+            const remaining = Number(detail.minutes_remaining);
+            const renewal = detail.renewal_date || detail.renewalDate || null;
+            const secondsEstimate = (audioDurationSec && audioDurationSec > 0)
+              ? audioDurationSec
+              : (required > 0 ? required * 60 : null);
+            setMinutesDialog({
+              requiredMinutes: required,
+              remainingMinutes: Number.isFinite(remaining) ? Math.max(0, remaining) : null,
+              renewalDate: renewal,
+              message: detail.message || e.message || 'Not enough processing minutes remain.',
+              durationSeconds: secondsEstimate,
+            });
+            setStatusMessage('');
+            setIsAssembling(false);
+            setError('');
+            try { await refreshUsage(); } catch {}
+            return;
+          }
           const msg = 'Monthly episode quota reached. Upgrade your plan to continue.';
           setError(msg);
           setStatusMessage('');
@@ -1014,7 +1042,7 @@ export default function usePodcastCreator({
       setAutoPublishPending(true);
       setStatusMessage(`Episode assembly has been queued. Job ID: ${result.job_id}`);
     } catch (err) {
-      setError(err.message);
+      setError(err.message || (err?.detail?.message) || 'Assembly failed');
       setStatusMessage('');
       setIsAssembling(false);
     }
@@ -1302,6 +1330,15 @@ export default function usePodcastCreator({
     setCurrentStep(2);
   };
 
+  useEffect(() => {
+    if (!assemblyComplete) return;
+    try {
+      localStorage.removeItem('ppp_uploaded_filename');
+      localStorage.removeItem('ppp_uploaded_hint');
+    } catch {}
+    refreshUsage();
+  }, [assemblyComplete, refreshUsage]);
+
   const retryFlubberSearch = async () => {
     setFlubberNotFound(false);
     if(!uploadedFilename) { setCurrentStep(3); return; }
@@ -1400,8 +1437,11 @@ export default function usePodcastCreator({
     minutesRemaining,
     minutesNearCap,
     minutesCap,
+    minutesDialog,
+    setMinutesDialog,
+    refreshUsage,
     buildActive,
-  cancelBuild,
+    cancelBuild,
     handleTemplateSelect,
     handleFileChange,
     handleCoverFileSelected,

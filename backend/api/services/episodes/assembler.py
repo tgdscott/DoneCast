@@ -15,7 +15,7 @@ from api.core.paths import MEDIA_DIR
 from api.services.billing import usage as usage_svc
 from math import ceil
 import time
-from typing import cast
+from typing import cast, Optional
 
 
 def _episodes_created_this_month(session: Session, user_id) -> int:
@@ -36,6 +36,52 @@ def _episodes_created_this_month(session: Session, user_id) -> int:
         return int(res or 0)
     except Exception:
         return 0
+
+
+def _estimate_processing_minutes(filename: str) -> Optional[int]:
+    """Best-effort estimate of audio length in whole minutes for quota checks."""
+    try:
+        from pathlib import Path as _Path
+        src_name = _Path(str(filename)).name
+        src_path = MEDIA_DIR / src_name
+        if not src_path.is_file():
+            return None
+        seconds = 0.0
+        try:
+            import subprocess
+            import json as _json
+
+            cmd = [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "json",
+                str(src_path),
+            ]
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if proc.returncode == 0:
+                data = _json.loads(proc.stdout or "{}")
+                dur = float(data.get("format", {}).get("duration", 0))
+                if dur and dur > 0:
+                    seconds = float(dur)
+        except Exception:
+            seconds = 0.0
+        if seconds <= 0:
+            try:
+                from pydub import AudioSegment as _AS
+
+                seg = _AS.from_file(src_path)
+                seconds = len(seg) / 1000.0
+            except Exception:
+                seconds = 0.0
+        if seconds <= 0:
+            return None
+        return max(1, int(ceil(seconds / 60.0)))
+    except Exception:
+        return None
 
 
 def assemble_or_queue(
@@ -66,6 +112,34 @@ def assemble_or_queue(
     en_input = episode_details.get("episodeNumber") or episode_details.get("episode_number")
     raw_tags = episode_details.get("tags")
     explicit_flag = bool(episode_details.get("explicit") or episode_details.get("is_explicit"))
+
+    # Enforce processing minutes quota (if enabled for the user's tier)
+    max_minutes = limits.get('max_processing_minutes_month')
+    estimated_minutes = _estimate_processing_minutes(main_content_filename)
+    if max_minutes is not None:
+        from datetime import datetime as _dt, timezone as _tz
+
+        now = _dt.now(_tz.utc)
+        start = _dt(now.year, now.month, 1, tzinfo=_tz.utc)
+        minutes_used = usage_svc.month_minutes_used(session, current_user.id, start, now)
+        minutes_remaining = max_minutes - minutes_used if minutes_used is not None else 0
+        needed = estimated_minutes or 1
+        if minutes_remaining < needed:
+            from fastapi import HTTPException
+
+            renewal = getattr(current_user, 'subscription_expires_at', None)
+            detail = {
+                "code": "INSUFFICIENT_MINUTES",
+                "minutes_required": int(needed),
+                "minutes_remaining": int(max(minutes_remaining, 0)),
+                "message": "Not enough processing minutes remain to assemble this episode.",
+            }
+            if renewal:
+                try:
+                    detail["renewal_date"] = renewal.isoformat()
+                except Exception:
+                    pass
+            raise HTTPException(status_code=402, detail=detail)
 
     # Admin test mode
     try:
@@ -223,30 +297,7 @@ def assemble_or_queue(
     if os.getenv("CELERY_EAGER", "").strip().lower() in {"1","true","yes","on"}:
         # EAGER path: charge immediately using source duration and inline correlation id
         try:
-            from pathlib import Path as _Path
-            src_name = _Path(str(main_content_filename)).name
-            src_path = MEDIA_DIR / src_name
-            seconds = 0.0
-            if src_path.is_file():
-                try:
-                    import subprocess, json as _json
-                    cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", str(src_path)]
-                    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-                    if proc.returncode == 0:
-                        data = _json.loads(proc.stdout or '{}')
-                        dur = float(data.get('format', {}).get('duration', 0))
-                        if dur and dur > 0:
-                            seconds = float(dur)
-                except Exception:
-                    pass
-                if seconds <= 0:
-                    try:
-                        from pydub import AudioSegment as _AS
-                        seg = _AS.from_file(src_path)
-                        seconds = len(seg) / 1000.0
-                    except Exception:
-                        seconds = 0.0
-            minutes = max(1, int(ceil(seconds / 60.0))) if seconds > 0 else 1
+            minutes = estimated_minutes or _estimate_processing_minutes(main_content_filename) or 1
             corr = f"inline:{str(ep.id)}:{int(time.time())}"
             usage_svc.post_debit(
                 session=session,
