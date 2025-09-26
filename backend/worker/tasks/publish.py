@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 from worker.tasks import celery_app
-from api.core.paths import WS_ROOT as PROJECT_ROOT
+from api.core.paths import WS_ROOT as PROJECT_ROOT, FINAL_DIR
 from api.core.database import get_session
 from api.core import crud
 from api.services.image_utils import ensure_cover_image_constraints
@@ -56,11 +56,11 @@ def publish_episode_to_spreaker_task(
 
 		desc = description or getattr(episode, "description", None) or getattr(episode, "show_notes", None) or ""
 
-		audio_path = str(episode.final_audio_path)
-		if audio_path and not os.path.isabs(audio_path):
-			candidate = (PROJECT_ROOT / 'final_episodes' / os.path.basename(audio_path)).resolve()
-			if candidate.is_file():
-				audio_path = str(candidate)
+                audio_path = str(episode.final_audio_path)
+                if audio_path and not os.path.isabs(audio_path):
+                        candidate = (FINAL_DIR / os.path.basename(audio_path)).resolve()
+                        if candidate.is_file():
+                                audio_path = str(candidate)
 		if not os.path.isfile(audio_path):
 			raise RuntimeError(f"Final audio file not found for publishing: {audio_path}")
 

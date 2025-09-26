@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Optional
 from sqlmodel import select
 from api.core.database import get_session
-from api.core.paths import WS_ROOT as PROJECT_ROOT
+from api.core.paths import WS_ROOT as PROJECT_ROOT, FINAL_DIR
 from api.core import crud
 from api.core.config import settings
 from api.services import audio_processor
@@ -844,7 +844,7 @@ def publish_episode_to_spreaker_task(
         # Audio path resolution
         audio_path = str(episode.final_audio_path)
         if audio_path and not os.path.isabs(audio_path):
-            candidate = (PROJECT_ROOT / 'final_episodes' / os.path.basename(audio_path)).resolve()
+            candidate = (FINAL_DIR / os.path.basename(audio_path)).resolve()
             if candidate.is_file():
                 audio_path = str(candidate)
         if not os.path.isfile(audio_path):
