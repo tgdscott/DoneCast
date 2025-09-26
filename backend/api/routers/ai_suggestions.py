@@ -38,6 +38,10 @@ except Exception:  # pragma: no cover
 router = APIRouter(prefix="/ai", tags=["ai"])
 _log = logging.getLogger(__name__)
 
+def _is_dev_env() -> bool:
+    val = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower()
+    return val in {"dev", "development", "local", "test", "testing"}
+
 
 def _discover_or_materialize_transcript(episode_id: Optional[str] = None) -> Optional[str]:
     try:
@@ -339,7 +343,7 @@ def post_title(request: Request, inp: SuggestTitleIn, session: Session = Depends
         raise HTTPException(status_code=mapped["status"], detail=mapped)
     except Exception as e:  # pragma: no cover - defensive catch
         _log.exception("[ai_title] unexpected error: %s", e)
-        if os.getenv("AI_STUB_MODE") == "1":
+        if os.getenv("AI_STUB_MODE") == "1" or _is_dev_env():
             return SuggestTitleOut(title="Stub Title (error fallback)")
         raise HTTPException(status_code=500, detail={"error":"AI_INTERNAL_ERROR"})
 
@@ -363,7 +367,7 @@ def post_notes(request: Request, inp: SuggestNotesIn, session: Session = Depends
         raise HTTPException(status_code=mapped["status"], detail=mapped)
     except Exception as e:  # pragma: no cover
         _log.exception("[ai_notes] unexpected error: %s", e)
-        if os.getenv("AI_STUB_MODE") == "1":
+        if os.getenv("AI_STUB_MODE") == "1" or _is_dev_env():
             return SuggestNotesOut(description="Stub Notes (error fallback)", bullets=["stub", "notes"])
         raise HTTPException(status_code=500, detail={"error":"AI_INTERNAL_ERROR"})
 
@@ -392,7 +396,7 @@ def post_tags(request: Request, inp: SuggestTagsIn, session: Session = Depends(g
         raise HTTPException(status_code=mapped["status"], detail=mapped)
     except Exception as e:  # pragma: no cover
         _log.exception("[ai_tags] unexpected error: %s", e)
-        if os.getenv("AI_STUB_MODE") == "1":
+        if os.getenv("AI_STUB_MODE") == "1" or _is_dev_env():
             return SuggestTagsOut(tags=["stub", "tags"])
         raise HTTPException(status_code=500, detail={"error":"AI_INTERNAL_ERROR"})
 

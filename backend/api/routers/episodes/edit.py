@@ -9,6 +9,7 @@ from api.core.auth import get_current_user
 from api.models.user import User
 from api.models.podcast import Episode
 from api.core.paths import FINAL_DIR
+from .common import _final_url_for
 from pathlib import Path
 
 log = logging.getLogger("ppp.episodes.edit")
@@ -33,6 +34,28 @@ async def get_edit_context(episode_id: str, session: Session = Depends(get_sessi
         raise HTTPException(status_code=404, detail="Episode not found")
 
     duration_ms = getattr(ep, 'duration_ms', None)
+    # Resolve playback URL similar to list endpoint: prefer remote stream if linked, else local final audio if present
+    playback_url = None
+    playback_type = 'none'
+    final_audio_exists = False
+    try:
+        fa = getattr(ep, 'final_audio_path', None)
+        if fa:
+            try:
+                candidate = (FINAL_DIR / Path(str(fa)).name).resolve()
+            except Exception:
+                candidate = FINAL_DIR / Path(str(fa)).name
+            if candidate.is_file():
+                final_audio_exists = True
+                playback_url = _final_url_for(fa)
+                playback_type = 'local'
+        if not playback_url:
+            spk_id = getattr(ep, 'spreaker_episode_id', None)
+            if spk_id:
+                playback_url = f"https://api.spreaker.com/v2/episodes/{spk_id}/play"
+                playback_type = 'stream'
+    except Exception:
+        pass
     transcript_segments = []  # placeholder: would load from transcript store
     existing_cuts = _CUT_STATE.get(str(ep.id), [])
     flubber_keyword = 'flubber'
@@ -45,15 +68,23 @@ async def get_edit_context(episode_id: str, session: Session = Depends(get_sessi
         "flubber_detected": flubber_detected,
         "transcript_segments": transcript_segments,
         "existing_cuts": existing_cuts,
+        "audio_url": playback_url,
+        "playback_type": playback_type,
+        "final_audio_exists": final_audio_exists,
     }
 
 @router.post("/{episode_id}/manual-edit/preview")
 async def manual_edit_preview(episode_id: str, payload: Dict[str, Any], session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
-    ep = session.execute(select(Episode).where(Episode.id == episode_id)).scalars().first()
+    # Normalize ID and enforce ownership
+    try:
+        from uuid import UUID as _UUID
+        eid = _UUID(str(episode_id))
+    except Exception:
+        raise HTTPException(status_code=404, detail="Episode not found")
+    ep = session.execute(select(Episode).where(Episode.id == eid, Episode.user_id == current_user.id)).scalars().first()
     if not ep:
         raise HTTPException(status_code=404, detail="Episode not found")
-    if not (current_user.is_admin or getattr(ep, 'user_id', None) == current_user.id):
-        raise HTTPException(status_code=403, detail="Forbidden")
+    # Ownership already enforced above
 
     cuts = payload.get('cuts') or []
     norm: List[Dict[str, int]] = []
@@ -89,14 +120,45 @@ async def manual_edit_preview(episode_id: str, payload: Dict[str, Any], session:
 
 @router.post("/{episode_id}/manual-edit/commit", status_code=status.HTTP_202_ACCEPTED)
 async def manual_edit_commit(episode_id: str, payload: Dict[str, Any], session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
-    ep = session.execute(select(Episode).where(Episode.id == episode_id)).scalars().first()
+    # Normalize ID and enforce ownership
+    try:
+        from uuid import UUID as _UUID
+        eid = _UUID(str(episode_id))
+    except Exception:
+        raise HTTPException(status_code=404, detail="Episode not found")
+    ep = session.execute(select(Episode).where(Episode.id == eid, Episode.user_id == current_user.id)).scalars().first()
     if not ep:
         raise HTTPException(status_code=404, detail="Episode not found")
-    if not (current_user.is_admin or getattr(ep, 'user_id', None) == current_user.id):
-        raise HTTPException(status_code=403, detail="Forbidden")
+    # Ownership already enforced above
 
     cuts = payload.get('cuts') or []
-    _CUT_STATE[str(ep.id)] = cuts  # store as-is for now
+    _CUT_STATE[str(ep.id)] = cuts  # store for reference
 
-    # For MVP we just acknowledge and pretend async job queued
-    return {"episode_id": str(ep.id), "status": "queued", "message": "Edit job accepted (MVP stub)."}
+    # Kick off background job to apply cuts
+    try:
+        from worker.tasks.audio import manual_cut_episode
+        async_mode = False
+        try:
+            # If Celery runs eagerly in dev, this returns result immediately
+            res = manual_cut_episode.delay(str(ep.id), cuts)
+            async_mode = True
+            try:
+                # Poll quickly for dev-eager
+                out = res.get(timeout=2)
+                if isinstance(out, dict) and out.get('ok'):
+                    # Refresh episode props
+                    session.refresh(ep)
+                    return {"episode_id": str(ep.id), "status": "done", "final_audio_path": getattr(ep, 'final_audio_path', None), "duration_ms": getattr(ep, 'duration_ms', None)}
+            except Exception:
+                pass
+        except Exception:
+            # Fallback: run inline (dev only)
+            out = manual_cut_episode(str(ep.id), cuts)
+            if isinstance(out, dict) and out.get('ok'):
+                session.refresh(ep)
+                # Clear stored UI cuts once applied
+                _CUT_STATE[str(ep.id)] = []
+                return {"episode_id": str(ep.id), "status": "done", "final_audio_path": getattr(ep, 'final_audio_path', None), "duration_ms": getattr(ep, 'duration_ms', None)}
+        return {"episode_id": str(ep.id), "status": "queued"}
+    except Exception as ex:
+        raise HTTPException(status_code=500, detail=f"cut job failed: {ex}")

@@ -26,6 +26,14 @@ def _stub_mode() -> bool:
     """
     return (os.getenv("AI_STUB_MODE") or "").strip() == "1"
 
+def _is_dev_env() -> bool:
+    """Return True if running in a local/dev/test environment.
+
+    We consider typical local setups where strict cloud auth shouldn't block UX.
+    """
+    val = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower()
+    return val in {"dev", "development", "local", "test", "testing"}
+
 def _get_model():
     """Return an initialized GenerativeModel or None (stub path).
 
@@ -120,8 +128,15 @@ def generate(content: str, **kwargs) -> str:
     if provider not in ("gemini", "vertex"):
         provider = "gemini"
     # Public Gemini path
-    model_name = getattr(settings, "GEMINI_MODEL", None) or "models/gemini-1.5-flash-latest"
     if provider == "gemini":
+        # Resolve model with GEMINI-specific inputs only to avoid cross-provider mixups.
+        model_name = (
+            os.getenv("GEMINI_MODEL")
+            or getattr(settings, "GEMINI_MODEL", None)
+            or "models/gemini-1.5-flash-latest"
+        )
+        if isinstance(model_name, str) and model_name.startswith("models/"):
+            model_name = model_name.split("/", 1)[1]
         if _stub_mode() and not getattr(settings, "GEMINI_API_KEY", None):
             # Avoid calling SDK at all
             return "Stub output (Gemini key missing)"
@@ -153,7 +168,7 @@ def generate(content: str, **kwargs) -> str:
             )
             return getattr(resp, "text", "") or ""
         except Exception as e:
-            # Common provider errors we may want to downgrade in stub mode
+            # Only downgrade to stub when explicit stub mode is enabled
             if _stub_mode():
                 return f"Stub output (exception: {type(e).__name__})"
             name = type(e).__name__
@@ -166,7 +181,7 @@ def generate(content: str, **kwargs) -> str:
         try:
             from google.cloud import aiplatform  # type: ignore
         except Exception as e:  # pragma: no cover
-            if _stub_mode():
+            if _stub_mode() or _is_dev_env():
                 return "Stub output (vertex import error)"
             raise RuntimeError("VERTEX_SDK_NOT_AVAILABLE") from e
         # Accept both VERTEX_PROJECT and legacy VERTEX_PROJECT_ID for convenience
@@ -179,7 +194,7 @@ def generate(content: str, **kwargs) -> str:
         location = os.getenv("VERTEX_LOCATION") or getattr(settings, "VERTEX_LOCATION", "us-central1")
         v_model = os.getenv("VERTEX_MODEL") or getattr(settings, "VERTEX_MODEL", None) or getattr(settings, "GEMINI_MODEL", None) or "gemini-1.5-flash"
         if not project:
-            if _stub_mode():
+            if _stub_mode() or _is_dev_env():
                 return "Stub output (vertex project missing)"
             raise RuntimeError("VERTEX_PROJECT_NOT_SET")
         try:
@@ -187,7 +202,7 @@ def generate(content: str, **kwargs) -> str:
         except Exception as e:
             # If the configured region doesn't support the model or Vertex GenAI,
             # fall back to the canonical region 'us-central1' to avoid hard failures.
-            if _stub_mode():
+            if _stub_mode() or _is_dev_env():
                 return "Stub output (vertex init error)"
             try:
                 if str(location) != "us-central1":
@@ -208,7 +223,7 @@ def generate(content: str, **kwargs) -> str:
                 preview_used = True
                 _log.warning("[vertex] Using deprecated preview GenerativeModel; update code to stable API before June 24 2026.")
         except Exception as e:
-            if _stub_mode():
+            if _stub_mode() or _is_dev_env():
                 return "Stub output (vertex model import error)"
             raise RuntimeError("VERTEX_MODEL_CLASS_UNAVAILABLE") from e
         try:
@@ -218,7 +233,8 @@ def generate(content: str, **kwargs) -> str:
             resp = model.generate_content(content)
             return getattr(resp, "text", "") or ""
         except Exception as e:
-            if _stub_mode():
+            if _stub_mode() or _is_dev_env():
+                # Specific auth guidance often appears in the error; keep it terse
                 return f"Stub output (vertex exception: {type(e).__name__})"
             name = type(e).__name__
             # If the region was not 'us-central1', attempt a one-time region fallback and retry once

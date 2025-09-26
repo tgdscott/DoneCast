@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { makeApi, isApiError } from '@/lib/apiClient';
+import WaveformEditor from './WaveformEditor';
 
 export default function ManualEditor({ episodeId, token, onClose }) {
   const [loading, setLoading] = useState(true);
@@ -8,6 +9,8 @@ export default function ManualEditor({ episodeId, token, onClose }) {
   const [cuts, setCuts] = useState([]); // [{start_ms,end_ms}]
   const [preview, setPreview] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [audioUrl, setAudioUrl] = useState('');
+  const waveRef = useRef(null);
 
   useEffect(() => {
     let live = true;
@@ -18,6 +21,7 @@ export default function ManualEditor({ episodeId, token, onClose }) {
         if (!live) return;
         setDuration(j?.duration_ms ?? null);
         setCuts(Array.isArray(j?.existing_cuts) ? j.existing_cuts : []);
+        setAudioUrl(j?.audio_url || '');
       } catch (e) {
         const msg = isApiError(e) ? (e.detail || e.error || e.message) : String(e);
         setErr(msg || 'Failed to load edit context');
@@ -28,29 +32,41 @@ export default function ManualEditor({ episodeId, token, onClose }) {
     return () => { live = false; };
   }, [episodeId, token]);
 
+  const toMs = (val) => {
+    if (val == null || val === '') return 0;
+    const s = String(val).trim();
+    if (/^\d+(?:\.\d+)?$/.test(s)) return Math.round(parseFloat(s) * 1000);
+    const m = /^(\d+):(\d{1,2})(?:\.(\d{1,3}))?$/.exec(s);
+    if (!m) return parseInt(s,10) || 0;
+    const min = parseInt(m[1],10);
+    const sec = parseInt(m[2],10);
+    const ms = m[3] ? parseInt(m[3].padEnd(3,'0'),10) : 0;
+    return min*60000 + sec*1000 + ms;
+  };
+  const toMMSS = (ms) => {
+    if (!isFinite(ms) || ms == null) return '';
+    const totalSec = Math.max(0, ms/1000);
+    const m = Math.floor(totalSec/60);
+    const s = Math.floor(totalSec % 60);
+    const hundredths = Math.floor((totalSec - Math.floor(totalSec)) * 100);
+    return `${m}:${String(s).padStart(2,'0')}.${String(hundredths).padStart(2,'0')}`;
+  };
   const addCut = () => setCuts(c => [...c, { start_ms: 0, end_ms: 0 }]);
-  const updateCut = (idx, key, val) => setCuts(c => c.map((x,i)=> i===idx ? { ...x, [key]: val } : x));
+  const updateCut = (idx, key, val) => setCuts(c => c.map((x,i)=> i===idx ? { ...x, [key]: key==='start_ms'||key==='end_ms' ? toMs(val) : val } : x));
   const removeCut = (idx) => setCuts(c => c.filter((_,i)=> i!==idx));
 
-  const generatePreview = async () => {
-    setErr(''); setPreview(null);
-    try {
-      const api = makeApi(token);
-      const j = await api.post(`/api/episodes/${episodeId}/manual-edit/preview`, { cuts });
-      setPreview(j);
-    } catch (e) {
-      const msg = isApiError(e) ? (e.detail || e.error || e.message) : String(e);
-      setErr(msg || 'Preview failed');
-    }
-  };
+  // Preview removed per user request
 
   const commitEdits = async () => {
     setSaving(true); setErr('');
     try {
       const api = makeApi(token);
-      await api.post(`/api/episodes/${episodeId}/manual-edit/commit`, { cuts });
+      const liveCuts = waveRef.current?.getCuts ? waveRef.current.getCuts() : cuts;
+      const resp = await api.post(`/api/episodes/${episodeId}/manual-edit/commit`, { cuts: liveCuts });
+      if (resp && typeof resp.duration_ms === 'number') { setDuration(resp.duration_ms); }
       onClose?.();
-      alert('Edit job queued (MVP).');
+      if (resp && resp.status === 'done') alert('Edits applied. A new final file has been saved.');
+      else alert('Edit job queued. The final file will update shortly.');
     } catch (e) {
       const msg = isApiError(e) ? (e.detail || e.error || e.message) : String(e);
       setErr(msg || 'Commit failed');
@@ -60,32 +76,42 @@ export default function ManualEditor({ episodeId, token, onClose }) {
   if (loading) return <div className="p-4 text-sm">Loading editor…</div>;
   return (
     <div className="p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold">Manual Editor</h3>
-        <button className="text-xs text-gray-500 hover:text-gray-800" onClick={onClose}>Close</button>
-      </div>
+      {/* Header is already shown by ManualEditorModal */}
   {err && <div className="text-xs text-red-600">{typeof err === 'string' ? err : (err.message || 'Error')}</div>}
-      <div className="text-xs text-gray-600">Duration: {duration ?? '—'} ms</div>
+  <div className="text-xs text-gray-600">Duration: {duration!=null ? (()=>{ const t=Math.floor(duration/1000); const h=Math.floor(t/3600); const m=Math.floor((t%3600)/60); const s=t%60; return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`; })() : '—'}</div>
+
+      {!!audioUrl && (
+        <div className="border rounded p-2">
+          <WaveformEditor
+            ref={waveRef}
+            audioUrl={audioUrl}
+            initialCuts={cuts}
+            onCutsChange={setCuts}
+            height={140}
+            zoomWindows={[15,30,60,120]}
+            onDuration={(ms)=>setDuration(ms)}
+          />
+        </div>
+      )}
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium">Cuts</div>
-          <button onClick={addCut} className="text-xs px-2 py-1 rounded border">+ Add Cut</button>
         </div>
         <div className="space-y-2">
           {cuts.map((c, idx) => (
             <div key={idx} className="grid grid-cols-12 gap-2 items-center">
-              <label className="col-span-3 text-xs text-gray-500">Start (ms)
-                <input type="number" className="mt-1 w-full border rounded px-2 py-1 text-sm" value={c.start_ms}
-                  onChange={e=>updateCut(idx,'start_ms', parseInt(e.target.value||'0',10))} />
+                <label className="col-span-3 text-xs text-gray-500">Start (mm:ss.ss)
+                  <input type="text" className="mt-1 w-full border rounded px-2 py-1 text-sm" value={toMMSS(c.start_ms)}
+                    onChange={e=>updateCut(idx,'start_ms', e.target.value)} />
               </label>
-              <label className="col-span-3 text-xs text-gray-500">End (ms)
-                <input type="number" className="mt-1 w-full border rounded px-2 py-1 text-sm" value={c.end_ms}
-                  onChange={e=>updateCut(idx,'end_ms', parseInt(e.target.value||'0',10))} />
+                <label className="col-span-3 text-xs text-gray-500">End (mm:ss.ss)
+                  <input type="text" className="mt-1 w-full border rounded px-2 py-1 text-sm" value={toMMSS(c.end_ms)}
+                    onChange={e=>updateCut(idx,'end_ms', e.target.value)} />
               </label>
-              <div className="col-span-3 text-xs text-gray-500">Length: {Math.max(0,(c.end_ms - c.start_ms) || 0)} ms</div>
+                <div className="col-span-3 text-xs text-gray-500">Length: {toMMSS(Math.max(0,(c.end_ms - c.start_ms) || 0))}</div>
               <div className="col-span-3 text-right">
-                <button onClick={()=>removeCut(idx)} className="text-xs px-2 py-1 rounded border">Remove</button>
+                  <button onClick={()=>removeCut(idx)} className="text-xs px-2 py-1 rounded border">Clear this Cut</button>
               </div>
             </div>
           ))}
@@ -93,16 +119,16 @@ export default function ManualEditor({ episodeId, token, onClose }) {
       </div>
 
       <div className="flex gap-2">
-        <button onClick={generatePreview} className="px-3 py-1 rounded bg-gray-800 text-white text-sm">Preview</button>
-        <button onClick={commitEdits} disabled={saving} className="px-3 py-1 rounded bg-blue-600 text-white text-sm disabled:opacity-50">{saving? 'Saving…':'Commit'}</button>
+        <button onClick={async ()=>{
+          const liveCuts = waveRef.current?.getCuts ? waveRef.current.getCuts() : cuts;
+          const n = Array.isArray(liveCuts) ? liveCuts.length : 0;
+          const plural = n === 1 ? 'this section' : 'these sections';
+          if(!window.confirm(`Are you sure you want to cut ${plural}? This action cannot be undone.`)) return;
+          await commitEdits();
+        }} disabled={saving} className="px-3 py-1 rounded bg-blue-600 text-white text-sm disabled:opacity-50">{saving? 'Saving…':'Commit'}</button>
       </div>
 
-      {preview && (
-        <div className="text-xs text-gray-700 border rounded p-2">
-          <div>New duration: {preview.new_duration_ms ?? '—'} ms</div>
-          <div className="text-gray-500">Preview contains {preview.cuts?.length || 0} cuts.</div>
-        </div>
-      )}
+      {/* Preview summary removed per user request */}
     </div>
   );
 }

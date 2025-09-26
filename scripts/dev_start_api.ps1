@@ -66,7 +66,9 @@ try {
           if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($token)) { $adcOk = $true }
         } catch { $adcOk = $false }
         if (-not $adcOk) {
-          if ($env:AUTO_GCLOUD_ADC -in @('1','true','yes','on')) {
+          if ($env:AI_STUB_MODE -in @('1','true','yes','on')) {
+            Write-Host "[dev_start_api] AI_STUB_MODE already set; skipping ADC login." -ForegroundColor Yellow
+          } elseif ($env:AUTO_GCLOUD_ADC_FORCE -in @('1','true','yes','on')) {
             Write-Host "[dev_start_api] No ADC found. Launching 'gcloud auth application-default login'..." -ForegroundColor Yellow
             try {
               & gcloud auth application-default login
@@ -87,6 +89,14 @@ try {
     }
     if ($adcOk) {
       Write-Host "[dev_start_api] Google ADC detected and ready."
+    } else {
+      # To keep local UX smooth for non-technical users, if GCP is configured
+      # but ADC isn't available, fall back to stub AI so /api/ai/* endpoints
+      # return friendly results instead of 401/reauth errors.
+      if (-not $env:AI_STUB_MODE) {
+        Write-Warning "[dev_start_api] No ADC found; enabling AI_STUB_MODE=1 for local AI stubs."
+        $env:AI_STUB_MODE = '1'
+      }
     }
   }
 
