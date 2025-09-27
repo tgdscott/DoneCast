@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -68,6 +69,7 @@ export default function AdminDashboard() {
   const [adminSettings, setAdminSettings] = useState(null);
   const [adminSettingsSaving, setAdminSettingsSaving] = useState(false);
   const [adminSettingsErr, setAdminSettingsErr] = useState(null);
+  const [maintenanceDraft, setMaintenanceDraft] = useState('');
 
   const toastApiError = (e, fallback='Request failed') => {
     const msg = (e && (e.detail || e.message)) || fallback;
@@ -104,6 +106,10 @@ export default function AdminDashboard() {
       .catch((e) => { if (!handleAdminForbidden(e)) setAdminSettings(null); });
   }, [token]);
 
+  useEffect(() => {
+    setMaintenanceDraft(adminSettings?.maintenance_message ?? '');
+  }, [adminSettings?.maintenance_message]);
+
   const saveAdminSettings = async (patch) => {
     if (!adminSettings) return;
     const next = { ...adminSettings, ...patch };
@@ -119,6 +125,19 @@ export default function AdminDashboard() {
     } finally {
       setAdminSettingsSaving(false);
     }
+  };
+
+  const maintenanceMessageChanged = maintenanceDraft !== (adminSettings?.maintenance_message ?? '');
+  const handleMaintenanceToggle = (checked) => {
+    saveAdminSettings({ maintenance_mode: !!checked });
+  };
+  const handleMaintenanceMessageSave = () => {
+    if (!maintenanceMessageChanged) return;
+    const trimmed = maintenanceDraft.trim();
+    saveAdminSettings({ maintenance_message: trimmed ? trimmed : null });
+  };
+  const handleMaintenanceMessageReset = () => {
+    setMaintenanceDraft(adminSettings?.maintenance_message ?? '');
   };
 
   const runSeed = () => {
@@ -150,7 +169,6 @@ export default function AdminDashboard() {
   const [settings, setSettings] = useState({
     aiShowNotes: true,
     guestAccess: false,
-    maintenanceMode: false,
     maxFileSize: "500",
     autoBackup: true,
     emailNotifications: true,
@@ -387,7 +405,7 @@ export default function AdminDashboard() {
             {seedResult && activeTab === 'dashboard' && (
               <div className="text-xs text-green-700 mt-2">Seeded podcast {seedResult.podcast_id.slice(0,8)} / template {seedResult.template_id.slice(0,8)}</div>
             )}
-            {settings.maintenanceMode && (
+            {adminSettings?.maintenance_mode && (
               <Card className="border-l-4 border-orange-500 bg-orange-50">
                 <CardContent className="p-4">
                   <div className="flex items-center">
@@ -395,14 +413,15 @@ export default function AdminDashboard() {
                     <div>
                       <p className="font-medium text-orange-800">Maintenance Mode Active</p>
                       <p className="text-sm text-orange-700">
-                        Platform is currently in maintenance mode. Users cannot access the service.
+                        {adminSettings?.maintenance_message || 'Platform is currently in maintenance mode. Users cannot access the service right now.'}
                       </p>
                     </div>
                     <Button
                       variant="outline"
                       size="sm"
                       className="ml-auto bg-transparent"
-                      onClick={() => setSettings({ ...settings, maintenanceMode: false })}>
+                      disabled={adminSettingsSaving}
+                      onClick={() => saveAdminSettings({ maintenance_mode: false })}>
                       Disable
                     </Button>
                   </div>
@@ -1299,14 +1318,43 @@ export default function AdminDashboard() {
                       <p className="text-sm text-gray-500 mt-1">Temporarily disable platform access for maintenance</p>
                     </div>
                     <div className="flex items-center space-x-2">
-                      {settings.maintenanceMode && <AlertTriangle className="w-5 h-5 text-orange-500" />}
+                      {adminSettings?.maintenance_mode && <AlertTriangle className="w-5 h-5 text-orange-500" />}
                       <Switch
                         aria-label="Maintenance mode"
-                        checked={settings.maintenanceMode}
-                        onCheckedChange={(checked) => setSettings({ ...settings, maintenanceMode: checked })} />
+                        checked={!!(adminSettings && adminSettings.maintenance_mode)}
+                        disabled={adminSettingsSaving || !adminSettings}
+                        onCheckedChange={handleMaintenanceToggle} />
                     </div>
                   </div>
 
+                  <div className="mt-3 space-y-2">
+                    <Label className="text-sm font-medium text-gray-700">Maintenance Message</Label>
+                    <Textarea
+                      value={maintenanceDraft}
+                      onChange={(e) => setMaintenanceDraft(e.target.value)}
+                      placeholder="Let your users know what's happening..."
+                      rows={3}
+                      disabled={adminSettingsSaving || !adminSettings}
+                    />
+                    <div className="flex items-center justify-between text-xs text-gray-500">
+                      {adminSettingsErr && <span className="text-red-500">{adminSettingsErr}</span>}
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleMaintenanceMessageReset}
+                          disabled={!maintenanceMessageChanged || adminSettingsSaving}>
+                          Reset
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={handleMaintenanceMessageSave}
+                          disabled={!maintenanceMessageChanged || adminSettingsSaving}>
+                          Save Message
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
                   <div className="flex items-center justify-between">
                     <div>
                       <Label className="text-base font-medium text-gray-700">Auto Backup</Label>

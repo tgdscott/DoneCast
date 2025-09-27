@@ -568,9 +568,21 @@ async def patch_user_prefs(payload: UserPrefsPatch, session: Session = Depends(g
 # --- Google OAuth Endpoints ---
 @router.get('/login/google')
 async def login_google(request: Request):
-    """Redirects the user to Google's login page."""
-    backend_base = settings.OAUTH_BACKEND_BASE or "https://api.podcastplusplus.com"
-    redirect_uri = f"{backend_base}/api/auth/google/callback"
+    """Redirects the user to Google's login page.
+
+    Important: Build redirect_uri from the incoming request host to ensure the
+    session cookie (holding OAuth state) and the callback land on the SAME
+    domain. Using an env var pointing to a different API domain can cause
+    "mismatching_state" errors because the session cookie won't be available
+    on the callback domain.
+    """
+    # Prefer dynamic callback URL from the actual host handling this request.
+    try:
+        redirect_uri = str(request.url_for('auth_google_callback'))
+    except Exception:
+        # Fallback to configured base (legacy behavior) if url_for isn't available.
+        backend_base = settings.OAUTH_BACKEND_BASE or "https://api.podcastplusplus.com"
+        redirect_uri = f"{backend_base.rstrip('/')}/api/auth/google/callback"
     try:
         oauth_client, _ = _build_oauth_client()
     except RuntimeError as exc:

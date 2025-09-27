@@ -10,6 +10,7 @@ from api.models.user import User
 from api.core.auth import get_current_user
 from api.core.paths import MEDIA_DIR
 from api.models.podcast import MediaItem, MediaCategory
+from sqlmodel import select
 import api.services.ai_enhancer as enhancer
 from api.services import tts_quota
 from api.services.billing import usage as billing_usage
@@ -155,6 +156,21 @@ async def create_tts_media(
     else:
         words = text.split()
         friendly_name = f"TTS – {' '.join(words[:6])}"
+
+    # Enforce unique friendly name per user (case-insensitive)
+    try:
+        rows = session.exec(
+            select(MediaItem.friendly_name).where(MediaItem.user_id == current_user.id)
+        ).all() or []
+        lower = { (r[0] if isinstance(r, tuple) else r) for r in rows }
+        lower = { str(x).strip().lower() for x in lower if x }
+        if friendly_name.strip().lower() in lower:
+            raise HTTPException(status_code=409, detail=f"A media item named '{friendly_name}' already exists. Please choose a different name.")
+    except HTTPException:
+        raise
+    except Exception:
+        # On unexpected error checking uniqueness, proceed without blocking
+        pass
 
     item = MediaItem(
         filename=filename,

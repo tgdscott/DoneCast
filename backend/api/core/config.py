@@ -2,6 +2,11 @@ from typing import Optional
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings
+from pydantic import Field
+try:
+    from pydantic import AliasChoices  # pydantic v2
+except Exception:  # pragma: no cover
+    AliasChoices = None  # type: ignore
 try:
     # pydantic-settings v2 preferred config style
     from pydantic_settings import SettingsConfigDict  # type: ignore
@@ -15,7 +20,14 @@ class Settings(BaseSettings):
     DB_NAME: str
     INSTANCE_CONNECTION_NAME: str
     SECRET_KEY: str = "dev-secret-key-change-me"  # Used for signing JWTs
-    SESSION_SECRET_KEY: str = "dev-session-secret-change-me"  # Used for signing session cookies
+    # Accept either SESSION_SECRET_KEY or legacy SESSION_SECRET from environment
+    SESSION_SECRET_KEY: str = (
+        Field(
+            default="dev-session-secret-change-me",
+            validation_alias=(AliasChoices("SESSION_SECRET_KEY", "SESSION_SECRET") if AliasChoices else None),
+            description="Used for signing session cookies",
+        )
+    )
 
     # --- Service API Keys ---
     GEMINI_API_KEY: str

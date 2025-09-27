@@ -7,6 +7,8 @@ import PodcastPlusDashboard from '@/components/dashboard.jsx'; // The regular us
 import Onboarding from '@/pages/Onboarding.jsx';
 import AdminDashboard from '@/components/admin-dashboard.jsx'; // The new admin dashboard
 import { useToast } from '@/hooks/use-toast';
+import { Button } from '@/components/ui/button';
+import { AlertTriangle } from 'lucide-react';
 import LandingPage from '@/components/landing-page.jsx';
 import Settings from '@/components/dashboard/Settings.jsx'; // Import the Settings component
 import ClosedAlphaGate from '@/components/ClosedAlphaGate.jsx';
@@ -21,7 +23,7 @@ import { useLayout } from '@/layout/LayoutContext.jsx';
 const isAdmin = (user) => !!(user && (user.is_admin || user.role === 'admin'));
 
 export default function App() {
-    const { isAuthenticated, token, login, logout, user, refreshUser, hydrated } = useAuth();
+    const { isAuthenticated, token, login, logout, user, refreshUser, hydrated, maintenanceInfo } = useAuth();
     const [isLoading, setIsLoading] = useState(true);
     const [postCheckout, setPostCheckout] = useState(false);
     const [postCheckoutStartedAt, setPostCheckoutStartedAt] = useState(null);
@@ -113,6 +115,21 @@ export default function App() {
     // --- Render decisions (after all hooks declared) ---
     const path = window.location.pathname;
     if (!hydrated) return <div className="flex items-center justify-center h-screen">Loading...</div>;
+    if (maintenanceInfo) {
+        const message = maintenanceInfo.message || maintenanceInfo.detail?.message || maintenanceInfo.detail?.detail || 'We are performing scheduled maintenance and will be back soon.';
+        return (
+            <div className="min-h-screen w-full flex flex-col items-center justify-center bg-slate-950 text-white px-6 text-center space-y-6">
+                <AlertTriangle className="w-14 h-14 text-amber-400" />
+                <div className="text-3xl font-semibold">We'll be right back</div>
+                <p className="max-w-md text-sm text-slate-200">{message}</p>
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                    <Button size="sm" onClick={() => refreshUser({ force: true })}>Try Again</Button>
+                    <Button size="sm" variant="outline" className="text-white border-white/40 hover:bg-white/10" onClick={logout}>Sign Out</Button>
+                </div>
+                <p className="text-xs text-slate-400 max-w-sm">Admins can still sign in to toggle maintenance mode off.</p>
+            </div>
+        );
+    }
     // If account is inactive, always show the closed alpha gate regardless of route
     if (user && user.is_active === false) {
         return <ClosedAlphaGate />;

@@ -119,7 +119,7 @@ class BackgroundMusicRule(SQLModel):
     end_offset_s: float = 0.0
     fade_in_s: float = 2.0
     fade_out_s: float = 3.0
-    volume_db: int = -15
+    volume_db: float = -15.0
 
 class SegmentTiming(SQLModel):
     # Defaults are zero (no overlap). Users can specify negative values to overlap.

@@ -936,11 +936,12 @@ def publish_episode_to_spreaker_task(
                 except Exception:
                     logging.warning('[publish] failed to enforce private via update', exc_info=True)
 
-            # Cover sync (both immediate and scheduled)
+            # Cover sync (both immediate and scheduled) with fallback update if missing
             try:
                 if isinstance(result, dict) and result.get('episode_id'):
                     ep_id = str(result['episode_id'])
                     ok_ep, ep_resp = client.get_episode(ep_id)
+                    remote_url = None
                     if ok_ep:
                         ep_obj = ep_resp.get('episode') or ep_resp
                         remote_url = (
@@ -948,19 +949,39 @@ def publish_episode_to_spreaker_task(
                             or ep_obj.get('image_original_url')
                             or ep_obj.get('image_large_url')
                         )
-                        if remote_url:
-                            if remote_url != getattr(episode, 'remote_cover_url', None):
-                                setattr(episode, 'remote_cover_url', remote_url)
-                            if episode.cover_path and not str(episode.cover_path).lower().startswith(('http://','https://')):
-                                local_path = (PROJECT_ROOT / 'media_uploads' / Path(episode.cover_path).name)
-                                if local_path.is_file():
-                                    try:
-                                        local_path.unlink()
-                                        episode.cover_path = remote_url
-                                    except Exception:
-                                        logging.warning(f"[publish] Failed to delete local cover {local_path}")
-                    else:
-                        logging.info(f"[publish] Remote episode fetch failed ok_ep={ok_ep}")
+                    # If Spreaker dropped the image on upload, try to update it afterward
+                    if not remote_url and image_file_path and os.path.isfile(image_file_path):
+                        try:
+                            ok_img, img_resp = client.update_episode_image(ep_id, image_file_path)
+                            logging.info(f"[publish] attempted episode image update ok={ok_img}")
+                            if not ok_img:
+                                try:
+                                    ok_upd_img, upd_img_resp = client.update_episode(ep_id, image_file=image_file_path, debug_try_all=True)
+                                    logging.info(f"[publish] fallback image update via update_episode ok={ok_upd_img}")
+                                except Exception:
+                                    logging.warning('[publish] secondary image update attempt failed', exc_info=True)
+                        except Exception:
+                            logging.warning('[publish] episode image update attempt error', exc_info=True)
+                        # Re-fetch to see if image landed
+                        ok_ep2, ep_resp2 = client.get_episode(ep_id)
+                        if ok_ep2:
+                            ep_obj = ep_resp2.get('episode') or ep_resp2
+                            remote_url = (
+                                ep_obj.get('image_url')
+                                or ep_obj.get('image_original_url')
+                                or ep_obj.get('image_large_url')
+                            )
+                    if remote_url:
+                        if remote_url != getattr(episode, 'remote_cover_url', None):
+                            setattr(episode, 'remote_cover_url', remote_url)
+                        if episode.cover_path and not str(episode.cover_path).lower().startswith(('http://','https://')):
+                            local_path = (PROJECT_ROOT / 'media_uploads' / Path(episode.cover_path).name)
+                            if local_path.is_file():
+                                try:
+                                    local_path.unlink()
+                                    episode.cover_path = remote_url
+                                except Exception:
+                                    logging.warning(f"[publish] Failed to delete local cover {local_path}")
                 else:
                     logging.debug('[publish] No episode_id in upload result; skip cover sync')
             except Exception:

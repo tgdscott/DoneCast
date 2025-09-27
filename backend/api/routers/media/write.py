@@ -21,7 +21,7 @@ from fastapi import (
 from sqlmodel import Session, select
 
 from api.core.paths import MEDIA_DIR
-from api.models.podcast import MediaItem, MediaCategory
+from api.models.podcast import MediaItem, MediaCategory, PodcastTemplate
 from api.models.user import User
 from api.core.database import get_session
 from api.core.auth import get_current_user
@@ -92,6 +92,23 @@ async def upload_media_files(
     created_items: List[MediaItem] = []
     names = parse_friendly_names(friendly_names)
 
+    # Enforce unique friendly_name per user (case-insensitive) to avoid accidental duplicates
+    # NOTE: Do NOT enforce for main_content uploads; duplicate names are allowed there.
+    # Preload existing names for the current user for fast checks
+    rows = session.exec(
+        select(MediaItem.friendly_name).where(MediaItem.user_id == current_user.id)
+    ).all() or []
+    existing_names_lower: set[str] = set()
+    for r in rows:
+        # r may be a 1-tuple or a bare value depending on driver
+        name_val = r[0] if isinstance(r, tuple) else r
+        if name_val:
+            try:
+                existing_names_lower.add(str(name_val).strip().lower())
+            except Exception:
+                pass
+    batch_names_lower: set[str] = set()
+
     MB = 1024 * 1024
     CATEGORY_SIZE_LIMITS = {
         MediaCategory.main_content: 500 * MB,
@@ -145,7 +162,7 @@ async def upload_media_files(
         original_filename = Path(file.filename).stem
         default_friendly_name = " ".join(original_filename.split("_")).title()
 
-        safe_orig = sanitize_name(file.filename)
+        safe_orig = sanitize_name(file.filename or "")
         # GCS object key: user_id/category/uuid4_safe_filename
         gcs_key = f"{current_user.id}/{category.value}/{uuid4().hex}_{safe_orig}"
 
@@ -209,11 +226,31 @@ async def upload_media_files(
                 buf.extend(chunk)
             gcs_uri = upload_bytes(bucket, gcs_key, bytes(buf), content_type)
 
+        # Determine proposed friendly name for this file
         friendly_name = names[i] if i < len(names) and str(names[i]).strip() else default_friendly_name
+        fn_norm = str(friendly_name).strip()
+        if not fn_norm:
+            fn_norm = default_friendly_name
+        fn_key = fn_norm.lower()
+        # Only enforce uniqueness for non-main_content categories
+        if category != MediaCategory.main_content:
+            # Check duplicate against existing library
+            if fn_key in existing_names_lower:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"A media item named '{fn_norm}' already exists. Please choose a different name.",
+                )
+            # Check duplicate within this batch
+            if fn_key in batch_names_lower:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Duplicate name in upload: '{fn_norm}'. Each uploaded item must have a unique name.",
+                )
+            batch_names_lower.add(fn_key)
 
         media_item = MediaItem(
             filename=gcs_uri,  # Store gs:// URI
-            friendly_name=str(friendly_name),
+            friendly_name=str(fn_norm),
             content_type=(file.content_type or None),
             filesize=(int(bytes_written) if isinstance(bytes_written, int) and bytes_written >= 0 else None),
             user_id=current_user.id,
@@ -267,7 +304,25 @@ def update_media_item_name(
         raise HTTPException(status_code=404, detail="Media item not found.")
 
     if media_update.friendly_name is not None:
-        media_item.friendly_name = media_update.friendly_name
+        new_name = (media_update.friendly_name or "").strip()
+        if not new_name:
+            raise HTTPException(status_code=400, detail="Name cannot be empty.")
+        # Enforce unique friendly_name (case-insensitive) for this user, excluding the current item
+        # Skip uniqueness for main_content category
+        try:
+            from api.models.podcast import MediaCategory as _MC
+            is_main = (media_item.category == _MC.main_content)
+        except Exception:
+            is_main = False
+        if not is_main:
+            rows = session.exec(
+                select(MediaItem.id, MediaItem.friendly_name)
+                .where(MediaItem.user_id == current_user.id)
+            ).all()
+            for (mid, fname) in rows:
+                if mid != media_id and fname and fname.strip().lower() == new_name.lower():
+                    raise HTTPException(status_code=409, detail=f"A media item named '{new_name}' already exists.")
+        media_item.friendly_name = new_name
     if media_update.trigger_keyword is not None:
         media_item.trigger_keyword = media_update.trigger_keyword.strip().lower() or None
 
@@ -291,6 +346,54 @@ def delete_media_item(
 
     if not media_item:
         raise HTTPException(status_code=404, detail="Media item not found or you don't have permission to delete it.")
+
+    # Prevent deletion if this media is referenced by any of the user's templates
+    try:
+        # Build a set of names that templates might reference
+        filename_full = str(media_item.filename or "")
+        # If gs://bucket/key, take the last component after '/'
+        filename_base = filename_full.rsplit('/', 1)[-1]
+        candidate_names = {filename_full, filename_base}
+
+        in_use_by: list[str] = []
+        tpls = session.exec(
+            select(PodcastTemplate).where(PodcastTemplate.user_id == current_user.id)
+        ).all()
+        for tpl in tpls:
+            ref = False
+            try:
+                segs = json.loads(getattr(tpl, 'segments_json', '[]') or '[]')
+                for s in segs or []:
+                    src = (s or {}).get('source') or {}
+                    if (src.get('source_type') == 'static'):
+                        fn = str(src.get('filename') or '')
+                        if fn and (fn in candidate_names or fn.rsplit('/', 1)[-1] in candidate_names):
+                            ref = True; break
+                if not ref:
+                    rules = json.loads(getattr(tpl, 'background_music_rules_json', '[]') or '[]')
+                    for r in rules or []:
+                        fn = str(r.get('music_filename') or '')
+                        if fn and (fn in candidate_names or fn.rsplit('/', 1)[-1] in candidate_names):
+                            ref = True; break
+            except Exception:
+                # If parsing fails, assume no reference and continue
+                ref = False
+            if ref:
+                name = getattr(tpl, 'name', None) or str(getattr(tpl, 'id', 'template'))
+                in_use_by.append(name)
+        if in_use_by:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "detail": "This media is used in one or more templates and cannot be deleted.",
+                    "templates": in_use_by,
+                },
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        # On error, be safe and block deletion rather than risk breaking templates
+        raise HTTPException(status_code=409, detail="Unable to verify template references; deletion blocked. Try again later.")
 
     # The filename can be a gs:// URI (prod) or a simple filename (local dev).
     # We need to handle both cases for deletion.

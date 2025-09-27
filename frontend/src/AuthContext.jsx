@@ -9,6 +9,7 @@ export const AuthProvider = ({ children }) => {
     });
     const [user, setUser] = useState(null);
     const [backendOnline, setBackendOnline] = useState(true);
+    const [maintenanceInfo, setMaintenanceInfo] = useState(null);
     const [hydrated, setHydrated] = useState(false); // whether we've successfully attempted to load /me
 
     const refreshInFlight = useRef(false);
@@ -31,11 +32,13 @@ export const AuthProvider = ({ children }) => {
 
     const login = (newToken) => {
         setToken(newToken);
+        setMaintenanceInfo(null);
     };
 
     const logout = () => {
         setToken(null);
         setUser(null);
+        setMaintenanceInfo(null);
         setHydrated(true);
     };
 
@@ -58,6 +61,7 @@ export const AuthProvider = ({ children }) => {
             const data = await api.get('/api/users/me');
             // data should be JSON user object
             setUser(data);
+            setMaintenanceInfo(null);
             setBackendOnline(true);
             errorCountRef.current = 0;
             backoffRef.current = 2000; // reset backoff
@@ -68,6 +72,15 @@ export const AuthProvider = ({ children }) => {
                 setUser(null);
                 setToken(null);
                 setHydrated(true);
+                return;
+            }
+            const maintenanceDetail = (err && typeof err.detail === 'object') ? err.detail : null;
+            if((maintenanceDetail && maintenanceDetail.maintenance) || (err && err.maintenance)) {
+                const message = maintenanceDetail?.message || maintenanceDetail?.detail || 'We are performing maintenance and will be back soon.';
+                setMaintenanceInfo({ message, detail: maintenanceDetail || {} });
+                setUser(null);
+                setHydrated(true);
+                setBackendOnline(true);
                 return;
             }
             // non-auth failures: mark backend offline and backoff
@@ -104,7 +117,7 @@ export const AuthProvider = ({ children }) => {
         return data;
     }, [token]);
 
-    const value = { token, user, login, logout, refreshUser, isAuthenticated: !!token, backendOnline, hydrated, acceptTerms };
+    const value = { token, user, login, logout, refreshUser, isAuthenticated: !!token, backendOnline, hydrated, acceptTerms, maintenanceInfo };
 
     return (
         <AuthContext.Provider value={value}>

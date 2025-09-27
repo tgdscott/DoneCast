@@ -397,8 +397,10 @@ class SpreakerClient:
         files = None
         fh = None
         if image_file and os.path.isfile(image_file):
+            ext = os.path.splitext(image_file)[1].lower()
+            mime = "image/png" if ext not in {".jpg", ".jpeg", ".webp"} else ("image/jpeg" if ext in {".jpg", ".jpeg"} else "image/webp")
             fh = open(image_file, "rb")
-            files = {"image_file": (os.path.basename(image_file), fh, "image/png")}
+            files = {"image_file": (os.path.basename(image_file), fh, mime)}
         # Env override for always-on debug attempt mode
         if not debug_try_all and os.getenv("SPREAKER_DEBUG_ALL") == "1":
             debug_try_all = True

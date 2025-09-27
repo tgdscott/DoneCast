@@ -7,6 +7,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
+try:
+    from starlette.middleware.proxy_headers import ProxyHeadersMiddleware  # type: ignore
+except Exception:  # pragma: no cover - older starlette
+    ProxyHeadersMiddleware = None  # type: ignore
 from starlette.requests import Request as StarletteRequest
 from starlette.staticfiles import StaticFiles
 
@@ -68,6 +72,12 @@ else:
 
 # --- Build App ---
 app = FastAPI(title="Podcast Pro Plus API")
+
+# Respect X-Forwarded-* headers from Cloud Run / reverse proxies so generated absolute
+# URLs (e.g., request.url_for in OAuth flows) use the correct https scheme and host.
+if ProxyHeadersMiddleware is not None:
+    # Use proxy headers if available so request.url_for reflects the external host/scheme
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
 
 # --- Pre-warm password hashing so first signup isn't slow ---
 try:

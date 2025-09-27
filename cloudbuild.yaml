@@ -4,6 +4,9 @@ options:
 substitutions:
   _REGION: us-west1
   _AR_REPO: cloud-run
+  # Optional override tag for additional tagging (e.g. set to $SHORT_SHA in a trigger).
+  # If left empty, only the immutable $BUILD_ID tag is used.
+  _TAG: ""
 
   # API
   _SERVICE: podcast-api
@@ -17,9 +20,9 @@ substitutions:
 
 images:
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:latest'
-  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$SHORT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$BUILD_ID'
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WEB_SERVICE}:latest'
-  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WEB_SERVICE}:$SHORT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WEB_SERVICE}:$BUILD_ID'
 
 steps:
   # ---------- API: build & push ----------
@@ -27,8 +30,18 @@ steps:
     args:
       [ 'build',
         '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:latest',
-        '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$SHORT_SHA',
+        '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$BUILD_ID',
         '.' ]
+  - name: gcr.io/cloud-builders/docker
+    id: api-push
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        set -eu
+        echo "==> Pushing API images"
+        docker push "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:latest"
+        docker push "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$BUILD_ID"
 
   # ---------- WEB: build & push ----------
   - name: gcr.io/cloud-builders/docker
@@ -41,8 +54,9 @@ steps:
       - |
         set -eu
         WEB_DIR='${_WEB_DIR}'
-  IMG_LATEST="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WEB_SERVICE}:latest"
-  IMG_SHA="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WEB_SERVICE}:$SHORT_SHA"
+        IMG_LATEST="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WEB_SERVICE}:latest"
+        IMG_ID="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WEB_SERVICE}:$BUILD_ID"
+        OPTIONAL_TAG='${_TAG}'
 
         echo "==> Verifying context at $${WEB_DIR}"
         ls -la "$${WEB_DIR}"
@@ -62,10 +76,15 @@ steps:
           --build-arg VITE_GOOGLE_CLIENT_ID="$${VGCID}" \
           --build-arg VITE_API_BASE="${_VITE_API_BASE}" \
           -t "$${IMG_LATEST}" \
-          -t "$${IMG_SHA}"
+          -t "$${IMG_ID}"
 
         docker push "$${IMG_LATEST}"
-        docker push "$${IMG_SHA}"
+        docker push "$${IMG_ID}"
+        if [ -n "$${OPTIONAL_TAG}" ]; then
+          EXTRA_TAG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WEB_SERVICE}:$${OPTIONAL_TAG}"
+          docker tag "$${IMG_ID}" "$${EXTRA_TAG}"
+          docker push "$${EXTRA_TAG}"
+        fi
 
   # ---------- API: deploy ----------
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
@@ -75,13 +94,19 @@ steps:
       - |
         set -euo pipefail
         CORS_ALLOWED='https://app.getpodcastplus.com;https://getpodcastplus.com;https://www.getpodcastplus.com'
-  # Deploy using the immutable SHA tag for provenance; keep 'latest' for quick roll-forward.
-  gcloud run deploy ${_SERVICE} --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$SHORT_SHA --region=${_REGION} --platform=managed --remove-env-vars=SECRET_KEY,GOOGLE_CLIENT_ID,DATABASE_URL,SESSION_SECRET_KEY,GEMINI_API_KEY,ELEVENLABS_API_KEY,ASSEMBLYAI_API_KEY,SPREAKER_API_TOKEN,SPREAKER_CLIENT_ID,SPREAKER_CLIENT_SECRET,GOOGLE_CLIENT_SECRET,STRIPE_SECRET_KEY,STRIPE_WEBHOOK_SECRET,DB_USER,DB_PASS,DB_NAME --update-env-vars="ADMIN_EMAIL=scott@scottgerhardt.com,MEDIA_ROOT=${_MEDIA_ROOT},OAUTH_BACKEND_BASE=https://api.getpodcastplus.com,CORS_ALLOWED_ORIGINS=$$CORS_ALLOWED,INSTANCE_CONNECTION_NAME=podcast612:us-west1:podcast-db" --update-secrets=DB_USER=DB_USER:latest,DB_PASS=DB_PASS:latest,DB_NAME=DB_NAME:latest,SECRET_KEY=SECRET_KEY:latest,SESSION_SECRET_KEY=SESSION_SECRET:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,ELEVENLABS_API_KEY=ELEVENLABS_API_KEY:latest,ASSEMBLYAI_API_KEY=ASSEMBLYAI_API_KEY:latest,SPREAKER_API_TOKEN=SPREAKER_API_TOKEN:latest,SPREAKER_CLIENT_ID=SPREAKER_CLIENT_ID:latest,SPREAKER_CLIENT_SECRET=SPREAKER_CLIENT_SECRET:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,STRIPE_SECRET_KEY=STRIPE_SECRET_KEY:latest,STRIPE_WEBHOOK_SECRET=STRIPE_WEBHOOK_SECRET:latest
+        # Deploy using the immutable BUILD_ID tag for provenance; keep 'latest' for quick roll-forward.
+        gcloud run deploy ${_SERVICE} \
+          --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$BUILD_ID \
+          --region=${_REGION} \
+          --platform=managed \
+          --remove-env-vars=SECRET_KEY,GOOGLE_CLIENT_ID,DATABASE_URL,SESSION_SECRET_KEY,GEMINI_API_KEY,ELEVENLABS_API_KEY,ASSEMBLYAI_API_KEY,SPREAKER_API_TOKEN,SPREAKER_CLIENT_ID,SPREAKER_CLIENT_SECRET,GOOGLE_CLIENT_SECRET,STRIPE_SECRET_KEY,STRIPE_WEBHOOK_SECRET,DB_USER,DB_PASS,DB_NAME \
+          --update-env-vars="ADMIN_EMAIL=scott@scottgerhardt.com,MEDIA_ROOT=${_MEDIA_ROOT},OAUTH_BACKEND_BASE=https://api.getpodcastplus.com,CORS_ALLOWED_ORIGINS=$$CORS_ALLOWED,INSTANCE_CONNECTION_NAME=podcast612:us-west1:podcast-db" \
+          --update-secrets=DB_USER=DB_USER:latest,DB_PASS=DB_PASS:latest,DB_NAME=DB_NAME:latest,SECRET_KEY=SECRET_KEY:latest,SESSION_SECRET_KEY=SESSION_SECRET:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,ELEVENLABS_API_KEY=ELEVENLABS_API_KEY:latest,ASSEMBLYAI_API_KEY=ASSEMBLYAI_API_KEY:latest,SPREAKER_API_TOKEN=SPREAKER_API_TOKEN:latest,SPREAKER_CLIENT_ID=SPREAKER_CLIENT_ID:latest,SPREAKER_CLIENT_SECRET=SPREAKER_CLIENT_SECRET:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,STRIPE_SECRET_KEY=STRIPE_SECRET_KEY:latest,STRIPE_WEBHOOK_SECRET=STRIPE_WEBHOOK_SECRET:latest
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     entrypoint: gcloud
     args:
       [ 'run', 'deploy', '${_WEB_SERVICE}',
-        '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WEB_SERVICE}:$SHORT_SHA',
+        '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WEB_SERVICE}:$BUILD_ID',
         '--region=${_REGION}',
         '--platform=managed',
         '--allow-unauthenticated' ]

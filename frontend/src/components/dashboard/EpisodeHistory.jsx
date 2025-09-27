@@ -280,7 +280,7 @@ export default function EpisodeHistory({ token, onBack }) {
               try {
                 const blob = await cropperRef.current.getProcessedBlob();
                 if(blob){
-                  fileToSend = new File([blob], editValues.cover_file.name.replace(/\.[^.]+$/,'')+"-square.png", { type:'image/png' });
+                  fileToSend = new File([blob], editValues.cover_file.name.replace(/\.[^.]+$/,'')+"-square.jpg", { type:'image/jpeg' });
                 }
                 if(cropperRef.current.getMode && cropperRef.current.getMode()==='pad' && body.image_crop){
                   delete body.image_crop; // pad mode keeps full image
