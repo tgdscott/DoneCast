@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import Joyride, { EVENTS, STATUS } from "react-joyride";
 import TemplateAIContent from "./TemplateAIContent";
-import TemplateRecurringScheduleSection from "./TemplateRecurringScheduleSection.jsx";
+import RecurringScheduleManager from "./RecurringScheduleManager.jsx";
 import {
     Plus,
   Save,
@@ -712,7 +712,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                         </div>
                 </CardContent></Card>
 
-                <TemplateRecurringScheduleSection
+                <RecurringScheduleManager
                     token={token}
                     templateId={template?.id ?? templateId}
                     userTimezone={authUser?.timezone || null}

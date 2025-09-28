@@ -76,7 +76,7 @@ function getTimezoneOptions() {
   return FALLBACK_TIMEZONES;
 }
 
-export default function TemplateRecurringScheduleSection({
+export default function RecurringScheduleManager({
   token,
   templateId,
   userTimezone,
