@@ -2,6 +2,8 @@ from datetime import datetime, time
 from typing import Optional
 from uuid import UUID, uuid4
 
+from sqlalchemy import Column, ForeignKey
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlmodel import Field, SQLModel
 
 
@@ -12,13 +14,19 @@ class RecurringScheduleBase(SQLModel):
 
     time_of_day: time
     template_id: UUID = Field(
-        foreign_key="podcasttemplate.id",
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            PGUUID(as_uuid=True),
+            ForeignKey("podcasttemplate.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
     )
     podcast_id: Optional[UUID] = Field(
         default=None,
-        foreign_key="podcast.id",
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            PGUUID(as_uuid=True),
+            ForeignKey("podcast.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
     )
     title_prefix: Optional[str] = None
     description_prefix: Optional[str] = None
@@ -71,3 +79,4 @@ class RecurringScheduleCreate(SQLModel):
     next_scheduled_date: Optional[str] = None  # YYYY-MM-DD in user's timezone
     next_scheduled_time: Optional[str] = None  # HH:MM in user's timezone
     timezone: Optional[str] = None
+
