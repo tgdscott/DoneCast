@@ -13,3 +13,11 @@ DB_POOL_SIZE: "10"
 DB_MAX_OVERFLOW: "5"
 DB_POOL_RECYCLE: "300"
 DB_POOL_TIMEOUT: "15"
+TASKS_LOCATION: "us-west1"
+TASKS_QUEUE: "ppp-queue"
+# TASKS_URL_BASE must match the external URL the task will post to (the API base)
+TASKS_URL_BASE: "https://api.podcastplusplus.com"
+# Shared secret for tasks -> API authentication
+TASKS_AUTH: "a-secure-local-secret"
+# Increase GCS resumable upload chunk size for better throughput
+GCS_CHUNK_MB: "32"

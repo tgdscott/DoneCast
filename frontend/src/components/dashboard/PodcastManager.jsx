@@ -446,7 +446,7 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
       <div className="text-center py-10">
     <p className="mb-4">You haven't created any podcasts yet.</p>
         <Button onClick={openWizard}>
-          <Plus className="w-4 h-4 mr-2" /> {fullPageOnboarding ? 'Get started' : 'Create Your First Show'}
+          <Icons.Plus className="w-4 h-4 mr-2" /> {fullPageOnboarding ? 'Get started' : 'Create Your First Show'}
         </Button>
       </div>
           )}

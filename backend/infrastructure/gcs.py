@@ -59,7 +59,7 @@ def upload_bytes(bucket: str, key: str, data: bytes, content_type: str) -> str:
     blob.upload_from_string(data, content_type=content_type)
     return f"gs://{bucket}/{key}"
 
-def upload_fileobj(bucket: str, key: str, fileobj: BinaryIO, *, size: Optional[int] = None, content_type: str = "application/octet-stream", chunk_mb: int = 8) -> str:
+def upload_fileobj(bucket: str, key: str, fileobj: BinaryIO, *, size: Optional[int] = None, content_type: str = "application/octet-stream", chunk_mb: int | None = None) -> str:
     """Upload from a file-like object to GCS using a resumable upload.
 
     - Does not buffer the whole content in memory
@@ -75,7 +75,12 @@ def upload_fileobj(bucket: str, key: str, fileobj: BinaryIO, *, size: Optional[i
     b = _client.bucket(bucket)
     blob = b.blob(key)
     # Use a larger chunk size to improve throughput on large uploads
-    # Must be a multiple of 256KB; 8MB is a good default.
+    # Must be a multiple of 256KB. Default to env GCS_CHUNK_MB or 32MB.
+    if chunk_mb is None:
+        try:
+            chunk_mb = int(os.getenv("GCS_CHUNK_MB", "32"))
+        except Exception:
+            chunk_mb = 32
     try:
         blob.chunk_size = max(256 * 1024, int(chunk_mb) * 1024 * 1024)
     except Exception:

@@ -202,11 +202,27 @@ async def upload_media_files(
             try:
                 if raw_f is None or not hasattr(raw_f, "read"):
                     raise RuntimeError("no file object; fallback path")
-                uri = upload_fileobj(bucket_name, object_key, raw_f, size=file_size, content_type=content_type, chunk_mb=8)
+                import time
+                t0 = time.time()
+                # Allow tuning via env var GCS_CHUNK_MB
+                chunk_mb_env = os.getenv("GCS_CHUNK_MB")
+                chunk_mb_val = int(chunk_mb_env) if chunk_mb_env and chunk_mb_env.isdigit() else None
+                uri = upload_fileobj(bucket_name, object_key, raw_f, size=file_size, content_type=content_type, chunk_mb=chunk_mb_val)
+                dt = max(0.0001, time.time() - t0)
                 written = file_size if file_size is not None else None
+                try:
+                    mb = (written or 0) / (1024*1024)
+                    logging.info(
+                        "event=upload.stream_ok path=%s bucket=%s key=%s bytes=%s seconds=%.3f mbps=%.2f chunk_mb=%s dev_local=%s",
+                        uri, bucket_name, object_key, (written or -1), dt, (mb*8.0/dt if dt>0 else 0.0), os.getenv("GCS_CHUNK_MB"), str(os.getenv("APP_ENV")).lower().startswith("dev")
+                    )
+                except Exception:
+                    pass
                 return uri, written
             except Exception:
                 # Fallback: buffer and upload as bytes (with size enforcement)
+                import time
+                t0 = time.time()
                 written = 0
                 buf = bytearray()
                 while True:
@@ -225,6 +241,15 @@ async def upload_media_files(
                         raise HTTPException(status_code=413, detail="File too large.")
                     buf.extend(chunk)
                 uri = upload_bytes(bucket_name, object_key, bytes(buf), content_type)
+                dt = max(0.0001, time.time() - t0)
+                try:
+                    mb = (written or 0) / (1024*1024)
+                    logging.info(
+                        "event=upload.buffer_ok path=%s bucket=%s key=%s bytes=%s seconds=%.3f mbps=%.2f dev_local=%s",
+                        uri, bucket_name, object_key, (written or -1), dt, (mb*8.0/dt if dt>0 else 0.0), str(os.getenv("APP_ENV")).lower().startswith("dev")
+                    )
+                except Exception:
+                    pass
                 return uri, written
 
         # If an item with the same friendly name already exists for this user/category, overwrite its file and return it
@@ -326,7 +351,9 @@ async def upload_media_files(
             # Kick transcription (best-effort)
             try:
                 if category == MediaCategory.main_content:
-                    logging.info("event=upload.enqueue attempt=true filename=%s", media_item.filename)
+                    logging.info("event=upload.enqueue attempt=true filename=%s cfg_project=%s cfg_loc=%s cfg_queue=%s cfg_base=%s dev=%s",
+                                 media_item.filename,
+                                 os.getenv("GOOGLE_CLOUD_PROJECT"), os.getenv("TASKS_LOCATION"), os.getenv("TASKS_QUEUE"), os.getenv("TASKS_URL_BASE"), _is_dev_env())
                     task = enqueue_http_task("/api/tasks/transcribe", {"filename": media_item.filename})
                     logging.info("event=upload.enqueue ok=true filename=%s task_name=%s", media_item.filename, task.get("name"))
             except Exception as enqueue_err:
@@ -335,7 +362,7 @@ async def upload_media_files(
                     "event=upload.enqueue ok=false filename=%s err=%s hint=%s",
                     media_item.filename,
                     enqueue_err,
-                    "Check Cloud Tasks config (GOOGLE_CLOUD_PROJECT, TASKS_LOCATION, TASKS_QUEUE, TASKS_URL_BASE) or dev fallback",
+                    f"Check Cloud Tasks config GOOGLE_CLOUD_PROJECT={os.getenv('GOOGLE_CLOUD_PROJECT')} TASKS_LOCATION={os.getenv('TASKS_LOCATION')} TASKS_QUEUE={os.getenv('TASKS_QUEUE')} TASKS_URL_BASE={os.getenv('TASKS_URL_BASE')} (dev={_is_dev_env()})",
                 )
 
             # Structured log: upload.receive

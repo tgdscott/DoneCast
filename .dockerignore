@@ -24,6 +24,7 @@ htmlcov/
 # Keep bulky local-only dirs out of image layers; runtime mounts or stores them elsewhere
 assembly_logs
 cleaned_audio
+docs
 edited_audio
 final_episodes
 media_uploads
@@ -44,3 +45,8 @@ frontend/dist/
 
 # Backup Dockerfiles
 Dockerfile.bak*
+
+# Other Files to ignore
+database.db
+cloud-sql-proxy.exe
+
