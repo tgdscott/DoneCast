@@ -89,7 +89,15 @@ def run_assemblyai_job(audio_path: Path, cfg: RunnerCfg, log: List[str]) -> Norm
     if not audio_path.exists():
         raise AssemblyAITranscriptionError(f"Audio file not found: {audio_path.name}")
     http = get_http_session()
+    try:
+        logging.info("[assemblyai] upload start file=%s size=%s", audio_path.name, audio_path.stat().st_size)
+    except Exception:
+        pass
     upload_url = upload_audio(audio_path, api_key=api_key, base_url=base_url, log=log, session=http)
+    try:
+        logging.info("[assemblyai] upload done url=%s", str(upload_url)[:64] + ("..." if len(str(upload_url)) > 64 else ""))
+    except Exception:
+        pass
     _upload_url_str = cast(str, upload_url)
     if use_webhook:
         params.setdefault("webhook_url", webhook_url)
@@ -98,6 +106,7 @@ def run_assemblyai_job(audio_path: Path, cfg: RunnerCfg, log: List[str]) -> Norm
             params.setdefault("webhook_auth_header_value", webhook_header_value)
         if webhook_events:
             params.setdefault("webhook_events", webhook_events)
+    logging.info("[assemblyai] create transcript request")
     create_json = start_transcription(_upload_url_str, api_key=api_key, params=params, base_url=base_url, log=log)
     transcript_id = create_json.get("id")
     if not transcript_id:
@@ -133,6 +142,10 @@ def run_assemblyai_job(audio_path: Path, cfg: RunnerCfg, log: List[str]) -> Norm
     while True:
         data = get_transcription(transcript_id, api_key=api_key, base_url=base_url, log=log, session=http)
         status = data.get("status")
+        try:
+            logging.info("[assemblyai] poll status=%s id=%s", status, transcript_id)
+        except Exception:
+            pass
         if status == "completed":
             return _normalize_completed_transcript(data)
         if status == "error":

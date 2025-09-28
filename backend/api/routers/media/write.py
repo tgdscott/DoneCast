@@ -77,7 +77,7 @@ def parse_friendly_names(raw: str | None) -> list[str]:
 @router.post("/upload/{category}", response_model=List[MediaItem], status_code=status.HTTP_201_CREATED)
 @(_limiter.limit("30/hour") if _limiter and hasattr(_limiter, "limit") else (lambda f: f))
 async def upload_media_files(
-    request: Request,                              # <-- required so SlowAPI can see "request"
+    request: Request,                              # required so SlowAPI can see "request"
     category: MediaCategory,
     files: List[UploadFile] = File(...),
     friendly_names: Optional[str] = Form(None),
@@ -91,6 +91,8 @@ async def upload_media_files(
     - For main_content, assigns expires_at and fires async transcription task
     """
     created_items: List[MediaItem] = []
+    # Track gs:// objects created in this request so we can delete them on DB failure
+    uploaded_objects: list[tuple[str, str]] = []  # (bucket, key)
     names = parse_friendly_names(friendly_names)
 
     # Track duplicates within this request batch
@@ -192,6 +194,7 @@ async def upload_media_files(
             pass
         if file_size is not None and file_size > max_bytes:
             raise HTTPException(status_code=413, detail="File too large.")
+
         # Helper to stream upload to a specific bucket/key
         async def _upload_to(bucket_name: str, object_key: str):
             nonlocal file_size
@@ -235,100 +238,129 @@ async def upload_media_files(
         ).first()
 
         if existing_item is not None:
-                # Parse target bucket/key from existing filename if gs://, else use default bucket and existing filename as key
-                target_bucket = default_bucket
-                target_key = str(existing_item.filename or "").strip()
-                if target_key.startswith("gs://"):
-                    try:
-                        # gs://bucket/key...
-                        without = target_key[len("gs://"):]
-                        bname, _, kpart = without.partition("/")
-                        if bname and kpart:
-                            target_bucket, target_key = bname, kpart
-                    except Exception:
-                        # Fall back to default bucket and original key sans prefix
-                        try:
-                            target_key = target_key.split("/", 3)[-1]
-                        except Exception:
-                            target_key = Path(file.filename or "").name
-
-                uri, written = await _upload_to(target_bucket, target_key)
-
-                # Normalize filename to whatever form was already stored (do not force gs:// if legacy value)
-                existing_item.content_type = (file.content_type or None)
+            # Parse target bucket/key from existing filename if gs://, else use default bucket and existing filename as key
+            target_bucket = default_bucket
+            target_key = str(existing_item.filename or "").strip()
+            if target_key.startswith("gs://"):
                 try:
-                    existing_item.filesize = int(written) if isinstance(written, int) and written >= 0 else None
+                    # gs://bucket/key...
+                    without = target_key[len("gs://"):]
+                    bname, _, kpart = without.partition("/")
+                    if bname and kpart:
+                        target_bucket, target_key = bname, kpart
                 except Exception:
-                    existing_item.filesize = None
-                # Keep friendly_name and category unchanged
-                session.add(existing_item)
-                session.commit()
-                session.refresh(existing_item)
-                created_items.append(existing_item)
-                batch_names_lower.add(fn_key)
-                # Structured log: overwrite
-                try:
-                    logging.info(
-                        "event=upload.overwrite user_id=%s category=%s name=%s key=%s",
-                        current_user.id, category.value, fn_norm, target_key
+                    # Fall back to default bucket and original key sans prefix
+                    try:
+                        target_key = target_key.split("/", 3)[-1]
+                    except Exception:
+                        target_key = Path(file.filename or "").name
+
+            uri, written = await _upload_to(target_bucket, target_key)
+
+            # Normalize filename to whatever form was already stored (do not force gs:// if legacy value)
+            existing_item.content_type = (file.content_type or None)
+            try:
+                existing_item.filesize = int(written) if isinstance(written, int) and written >= 0 else None
+            except Exception:
+                existing_item.filesize = None
+            # Keep friendly_name and category unchanged
+            session.add(existing_item)
+            session.commit()
+            session.refresh(existing_item)
+            created_items.append(existing_item)
+            batch_names_lower.add(fn_key)
+            # Structured log: overwrite
+            try:
+                logging.info(
+                    "event=upload.overwrite user_id=%s category=%s name=%s key=%s",
+                    current_user.id, category.value, fn_norm, target_key
+                )
+            except Exception:
+                pass
+        else:
+            # No existing item with this name. For enforced categories, block duplicates within the same request batch
+            if category in ENFORCE_UNIQUE:
+                if fn_key in batch_names_lower:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Duplicate name in upload: '{fn_norm}'. Each uploaded item must have a unique name.",
                     )
+                batch_names_lower.add(fn_key)
+
+            # No overwrite case -> upload to a fresh object path and create a new media item
+            safe_orig = sanitize_name(file.filename or "")
+            gcs_key = f"{current_user.id}/{category.value}/{uuid4().hex}_{safe_orig}"
+            uri, written = await _upload_to(default_bucket, gcs_key)
+            # Remember this object so we can clean it up if DB commit fails
+            try:
+                if uri.startswith("gs://"):
+                    path_part = uri[5:]
+                    bname, _, kpart = path_part.partition('/')
+                    if bname and kpart:
+                        uploaded_objects.append((bname, kpart))
+            except Exception:
+                pass
+
+            media_item = MediaItem(
+                filename=uri,  # Store gs:// URI when available
+                friendly_name=str(fn_norm),
+                content_type=(file.content_type or None),
+                filesize=(int(written) if isinstance(written, int) and written >= 0 else None),
+                user_id=current_user.id,
+                category=category,
+            )
+
+            # Assign expires_at for raw uploads (main_content): 2am PT +14 days rule
+            try:
+                if category == MediaCategory.main_content:
+                    from api.main import _compute_pt_expiry  # type: ignore
+                    now_utc = datetime.utcnow()
+                    media_item.expires_at = _compute_pt_expiry(now_utc)
+            except Exception:
+                # don't fail upload if expiry calc wiring changes
+                pass
+
+            session.add(media_item)
+            created_items.append(media_item)
+
+            # Kick transcription (best-effort)
+            try:
+                if category == MediaCategory.main_content:
+                    logging.info("event=upload.enqueue attempt=true filename=%s", media_item.filename)
+                    task = enqueue_http_task("/api/tasks/transcribe", {"filename": media_item.filename})
+                    logging.info("event=upload.enqueue ok=true filename=%s task_name=%s", media_item.filename, task.get("name"))
+            except Exception as enqueue_err:
+                # background task is best-effort; never fail the upload, but do log why it's not enqueued
+                logging.warning(
+                    "event=upload.enqueue ok=false filename=%s err=%s hint=%s",
+                    media_item.filename,
+                    enqueue_err,
+                    "Check Cloud Tasks config (GOOGLE_CLOUD_PROJECT, TASKS_LOCATION, TASKS_QUEUE, TASKS_URL_BASE) or dev fallback",
+                )
+
+            # Structured log: upload.receive
+            logging.info(
+                "event=upload.receive user_id=%s category=%s filename=%s size=%d content_type=%s",
+                current_user.id, category.value, file.filename, media_item.filesize or -1, file.content_type or ""
+            )
+
+    # Commit all rows; on failure, delete any newly uploaded objects to avoid orphans
+    try:
+        session.commit()
+    except Exception as db_err:
+        try:
+            for (b, k) in uploaded_objects:
+                try:
+                    delete_blob(b, k)
                 except Exception:
                     pass
-                # Done with this file (we overwrote existing item)
-                continue
-
-        # No existing item with this name. For enforced categories, block duplicates within the same request batch
-        if category in ENFORCE_UNIQUE:
-            if fn_key in batch_names_lower:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Duplicate name in upload: '{fn_norm}'. Each uploaded item must have a unique name.",
-                )
-            batch_names_lower.add(fn_key)
-
-        # No overwrite case -> upload to a fresh object path and create a new media item
-        safe_orig = sanitize_name(file.filename or "")
-        gcs_key = f"{current_user.id}/{category.value}/{uuid4().hex}_{safe_orig}"
-        uri, written = await _upload_to(default_bucket, gcs_key)
-
-        media_item = MediaItem(
-            filename=uri,  # Store gs:// URI when available
-            friendly_name=str(fn_norm),
-            content_type=(file.content_type or None),
-            filesize=(int(written) if isinstance(written, int) and written >= 0 else None),
-            user_id=current_user.id,
-            category=category,
-        )
-
-        # Assign expires_at for raw uploads (main_content): 2am PT +14 days rule
-        try:
-            if category == MediaCategory.main_content:
-                from api.main import _compute_pt_expiry  # type: ignore
-                now_utc = datetime.utcnow()
-                media_item.expires_at = _compute_pt_expiry(now_utc)
-        except Exception:
-            # don't fail upload if expiry calc wiring changes
-            pass
-
-        session.add(media_item)
-        created_items.append(media_item)
-
-        # Kick transcription (best-effort)
-        try:
-            if category == MediaCategory.main_content:
-                task = enqueue_http_task("/api/tasks/transcribe", {"filename": media_item.filename})
-                logging.info("event=upload.enqueue ok=true filename=%s task_name=%s", media_item.filename, task.get("name"))
-        except Exception:
-            # background task is best-effort; never fail the upload
-            pass
-
-        # Structured log: upload.receive
-        logging.info(
-            "event=upload.receive user_id=%s category=%s filename=%s size=%d content_type=%s",
-            current_user.id, category.value, file.filename, media_item.filesize or -1, file.content_type or ""
-        )
-
-    session.commit()
+        finally:
+            try:
+                session.rollback()
+            except Exception:
+                pass
+        logging.error("event=upload.db_commit_failed err=%s items=%d", db_err, len(created_items))
+        raise HTTPException(status_code=500, detail="Upload failed while saving to the database. Please retry.")
     for item in created_items:
         session.refresh(item)
 

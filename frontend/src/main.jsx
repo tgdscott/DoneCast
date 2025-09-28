@@ -20,6 +20,13 @@ import { LayoutProvider } from './layout/LayoutContext.jsx';
 import './index.css' // <-- This line imports all the styles
 import { assetUrl } from './lib/apiClient';
 
+// In development, tag the root element so CSS can show a clear DEV theme/badge
+try {
+  if (import.meta?.env?.DEV && typeof document !== 'undefined') {
+    document.documentElement.classList.add('env-dev');
+  }
+} catch {}
+
 // Runtime safeguard: some code (or older bundles) may call fetch('/api/...') expecting
 // the API to be on a separate origin. If VITE_API_BASE is configured we should ensure
 // these relative calls get routed to the API host rather than the SPA origin which

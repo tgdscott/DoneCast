@@ -8,6 +8,7 @@ import re
 import logging
 
 from ..core.config import settings
+from urllib.parse import urlparse
 
 logger = logging.getLogger("security_headers")
 
@@ -106,12 +107,34 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         # Ensure CORS responses have explicit origin when credentials are required.
+        # Some proxies (or certain browser flows) may omit or strip the Origin header.
+        # As a resilient fallback, derive the origin from the Referer header when safe.
         allowed_origins = settings.cors_allowed_origin_list
         origin = request.headers.get('origin')
-        if origin and origin in allowed_origins:
-            response.headers['Access-Control-Allow-Origin'] = origin
+
+        effective_origin = origin
+        if not effective_origin:
+            # Attempt to parse scheme://host[:port] from Referer
+            ref = request.headers.get('referer') or request.headers.get('referrer')
+            if ref:
+                try:
+                    parsed = urlparse(ref)
+                    if parsed.scheme and parsed.netloc:
+                        # Reconstruct origin (scheme://host[:port])
+                        effective_origin = f"{parsed.scheme}://{parsed.netloc}"
+                except Exception:
+                    effective_origin = None  # keep fallback silent
+
+        if effective_origin and effective_origin in allowed_origins:
+            response.headers['Access-Control-Allow-Origin'] = effective_origin
             response.headers.setdefault('Access-Control-Allow-Credentials', 'true')
-            response.headers.setdefault('Vary', 'Origin')
+            # Vary on both Origin and Referer since either may influence the header
+            existing_vary = response.headers.get('Vary')
+            vary_values = [] if not existing_vary else [v.strip() for v in existing_vary.split(',') if v.strip()]
+            for v in ("Origin", "Referer"):
+                if v not in vary_values:
+                    vary_values.append(v)
+            response.headers['Vary'] = ", ".join(vary_values)
         response.headers.setdefault("Permissions-Policy", "camera=(), microphone=()")
         # HSTS header expected by tests
         response.headers.setdefault("Strict-Transport-Security", "max-age=15552000; includeSubDomains")

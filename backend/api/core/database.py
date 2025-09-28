@@ -15,25 +15,42 @@ from .config import settings
 log = logging.getLogger(__name__)
 
 IS_CLOUD_SQL = bool(settings.INSTANCE_CONNECTION_NAME)
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT", "5432")
 
 if IS_CLOUD_SQL:
     db_user = settings.DB_USER
     db_pass = settings.DB_PASS
     db_name = settings.DB_NAME
     instance_connection = settings.INSTANCE_CONNECTION_NAME
-    db_socket_dir = os.getenv("DB_SOCKET_DIR", "/cloudsql")
-    socket_path = f"{db_socket_dir}/{instance_connection}"
-
-    # psycopg connection via Cloud SQL unix socket
-    password = quote_plus(db_pass)
-    engine = create_engine(
-        f"postgresql+psycopg://{db_user}:{password}@/{db_name}?host={socket_path}&port=5432",
-        pool_pre_ping=True,
-        pool_size=int(os.getenv("DB_POOL_SIZE", 5)),
-        max_overflow=int(os.getenv("DB_MAX_OVERFLOW", 0)),
-        pool_recycle=int(os.getenv("DB_POOL_RECYCLE", 180)),
-        future=True,
-    )
+    # Prefer TCP when DB_HOST is provided (recommended on Windows with Cloud SQL Proxy)
+    if DB_HOST:
+        password = quote_plus(db_pass)
+        engine = create_engine(
+            f"postgresql+psycopg://{db_user}:{password}@{DB_HOST}:{DB_PORT}/{db_name}",
+            pool_pre_ping=True,
+            pool_size=int(os.getenv("DB_POOL_SIZE", 5)),
+            max_overflow=int(os.getenv("DB_MAX_OVERFLOW", 0)),
+            pool_recycle=int(os.getenv("DB_POOL_RECYCLE", 180)),
+            pool_timeout=int(os.getenv("DB_POOL_TIMEOUT", 30)),
+            future=True,
+        )
+        log.info("[db] Using Cloud SQL via TCP %s:%s for instance %s", DB_HOST, DB_PORT, instance_connection)
+    else:
+        db_socket_dir = os.getenv("DB_SOCKET_DIR", "/cloudsql")
+        socket_path = f"{db_socket_dir}/{instance_connection}"
+        # psycopg connection via Cloud SQL unix socket (Linux/Cloud Run)
+        password = quote_plus(db_pass)
+        engine = create_engine(
+            f"postgresql+psycopg://{db_user}:{password}@/{db_name}?host={socket_path}&port=5432",
+            pool_pre_ping=True,
+            pool_size=int(os.getenv("DB_POOL_SIZE", 5)),
+            max_overflow=int(os.getenv("DB_MAX_OVERFLOW", 0)),
+            pool_recycle=int(os.getenv("DB_POOL_RECYCLE", 180)),
+            pool_timeout=int(os.getenv("DB_POOL_TIMEOUT", 30)),
+            future=True,
+        )
+        log.info("[db] Using Cloud SQL via Unix socket %s", socket_path)
 else:
     _DB_PATH: Path = Path(os.getenv("SQLITE_PATH", "/tmp/ppp.db")).resolve()
     _DEFAULT_SQLITE_URL = f"sqlite:///{_DB_PATH.as_posix()}"

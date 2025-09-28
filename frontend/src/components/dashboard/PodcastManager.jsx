@@ -338,21 +338,6 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
                     <Button variant="outline" size="sm" onClick={() => openDistributionDialog(podcast)}>
                       <Icons.Share2 className="w-4 h-4 mr-2" /> Distribution
                     </Button>
-                    {/* Recover Missing Episodes: promote to a primary inline action for discoverability */}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleRecovery(podcast)}
-                      disabled={recoveringId === podcast.id || !podcast.spreaker_show_id}
-                      title={podcast.spreaker_show_id
-                        ? "Scan Spreaker and restore any episodes missing locally"
-                        : "Link a Spreaker show to enable recovery"}
-                    >
-                      {recoveringId === podcast.id
-                        ? <Icons.Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        : <Icons.RefreshCw className="w-4 h-4 mr-2" />}
-                      Recover Missing
-                    </Button>
                     {/* Spreaker publish/setup pills */}
                     {(() => {
                       const issues = getComplianceIssues(podcast);

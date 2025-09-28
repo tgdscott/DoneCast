@@ -1,4 +1,4 @@
-import os, json, threading
+import os, json, threading, logging
 try:
     from google.cloud import tasks_v2
     from google.protobuf import timestamp_pb2
@@ -7,6 +7,7 @@ except ImportError:
 from datetime import datetime
 
 IS_DEV_ENV = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower() == "dev"
+log = logging.getLogger("tasks.client")
 
 def enqueue_http_task(path: str, body: dict) -> dict:
     if IS_DEV_ENV:
@@ -138,6 +139,10 @@ def enqueue_http_task(path: str, body: dict) -> dict:
             _dispatch_assemble(body)
         else:
             _dispatch_transcribe(body)
+        try:
+            log.info("event=tasks.dev.dispatch path=%s body_keys=%s", path, list(body.keys()))
+        except Exception:
+            pass
         return {"name": "local-direct-dispatch"}
 
     if tasks_v2 is None:

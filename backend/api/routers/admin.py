@@ -52,6 +52,14 @@ router = APIRouter(
     tags=["Admin"],
 )
 
+# Low-level SQL helper to avoid type issues with session.exec(TextClause)
+def _exec_text(session: Session, sql: str, params: Optional[dict] = None):
+    """Execute raw SQL text safely using SQLAlchemy session.execute(text, params)."""
+    stmt = _sql_text(sql)
+    if params:
+        return session.execute(stmt, params)
+    return session.execute(stmt)
+
 # --- Admin Dependency ---
 def get_current_admin_user(current_user: User = Depends(get_current_user)) -> User:
     """
@@ -93,11 +101,13 @@ def admin_summary(
     admin_user: User = Depends(get_current_admin_user)
 ):
     """Simple platform summary for admin dashboard MVP."""
-    user_count = session.exec(select(func.count(User.id))).one()
-    podcast_count = session.exec(select(func.count(Podcast.id))).one()
-    template_count = session.exec(select(func.count(PodcastTemplate.id))).one()
-    episode_count = session.exec(select(func.count(Episode.id))).one()
-    published_count = session.exec(select(func.count(Episode.id)).where(Episode.status == "published")).one()
+    user_count = session.exec(select(func.count(User.id))).one()[0]  # type: ignore[arg-type]
+    podcast_count = session.exec(select(func.count(Podcast.id))).one()[0]  # type: ignore[arg-type]
+    template_count = session.exec(select(func.count(PodcastTemplate.id))).one()[0]  # type: ignore[arg-type]
+    episode_count = session.exec(select(func.count(Episode.id))).one()[0]  # type: ignore[arg-type]
+    published_count = session.exec(
+        select(func.count(Episode.id)).where(Episode.status == "published")
+    ).one()[0]  # type: ignore[arg-type]
     return {
         "users": user_count,
         "podcasts": podcast_count,
@@ -731,7 +741,7 @@ def admin_list_podcasts(
     like = None
     if owner_email:
         like = f"%{owner_email.strip()}%"
-    count_stmt = select(func.count(Podcast.id)).select_from(Podcast).join(User, Podcast.user_id == User.id)
+        count_stmt = select(func.count(Podcast.id)).select_from(Podcast).join(User, Podcast.user_id == User.id)  # type: ignore[arg-type]
     if like:
         try:
             from sqlalchemy import or_  # noqa: F401
@@ -943,14 +953,70 @@ def update_admin_settings(
 
 # --- DB Explorer helpers ---
 
-def _db_get_columns(session: Session, table_name: str) -> list[str]:
+def _quote_ident(name: str) -> str:
+    """Safely double-quote an SQL identifier (table/column/schema)."""
+    if name is None:
+        return '""'
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+def _find_table_schema_and_columns(session: Session, table_name: str) -> tuple[Optional[str], list[str]]:
+    """Locate the schema containing table_name and return (schema, columns).
+
+    Falls back gracefully if inspector APIs are unavailable. Returns (None, []) if not found.
+    """
     bind = session.get_bind()
-    dialect = bind.dialect.name.lower() if bind else ''
+    try:
+        dialect = (bind.dialect.name.lower() if bind else '')
+    except Exception:
+        dialect = ''
+
+    # SQLite: PRAGMA introspection; schemas don't apply
     if 'sqlite' in dialect:
-        cols_res = session.exec(_sql_text(f"PRAGMA table_info({table_name})"))
-        return [c[1] for c in cols_res]
-    inspector = sa_inspect(bind)
-    return [col['name'] for col in inspector.get_columns(table_name)]
+        try:
+            cols_res = _exec_text(session, f"PRAGMA table_info({_quote_ident(table_name)})")
+            return None, [c[1] for c in cols_res]
+        except Exception:
+            return None, []
+
+    try:
+        insp = sa_inspect(bind)
+    except Exception:
+        return None, []
+
+    # Preferred schemas to probe first
+    probe_schemas: list[Optional[str]] = [None, 'public']
+    try:
+        # Append all known schemas (unique, preserving order)
+        for s in insp.get_schema_names():
+            if s not in probe_schemas:
+                probe_schemas.append(s)
+    except Exception:
+        pass
+
+    for schema in probe_schemas:
+        try:
+            has_tbl = False
+            try:
+                has_tbl = insp.has_table(table_name, schema=schema)  # type: ignore[arg-type]
+            except Exception:
+                # Fallback: attempt get_columns directly; will raise if absent
+                pass
+            if has_tbl or True:
+                try:
+                    cols_meta = insp.get_columns(table_name, schema=schema)
+                    if cols_meta:
+                        return schema, [c['name'] for c in cols_meta]
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return None, []
+
+
+def _db_get_columns(session: Session, table_name: str) -> list[str]:
+    _, cols = _find_table_schema_and_columns(session, table_name)
+    return cols
 
 
 def _db_rows_to_dicts(result) -> list[dict[str, Any]]:
@@ -972,11 +1038,9 @@ def admin_db_tables(
     # Filter only existing tables among whitelist
     existing = []
     for t in DB_EXPLORER_TABLES:
-        try:
-            session.exec(_sql_text(f"SELECT 1 FROM {t} LIMIT 1"))
+        schema, cols = _find_table_schema_and_columns(session, t)
+        if cols:
             existing.append(t)
-        except Exception:
-            continue
     return {"tables": existing}
 
 
@@ -1004,12 +1068,12 @@ def admin_db_table_rows(
         offset = 0
     try:
         # Columns
-        columns = _db_get_columns(session, table_name)
+        schema, columns = _find_table_schema_and_columns(session, table_name)
         if not columns:
             return {"table": table_name, "columns": [], "rows": [], "total": 0, "offset": offset, "limit": limit}
         # Ordering: special-case 'episode' to use publish_at DESC per request.
         if table_name == "episode" and "publish_at" in columns:
-            order_clause = "publish_at DESC"
+            order_clause = f"{_quote_ident('publish_at')} DESC"
         else:
             preferred_order_cols = [
                 "created_at",
@@ -1025,11 +1089,17 @@ def admin_db_table_rows(
                     break
             if not chosen_col:
                 chosen_col = columns[0]
-            order_clause = f"{chosen_col} DESC"
-        total_res = session.exec(_sql_text(f"SELECT COUNT(*) FROM {table_name}"))
+            order_clause = f"{_quote_ident(chosen_col)} DESC"
+
+        # Qualify table with schema and quote to handle reserved names (e.g., user)
+        if schema:
+            tbl_sql = f"{_quote_ident(schema)}.{_quote_ident(table_name)}"
+        else:
+            tbl_sql = _quote_ident(table_name)
+
+        total_res = _exec_text(session, f"SELECT COUNT(*) FROM {tbl_sql}")
         total = total_res.first()[0]
-        stmt = _sql_text(f"SELECT * FROM {table_name} ORDER BY {order_clause} LIMIT :lim OFFSET :off").bindparams(lim=limit, off=offset)
-        res = session.exec(stmt)
+        res = _exec_text(session, f"SELECT * FROM {tbl_sql} ORDER BY {order_clause} LIMIT :lim OFFSET :off", {"lim": limit, "off": offset})
         rows = _db_rows_to_dicts(res)
         return {"table": table_name, "columns": columns, "rows": rows, "total": total, "offset": offset, "limit": limit}
     except HTTPException:
@@ -1050,8 +1120,9 @@ def admin_db_table_row_detail(
         raise HTTPException(status_code=400, detail="Table not allowed")
     pk_col = "id"  # convention
     try:
-        stmt = _sql_text(f"SELECT * FROM {table_name} WHERE {pk_col} = :rid").bindparams(rid=row_id)
-        res = session.exec(stmt)
+        schema, _ = _find_table_schema_and_columns(session, table_name)
+        tbl_sql = f"{_quote_ident(schema)}.{_quote_ident(table_name)}" if schema else _quote_ident(table_name)
+        res = _exec_text(session, f"SELECT * FROM {tbl_sql} WHERE {_quote_ident(pk_col)} = :rid", {"rid": row_id})
         row_map = res.mappings().first()
         if not row_map:
             raise HTTPException(status_code=404, detail="Row not found")
@@ -1080,7 +1151,7 @@ def admin_db_table_row_update(
     if not isinstance(updates, dict) or not updates:
         raise HTTPException(status_code=400, detail="No updates provided")
     # Fetch columns & filter allowed (exclude id & obvious system fields)
-    column_names = _db_get_columns(session, table_name)
+    schema, column_names = _find_table_schema_and_columns(session, table_name)
     protected = {"id", "created_at", "processed_at", "publish_at", "published_at", "spreaker_episode_id"}
     set_parts = []
     params = {"rid": row_id}
@@ -1090,14 +1161,14 @@ def admin_db_table_row_update(
         if k in protected:
             continue
         param_name = f"val_{k}"
-        set_parts.append(f"{k} = :{param_name}")
+        set_parts.append(f"{_quote_ident(k)} = :{param_name}")
         params[param_name] = v
     if not set_parts:
         raise HTTPException(status_code=400, detail="No permissible fields to update")
-    sql = f"UPDATE {table_name} SET {', '.join(set_parts)} WHERE id = :rid"
+    tbl_sql = f"{_quote_ident(schema)}.{_quote_ident(table_name)}" if schema else _quote_ident(table_name)
+    sql = f"UPDATE {tbl_sql} SET {', '.join(set_parts)} WHERE {_quote_ident('id')} = :rid"
     try:
-        stmt = _sql_text(sql).bindparams(**params)
-        session.exec(stmt)
+        _exec_text(session, sql, params)
         session.commit()
     except Exception as e:
         session.rollback()
@@ -1122,7 +1193,7 @@ def admin_db_table_row_insert(
     if not isinstance(values, dict) or not values:
         raise HTTPException(status_code=400, detail="No values provided")
     # Fetch columns & filter allowed
-    column_names = _db_get_columns(session, table_name)
+    schema, column_names = _find_table_schema_and_columns(session, table_name)
     if not column_names:
         raise HTTPException(status_code=400, detail="Unknown table or no columns")
     protected = {"created_at", "processed_at", "publish_at", "published_at", "spreaker_episode_id"}
@@ -1136,7 +1207,7 @@ def admin_db_table_row_insert(
         insert_cols.append(k)
         params[f"val_{k}"] = v
     # Ensure id present if column exists
-    if "id" in cols and "id" not in values:
+    if "id" in column_names and "id" not in values:
         new_id = str(uuid4())
         insert_cols.append("id")
         params["val_id"] = new_id
@@ -1144,11 +1215,11 @@ def admin_db_table_row_insert(
     if not insert_cols:
         raise HTTPException(status_code=400, detail="No permissible fields to insert")
     placeholders = ", ".join([f":val_{c}" for c in insert_cols])
-    cols_sql = ", ".join(insert_cols)
-    sql = f"INSERT INTO {table_name} ({cols_sql}) VALUES ({placeholders})"
+    cols_sql = ", ".join(_quote_ident(c) for c in insert_cols)
+    tbl_sql = f"{_quote_ident(schema)}.{_quote_ident(table_name)}" if schema else _quote_ident(table_name)
+    sql = f"INSERT INTO {tbl_sql} ({cols_sql}) VALUES ({placeholders})"
     try:
-        stmt = _sql_text(sql).bindparams(**params)
-        session.exec(stmt)
+        _exec_text(session, sql, params)
         session.commit()
     except Exception as e:
         session.rollback()
@@ -1189,8 +1260,9 @@ def admin_db_table_row_delete(
             raise HTTPException(status_code=500, detail=f"Delete failed: {e}")
     else:
         try:
-            stmt = _sql_text(f"DELETE FROM {table_name} WHERE id = :rid").bindparams(rid=row_id)
-            session.exec(stmt)
+            schema, _ = _find_table_schema_and_columns(session, table_name)
+            tbl_sql = f"{_quote_ident(schema)}.{_quote_ident(table_name)}" if schema else _quote_ident(table_name)
+            _exec_text(session, f"DELETE FROM {tbl_sql} WHERE {_quote_ident('id')} = :rid", {"rid": row_id})
             session.commit()
         except Exception as e:
             session.rollback()

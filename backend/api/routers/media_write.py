@@ -4,6 +4,7 @@ from typing import List, Optional
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Form
+import logging
 from sqlmodel import Session, select
 
 from api.core.paths import MEDIA_DIR
@@ -16,6 +17,7 @@ from .media_schemas import MediaItemUpdate
 from .media_common import sanitize_name, copy_with_limit
 
 router = APIRouter(prefix="/media", tags=["Media Library"])
+log = logging.getLogger("media.upload")
 
 
 @router.post("/upload/{category}", response_model=List[MediaItem], status_code=status.HTTP_201_CREATED)
@@ -94,7 +96,8 @@ async def upload_media_files(
 			finally:
 				pass
 			raise
-		except Exception:
+		except Exception as e:
+			log.error("[upload.write] failed writing %s: %s", safe_filename, e)
 			try:
 				if file_path.exists():
 					file_path.unlink()
@@ -122,7 +125,21 @@ async def upload_media_files(
 		except Exception:
 			pass
 
-	session.commit()
+	# Commit and cleanup on failure
+	try:
+		session.commit()
+	except Exception as e:
+		log.error("[upload.db] commit failed for %d items in category=%s: %s", len(created_items), category.value, e)
+		# remove any files written for this batch
+		for item in created_items:
+			try:
+				p = MEDIA_DIR / item.filename
+				if p.exists():
+					p.unlink()
+			except Exception:
+				pass
+		session.rollback()
+		raise HTTPException(status_code=500, detail="Upload stored file(s), but database write failed. Please retry.")
 	for item in created_items:
 		session.refresh(item)
 
