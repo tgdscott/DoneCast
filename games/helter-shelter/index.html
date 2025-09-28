@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Helter Shelter</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  <div id="root" class="min-h-screen"></div>
+  <script type="module">
+    const BOARD_SIZE = 8;
+    const MAX_LOG_ENTRIES = 8;
+    const POLICE_THRESHOLD = 100;
+    const POLICE_TIMER_TURNS = 5;
+
+    const DIRECTIONS = {
+      up: { label: 'Up', dx: 0, dy: -1 },
+      down: { label: 'Down', dx: 0, dy: 1 },
+      left: { label: 'Left', dx: -1, dy: 0 },
+      right: { label: 'Right', dx: 1, dy: 0 }
+    };
+
+    const keyFor = (x, y) => `${x},${y}`;
+    const inBounds = (x, y) => x >= 0 && y >= 0 && x < BOARD_SIZE && y < BOARD_SIZE;
+    const manhattan = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+
+    const shuffle = (arr) => {
+      const copy = [...arr];
+      for (let i = copy.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
+    };
+
+    const cloneEntity = (entity) => ({ ...entity });
+    const cloneList = (list) => list.map(cloneEntity);
+
+    const createInitialState = () => ({
+      player: { x: 1, y: 6 },
+      animals: [
+        { id: 'a1', x: 2, y: 5, scheduled: false },
+        { id: 'a2', x: 4, y: 2, scheduled: true },
+        { id: 'a3', x: 5, y: 6, scheduled: false },
+        { id: 'a4', x: 1, y: 2, scheduled: true },
+        { id: 'a5', x: 6, y: 4, scheduled: false }
+      ],
+      volunteers: [
+        { id: 'v1', x: 3, y: 6 },
+        { id: 'v2', x: 5, y: 3 }
+      ],
+      families: [
+        { id: 'f1', x: 2, y: 7 },
+        { id: 'f2', x: 6, y: 1 }
+      ],
+      workers: [
+        { id: 'w1', x: 6, y: 5, trapped: false },
+        { id: 'w2', x: 0, y: 2, trapped: false }
+      ],
+      pens: [
+        { id: 'p1', x: 0, y: 7 },
+        { id: 'p2', x: 7, y: 0 },
+        { id: 'p3', x: 7, y: 7 }
+      ],
+      turn: 0,
+      score: 0,
+      suspicion: 10,
+      freedCount: 0,
+      trappedCount: 0,
+      adoptedCount: 0,
+      policeCalled: false,
+      policeTimer: POLICE_TIMER_TURNS,
+      log: [
+        'You slip into the shelter after hours. Keep it quiet and free who you can!',
+        'Workers will radio for help if they spot you. Stay out of their sight.',
+        'Convince visiting families with help from volunteers to adopt waiting pets.'
+      ],
+      status: null
+    });
+
+    const findAvailablePen = (pens, occupiedKeys) => pens.find((pen) => !occupiedKeys.has(keyFor(pen.x, pen.y)));
+
+    const spawnWorker = (entities, pens) => {
+      const occupied = new Set(entities.map((entity) => keyFor(entity.x, entity.y)));
+      pens.forEach((pen) => occupied.add(keyFor(pen.x, pen.y)));
+
+      const edgePositions = [];
+      for (let i = 0; i < BOARD_SIZE; i += 1) {
+        edgePositions.push({ x: i, y: 0 });
+        edgePositions.push({ x: i, y: BOARD_SIZE - 1 });
+        edgePositions.push({ x: 0, y: i });
+        edgePositions.push({ x: BOARD_SIZE - 1, y: i });
+      }
+
+      const shuffled = shuffle(edgePositions);
+      for (const pos of shuffled) {
+        if (!occupied.has(keyFor(pos.x, pos.y))) {
+          return { id: `w${Math.random().toString(36).slice(2, 7)}`, x: pos.x, y: pos.y, trapped: false };
+        }
+      }
+      return null;
+    };
+
+    const moveWorkers = (workers, player, occupiedTargets) => {
+      const nextWorkers = [];
+      const taken = new Set(occupiedTargets);
+
+      workers.forEach((worker) => {
+        if (worker.trapped) {
+          nextWorkers.push(cloneEntity(worker));
+          taken.add(keyFor(worker.x, worker.y));
+          return;
+        }
+
+        const deltas = shuffle([
+          { dx: 1, dy: 0 },
+          { dx: -1, dy: 0 },
+          { dx: 0, dy: 1 },
+          { dx: 0, dy: -1 },
+          { dx: 0, dy: 0 }
+        ]);
+
+        let best = cloneEntity(worker);
+        let bestDistance = manhattan(worker, player);
+
+        deltas.forEach(({ dx, dy }) => {
+          const nx = worker.x + dx;
+          const ny = worker.y + dy;
+          if (!inBounds(nx, ny)) return;
+          const k = keyFor(nx, ny);
+          if (taken.has(k)) return;
+          const distance = Math.abs(nx - player.x) + Math.abs(ny - player.y);
+          if (distance <= bestDistance) {
+            best = { ...worker, x: nx, y: ny };
+            bestDistance = distance;
+          }
+        });
+
+        taken.add(keyFor(best.x, best.y));
+        nextWorkers.push(best);
+      });
+
+      return nextWorkers;
+    };
+
+    let state = createInitialState();
+
+    const addLog = (entry) => {
+      state = {
+        ...state,
+        log: [entry, ...state.log].slice(0, MAX_LOG_ENTRIES)
+      };
+      render();
+    };
+
+    const resetGame = () => {
+      state = createInitialState();
+      render();
+    };
+
+    const resolveTurn = (mutations = {}) => {
+      if (state.status) return;
+
+      const prev = state;
+
+      const player = mutations.player ? { ...mutations.player } : { ...prev.player };
+      const animals = mutations.animals ? cloneList(mutations.animals) : cloneList(prev.animals);
+      const volunteers = mutations.volunteers ? cloneList(mutations.volunteers) : cloneList(prev.volunteers);
+      const families = mutations.families ? cloneList(mutations.families) : cloneList(prev.families);
+      const workers = mutations.workers ? cloneList(mutations.workers) : cloneList(prev.workers);
+      const scoreDelta = mutations.scoreDelta ?? 0;
+      const freedDelta = mutations.freedDelta ?? 0;
+      const trappedDelta = mutations.trappedDelta ?? 0;
+      const adoptedDelta = mutations.adoptedDelta ?? 0;
+      const message = mutations.message;
+
+      let newScore = prev.score + scoreDelta;
+      let newTurn = prev.turn + 1;
+      let newFreed = prev.freedCount + freedDelta;
+      let newTrapped = prev.trappedCount + trappedDelta;
+      let newAdopted = prev.adoptedCount + adoptedDelta;
+      let newLog = message ? [message, ...prev.log].slice(0, MAX_LOG_ENTRIES) : prev.log.slice(0, MAX_LOG_ENTRIES);
+
+      const occupiedByAllies = new Set([
+        ...animals.map((a) => keyFor(a.x, a.y)),
+        ...volunteers.map((v) => keyFor(v.x, v.y)),
+        ...families.map((f) => keyFor(f.x, f.y)),
+        keyFor(player.x, player.y)
+      ]);
+      const movedWorkers = moveWorkers(workers, player, occupiedByAllies);
+
+      let suspicionGain = 2;
+      let caught = false;
+      movedWorkers.forEach((worker) => {
+        if (worker.trapped) return;
+        const dist = manhattan(worker, player);
+        if (dist === 0) {
+          suspicionGain = POLICE_THRESHOLD;
+          caught = true;
+        } else if (dist === 1) {
+          suspicionGain += 35;
+        } else if (dist === 2) {
+          suspicionGain += 18;
+        }
+      });
+
+      let newSuspicion = Math.min(POLICE_THRESHOLD + 20, prev.suspicion + suspicionGain);
+      let policeCalled = prev.policeCalled;
+      let policeTimer = prev.policeTimer;
+      let status = prev.status;
+      let postLog = newLog;
+
+      if (!policeCalled && newSuspicion >= POLICE_THRESHOLD) {
+        policeCalled = true;
+        policeTimer = POLICE_TIMER_TURNS;
+        postLog = ['The workers radio the police! Wrap up fast.', ...newLog].slice(0, MAX_LOG_ENTRIES);
+      }
+
+      if (policeCalled) {
+        const nextTimer = Math.max(0, policeTimer - 1);
+        policeTimer = nextTimer;
+        if (nextTimer === 0 || caught) {
+          newScore -= 25;
+          status = { type: 'caught', message: 'The police arrive and you are arrested. -25 points.' };
+          postLog = ['You were caught and hauled off to jail.', ...postLog].slice(0, MAX_LOG_ENTRIES);
+        }
+      }
+
+      let extraLog = postLog;
+      if (newTurn % 4 === 0 && !status) {
+        const spawn = spawnWorker([
+          { ...player },
+          ...animals,
+          ...volunteers,
+          ...families,
+          ...movedWorkers
+        ], prev.pens);
+        if (spawn) {
+          movedWorkers.push(spawn);
+          extraLog = [`Reinforcement worker ${spawn.id.toUpperCase()} enters the shelter.`, ...postLog].slice(0, MAX_LOG_ENTRIES);
+        }
+      }
+
+      state = {
+        ...prev,
+        player,
+        animals,
+        volunteers,
+        families,
+        workers: movedWorkers,
+        score: newScore,
+        freedCount: newFreed,
+        trappedCount: newTrapped,
+        adoptedCount: newAdopted,
+        suspicion: newSuspicion,
+        policeCalled,
+        policeTimer,
+        status,
+        turn: newTurn,
+        log: extraLog
+      };
+
+      render();
+    };
+
+    const handleMove = (direction) => {
+      if (state.status) return;
+      const dir = DIRECTIONS[direction];
+      const nx = Math.min(BOARD_SIZE - 1, Math.max(0, state.player.x + dir.dx));
+      const ny = Math.min(BOARD_SIZE - 1, Math.max(0, state.player.y + dir.dy));
+      if (nx === state.player.x && ny === state.player.y) {
+        addLog('You press against the wall and hold your breath.');
+        return;
+      }
+      resolveTurn({ player: { x: nx, y: ny }, message: `You sneak ${direction}.` });
+    };
+
+    const handleFreeAnimal = () => {
+      if (state.status) return;
+      const animal = state.animals.find((a) => a.x === state.player.x && a.y === state.player.y);
+      if (!animal) {
+        addLog('No animal is caged here. Try another kennel.');
+        return;
+      }
+      const remaining = state.animals
+        .filter((a) => a.id !== animal.id)
+        .map(cloneEntity);
+      resolveTurn({
+        player: { ...state.player },
+        animals: remaining,
+        scoreDelta: 1,
+        freedDelta: 1,
+        message: animal.scheduled
+          ? 'You free a pet who was scheduled for euthanasia. They bolt for the door! (+1)'
+          : 'You unlatch a kennel and set a pet free. (+1)'
+      });
+    };
+
+    const handleTrapWorker = () => {
+      if (state.status) return;
+      const nearbyWorker = state.workers.find((worker) => !worker.trapped && manhattan(worker, state.player) === 1);
+      if (!nearbyWorker) {
+        addLog('No worker is close enough to shove into a pen.');
+        return;
+      }
+      const occupiedPens = new Set(state.workers.filter((w) => w.trapped).map((w) => keyFor(w.x, w.y)));
+      const pen = findAvailablePen(state.pens, occupiedPens);
+      if (!pen) {
+        addLog('Every pen already holds a trapped worker!');
+        return;
+      }
+      const updatedWorkers = state.workers.map((worker) => {
+        if (worker.id === nearbyWorker.id) {
+          return { ...worker, x: pen.x, y: pen.y, trapped: true };
+        }
+        return { ...worker };
+      });
+      resolveTurn({
+        player: { ...state.player },
+        workers: updatedWorkers,
+        scoreDelta: 5,
+        trappedDelta: 1,
+        message: 'You and a volunteer slam a worker into an empty pen. (+5)'
+      });
+    };
+
+    const handleAdoption = () => {
+      if (state.status) return;
+      const adjacentFamily = state.families.find((family) => manhattan(family, state.player) === 1);
+      if (!adjacentFamily) {
+        addLog('You need to be next to a visiting family to pitch an adoption.');
+        return;
+      }
+      const helpfulVolunteer = state.volunteers.find((vol) => manhattan(vol, adjacentFamily) <= 1);
+      if (!helpfulVolunteer) {
+        addLog('Wave a volunteer over so the family trusts you. Find one nearby.');
+        return;
+      }
+      if (state.animals.length === 0) {
+        addLog('No adoptable animals remain in the kennels!');
+        return;
+      }
+      const scheduled = state.animals.find((animal) => animal.scheduled);
+      const chosenAnimal = scheduled || state.animals[0];
+      const remainingAnimals = state.animals
+        .filter((animal) => animal.id !== chosenAnimal.id)
+        .map(cloneEntity);
+      const remainingFamilies = state.families
+        .filter((family) => family.id !== adjacentFamily.id)
+        .map(cloneEntity);
+      resolveTurn({
+        player: { ...state.player },
+        animals: remainingAnimals,
+        families: remainingFamilies,
+        scoreDelta: 10,
+        adoptedDelta: 1,
+        message: 'A family signs the papers and heads home with a new friend! (+10)'
+      });
+    };
+
+    const handleWait = () => {
+      if (state.status) return;
+      resolveTurn({ player: { ...state.player }, message: 'You pause in the shadows to plan your next move.' });
+    };
+
+    const handleEscape = () => {
+      if (state.status || !state.policeCalled) return;
+      state = {
+        ...state,
+        status: { type: 'escaped', message: 'You slip out before the police arrive. Mission complete!' },
+        log: ['You disappear into the night with the animals you saved.', ...state.log].slice(0, MAX_LOG_ENTRIES)
+      };
+      render();
+    };
+
+    const buildBoard = () => {
+      const cells = Array.from({ length: BOARD_SIZE }, () => Array.from({ length: BOARD_SIZE }, () => ({
+        classes: 'bg-slate-900/70 border border-slate-700 flex items-center justify-center rounded-md text-xl',
+        symbol: '',
+        title: 'Empty floor'
+      })));
+
+      state.pens.forEach((pen) => {
+        cells[pen.y][pen.x] = {
+          classes: 'bg-amber-900/60 border-amber-500/70 flex items-center justify-center rounded-md text-xl',
+          symbol: '🪤',
+          title: 'Empty holding pen'
+        };
+      });
+
+      state.animals.forEach((animal) => {
+        cells[animal.y][animal.x] = {
+          classes: animal.scheduled
+            ? 'bg-rose-900/60 border border-rose-500 flex items-center justify-center rounded-md text-xl'
+            : 'bg-emerald-900/60 border border-emerald-500 flex items-center justify-center rounded-md text-xl',
+          symbol: animal.scheduled ? '⏰🐾' : '🐾',
+          title: animal.scheduled ? 'Animal scheduled for euthanasia' : 'Caged animal'
+        };
+      });
+
+      state.volunteers.forEach((volunteer) => {
+        cells[volunteer.y][volunteer.x] = {
+          classes: 'bg-sky-900/60 border border-sky-500 flex items-center justify-center rounded-md text-xl',
+          symbol: '🙋',
+          title: 'Helpful volunteer'
+        };
+      });
+
+      state.families.forEach((family) => {
+        cells[family.y][family.x] = {
+          classes: 'bg-indigo-900/60 border border-indigo-500 flex items-center justify-center rounded-md text-xl',
+          symbol: '👪',
+          title: 'Visiting family considering adoption'
+        };
+      });
+
+      state.workers.forEach((worker) => {
+        cells[worker.y][worker.x] = {
+          classes: worker.trapped
+            ? 'bg-amber-950 border border-amber-600 flex items-center justify-center rounded-md text-xl'
+            : 'bg-red-950 border border-red-600 flex items-center justify-center rounded-md text-xl',
+          symbol: worker.trapped ? '🚫👷' : '👷',
+          title: worker.trapped ? 'Trapped city worker' : 'City worker on patrol'
+        };
+      });
+
+      cells[state.player.y][state.player.x] = {
+        classes: 'bg-emerald-800 border border-emerald-500 flex items-center justify-center rounded-md text-xl font-semibold text-emerald-50',
+        symbol: '🕵️',
+        title: 'You'
+      };
+
+      return cells;
+    };
+
+    const escapeHtml = (value) => value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+    const render = () => {
+      const root = document.getElementById('root');
+      const cells = buildBoard();
+      let boardHtml = '';
+      for (let y = 0; y < BOARD_SIZE; y += 1) {
+        for (let x = 0; x < BOARD_SIZE; x += 1) {
+          const cell = cells[y][x];
+          boardHtml += `<div class="${cell.classes} aspect-square relative" title="${escapeHtml(cell.title)}"><span class="select-none">${cell.symbol}</span></div>`;
+        }
+      }
+
+      const suspicionPercent = Math.min(100, (state.suspicion / POLICE_THRESHOLD) * 100);
+      const disableAll = state.status ? 'disabled' : '';
+      const disableEscape = state.status || !state.policeCalled ? 'disabled' : '';
+
+      const logHtml = state.log
+        .map((entry) => `<p class="bg-slate-800/60 rounded-md px-2 py-1 border border-slate-700/70">${escapeHtml(entry)}</p>`)
+        .join('');
+
+      const statusHtml = state.status
+        ? `
+          <div class="bg-slate-900/80 border border-emerald-500/40 rounded-xl p-4 text-center space-y-3">
+            <h2 class="text-xl font-semibold">${state.status.type === 'caught' ? 'Busted!' : 'Mission Complete'}</h2>
+            <p class="text-sm text-slate-300">${escapeHtml(state.status.message)}</p>
+            <button type="button" data-action="reset" class="bg-emerald-700 hover:bg-emerald-600 transition-colors border border-emerald-500 rounded-lg px-4 py-2 text-sm">Start Again</button>
+          </div>
+        `
+        : '';
+
+      root.innerHTML = `
+        <div class="min-h-screen bg-slate-950 text-slate-100 py-10">
+          <div class="max-w-6xl mx-auto px-4">
+            <div class="space-y-6">
+              <header class="bg-slate-900/80 border border-slate-700 rounded-xl p-6 shadow-lg shadow-emerald-500/10">
+                <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                  <div>
+                    <h1 class="text-3xl font-bold text-emerald-300">Helter Shelter</h1>
+                    <p class="text-sm text-slate-300 mt-1">
+                      Sneak through the city shelter, free at-risk animals, and rally families to adopt before the police arrive.
+                    </p>
+                  </div>
+                  <div class="flex gap-4">
+                    <div class="text-right">
+                      <div class="text-xs uppercase tracking-wide text-slate-400">Turn</div>
+                      <div class="text-2xl font-semibold">${state.turn}</div>
+                    </div>
+                    <div class="text-right">
+                      <div class="text-xs uppercase tracking-wide text-slate-400">Score</div>
+                      <div class="text-2xl font-semibold text-emerald-300">${state.score}</div>
+                    </div>
+                  </div>
+                </div>
+              </header>
+
+              <div class="grid lg:grid-cols-[2fr_1fr] gap-6">
+                <div class="space-y-6">
+                  <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-6">
+                    <div class="grid grid-cols-8 gap-2">
+                      ${boardHtml}
+                    </div>
+
+                    <div class="mt-6">
+                      <div class="flex items-center justify-between">
+                        <span class="text-sm text-slate-300">Suspicion</span>
+                        <span class="text-sm font-semibold text-rose-300">${state.suspicion}/${POLICE_THRESHOLD}</span>
+                      </div>
+                      <div class="h-3 bg-slate-800 rounded-full mt-2 overflow-hidden">
+                        <div class="h-full bg-gradient-to-r from-emerald-500 via-amber-400 to-rose-500" style="width: ${suspicionPercent}%"></div>
+                      </div>
+                      ${state.policeCalled && !state.status ? `<p class="mt-2 text-sm text-rose-300">Police en route! ${state.policeTimer} turn${state.policeTimer !== 1 ? 's' : ''} remaining.</p>` : ''}
+                      ${state.status && state.status.type === 'caught' ? '<p class="mt-2 text-sm text-rose-300">Caught! Mission failed.</p>' : ''}
+                    </div>
+
+                    <div class="mt-6 grid md:grid-cols-3 gap-4">
+                      <div class="bg-slate-800/60 rounded-lg p-3">
+                        <div class="text-xs uppercase tracking-wide text-slate-400">Animals Freed</div>
+                        <div class="text-xl font-semibold">${state.freedCount}</div>
+                      </div>
+                      <div class="bg-slate-800/60 rounded-lg p-3">
+                        <div class="text-xs uppercase tracking-wide text-slate-400">Families Won</div>
+                        <div class="text-xl font-semibold">${state.adoptedCount}</div>
+                      </div>
+                      <div class="bg-slate-800/60 rounded-lg p-3">
+                        <div class="text-xs uppercase tracking-wide text-slate-400">Workers Trapped</div>
+                        <div class="text-xl font-semibold">${state.trappedCount}</div>
+                      </div>
+                    </div>
+
+                    <div class="mt-6 flex flex-wrap gap-2">
+                      ${Object.entries(DIRECTIONS).map(([key, dir]) => `
+                        <button type="button" data-move="${key}" class="flex-1 min-w-[120px] bg-slate-800 hover:bg-slate-700 transition-colors border border-slate-600 rounded-lg py-2 text-sm" ${disableAll}>Move ${dir.label}</button>
+                      `).join('')}
+                      <button type="button" data-action="free" class="flex-1 min-w-[120px] bg-emerald-700 hover:bg-emerald-600 transition-colors border border-emerald-500 rounded-lg py-2 text-sm" ${disableAll}>Free Animal (+1)</button>
+                      <button type="button" data-action="adopt" class="flex-1 min-w-[120px] bg-indigo-700 hover:bg-indigo-600 transition-colors border border-indigo-500 rounded-lg py-2 text-sm" ${disableAll}>Win Adoption (+10)</button>
+                      <button type="button" data-action="trap" class="flex-1 min-w-[120px] bg-amber-700 hover:bg-amber-600 transition-colors border border-amber-500 rounded-lg py-2 text-sm" ${disableAll}>Trap Worker (+5)</button>
+                      <button type="button" data-action="wait" class="flex-1 min-w-[120px] bg-slate-800 hover:bg-slate-700 transition-colors border border-slate-600 rounded-lg py-2 text-sm" ${disableAll}>Wait &amp; Watch</button>
+                      <button type="button" data-action="escape" class="flex-1 min-w-[120px] bg-rose-800 hover:bg-rose-700 transition-colors border border-rose-500 rounded-lg py-2 text-sm" ${disableEscape}>Escape Now</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="space-y-4">
+                  <div class="bg-slate-900/70 border border-slate-700 rounded-xl p-4 space-y-3">
+                    <h2 class="text-lg font-semibold text-emerald-200">Mission Briefing</h2>
+                    <ul class="list-disc list-inside space-y-2 text-sm text-slate-300">
+                      <li>Move with the arrow buttons or your keyboard. Avoid bumping into city workers.</li>
+                      <li>Freeing any animal grants +1 point. Animals marked with ⏰ were scheduled for euthanasia.</li>
+                      <li>To earn +10 points, stand next to a family and ensure a volunteer is adjacent to them.</li>
+                      <li>Trap a worker by getting adjacent to them and using an empty pen for +5 points.</li>
+                      <li>Suspicion rises the closer workers get. Once it maxes out the police are called.</li>
+                      <li>If the police are on the way, finish up quickly or hit Escape to slip out safely.</li>
+                    </ul>
+                  </div>
+
+                  <div class="bg-slate-900/70 border border-slate-700 rounded-xl p-4 space-y-3">
+                    <h2 class="text-lg font-semibold text-emerald-200">Shelter Log</h2>
+                    <div class="space-y-2 text-sm text-slate-300">${logHtml}</div>
+                  </div>
+
+                  ${statusHtml}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      root.querySelectorAll('[data-move]').forEach((button) => {
+        button.addEventListener('click', () => handleMove(button.dataset.move));
+      });
+      root.querySelectorAll('[data-action]').forEach((button) => {
+        button.addEventListener('click', (event) => {
+          const { action } = event.currentTarget.dataset;
+          if (action === 'free') handleFreeAnimal();
+          if (action === 'trap') handleTrapWorker();
+          if (action === 'adopt') handleAdoption();
+          if (action === 'wait') handleWait();
+          if (action === 'escape') handleEscape();
+          if (action === 'reset') resetGame();
+        });
+      });
+    };
+
+    window.addEventListener('keydown', (event) => {
+      if (state.status) return;
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        handleMove('up');
+      } else if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        handleMove('down');
+      } else if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        handleMove('left');
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        handleMove('right');
+      }
+    });
+
+    render();
+  </script>
+</body>
+</html>
