@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from '@/hooks/use-toast';
-import { makeApi } from '@/lib/apiClient';
+import { makeApi, buildApiUrl } from '@/lib/apiClient';
 import { fetchVoices as fetchElevenVoices } from '@/api/elevenlabs';
 import { useAuth } from '@/AuthContext.jsx';
 
@@ -77,6 +77,7 @@ export default function usePodcastCreator({
   const [coverNeedsUpload, setCoverNeedsUpload] = useState(false);
   const [coverMode, setCoverMode] = useState('crop');
   const [isUploadingCover, setIsUploadingCover] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(null);
   const [audioDurationSec, setAudioDurationSec] = useState(null);
 
   // Consider a build "active" when something non-trivial is in-flight or staged
@@ -687,6 +688,7 @@ export default function usePodcastCreator({
     setShowIntentQuestions(false);
     intentsPromptedRef.current = false; // new file -> prompt again in Step 2
     setIsUploading(true);
+    setUploadProgress(0);
     setStatusMessage('Uploading audio file...');
     setError('');
 
@@ -694,15 +696,65 @@ export default function usePodcastCreator({
     formData.append('files', file);
     formData.append('friendly_names', JSON.stringify([file.name]));
 
+    const authToken = token || (() => { try { return localStorage.getItem('authToken'); } catch { return null; } })();
+
+    const performUpload = () => new Promise((resolve, reject) => {
+      try {
+        if (typeof XMLHttpRequest === 'undefined') {
+          const api = makeApi(token);
+          api.raw('/api/media/upload/main_content', { method: 'POST', body: formData })
+            .then(resolve)
+            .catch(reject);
+          return;
+        }
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', buildApiUrl('/api/media/upload/main_content'));
+        xhr.withCredentials = true;
+        if (authToken) {
+          xhr.setRequestHeader('Authorization', `Bearer ${authToken}`);
+        }
+        xhr.responseType = 'json';
+        xhr.upload.onprogress = (event) => {
+          if (!event.lengthComputable) return;
+          const pct = Math.min(100, Math.round((event.loaded / event.total) * 100));
+          setUploadProgress(pct);
+        };
+        xhr.onerror = () => {
+          reject(new Error('Upload failed. Please try again.'));
+        };
+        xhr.onload = () => {
+          const safeResponse = (() => {
+            if (xhr.response != null) return xhr.response;
+            try {
+              return JSON.parse(xhr.responseText || '');
+            } catch (_) {
+              return null;
+            }
+          })();
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(safeResponse);
+            return;
+          }
+          const message = (safeResponse && (safeResponse.error || safeResponse.detail || safeResponse.message))
+            || `Upload failed with status ${xhr.status}`;
+          reject(new Error(message));
+        };
+        xhr.send(formData);
+      } catch (err) {
+        reject(err);
+      }
+    });
+
     try {
-      const api = makeApi(token);
-      const result = await api.raw('/api/media/upload/main_content', { method: 'POST', body: formData });
-      const fname = result[0]?.filename;
+      const result = await performUpload();
+      const entries = Array.isArray(result) ? result : (result?.files || []);
+      const fname = entries[0]?.filename;
       setUploadedFilename(fname);
       try {
         if (fname) localStorage.setItem('ppp_uploaded_filename', fname);
       } catch {}
       setStatusMessage('Upload successful!');
+      setUploadProgress(100);
     } catch (err) {
       setError(err.message);
       setStatusMessage('');
@@ -710,8 +762,10 @@ export default function usePodcastCreator({
       try {
         localStorage.removeItem('ppp_uploaded_filename');
       } catch {}
+      setUploadProgress(null);
     } finally {
       setIsUploading(false);
+      setTimeout(() => setUploadProgress(null), 400);
     }
   };
 
@@ -1510,6 +1564,7 @@ export default function usePodcastCreator({
     cancelBuild,
     handleTemplateSelect,
     handleFileChange,
+    uploadProgress,
     handleCoverFileSelected,
     handleUploadProcessedCover,
     handleTtsChange,
