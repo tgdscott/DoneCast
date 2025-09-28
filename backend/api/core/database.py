@@ -7,6 +7,7 @@ from urllib.parse import quote_plus
 
 # Ensure models are imported so SQLModel metadata is populated
 from ..models import user, podcast, settings as _app_settings  # noqa: F401
+from ..models import recurring as _recurring_models  # noqa: F401
 # Import usage ledger model so metadata contains it during create_all
 from ..models import usage as _usage_models  # noqa: F401
 from pathlib import Path

@@ -56,6 +56,7 @@ export default function usePodcastCreator({
   const [isAiDescBusy, setIsAiDescBusy] = useState(false);
   const aiCacheRef = useRef({ title: null, notes: null, tags: null });
   const autoFillKeyRef = useRef('');
+  const autoRecurringRef = useRef({ templateId: null, date: null, time: null, manual: false });
   const transcriptReadyRef = useRef(false);
   const [jobId, setJobId] = useState(null);
   const [spreakerShows, setSpreakerShows] = useState([]);
@@ -158,6 +159,17 @@ export default function usePodcastCreator({
     }
   }, [templates, selectedTemplate, currentStep]);
 
+  useEffect(() => {
+    const tplId = selectedTemplate?.id || null;
+    if (!tplId) {
+      autoRecurringRef.current = { templateId: null, date: null, time: null, manual: false };
+      return;
+    }
+    if (autoRecurringRef.current.templateId !== tplId) {
+      autoRecurringRef.current = { templateId: tplId, date: null, time: null, manual: false };
+    }
+  }, [selectedTemplate?.id]);
+
   const refreshUsage = useCallback(async () => {
     try {
       const api = makeApi(token);
@@ -206,6 +218,62 @@ export default function usePodcastCreator({
       } catch(_) {}
     })();
   }, [token, authUser, refreshUsage]);
+
+  useEffect(() => {
+    const tplId = selectedTemplate?.id;
+    if (!tplId || !token) {
+      return;
+    }
+    const state = autoRecurringRef.current;
+    if (state.manual && state.templateId === tplId) {
+      return;
+    }
+    if (state.templateId === tplId && state.date && state.time && !state.manual) {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const apiClient = makeApi(token);
+        const info = await apiClient.get(`/api/recurring/templates/${tplId}/next`);
+        if (cancelled) return;
+        const nextDate = info?.next_publish_date;
+        const nextTime = info?.next_publish_time;
+        if (nextDate && nextTime) {
+          setScheduleDate(nextDate);
+          setScheduleTime(nextTime);
+          setPublishMode((prev) => (prev === 'now' ? prev : 'schedule'));
+          autoRecurringRef.current = {
+            templateId: tplId,
+            date: nextDate,
+            time: nextTime,
+            manual: false,
+          };
+        } else {
+          autoRecurringRef.current = {
+            templateId: tplId,
+            date: null,
+            time: null,
+            manual: false,
+          };
+        }
+      } catch (err) {
+        console.warn('Failed to fetch template recurring slot', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTemplate?.id, token]);
+
+  useEffect(() => {
+    const state = autoRecurringRef.current;
+    if (!state.templateId || state.manual) return;
+    if (!state.date || !state.time) return;
+    if (scheduleDate !== state.date || scheduleTime !== state.time) {
+      state.manual = true;
+    }
+  }, [scheduleDate, scheduleTime]);
 
   const requireIntern = capabilities.has_elevenlabs || capabilities.has_google_tts;
   const requireSfx = capabilities.has_any_sfx_triggers;
@@ -1597,7 +1665,6 @@ export default function usePodcastCreator({
     setCoverMode,
     setUsage,
     setError,
-    handleRecurringApply,
     clearCover,
     updateCoverCrop,
   };
