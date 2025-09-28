@@ -8,3 +8,4 @@ from .user import User, UserCreate, UserPublic, UserTermsAcceptance  # noqa: F40
 from .subscription import Subscription  # noqa: F401
 from .settings import AppSetting  # noqa: F401
 from .usage import ProcessingMinutesLedger, LedgerDirection, LedgerReason  # noqa: F401
+from .recurring import RecurringSchedule  # noqa: F401

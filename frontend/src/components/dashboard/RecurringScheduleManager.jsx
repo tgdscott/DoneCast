@@ -1,121 +1,454 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { makeApi } from '@/lib/apiClient';
-import { Button } from '../ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
-import { Input } from '../ui/input';
-import { Label } from '../ui/label';
+import { toast } from '@/hooks/use-toast';
 
-export default function RecurringScheduleManager({ token, templates, onApply }) {
-  const [schedules, setSchedules] = useState([]);
-  const [day, setDay] = useState('1');
-  const [time, setTime] = useState('09:00');
-  const [templateId, setTemplateId] = useState('');
+const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const FALLBACK_TIMEZONES = [
+  'UTC',
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'Europe/London',
+  'Europe/Berlin',
+  'Europe/Paris',
+  'Asia/Tokyo',
+  'Australia/Sydney',
+];
+
+const sortSlots = (slots) => {
+  return [...slots].sort((a, b) => {
+    const dayDiff = Number(a.day_of_week ?? 0) - Number(b.day_of_week ?? 0);
+    if (dayDiff !== 0) return dayDiff;
+    return String(a.time_of_day || '').localeCompare(String(b.time_of_day || ''));
+  });
+};
+
+const normalizeSlot = (slot) => ({
+  id: slot.id || null,
+  day_of_week: Number(slot.day_of_week ?? 0),
+  time_of_day: String(slot.time_of_day || '').slice(0, 5) || '05:00',
+  enabled: slot.enabled !== false,
+  advance_minutes: Number(slot.advance_minutes ?? 60) || 60,
+  timezone: slot.timezone || null,
+  next_scheduled: slot.next_scheduled || null,
+  next_scheduled_local: slot.next_scheduled_local || null,
+  next_scheduled_date: slot.next_scheduled_date || null,
+  next_scheduled_time: slot.next_scheduled_time || null,
+});
+
+const formatNext = (slot) => {
+  const iso = slot.next_scheduled || (slot.next_scheduled_local ? `${slot.next_scheduled_local}:00` : null);
+  if (!iso) return '—';
+  const dt = new Date(iso);
+  if (Number.isNaN(dt.getTime())) {
+    if (slot.next_scheduled_date && slot.next_scheduled_time) {
+      return `${slot.next_scheduled_date} ${slot.next_scheduled_time}`;
+    }
+    return '—';
+  }
+  return dt.toLocaleString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+};
+
+function getTimezoneOptions() {
+  if (typeof Intl !== 'undefined' && typeof Intl.supportedValuesOf === 'function') {
+    try {
+      const values = Intl.supportedValuesOf('timeZone');
+      if (Array.isArray(values) && values.length > 0) {
+        return [...values];
+      }
+    } catch (err) {
+      // ignore and fall back
+    }
+  }
+  return FALLBACK_TIMEZONES;
+}
+
+export default function RecurringScheduleManager({
+  token,
+  templateId,
+  userTimezone,
+  isNewTemplate,
+  onDirtyChange,
+}) {
   const [loading, setLoading] = useState(false);
-  const [applyingId, setApplyingId] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [slots, setSlots] = useState([]);
+  const [timezone, setTimezone] = useState(userTimezone || 'UTC');
+  const [scheduleDirty, setScheduleDirty] = useState(false);
+  const [timeInput, setTimeInput] = useState('05:00');
+  const [daySelection, setDaySelection] = useState(() => new Set([0]));
+  const [baseline, setBaseline] = useState({ timezone: userTimezone || 'UTC', slots: [] });
+
+  const timezoneOptions = useMemo(() => {
+    const list = getTimezoneOptions();
+    const sorted = [...new Set([...list, userTimezone || 'UTC'])];
+    return sorted.sort((a, b) => a.localeCompare(b));
+  }, [userTimezone]);
 
   useEffect(() => {
-    const api = makeApi(token);
-    api.get('/api/recurring/schedules').then(setSchedules).catch(() => {});
-  }, [token]);
+    if (typeof onDirtyChange === 'function') {
+      onDirtyChange(scheduleDirty);
+    }
+  }, [scheduleDirty, onDirtyChange]);
 
-  const handleAdd = async () => {
+  useEffect(() => {
+    if (!templateId || templateId === 'new' || isNewTemplate) {
+      const defaultTz = userTimezone || 'UTC';
+      setSlots([]);
+      setScheduleDirty(false);
+      setError(null);
+      setLoading(false);
+      setTimezone(defaultTz);
+      setBaseline({ timezone: defaultTz, slots: [] });
+      if (typeof onDirtyChange === 'function') {
+        onDirtyChange(false);
+      }
+      return;
+    }
+
+    let cancelled = false;
     setLoading(true);
+    (async () => {
+      try {
+        const api = makeApi(token);
+        const data = await api.get(`/api/recurring/templates/${templateId}/schedules`);
+        if (cancelled) return;
+        const incoming = Array.isArray(data?.schedules) ? data.schedules : [];
+        const normalized = sortSlots(incoming.map(normalizeSlot));
+        const cloned = normalized.map((slot) => ({ ...slot }));
+        const resolvedTz = data?.timezone || userTimezone || normalized[0]?.timezone || 'UTC';
+        setSlots(cloned);
+        setTimezone(resolvedTz);
+        setBaseline({
+          timezone: resolvedTz,
+          slots: cloned.map((slot) => ({ ...slot })),
+        });
+        setScheduleDirty(false);
+        setError(null);
+        if (typeof onDirtyChange === 'function') {
+          onDirtyChange(false);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err?.message || 'Failed to load recurring schedule');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [templateId, token, isNewTemplate, userTimezone, onDirtyChange]);
+
+  const toggleDay = useCallback((index) => {
+    setDaySelection((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleAddSlots = useCallback(() => {
+    if (daySelection.size === 0 || !timeInput) {
+      return;
+    }
+    setSlots((prev) => {
+      const next = [...prev];
+      let added = 0;
+      daySelection.forEach((day) => {
+        const dayNum = Number(day);
+        const exists = next.some(
+          (slot) => Number(slot.day_of_week) === dayNum && String(slot.time_of_day) === String(timeInput)
+        );
+        if (!exists) {
+          next.push({
+            id: null,
+            day_of_week: dayNum,
+            time_of_day: timeInput,
+            enabled: true,
+            advance_minutes: 60,
+            timezone,
+            next_scheduled: null,
+            next_scheduled_local: null,
+            next_scheduled_date: null,
+            next_scheduled_time: null,
+          });
+          added += 1;
+        }
+      });
+      if (added > 0) {
+        setScheduleDirty(true);
+        return sortSlots(next);
+      }
+      return next;
+    });
+  }, [daySelection, timeInput, timezone]);
+
+  const updateSlot = useCallback((index, updates, shouldSort = false) => {
+    setSlots((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], ...updates };
+      return shouldSort ? sortSlots(next) : next;
+    });
+    setScheduleDirty(true);
+  }, []);
+
+  const removeSlot = useCallback((index) => {
+    setSlots((prev) => {
+      const next = [...prev];
+      next.splice(index, 1);
+      return next;
+    });
+    setScheduleDirty(true);
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    if (!templateId || templateId === 'new') return;
+    setSaving(true);
+    setError(null);
     try {
       const api = makeApi(token);
-      await api.post('/api/recurring/schedules', { day_of_week: parseInt(day), time_of_day: time, template_id: templateId });
-      const list = await api.get('/api/recurring/schedules');
-      setSchedules(list);
+      const payload = {
+        timezone,
+        schedules: slots.map((slot) => ({
+          id: slot.id || undefined,
+          day_of_week: Number(slot.day_of_week ?? 0),
+          time_of_day: String(slot.time_of_day || '').slice(0, 5),
+          enabled: slot.enabled !== false,
+          advance_minutes: Number(slot.advance_minutes ?? 60) || 60,
+          timezone: slot.timezone || timezone,
+        })),
+      };
+      const data = await api.put(`/api/recurring/templates/${templateId}/schedules`, payload);
+      const incoming = Array.isArray(data?.schedules) ? data.schedules : [];
+      const normalized = sortSlots(incoming.map(normalizeSlot));
+      const cloned = normalized.map((slot) => ({ ...slot }));
+      const resolvedTz = data?.timezone || timezone;
+      setSlots(cloned);
+      setTimezone(resolvedTz);
+      setBaseline({
+        timezone: resolvedTz,
+        slots: cloned.map((slot) => ({ ...slot })),
+      });
+      setScheduleDirty(false);
+      if (typeof onDirtyChange === 'function') {
+        onDirtyChange(false);
+      }
+      toast({
+        title: 'Recurring schedule updated',
+        description: 'Future episodes from this template will use the new time slots.',
+      });
+    } catch (err) {
+      const message = err?.message || 'Failed to save recurring schedule';
+      setError(message);
+      toast({ variant: 'destructive', title: 'Save failed', description: message });
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
-  };
+  }, [templateId, token, slots, timezone, onDirtyChange]);
 
-  const handleDelete = async (id) => {
-    const api = makeApi(token);
-    await api.del(`/api/recurring/schedules/${id}`);
-    setSchedules(schedules.filter(s => s.id !== id));
-  };
+  const hasSlots = slots.length > 0;
+  const selectedDaysSummary = useMemo(() => Array.from(daySelection).sort((a, b) => a - b), [daySelection]);
 
-  const handleApplyClick = async (schedule) => {
-    if (!onApply) return;
-    try {
-      setApplyingId(schedule.id);
-      await onApply(schedule);
-    } finally {
-      setApplyingId(null);
-    }
-  };
-
-  const formatNext = (schedule) => {
-    const datePart = schedule?.next_scheduled_date;
-    const timePart = schedule?.next_scheduled_time;
-    if (!datePart || !timePart) return null;
-    const localIso = `${datePart}T${timePart}`;
-    const localDate = new Date(localIso);
-    if (Number.isNaN(localDate.getTime())) {
-      return `${datePart} ${timePart}`;
-    }
-    return localDate.toLocaleString(undefined, {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  };
+  if (!templateId || templateId === 'new' || isNewTemplate) {
+    return (
+      <Card className="shadow-sm">
+        <CardHeader>
+          <CardTitle>Recurring Publish Schedule</CardTitle>
+          <CardDescription>Save your template first to plan automatic publish slots.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Once this template is saved, you can choose the days and times it should publish automatically. Each new episode will
+            pick the next open slot.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
-    <Card className="mb-6">
-      <CardHeader><CardTitle>Recurring Episode Slots</CardTitle></CardHeader>
-      <CardContent>
-        <div className="flex flex-wrap gap-3 mb-4 items-end">
-          <div className="flex flex-col w-28">
-            <Label htmlFor="recurring-day" className="text-xs mb-1">Day</Label>
-            <select id="recurring-day" aria-label="Day of week" className="border rounded px-2 py-1 text-sm" value={day} onChange={e => setDay(e.target.value)}>
-              {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>(<option key={i} value={i}>{d}</option>))}
-            </select>
+    <Card className="shadow-sm">
+      <CardHeader>
+        <CardTitle>Recurring Publish Schedule</CardTitle>
+        <CardDescription>
+          Tell CloudPod when episodes made from this template should go live. We&rsquo;ll skip conflicts with already scheduled
+          episodes.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {error && <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+
+        <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+          <div className="grid gap-3 sm:grid-cols-[repeat(2,minmax(0,1fr))] md:grid-cols-[repeat(3,minmax(0,1fr))]">
+            <div className="space-y-2">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Timezone</Label>
+              <Select
+                value={timezone}
+                onValueChange={(value) => {
+                  setTimezone(value);
+                  setSlots((prev) => prev.map((slot) => ({ ...slot, timezone: value })));
+                  setScheduleDirty(true);
+                }}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select timezone" />
+                </SelectTrigger>
+                <SelectContent className="max-h-64">
+                  {timezoneOptions.map((tz) => (
+                    <SelectItem key={tz} value={tz}>
+                      {tz}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Time</Label>
+              <Input type="time" value={timeInput} onChange={(event) => setTimeInput(event.target.value)} className="h-9" />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Days</Label>
+              <div className="flex flex-wrap gap-2">
+                {DAY_LABELS.map((label, index) => {
+                  const checked = daySelection.has(index);
+                  return (
+                    <button
+                      type="button"
+                      key={label}
+                      onClick={() => toggleDay(index)}
+                      className={`rounded border px-2 py-1 text-xs font-medium transition-colors ${
+                        checked ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              {selectedDaysSummary.length === 0 && (
+                <p className="text-xs text-muted-foreground">Select at least one day.</p>
+              )}
+            </div>
           </div>
-          <div className="flex flex-col w-32">
-            <Label className="text-xs mb-1">Time</Label>
-            <Input type="time" value={time} onChange={e => setTime(e.target.value)} className="h-9" />
+          <Button onClick={handleAddSlots} disabled={daySelection.size === 0 || !timeInput}>
+            Add slot{daySelection.size > 1 ? 's' : ''}
+          </Button>
+        </div>
+
+        {loading ? (
+          <div className="text-sm text-muted-foreground">Loading recurring slots…</div>
+        ) : hasSlots ? (
+          <div className="space-y-3">
+            {slots.map((slot, index) => (
+              <div
+                key={slot.id || `${slot.day_of_week}-${slot.time_of_day}-${index}`}
+                className="flex flex-col gap-3 rounded border border-slate-200 bg-white p-3 md:flex-row md:items-center"
+              >
+                <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+                  <div className="space-y-1">
+                    <Label className="text-xs uppercase tracking-wide text-muted-foreground">Day</Label>
+                    <select
+                      value={String(slot.day_of_week)}
+                      onChange={(event) => updateSlot(index, { day_of_week: Number(event.target.value) }, true)}
+                      className="h-9 rounded border border-slate-300 px-2 text-sm"
+                    >
+                      {DAY_LABELS.map((label, dayIndex) => (
+                        <option key={label} value={dayIndex}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs uppercase tracking-wide text-muted-foreground">Time</Label>
+                    <Input
+                      type="time"
+                      value={slot.time_of_day}
+                      onChange={(event) => updateSlot(index, { time_of_day: event.target.value }, true)}
+                      className="h-9"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs uppercase tracking-wide text-muted-foreground">Status</Label>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id={`slot-enabled-${index}`}
+                        checked={slot.enabled !== false}
+                        onCheckedChange={(checked) => updateSlot(index, { enabled: !!checked })}
+                      />
+                      <Label htmlFor={`slot-enabled-${index}`} className="text-sm text-slate-700">
+                        {slot.enabled !== false ? 'Enabled' : 'Paused'}
+                      </Label>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs uppercase tracking-wide text-muted-foreground">Next publish</Label>
+                    <div className="text-sm text-slate-700">
+                      {formatNext(slot)}
+                      <span className="ml-1 text-xs text-muted-foreground">({slot.timezone || timezone})</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button type="button" variant="destructive" size="sm" onClick={() => removeSlot(index)}>
+                    Remove
+                  </Button>
+                </div>
+              </div>
+            ))}
           </div>
-          <div className="flex flex-col flex-1 min-w-[160px]">
-            <Label htmlFor="recurring-template" className="text-xs mb-1">Template</Label>
-            <select id="recurring-template" aria-label="Template" className="border rounded px-2 py-1 text-sm" value={templateId} onChange={e => setTemplateId(e.target.value)}>
-              <option value="">Select...</option>
-              {templates.map(t=>(<option key={t.id} value={t.id}>{t.name}</option>))}
-            </select>
+        ) : (
+          <div className="rounded border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
+            No recurring slots yet. Add your publish days and time above, then click Save.
           </div>
-          <div className="flex">
-            <Button onClick={handleAdd} disabled={loading || !templateId}>{loading ? 'Adding...' : 'Add'}</Button>
+        )}
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4">
+          <div className="text-xs text-muted-foreground">
+            {scheduleDirty ? 'You have unsaved schedule changes.' : 'Changes saved.'}
+          </div>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!scheduleDirty || saving}
+              onClick={() => {
+                setSlots(baseline.slots.map((slot) => ({ ...slot })));
+                setTimezone(baseline.timezone || userTimezone || 'UTC');
+                setScheduleDirty(false);
+                if (typeof onDirtyChange === 'function') {
+                  onDirtyChange(false);
+                }
+              }}
+            >
+              Cancel
+            </Button>
+            <Button type="button" onClick={handleSave} disabled={saving || !scheduleDirty}>
+              {saving ? 'Saving…' : 'Save schedule'}
+            </Button>
           </div>
         </div>
-        <ul className="space-y-2">
-          {schedules.map(s => (
-            <li key={s.id} className="flex items-center gap-4 text-sm">
-              <div className="flex flex-col">
-                <span>
-                  {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][s.day_of_week]}{' '}
-                  {String(s.time_of_day).slice(0,5)} — {templates.find(t=>t.id===s.template_id)?.name || s.template_id}
-                </span>
-                {(s.next_scheduled_date && s.next_scheduled_time) && (
-                  <span className="text-xs text-muted-foreground">
-                    Next: {formatNext(s)}{s.timezone ? ` (${s.timezone})` : ''}
-                  </span>
-                )}
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handleApplyClick(s)}
-                disabled={applyingId === s.id}
-              >
-                {applyingId === s.id ? 'Applying…' : 'Apply'}
-              </Button>
-              <Button size="sm" variant="destructive" onClick={()=>handleDelete(s.id)}>Delete</Button>
-            </li>
-          ))}
-        </ul>
       </CardContent>
     </Card>
   );
