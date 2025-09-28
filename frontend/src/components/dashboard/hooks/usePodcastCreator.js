@@ -1317,15 +1317,70 @@ export default function usePodcastCreator({
     setEpisodeDetails(p=>({ ...p, cover_crop: val }));
   };
 
-  const handleRecurringApply = (slot) => {
+  const computeNextLocalFromSlot = (slot) => {
+    if (!slot) return null;
+    let dow = Number(slot.day_of_week);
+    if (!Number.isFinite(dow)) return null;
+    const timeText = String(slot.time_of_day || '').trim();
+    if (!timeText) return null;
+    const [hhStr, mmStr] = timeText.split(':');
+    const hours = Number(hhStr);
+    const minutes = Number(mmStr);
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+    const targetDow = (dow + 1) % 7; // Python weekday (Mon=0) -> JS (Sun=0)
+    const now = new Date();
+    const candidate = new Date(now);
+    candidate.setHours(hours, minutes, 0, 0);
+    let deltaDays = (targetDow - now.getDay() + 7) % 7;
+    if (deltaDays === 0 && candidate <= now) {
+      deltaDays = 7;
+    }
+    candidate.setDate(candidate.getDate() + deltaDays);
+    return {
+      date: candidate.toISOString().slice(0, 10),
+      time: `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`,
+    };
+  };
+
+  const handleRecurringApply = async (slot) => {
     try {
       const template = templates.find(t=>t.id===slot.template_id);
       if (template) {
         setSelectedTemplate(template);
       }
     } catch {}
-    setScheduleDate('2025-08-19');
-    setScheduleTime(slot.time_of_day);
+
+    let nextDate = slot?.next_scheduled_date;
+    let nextTime = slot?.next_scheduled_time;
+
+    if ((!nextDate || !nextTime) && slot?.id) {
+      try {
+        const api = makeApi(token);
+        const info = await api.get(`/api/recurring/schedules/${slot.id}/next`);
+        nextDate = info?.next_publish_date || info?.next_publish_at_local?.slice(0, 10) || nextDate;
+        if (info?.next_publish_time) {
+          nextTime = info.next_publish_time;
+        } else if (info?.next_publish_at_local && info.next_publish_at_local.includes('T')) {
+          nextTime = info.next_publish_at_local.split('T')[1]?.slice(0,5) || nextTime;
+        }
+      } catch (err) {
+        console.warn('Failed to fetch next slot info', err);
+      }
+    }
+
+    if (!nextDate || !nextTime) {
+      const fallback = computeNextLocalFromSlot(slot);
+      if (fallback) {
+        nextDate = fallback.date;
+        nextTime = fallback.time;
+      }
+    }
+
+    if (nextDate && nextTime) {
+      setScheduleDate(nextDate);
+      setScheduleTime(nextTime);
+    }
+
     setPublishMode('schedule');
     setCurrentStep(2);
   };

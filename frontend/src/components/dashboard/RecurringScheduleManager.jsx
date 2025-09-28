@@ -11,6 +11,7 @@ export default function RecurringScheduleManager({ token, templates, onApply }) 
   const [time, setTime] = useState('09:00');
   const [templateId, setTemplateId] = useState('');
   const [loading, setLoading] = useState(false);
+  const [applyingId, setApplyingId] = useState(null);
 
   useEffect(() => {
     const api = makeApi(token);
@@ -33,6 +34,34 @@ export default function RecurringScheduleManager({ token, templates, onApply }) 
     const api = makeApi(token);
     await api.del(`/api/recurring/schedules/${id}`);
     setSchedules(schedules.filter(s => s.id !== id));
+  };
+
+  const handleApplyClick = async (schedule) => {
+    if (!onApply) return;
+    try {
+      setApplyingId(schedule.id);
+      await onApply(schedule);
+    } finally {
+      setApplyingId(null);
+    }
+  };
+
+  const formatNext = (schedule) => {
+    const datePart = schedule?.next_scheduled_date;
+    const timePart = schedule?.next_scheduled_time;
+    if (!datePart || !timePart) return null;
+    const localIso = `${datePart}T${timePart}`;
+    const localDate = new Date(localIso);
+    if (Number.isNaN(localDate.getTime())) {
+      return `${datePart} ${timePart}`;
+    }
+    return localDate.toLocaleString(undefined, {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
   };
 
   return (
@@ -64,8 +93,25 @@ export default function RecurringScheduleManager({ token, templates, onApply }) 
         <ul className="space-y-2">
           {schedules.map(s => (
             <li key={s.id} className="flex items-center gap-4 text-sm">
-              <span>{['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][s.day_of_week]} {s.time_of_day} — {templates.find(t=>t.id===s.template_id)?.name || s.template_id}</span>
-              <Button size="sm" variant="outline" onClick={()=>onApply && onApply(s)}>Apply</Button>
+              <div className="flex flex-col">
+                <span>
+                  {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][s.day_of_week]}{' '}
+                  {String(s.time_of_day).slice(0,5)} — {templates.find(t=>t.id===s.template_id)?.name || s.template_id}
+                </span>
+                {(s.next_scheduled_date && s.next_scheduled_time) && (
+                  <span className="text-xs text-muted-foreground">
+                    Next: {formatNext(s)}{s.timezone ? ` (${s.timezone})` : ''}
+                  </span>
+                )}
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleApplyClick(s)}
+                disabled={applyingId === s.id}
+              >
+                {applyingId === s.id ? 'Applying…' : 'Apply'}
+              </Button>
               <Button size="sm" variant="destructive" onClick={()=>handleDelete(s.id)}>Delete</Button>
             </li>
           ))}
