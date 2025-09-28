@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import Joyride, { EVENTS, STATUS } from "react-joyride";
 import TemplateAIContent from "./TemplateAIContent";
+import TemplateRecurringScheduleSection from "./TemplateRecurringScheduleSection.jsx";
 import {
     Plus,
   Save,
@@ -31,6 +32,7 @@ import { createTTS } from "@/api/media";
 import { toast } from "@/hooks/use-toast";
 import VoicePicker from "@/components/VoicePicker";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { useAuth } from "@/AuthContext.jsx";
 
 const AI_DEFAULT = {
   auto_fill_ai: true,
@@ -121,6 +123,7 @@ const AddSegmentButton = ({ type, onClick, disabled }) => (
 
 // --- Main Template Editor Component ---
 export default function TemplateEditor({ templateId, onBack, token, onTemplateSaved }) {
+  const { user: authUser } = useAuth();
   const [template, setTemplate] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -145,6 +148,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     const [createdFromTTS, setCreatedFromTTS] = useState({}); // { segmentId: timestampMs }
     const [showAdvanced, setShowAdvanced] = useState(false);
     const [runTemplateTour, setRunTemplateTour] = useState(false);
+    const [scheduleDirty, setScheduleDirty] = useState(false);
 
         // Load voices when AI voice modal opens
         useEffect(() => {
@@ -169,7 +173,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
         }, [ttsOpen]);
   const isNewTemplate = templateId === 'new';
 
-  const isDirty = useMemo(() => {
+  const templateDirty = useMemo(() => {
     if (!template || !baselineTemplate) return false;
     try {
       return JSON.stringify(template) !== JSON.stringify(baselineTemplate);
@@ -177,6 +181,8 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
       return true;
     }
   }, [template, baselineTemplate]);
+
+  const isDirty = templateDirty || scheduleDirty;
 
   const onMediaUploaded = (newFile) => {
     if (!newFile) return;
@@ -514,6 +520,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
           return { ...seg, source: { source_type: 'static', filename: '' } };
         });
       }
+      const shouldExit = !scheduleDirty;
       if (isNewTemplate) {
         await api.post('/api/templates/', payload);
       } else {
@@ -524,9 +531,20 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
       } catch {
         /* ignore snapshot errors */
       }
-      skipExitPromptRef.current = true;
       if (onTemplateSaved) onTemplateSaved();
-      handleBackClick();
+      if (shouldExit) {
+        skipExitPromptRef.current = true;
+        handleBackClick();
+      } else {
+        try {
+          toast({
+            title: 'Template saved',
+            description: 'Recurring schedule changes are still unsaved.',
+          });
+        } catch (_) {
+          /* ignore */
+        }
+      }
     } catch (err) {
       setError(err.message || String(err));
     } finally {
@@ -693,6 +711,14 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                             )}
                         </div>
                 </CardContent></Card>
+
+                <TemplateRecurringScheduleSection
+                    token={token}
+                    templateId={template?.id ?? templateId}
+                    userTimezone={authUser?.timezone || null}
+                    isNewTemplate={isNewTemplate}
+                    onDirtyChange={setScheduleDirty}
+                />
 
                 {/* Default AI Voice selector */}
                 <Card className="shadow-sm">

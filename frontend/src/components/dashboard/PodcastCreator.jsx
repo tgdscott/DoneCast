@@ -110,7 +110,6 @@ export default function PodcastCreator({
     minutesRemaining,
     minutesDialog,
     setMinutesDialog,
-    handleRecurringApply,
     activeSegment,
     showVoicePicker,
     handleVoiceChange,
@@ -310,9 +309,6 @@ export default function PodcastCreator({
         minutesNearCap={minutesNearCap}
         buildActive={buildActive}
         minutesRemaining={minutesRemaining}
-        token={token}
-        templates={templates}
-        onRecurringApply={handleRecurringApply}
         onCancelBuild={cancelBuild}
       >
         {stepContent}

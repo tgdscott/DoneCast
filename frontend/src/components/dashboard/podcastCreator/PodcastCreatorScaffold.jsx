@@ -1,7 +1,6 @@
 import React from 'react';
 import { Button } from '../../ui/button';
 import { Progress } from '../../ui/progress';
-import RecurringScheduleManager from '../RecurringScheduleManager';
 import { ArrowLeft, BookText, FileImage, FileUp, Globe, Settings, Wand2, CheckCircle } from 'lucide-react';
 
 const ICON_MAP = {
@@ -22,9 +21,6 @@ export default function PodcastCreatorScaffold({
   usage,
   minutesNearCap,
   minutesRemaining,
-  token,
-  templates,
-  onRecurringApply,
   onCancelBuild,
   buildActive,
   children,
@@ -67,7 +63,6 @@ export default function PodcastCreatorScaffold({
 
       <div className="px-4 py-6 bg-white border-b border-gray-100">
         <div className="container mx-auto max-w-6xl">
-          <RecurringScheduleManager token={token} templates={templates} onApply={onRecurringApply} />
           <Progress value={progressPercentage} className="h-2 mb-6" />
           <div className="flex justify-between">
             {steps.map((step) => {
