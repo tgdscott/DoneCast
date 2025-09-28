@@ -9,6 +9,8 @@ from urllib.parse import quote_plus
 from datetime import datetime, timezone
 
 from sqlmodel import Session, select, SQLModel, Field
+from sqlalchemy.exc import ProgrammingError
+from sqlalchemy import text
 
 from ..core.database import get_session
 from ..models.user import User
@@ -623,20 +625,82 @@ async def recover_spreaker_episodes(
 
     return {"recovered_count": recovered_count, "message": f"Successfully recovered {recovered_count} missing episodes."}
 
+def _load_user_podcasts(session: Session, user_id: UUID) -> List[Podcast]:
+    """Fetch podcasts for a user, handling legacy schemas missing new columns.
+
+    Some production databases may not yet have the newer ``remote_cover_url`` column. When
+    SQLModel issues a ``SELECT`` against such a table, PostgreSQL raises ``UndefinedColumn``
+    (surfacing as :class:`sqlalchemy.exc.ProgrammingError`). We catch that specific case,
+    run a pared-down legacy query, and hydrate :class:`Podcast` instances manually so the
+    API can keep serving data instead of bubbling a 500 to the dashboard.
+    """
+
+    statement = select(Podcast).where(Podcast.user_id == user_id)
+    try:
+        return session.exec(statement).all()
+    except ProgrammingError as pe:
+        message = str(pe).lower()
+        if "remote_cover_url" not in message:
+            raise
+
+        session.rollback()
+        log.warning(
+            "[podcasts.list] remote_cover_url column missing for user=%s; using legacy fallback",
+            user_id,
+        )
+
+        legacy_query = text(
+            """
+            SELECT
+                id,
+                user_id,
+                name,
+                description,
+                cover_path,
+                rss_url,
+                rss_url_locked,
+                podcast_type,
+                language,
+                copyright_line,
+                owner_name,
+                author_name,
+                spreaker_show_id,
+                contact_email,
+                category_id,
+                category_2_id,
+                category_3_id,
+                podcast_guid,
+                feed_url_canonical,
+                verification_method,
+                verified_at
+            FROM podcast
+            WHERE user_id = :user_id
+            """
+        )
+
+        rows = session.exec(legacy_query, {"user_id": str(user_id)}).all()
+        podcasts: List[Podcast] = []
+        for row in rows:
+            data = dict(getattr(row, "_mapping", row))
+            data.setdefault("remote_cover_url", None)
+            podcasts.append(Podcast(**data))
+        return podcasts
+
+
 @router.get("/", response_model=List[Podcast])
 async def get_user_podcasts(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
     try:
-        statement = select(Podcast).where(Podcast.user_id == current_user.id)
-        pods = session.exec(statement).all()
-        # Ensure remote_cover_url is preferred when present (response_model will include fields automatically)
-        # Nothing to mutate except legacy cover_path retention for now.
-        return pods
+        return _load_user_podcasts(session, current_user.id)
     except Exception as e:
         # Never let dashboard gating depend on a 500 here; return an empty list on error.
-        log.warning(f"[podcasts.list] failed to load podcasts for user={getattr(current_user, 'id', None)}: {e}")
+        log.warning(
+            "[podcasts.list] failed to load podcasts for user=%s: %s",
+            getattr(current_user, "id", None),
+            e,
+        )
         return []
 
 
