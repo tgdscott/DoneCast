@@ -31,8 +31,8 @@ async def upload_media_files(
 	names = json.loads(friendly_names) if friendly_names else []
 
 	MB = 1024 * 1024
-	CATEGORY_SIZE_LIMITS = {
-		MediaCategory.main_content: 500 * MB,
+        CATEGORY_SIZE_LIMITS = {
+                MediaCategory.main_content: 1536 * MB,  # 1.5 GB
 		MediaCategory.intro: 50 * MB,
 		MediaCategory.outro: 50 * MB,
 		MediaCategory.music: 50 * MB,

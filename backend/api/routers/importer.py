@@ -259,7 +259,7 @@ async def import_from_rss(
 
                     # Stream download with size cap
                     MB = 1024 * 1024
-                    MAX_BYTES = 600 * MB
+                    MAX_BYTES = 1536 * MB
                     headers_ct = None
                     async with httpx.AsyncClient() as dl:
                         r = await dl.get(audio_url, timeout=120.0, follow_redirects=True)
@@ -285,7 +285,7 @@ async def import_from_rss(
                                     break
                                 total += len(chunk)
                                 if total > MAX_BYTES:
-                                    raise HTTPException(status_code=413, detail="Enclosure audio exceeds 600 MB limit")
+                                    raise HTTPException(status_code=413, detail="Enclosure audio exceeds 1.5 GB limit")
                                 out.write(chunk)
 
                     # Local publish/playback will use basename via /static/final
