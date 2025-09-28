@@ -30,6 +30,9 @@ try:
 except Exception:  # pragma: no cover
     _stripe = None
 
+# GCS helpers (dev shim writes to MEDIA_DIR automatically)
+from infrastructure.gcs import upload_fileobj as gcs_upload_fileobj, upload_bytes as gcs_upload_bytes
+
 # Whitelisted tables for admin DB explorer (avoid arbitrary SQL injection surface)
 DB_EXPLORER_TABLES = ["user", "podcast", "episode", "podcasttemplate", "podcast_template"]
 
@@ -383,16 +386,30 @@ def admin_upload_music_asset(
     session: Session = Depends(get_session),
     admin_user: User = Depends(get_current_admin_user),
 ):
+    """Upload a music file. In dev, save under MEDIA_DIR; in prod, upload to GCS.
+
+    Stored filename will be a local /static path in dev, and a gs:// URI in prod.
+    """
     try:
-        music_dir = _ensure_music_dir()
         orig = file.filename or "uploaded.mp3"
         base = _sanitize_filename(orig)
         if "." not in base:
             base += ".mp3"
-        out_path = _unique_path(music_dir, base)
-        with out_path.open("wb") as f:
-            shutil.copyfileobj(file.file, f)
-        rel_url = f"/static/media/music/{out_path.name}"
+
+        bucket = os.getenv("MEDIA_BUCKET")
+        if bucket:
+            # Use GCS (dev shim writes locally)
+            key = f"music/{uuid.uuid4().hex}_{base}"
+            stored_uri = gcs_upload_fileobj(bucket, key, file.file, content_type=(file.content_type or "audio/mpeg"))
+            filename_stored = stored_uri if stored_uri.startswith("gs://") else f"/static/media/{Path(stored_uri).name}"
+        else:
+            # Fallback: save locally under MEDIA_DIR/music
+            music_dir = _ensure_music_dir()
+            out_path = _unique_path(music_dir, base)
+            with out_path.open("wb") as f:
+                shutil.copyfileobj(file.file, f)
+            filename_stored = f"/static/media/music/{out_path.name}"
+
         tags_list: list[str] = []
         if mood_tags:
             try:
@@ -402,9 +419,10 @@ def admin_upload_music_asset(
                     tags_list = [t.strip() for t in mood_tags.split(",") if t.strip()]
             except Exception:
                 tags_list = []
+
         asset = MusicAsset(
             display_name=(display_name or Path(orig).stem),
-            filename=rel_url,
+            filename=filename_stored,
             mood_tags_json=json.dumps(tags_list or []),
             source_type=MusicAssetSource.external,
             license=license,
@@ -413,7 +431,7 @@ def admin_upload_music_asset(
         session.add(asset)
         session.commit()
         session.refresh(asset)
-        return {"id": str(asset.id), "filename": rel_url}
+        return {"id": str(asset.id), "filename": filename_stored}
     except HTTPException:
         raise
     except Exception as e:
@@ -454,14 +472,23 @@ def admin_import_music_asset_by_url(
             except Exception:
                 ext = ".mp3"
         safe_name = _sanitize_filename((payload.display_name or "track") + ext)
-        music_dir = _ensure_music_dir()
-        out_path = _unique_path(music_dir, safe_name)
-        with out_path.open("wb") as f:
-            shutil.copyfileobj(r.raw, f)
-        rel_url = f"/static/media/music/{out_path.name}"
+
+        bucket = os.getenv("MEDIA_BUCKET")
+        if bucket:
+            key = f"music/{uuid.uuid4().hex}_{safe_name}"
+            content = r.content  # small files expected; if large, switch to chunked approach
+            stored_uri = gcs_upload_bytes(bucket, key, content, content_type=(ct or "audio/mpeg"))
+            filename_stored = stored_uri if stored_uri.startswith("gs://") else f"/static/media/{Path(stored_uri).name}"
+        else:
+            music_dir = _ensure_music_dir()
+            out_path = _unique_path(music_dir, safe_name)
+            with out_path.open("wb") as f:
+                shutil.copyfileobj(r.raw, f)
+            filename_stored = f"/static/media/music/{out_path.name}"
+
         asset = MusicAsset(
             display_name=payload.display_name.strip(),
-            filename=rel_url,
+            filename=filename_stored,
             mood_tags_json=json.dumps(payload.mood_tags or []),
             source_type=MusicAssetSource.external,
             license=payload.license,
@@ -470,7 +497,7 @@ def admin_import_music_asset_by_url(
         session.add(asset)
         session.commit()
         session.refresh(asset)
-        return {"id": str(asset.id), "filename": rel_url}
+        return {"id": str(asset.id), "filename": filename_stored}
     except HTTPException:
         raise
     except Exception as e:

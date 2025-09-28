@@ -11,7 +11,7 @@ from sqlalchemy import func
 from api.core.database import get_session
 from api.core.auth import get_current_user
 from api.models.user import User
-from api.models.podcast import Episode, Podcast
+from api.models.podcast import Episode, Podcast, EpisodeStatus
 
 from api.services.episodes import jobs as _svc_jobs
 from .common import _final_url_for, _cover_url_for, _status_value
@@ -54,13 +54,34 @@ def _set_status(ep: Episode, status_str: str) -> None:
 
 @router.get("/last/numbering", status_code=200)
 def get_last_numbering(
+	podcast_id: Optional[str] = Query(None, description="Optional podcast UUID to scope numbering"),
 	session: Session = Depends(get_session),
 	current_user: User = Depends(get_current_user),
 ):
 	try:
 		from sqlalchemy import text as _sa_text
 		q = select(Episode).where(Episode.user_id == current_user.id)
-		eps = session.execute(q.order_by(_sa_text("season_number DESC"), _sa_text("episode_number DESC"), _sa_text("created_at DESC")).limit(100)).scalars().all()
+		# Consider only published episodes for numbering defaults
+		try:
+			q = q.where(Episode.status == EpisodeStatus.published)
+		except Exception:
+			pass
+		# Optionally scope to a single podcast
+		if podcast_id:
+			try:
+				from uuid import UUID as _UUID
+				pid = _UUID(str(podcast_id))
+				q = q.where(Episode.podcast_id == pid)
+			except Exception:
+				# Ignore invalid podcast_id and fall back to user-wide search
+				pass
+		eps = session.execute(
+			q.order_by(
+				_sa_text("season_number DESC"),
+				_sa_text("episode_number DESC"),
+				_sa_text("created_at DESC"),
+			).limit(100)
+		).scalars().all()
 		latest_season = None
 		latest_episode = None
 		for e in eps:

@@ -9,6 +9,7 @@ export default function StepUploadAudio({
   uploadedFile,
   uploadedFilename,
   isUploading,
+  uploadProgress = null,
   onFileChange,
   fileInputRef,
   onBack,
@@ -122,7 +123,9 @@ export default function StepUploadAudio({
             {(uploadedFile || uploadedFilename) ? (
               <div className="space-y-6">
                 <FileAudio className="w-16 h-16 mx-auto text-green-600" />
-                <p className="text-xl font-semibold text-green-600">File Ready!</p>
+                <p className={`text-xl font-semibold ${isUploading ? 'text-slate-600' : 'text-green-600'}`}>
+                  {isUploading ? 'Uploading your audio…' : 'File Ready!'}
+                </p>
                 {uploadedFile && <p className="text-gray-600">{formatDisplayName(uploadedFile.name)}</p>}
                 {!uploadedFile && uploadedFilename && (
                   <>
@@ -153,6 +156,19 @@ export default function StepUploadAudio({
                     </>
                   )}
                 </Button>
+              </div>
+            )}
+            {isUploading && (
+              <div className="mt-6 space-y-2">
+                <div className="h-2 w-full rounded-full bg-slate-200 overflow-hidden">
+                  <div
+                    className="h-full bg-slate-600 transition-all duration-200"
+                    style={{ width: `${Math.min(100, Math.max(5, typeof uploadProgress === 'number' ? uploadProgress : 5))}%` }}
+                  />
+                </div>
+                <p className="text-sm text-slate-600">
+                  Uploading{typeof uploadProgress === 'number' ? `… ${uploadProgress}%` : '…'}
+                </p>
               </div>
             )}
             <input ref={fileInputRef} type="file" accept="audio/*" onChange={handleFileInput} className="hidden" />

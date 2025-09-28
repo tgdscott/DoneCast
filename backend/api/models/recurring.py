@@ -9,6 +9,7 @@ class RecurringScheduleBase(SQLModel):
     """Common fields shared by recurring schedule variants."""
 
     day_of_week: int = Field(ge=0, le=6, description="0=Monday .. 6=Sunday")
+
     time_of_day: time
     template_id: UUID = Field(
         foreign_key="podcasttemplate.id",
@@ -63,5 +64,10 @@ class RecurringScheduleCreate(SQLModel):
     title_prefix: Optional[str] = None
     description_prefix: Optional[str] = None
     enabled: bool = True
-    advance_minutes: int = 60
+
+    advance_minutes: int = 60  # How far in advance to create the draft
+    next_scheduled: Optional[str] = None  # ISO8601 UTC string (Z suffix)
+    next_scheduled_local: Optional[str] = None  # Local ISO string YYYY-MM-DDTHH:MM
+    next_scheduled_date: Optional[str] = None  # YYYY-MM-DD in user's timezone
+    next_scheduled_time: Optional[str] = None  # HH:MM in user's timezone
     timezone: Optional[str] = None

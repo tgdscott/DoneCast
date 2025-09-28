@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from '@/hooks/use-toast';
-import { makeApi } from '@/lib/apiClient';
+import { makeApi, buildApiUrl } from '@/lib/apiClient';
 import { fetchVoices as fetchElevenVoices } from '@/api/elevenlabs';
 import { useAuth } from '@/AuthContext.jsx';
 
@@ -78,6 +78,7 @@ export default function usePodcastCreator({
   const [coverNeedsUpload, setCoverNeedsUpload] = useState(false);
   const [coverMode, setCoverMode] = useState('crop');
   const [isUploadingCover, setIsUploadingCover] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(null);
   const [audioDurationSec, setAudioDurationSec] = useState(null);
 
   // Consider a build "active" when something non-trivial is in-flight or staged
@@ -615,22 +616,33 @@ export default function usePodcastCreator({
     }
   }, [templates, selectedTemplate, currentStep]);
 
+  const prefillNumbering = useCallback(async () => {
+    try {
+      const api = makeApi(token);
+      const qs = [];
+      if (selectedTemplate && selectedTemplate.podcast_id) {
+        qs.push(`podcast_id=${encodeURIComponent(selectedTemplate.podcast_id)}`);
+      }
+      const url = `/api/episodes/last/numbering${qs.length ? `?${qs.join('&')}` : ''}`;
+      const data = await api.get(url);
+      if (data && (data.season_number != null || data.episode_number != null)) {
+        setEpisodeDetails(prev => {
+          // Only prefill if user hasn’t changed these yet
+          if (prev.episodeNumber && String(prev.episodeNumber).trim()) return prev;
+          if (prev.season && String(prev.season).trim() !== '1') return prev;
+          const season = (data.season_number != null) ? String(data.season_number) : '1';
+          const nextEp = (data.episode_number != null) ? String(Number(data.episode_number) + 1) : '1';
+          return { ...prev, season, episodeNumber: nextEp };
+        });
+      }
+    } catch(_) {}
+  }, [token, selectedTemplate?.podcast_id]);
+
+  useEffect(() => { prefillNumbering(); }, [prefillNumbering]);
+  // Also attempt prefill when entering Step 5 if needed
   useEffect(() => {
-    (async () => {
-      try {
-        const api = makeApi(token);
-        const data = await api.get('/api/episodes/last/numbering');
-        if(data && (data.season_number || data.episode_number)){
-          setEpisodeDetails(prev => {
-            if(prev.episodeNumber || prev.season !== '1') return prev;
-            const season = data.season_number ? String(data.season_number) : '1';
-            const nextEp = data.episode_number ? String(Number(data.episode_number)+1) : '1';
-            return { ...prev, season, episodeNumber: nextEp };
-          });
-        }
-      } catch(_){ }
-    })();
-  }, [token]);
+    if (currentStep === 5) prefillNumbering();
+  }, [currentStep, prefillNumbering]);
 
   useEffect(() => {
     if (!jobId) return;
@@ -744,6 +756,7 @@ export default function usePodcastCreator({
     setShowIntentQuestions(false);
     intentsPromptedRef.current = false; // new file -> prompt again in Step 2
     setIsUploading(true);
+    setUploadProgress(0);
     setStatusMessage('Uploading audio file...');
     setError('');
 
@@ -751,15 +764,65 @@ export default function usePodcastCreator({
     formData.append('files', file);
     formData.append('friendly_names', JSON.stringify([file.name]));
 
+    const authToken = token || (() => { try { return localStorage.getItem('authToken'); } catch { return null; } })();
+
+    const performUpload = () => new Promise((resolve, reject) => {
+      try {
+        if (typeof XMLHttpRequest === 'undefined') {
+          const api = makeApi(token);
+          api.raw('/api/media/upload/main_content', { method: 'POST', body: formData })
+            .then(resolve)
+            .catch(reject);
+          return;
+        }
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', buildApiUrl('/api/media/upload/main_content'));
+        xhr.withCredentials = true;
+        if (authToken) {
+          xhr.setRequestHeader('Authorization', `Bearer ${authToken}`);
+        }
+        xhr.responseType = 'json';
+        xhr.upload.onprogress = (event) => {
+          if (!event.lengthComputable) return;
+          const pct = Math.min(100, Math.round((event.loaded / event.total) * 100));
+          setUploadProgress(pct);
+        };
+        xhr.onerror = () => {
+          reject(new Error('Upload failed. Please try again.'));
+        };
+        xhr.onload = () => {
+          const safeResponse = (() => {
+            if (xhr.response != null) return xhr.response;
+            try {
+              return JSON.parse(xhr.responseText || '');
+            } catch (_) {
+              return null;
+            }
+          })();
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(safeResponse);
+            return;
+          }
+          const message = (safeResponse && (safeResponse.error || safeResponse.detail || safeResponse.message))
+            || `Upload failed with status ${xhr.status}`;
+          reject(new Error(message));
+        };
+        xhr.send(formData);
+      } catch (err) {
+        reject(err);
+      }
+    });
+
     try {
-      const api = makeApi(token);
-      const result = await api.raw('/api/media/upload/main_content', { method: 'POST', body: formData });
-      const fname = result[0]?.filename;
+      const result = await performUpload();
+      const entries = Array.isArray(result) ? result : (result?.files || []);
+      const fname = entries[0]?.filename;
       setUploadedFilename(fname);
       try {
         if (fname) localStorage.setItem('ppp_uploaded_filename', fname);
       } catch {}
       setStatusMessage('Upload successful!');
+      setUploadProgress(100);
     } catch (err) {
       setError(err.message);
       setStatusMessage('');
@@ -767,8 +830,10 @@ export default function usePodcastCreator({
       try {
         localStorage.removeItem('ppp_uploaded_filename');
       } catch {}
+      setUploadProgress(null);
     } finally {
       setIsUploading(false);
+      setTimeout(() => setUploadProgress(null), 400);
     }
   };
 
@@ -1385,6 +1450,74 @@ export default function usePodcastCreator({
     setEpisodeDetails(p=>({ ...p, cover_crop: val }));
   };
 
+  const computeNextLocalFromSlot = (slot) => {
+    if (!slot) return null;
+    let dow = Number(slot.day_of_week);
+    if (!Number.isFinite(dow)) return null;
+    const timeText = String(slot.time_of_day || '').trim();
+    if (!timeText) return null;
+    const [hhStr, mmStr] = timeText.split(':');
+    const hours = Number(hhStr);
+    const minutes = Number(mmStr);
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+    const targetDow = (dow + 1) % 7; // Python weekday (Mon=0) -> JS (Sun=0)
+    const now = new Date();
+    const candidate = new Date(now);
+    candidate.setHours(hours, minutes, 0, 0);
+    let deltaDays = (targetDow - now.getDay() + 7) % 7;
+    if (deltaDays === 0 && candidate <= now) {
+      deltaDays = 7;
+    }
+    candidate.setDate(candidate.getDate() + deltaDays);
+    return {
+      date: candidate.toISOString().slice(0, 10),
+      time: `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`,
+    };
+  };
+
+  const handleRecurringApply = async (slot) => {
+    try {
+      const template = templates.find(t=>t.id===slot.template_id);
+      if (template) {
+        setSelectedTemplate(template);
+      }
+    } catch {}
+
+    let nextDate = slot?.next_scheduled_date;
+    let nextTime = slot?.next_scheduled_time;
+
+    if ((!nextDate || !nextTime) && slot?.id) {
+      try {
+        const api = makeApi(token);
+        const info = await api.get(`/api/recurring/schedules/${slot.id}/next`);
+        nextDate = info?.next_publish_date || info?.next_publish_at_local?.slice(0, 10) || nextDate;
+        if (info?.next_publish_time) {
+          nextTime = info.next_publish_time;
+        } else if (info?.next_publish_at_local && info.next_publish_at_local.includes('T')) {
+          nextTime = info.next_publish_at_local.split('T')[1]?.slice(0,5) || nextTime;
+        }
+      } catch (err) {
+        console.warn('Failed to fetch next slot info', err);
+      }
+    }
+
+    if (!nextDate || !nextTime) {
+      const fallback = computeNextLocalFromSlot(slot);
+      if (fallback) {
+        nextDate = fallback.date;
+        nextTime = fallback.time;
+      }
+    }
+
+    if (nextDate && nextTime) {
+      setScheduleDate(nextDate);
+      setScheduleTime(nextTime);
+    }
+
+    setPublishMode('schedule');
+    setCurrentStep(2);
+  };
+
   useEffect(() => {
     if (!assemblyComplete) return;
     try {
@@ -1499,6 +1632,7 @@ export default function usePodcastCreator({
     cancelBuild,
     handleTemplateSelect,
     handleFileChange,
+    uploadProgress,
     handleCoverFileSelected,
     handleUploadProcessedCover,
     handleTtsChange,

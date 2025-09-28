@@ -16,6 +16,7 @@ from api.models.recurring import (
     RecurringScheduleCreate,
     RecurringScheduleRead,
 )
+
 from api.models.user import User
 
 router = APIRouter(prefix="/recurring", tags=["recurring"])
@@ -34,10 +35,14 @@ class RecurringNextSlotResponse(BaseModel):
     conflicts_skipped: int = 0
 
 
-class ScheduleSlotPayload(BaseModel):
-    id: Optional[UUID] = None
-    day_of_week: int = Field(ge=0, le=6)
-    time_of_day: str
+class RecurringScheduleCreate(BaseModel):
+    day_of_week: int = Field(ge=0, le=6)  # 0=Mon .. 6=Sun
+    time_of_day: str  # "HH:MM"
+    template_id: str
+    podcast_id: Optional[str] = None
+    title_prefix: Optional[str] = None
+    description_prefix: Optional[str] = None
+
     enabled: bool = True
     advance_minutes: int = 60
     timezone: Optional[str] = None
@@ -78,21 +83,110 @@ def _timezone_for_schedule(schedule: RecurringSchedule, user: User) -> ZoneInfo:
 def _timezone_name(tz: ZoneInfo) -> str:
     return getattr(tz, "key", None) or getattr(tz, "zone", None) or str(tz)
 
+class RecurringNextSlotResponse(BaseModel):
+    schedule_id: str
+    timezone: str
+    next_publish_at: Optional[str] = None  # UTC ISO8601 (Z)
+    next_publish_at_local: Optional[str] = None  # YYYY-MM-DDTHH:MM
+    next_publish_date: Optional[str] = None
+    next_publish_time: Optional[str] = None
+    conflicts_skipped: int = 0
+
+
+def _timezone_for_user(user: User) -> ZoneInfo:
+    tz_name = getattr(user, "timezone", None)
+    if tz_name:
+        try:
+            return ZoneInfo(str(tz_name))
+        except Exception:
+            pass
+    return ZoneInfo("UTC")
+
 
 def _parse_time_of_day(value: object) -> dt_time:
     if isinstance(value, dt_time):
-        return value.replace(second=value.second or 0, microsecond=0)
+        return value
+
     text = str(value).strip() if value is not None else ""
     if not text:
         raise ValueError("time_of_day is required")
     for fmt in ("%H:%M", "%H:%M:%S"):
         try:
-            parsed = datetime.strptime(text, fmt).time()
-            return parsed.replace(second=parsed.second or 0, microsecond=0)
+            return datetime.strptime(text, fmt).time()
         except ValueError:
             continue
     raise ValueError(f"Invalid time_of_day format: {value!r}")
 
+
+def _scheduled_local_keys(session: Session, user_id, tz: ZoneInfo) -> Set[str]:
+    """Return a set of YYYY-MM-DDTHH:MM strings already reserved by scheduled episodes."""
+
+    now_utc = datetime.now(timezone.utc)
+    try:
+        episodes = session.exec(
+            select(Episode)
+            .where(Episode.user_id == user_id)
+            .where(Episode.publish_at != None)  # noqa: E711
+            .where(Episode.publish_at > now_utc)
+        ).all()
+    except Exception:
+        episodes = []
+
+    reserved: Set[str] = set()
+    for ep in episodes:
+        pub_dt = getattr(ep, "publish_at", None)
+        if not pub_dt:
+            continue
+        try:
+            if pub_dt.tzinfo is None or pub_dt.tzinfo.utcoffset(pub_dt) is None:
+                pub_dt = pub_dt.replace(tzinfo=timezone.utc)
+            local_dt = pub_dt.astimezone(tz)
+            reserved.add(local_dt.strftime("%Y-%m-%dT%H:%M"))
+        except Exception:
+            continue
+    return reserved
+
+
+def _compute_next_occurrence(
+    schedule: RecurringSchedule,
+    tz: ZoneInfo,
+    reserved: Set[str],
+) -> Optional[dict]:
+    try:
+        day = int(schedule.day_of_week)
+    except Exception:
+        return None
+
+    try:
+        base_time = _parse_time_of_day(schedule.time_of_day)
+    except ValueError:
+        return None
+
+    now_local = datetime.now(tz)
+    days_ahead = (day - now_local.weekday()) % 7
+    candidate_date = (now_local + timedelta(days=days_ahead)).date()
+    candidate = datetime.combine(candidate_date, base_time, tz)
+    if candidate <= now_local:
+        candidate += timedelta(days=7)
+
+    conflicts = 0
+    for _ in range(520):  # ~10 years of weekly recurrences
+        key = candidate.strftime("%Y-%m-%dT%H:%M")
+        if key not in reserved:
+            utc_iso = candidate.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+            return {
+                "utc_iso": utc_iso,
+                "local_iso": key,
+                "local_date": candidate.strftime("%Y-%m-%d"),
+                "local_time": candidate.strftime("%H:%M"),
+                "conflicts": conflicts,
+            }
+        candidate += timedelta(days=7)
+        conflicts += 1
+    return None
+
+# In-memory store for demo (replace with DB in prod)
+RECURRING_SCHEDULES: List[RecurringSchedule] = []
 
 def _coerce_time(value: object) -> dt_time:
     parsed = _parse_time_of_day(value)
@@ -237,23 +331,25 @@ def list_schedules(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    stmt = select(RecurringSchedule).where(RecurringSchedule.user_id == current_user.id)
-    if template_id:
-        stmt = stmt.where(RecurringSchedule.template_id == template_id)
-    schedules = session.exec(stmt).all()
 
-    upcoming = _fetch_upcoming_publish_times(session, current_user.id)
-    reserved_cache: Dict[str, Set[str]] = {}
-    results: List[RecurringScheduleRead] = []
-    for schedule in schedules:
-        tz = _timezone_for_schedule(schedule, current_user)
-        tz_key = _timezone_name(tz)
-        if tz_key not in reserved_cache:
-            reserved_cache[tz_key] = _scheduled_local_keys(upcoming, tz)
-        info = _compute_next_occurrence(schedule, tz, reserved_cache[tz_key])
-        results.append(_serialize_schedule(schedule, tz, info))
+    tz = _timezone_for_user(current_user)
+    tz_name = getattr(tz, "key", "UTC")
+    reserved = _scheduled_local_keys(session, current_user.id, tz)
+
+    results: List[RecurringSchedule] = []
+    for schedule in RECURRING_SCHEDULES:
+        if schedule.user_id != current_user.id:
+            continue
+        enriched = schedule.copy()
+        enriched.timezone = tz_name
+        info = _compute_next_occurrence(schedule, tz, reserved)
+        if info:
+            enriched.next_scheduled = info["utc_iso"]
+            enriched.next_scheduled_local = info["local_iso"]
+            enriched.next_scheduled_date = info["local_date"]
+            enriched.next_scheduled_time = info["local_time"]
+        results.append(enriched)
     return results
-
 
 @router.post("/schedules", response_model=RecurringScheduleRead)
 def create_schedule(
@@ -261,16 +357,18 @@ def create_schedule(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    template = _assert_template_access(session, rec_in.template_id, current_user.id)
 
+    template = _assert_template_access(session, rec_in.template_id, current_user.id)
     try:
         parsed_time = _parse_time_of_day(rec_in.time_of_day)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    tz_name = _normalize_timezone_choice(rec_in.timezone, current_user)
 
-    schedule = RecurringSchedule(
+
+    rec = RecurringSchedule(
+        id=f"rec-{len(RECURRING_SCHEDULES)+1}",
+
         user_id=current_user.id,
         day_of_week=rec_in.day_of_week,
         time_of_day=parsed_time,
@@ -280,6 +378,7 @@ def create_schedule(
         description_prefix=rec_in.description_prefix,
         enabled=rec_in.enabled,
         advance_minutes=rec_in.advance_minutes,
+
         timezone=tz_name,
     )
     session.add(schedule)
@@ -322,6 +421,36 @@ def get_next_schedule_slot(
         conflicts_skipped=info["conflicts"],
     )
 
+
+@router.get("/schedules/{rec_id}/next", response_model=RecurringNextSlotResponse)
+def get_next_schedule_slot(
+    rec_id: str,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    schedule = next(
+        (r for r in RECURRING_SCHEDULES if r.id == rec_id and r.user_id == current_user.id),
+        None,
+    )
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    tz = _timezone_for_user(current_user)
+    tz_name = getattr(tz, "key", "UTC")
+    reserved = _scheduled_local_keys(session, current_user.id, tz)
+    info = _compute_next_occurrence(schedule, tz, reserved)
+    if not info:
+        return RecurringNextSlotResponse(schedule_id=rec_id, timezone=tz_name)
+
+    return RecurringNextSlotResponse(
+        schedule_id=rec_id,
+        timezone=tz_name,
+        next_publish_at=info["utc_iso"],
+        next_publish_at_local=info["local_iso"],
+        next_publish_date=info["local_date"],
+        next_publish_time=info["local_time"],
+        conflicts_skipped=info["conflicts"],
+    )
 
 @router.delete("/schedules/{rec_id}")
 def delete_schedule(

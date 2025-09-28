@@ -8,6 +8,7 @@ from api.models.podcast import MusicAsset
 import os
 from fastapi import Request
 from api.core.paths import MEDIA_DIR
+from infrastructure.gcs import make_signed_url
 
 router = APIRouter(prefix="/music", tags=["music"])
 
@@ -23,25 +24,41 @@ def list_music_assets(request: Request, session: Session = Depends(get_session),
             tags = []
         if mood and mood not in tags:
             continue
-        # Derive a simple public URL; assumes filename is relative to /static/media/ or already absolute.
-        filename = a.filename
-        if not (filename.startswith('http://') or filename.startswith('https://')):
+        # Build a preview URL for browser playback.
+        # - If gs://, generate a signed URL (dev shim returns /static path)
+        # - If http(s), use as-is
+        # - Otherwise treat as local path relative to /static/media
+        filename = a.filename or ""
+        filename_url = filename
+        file_exists = True
+        if filename.startswith("gs://"):
+            try:
+                # Signed URL for direct playback; dev returns /static/media/<name>
+                # Extract bucket/key for display only if needed by clients
+                without = filename[len("gs://"):]
+                bucket, key = without.split("/", 1)
+                filename_url = make_signed_url(bucket, key, minutes=60)
+                file_exists = True
+            except Exception:
+                # Fallback: report original value
+                filename_url = filename
+                file_exists = True
+        elif filename.startswith('http://') or filename.startswith('https://'):
+            filename_url = filename
+            file_exists = True
+        else:
             # Normalize leading slash and build absolute URL so the React dev server (5173) doesn't try to serve it.
             rel = filename.lstrip('/')
             if not rel.startswith('static/media'):
-                # Files expected under media_uploads directory mounted at /static/media
                 rel = f"static/media/{rel}"
             base = str(request.base_url).rstrip('/')
             filename_url = f"{base}/{rel}"
-        else:
-            filename_url = filename
-        file_exists = True
-        try:
-            if 'static/media/' in filename_url:
-                rel = filename_url.split('/static/media/', 1)[-1]
-                file_exists = (MEDIA_DIR / rel).is_file()
-        except Exception:
-            file_exists = True
+            try:
+                if 'static/media/' in filename_url:
+                    rel2 = filename_url.split('/static/media/', 1)[-1]
+                    file_exists = (MEDIA_DIR / rel2).is_file()
+            except Exception:
+                file_exists = True
         out.append({
             "id": str(a.id),
             "display_name": a.display_name,
