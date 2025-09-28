@@ -150,11 +150,14 @@ def _build_distribution_item(
         notes = status.notes
         updated_at = getattr(status, "updated_at", None)
 
-    instructions = [
-        _format_template(text, context)
-        for text in (host_def.get("instructions") or [])
-        if text
-    ]
+    # Build instructions ensuring all entries are strings (filtering out any Nones)
+    instructions_list: list[str] = []
+    for text in (host_def.get("instructions") or []):
+        if not text:
+            continue
+        ft = _format_template(text, context)
+        if ft:
+            instructions_list.append(ft)
     action_url = _format_template(host_def.get("action_url_template"), context)
     if not action_url:
         action_url = _format_template(host_def.get("action_url"), context)
@@ -169,7 +172,7 @@ def _build_distribution_item(
         action_label=host_def.get("action_label"),
         action_url=action_url,
         docs_url=docs_url,
-        instructions=instructions,
+    instructions=instructions_list,
         requires_rss_feed=requires_rss_feed,
         requires_spreaker_show=requires_spreaker_show,
         disabled_reason=disabled_reason,
@@ -409,38 +412,50 @@ async def create_podcast(
     log.info("--- Starting a new podcast creation process ---")
     log.info(f"Received request to create podcast with name: '{name}'")
 
+    # Basic validation to avoid generic 500s later
+    try:
+        name_clean = (name or "").strip()
+        desc_clean = (description or "").strip()
+    except Exception:
+        name_clean = name
+        desc_clean = description
+    if not name_clean or len(name_clean) < 4:
+        raise HTTPException(status_code=400, detail="Name must be at least 4 characters.")
+    if not desc_clean:
+        raise HTTPException(status_code=400, detail="Description is required.")
+
     spreaker_show_id = None
     if current_user.spreaker_access_token:
         log.info("User has a Spreaker access token. Proceeding to create show on Spreaker.")
         client = SpreakerClient(api_token=current_user.spreaker_access_token)
-        
-        log.info(f"Calling SpreakerClient.create_show with title: '{name}'")
-        success, result = client.create_show(title=name, description=description, language="en")
-        
-        if not success:
-            log.error(f"Spreaker API call failed. Result: {result}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create show on Spreaker: {result}"
-            )
-        
-        log.info(f"Spreaker API call successful. Result: {result}")
-        spreaker_show_id = result.get("show_id")
-        
-        if not spreaker_show_id:
-            log.error("Spreaker created the show but did not return a valid show_id.")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Spreaker created the show but did not return a valid ID."
-            )
-        log.info(f"Successfully obtained Spreaker Show ID: {spreaker_show_id}")
+        try:
+            log.info(f"Calling SpreakerClient.create_show with title: '{name_clean}'")
+            success, result = client.create_show(title=name_clean, description=desc_clean, language="en")
+            if not success:
+                # Do not block local creation; log and continue without a linked show
+                msg = str(result)
+                low = msg.lower()
+                if ("free account" in low) or ("can't create any more shows" in low) or ("cant create any more shows" in low):
+                    log.warning("Spreaker free plan limit hit while creating show; proceeding without link.")
+                else:
+                    log.warning(f"Spreaker create_show failed: {result}")
+            else:
+                log.info(f"Spreaker API call successful. Result: {result}")
+                spreaker_show_id = result.get("show_id")
+                if not spreaker_show_id:
+                    log.warning("Spreaker created the show but did not return a valid show_id; proceeding without link.")
+                else:
+                    log.info(f"Successfully obtained Spreaker Show ID: {spreaker_show_id}")
+        except Exception as e:
+            # Treat any unexpected error as non-fatal for onboarding
+            log.warning(f"Spreaker create_show raised exception; proceeding without link: {e}")
     else:
         log.warning("User does not have a Spreaker access token. Skipping Spreaker show creation.")
 
     log.info("Creating podcast in local database.")
     db_podcast = Podcast(
-        name=name,
-        description=description,
+        name=name_clean,
+        description=desc_clean,
         spreaker_show_id=spreaker_show_id,
         user_id=current_user.id
     )
@@ -468,7 +483,7 @@ async def create_podcast(
         # Validate content type and extension
         ct = (getattr(cover_image, 'content_type', '') or '').lower()
         if not ct.startswith('image/'):
-            raise HTTPException(status_code=400, detail=f"Invalid cover content type '{ct or 'unknown'}'. Expected image.")
+            raise HTTPException(status_code=400, detail=f"Invalid cover content type '{ct or 'unknown'}'. Expected image/*.")
         ext = Path(cover_image.filename).suffix.lower()
         if ext not in {'.png', '.jpg', '.jpeg'}:
             raise HTTPException(status_code=400, detail="Unsupported cover image extension. Allowed: .png, .jpg, .jpeg")
@@ -504,16 +519,19 @@ async def create_podcast(
 
             if spreaker_show_id:
                 log.info(f"Uploading cover art to Spreaker for show ID: {spreaker_show_id}")
-                ok_img, resp_img = client.update_show_image(show_id=spreaker_show_id, image_file_path=str(save_path))
-                if ok_img and isinstance(resp_img, dict):
-                    show_obj = resp_img.get('show') or resp_img
-                    # Try to capture remote cover URL if returned
-                    for k in ('image_url','cover_url','cover_art_url','image'):  # heuristic keys
-                        if isinstance(show_obj, dict) and show_obj.get(k):
-                            db_podcast.remote_cover_url = show_obj.get(k)
-                            break
-                elif not ok_img:
-                    log.warning(f"Spreaker cover upload failed: {resp_img}")
+                try:
+                    ok_img, resp_img = client.update_show_image(show_id=spreaker_show_id, image_file_path=str(save_path))
+                    if ok_img and isinstance(resp_img, dict):
+                        show_obj = resp_img.get('show') or resp_img
+                        # Try to capture remote cover URL if returned
+                        for k in ('image_url','cover_url','cover_art_url','image'):  # heuristic keys
+                            if isinstance(show_obj, dict) and show_obj.get(k):
+                                db_podcast.remote_cover_url = show_obj.get(k)
+                                break
+                    elif not ok_img:
+                        log.warning(f"Spreaker cover upload failed: {resp_img}")
+                except Exception as ie:
+                    log.warning(f"Spreaker cover upload errored; continuing with local cover only: {ie}")
 
         except HTTPException:
             raise

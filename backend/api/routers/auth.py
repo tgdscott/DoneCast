@@ -531,6 +531,61 @@ async def login_for_access_token_json(
     access_token = create_access_token(data={"sub": user.email})
     return {"access_token": access_token, "token_type": "bearer"}
 
+# --- Proxy-aware URL helpers ---
+def _parse_forwarded_header(forwarded: str | None) -> tuple[str | None, str | None]:
+    """Parse RFC 7239 Forwarded header minimally to extract proto and host.
+
+    Returns (proto, host) where values may be None if not found.
+    """
+    if not forwarded:
+        return None, None
+    try:
+        # Handle first entry only (before any commas)
+        first = forwarded.split(",", 1)[0]
+        parts = [p.strip() for p in first.split(";") if p.strip()]
+        kv = {}
+        for p in parts:
+            if "=" in p:
+                k, v = p.split("=", 1)
+                kv[k.strip().lower()] = v.strip().strip('"')
+        return kv.get("proto"), kv.get("host")
+    except Exception:
+        return None, None
+
+def _external_base_url(request: Request) -> str:
+    """Determine the external base URL (scheme://host) for this request.
+
+    Prefers proxy headers (X-Forwarded-Proto/Host, Forwarded). Falls back to
+    request.url or settings.OAUTH_BACKEND_BASE. Ensures https for known prod.
+    """
+    hdr = request.headers
+    xf_proto = (hdr.get("x-forwarded-proto") or "").split(",")[0].strip()
+    xf_host = (hdr.get("x-forwarded-host") or "").split(",")[0].strip()
+    f_proto, f_host = _parse_forwarded_header(hdr.get("forwarded"))
+
+    # Prefer explicit forwarded host/proto
+    host = xf_host or f_host or hdr.get("host") or request.url.hostname
+    proto = xf_proto or f_proto or request.url.scheme or "https"
+
+    # If we know we are in prod with custom domain, enforce https
+    try:
+        import urllib.parse as _urlp
+        base_cfg = (settings.OAUTH_BACKEND_BASE or "").strip()
+        if base_cfg:
+            parsed = _urlp.urlparse(base_cfg)
+            # If the configured base has a hostname we trust, prefer its scheme
+            if parsed.scheme and parsed.hostname and host:
+                # If hosts match or share the podcastplusplus.com base, upgrade scheme
+                if parsed.hostname == host or host.endswith("podcastplusplus.com"):
+                    proto = parsed.scheme
+        # Safety: never return plain http for podcastplusplus.com in production
+        if host and host.endswith("podcastplusplus.com") and proto != "https":
+            proto = "https"
+    except Exception:
+        pass
+
+    return f"{proto}://{host}".rstrip("/")
+
 # --- Compatibility alias: some legacy SPA code calls /api/auth/me expecting { user: ... }
 @router.get("/me", response_model=UserPublic)
 async def auth_me_current_user(current_user: User = Depends(get_current_user)) -> UserPublic:
@@ -578,11 +633,30 @@ async def login_google(request: Request):
     """
     # Prefer dynamic callback URL from the actual host handling this request.
     try:
-        redirect_uri = str(request.url_for('auth_google_callback'))
+        # Build based on external scheme/host to avoid http from internal hops
+        base = _external_base_url(request)
+        redirect_uri = f"{base}/api/auth/google/callback"
     except Exception:
         # Fallback to configured base (legacy behavior) if url_for isn't available.
         backend_base = settings.OAUTH_BACKEND_BASE or "https://api.podcastplusplus.com"
         redirect_uri = f"{backend_base.rstrip('/')}/api/auth/google/callback"
+
+    # If caller requested a dry run, return diagnostics instead of redirecting
+    # so operators can copy/paste the exact redirect_uri into Google Console.
+    dry_run = request.query_params.get("dry_run") or request.query_params.get("debug")
+    if dry_run and str(dry_run).lower() not in {"0", "false", "no"}:
+        hdr = request.headers
+        return {
+            "status": "ok",
+            "redirect_uri": redirect_uri,
+            "request_url": str(request.url),
+            "base_url": str(request.base_url),
+            "host": hdr.get("host"),
+            "x_forwarded_host": hdr.get("x-forwarded-host"),
+            "x_forwarded_proto": hdr.get("x-forwarded-proto"),
+            "forwarded": hdr.get("forwarded"),
+            "oauth_backend_base": settings.OAUTH_BACKEND_BASE or "",
+        }
     try:
         oauth_client, _ = _build_oauth_client()
     except RuntimeError as exc:
@@ -693,19 +767,42 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
 
 # --- Debug endpoint ---
 @router.get("/debug/google-client", include_in_schema=False)
-async def debug_google_client():
+async def debug_google_client(request: Request):
     """Reveals what Google client settings are active."""
     def _mask(val: str | None) -> str:
         v = (val or "").strip()
         return (v[:8] + "…" if len(v) > 8 else v) if v else ""
 
     backend_base = settings.OAUTH_BACKEND_BASE or "https://api.podcastplusplus.com"
+    # Try to compute the dynamic redirect URI as it would be used on the current host
+    try:
+        dynamic_redirect = f"{_external_base_url(request)}/api/auth/google/callback"
+    except Exception:
+        dynamic_redirect = f"{backend_base}/api/auth/google/callback"
+    hdr = request.headers
+    # Try to instantiate the OAuth client to ensure registration succeeds
+    try:
+        _oc, _cid = _build_oauth_client()
+        oauth_client_registration_ok = True
+        oauth_client_error = ""
+    except Exception as e:
+        oauth_client_registration_ok = False
+        oauth_client_error = str(e)
     return {
         "client_id_hint": _mask(settings.GOOGLE_CLIENT_ID),
+        "client_secret_hint": _mask(getattr(settings, "GOOGLE_CLIENT_SECRET", None)),
+        "client_secret_set": bool(getattr(settings, "GOOGLE_CLIENT_SECRET", None)),
         "redirect_uri": f"{backend_base}/api/auth/google/callback",
+        "redirect_uri_dynamic": dynamic_redirect,
+        "request_host": hdr.get("host"),
+        "x_forwarded_host": hdr.get("x-forwarded-host"),
+        "x_forwarded_proto": hdr.get("x-forwarded-proto"),
+        "forwarded": hdr.get("forwarded"),
         "oauth_backend_base_is_set": bool(settings.OAUTH_BACKEND_BASE),
         "authlib_available": _OAuthFactory is not None,
         "authlib_error": str(_AUTHLIB_ERROR) if _AUTHLIB_ERROR else "",
+        "oauth_client_registration_ok": oauth_client_registration_ok,
+        "oauth_client_registration_error": oauth_client_error,
     }
 
 # --- Terms of Use Endpoints ---

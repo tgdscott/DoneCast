@@ -477,6 +477,22 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
                 <Button className="rounded-[var(--radius)] h-11 min-h-[44px] px-5 text-white" asChild>
                   <a href="mailto:support@example.com">Contact</a>
                 </Button>
+                <Button
+                  variant="secondary"
+                  className="rounded-[var(--radius)] h-11 min-h-[44px] px-5"
+                  onClick={() => {
+                    const ok = window.confirm(
+                      "You can skip this for now, but you will either have to complete this later or enter in everything manually to create podcast episodes."
+                    );
+                    if (ok) {
+                      try { localStorage.setItem('ppp.onboarding.completed', '1'); } catch {}
+                      try { localStorage.removeItem('ppp.onboarding.step'); } catch {}
+                      try { window.location.assign('/dashboard'); } catch {}
+                    }
+                  }}
+                >
+                  Skip for now
+                </Button>
               </div>
             </CardContent>
           </Card>

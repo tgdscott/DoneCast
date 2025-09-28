@@ -469,7 +469,18 @@ export default function Onboarding() {
         // Stop any current
         if (ioAudioRef.current) { try { ioAudioRef.current.pause(); } catch {} }
         const a = new Audio(url);
-        a.crossOrigin = 'anonymous';
+        // Only set crossOrigin when the media is served by our API origin, which responds with CORS headers.
+        // For third-party or signed GCS URLs without CORS headers, leaving crossOrigin unset avoids load failures.
+        try {
+          const apiBase = buildApiUrl('/')
+            .replace(/\/+$|^https?:\/\/|\/$/g, '') // strip protocol and trailing slash
+            .replace(/^[^/]*\/\//, '');
+          const apiHost = apiBase.includes('//') ? new URL(apiBase).host : apiBase;
+          const mediaHost = new URL(url, window.location.origin).host;
+          if (apiHost && mediaHost && apiHost === mediaHost) {
+            a.crossOrigin = 'anonymous';
+          }
+        } catch {}
         ioAudioRef.current = a;
         setIntroPreviewing(kind === 'intro');
         setOutroPreviewing(kind === 'outro');

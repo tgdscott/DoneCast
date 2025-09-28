@@ -28,7 +28,9 @@
     --chart-3: 197 37% 24%;
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
-    --radius: 0.5rem
+    --radius: 0.5rem;
+    /* Optional helper var; not enforced globally */
+    --border-radius: var(--radius);
   }
   .dark {
     --background: 240 10% 3.9%;
@@ -63,8 +65,10 @@
     --foreground: 210 59% 11%;        /* Ink #0B1B2B */
     --primary: 185 84% 38%;           /* Breeze Teal #0FA3B1 */
     --primary-foreground: 0 0% 100%;
-    --secondary: 168 69% 84%;         /* Mist #B8F2E6 */
-    --secondary-foreground: 210 59% 11%;
+  --logo-vibrant-green: 130 80% 45%;
+  --logo-vibrant-green-rgb: 86 204 53;
+  --secondary: var(--logo-vibrant-green); /* Vibrant, logo-matching green */
+  --secondary-foreground: 0 0% 100%;
     --accent: 43 100% 51%;            /* Spark #FFB703 */
     --accent-foreground: 210 59% 11%;
     --muted: 169 52% 94%;
@@ -83,8 +87,7 @@
     background-repeat: no-repeat;
   /* Plus Plus font (more legible): Inter (replaced Atkinson Hyperlegible) */
   font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-    font-size: 18px;
-    line-height: 1.7;
+    /* Use default base sizing to avoid oversized text; components can opt-in to larger sizes */
   }
 
   /* Plus Plus links and accents clearly teal */

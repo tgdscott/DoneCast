@@ -17,6 +17,10 @@
 .logo.react:hover {
   filter: drop-shadow(0 0 2em #61dafbaa);
 }
+/* Subtle glow aligned with brand vibrant green when brand-plusplus is active */
+html.brand-plusplus .logo {
+  filter: drop-shadow(0 0 10px hsla(130, 80%, 45%, 0.5));
+}
 
 @keyframes logo-spin {
   from {

@@ -18,8 +18,8 @@
      --region=us-west1 \
      --platform=managed \
      --allow-unauthenticated \
-     --set-env-vars=APP_ENV=production,ADMIN_EMAIL=scott@scottgerhardt.com,MEDIA_ROOT=/tmp,MEDIA_BUCKET=<your-media-bucket>,OAUTH_BACKEND_BASE=https://api.getpodcastplus.com,\
-       CORS_ALLOWED_ORIGINS=https://app.getpodcastplus.com\\,https://app.getpodcastpro.com\\,https://app.podcastpro.plus \
+  --set-env-vars=APP_ENV=production,ADMIN_EMAIL=scott@scottgerhardt.com,MEDIA_ROOT=/tmp,MEDIA_BUCKET=<your-media-bucket>,OAUTH_BACKEND_BASE=https://api.podcastplusplus.com,\
+       CORS_ALLOWED_ORIGINS=https://app.podcastplusplus.com\,https://podcastplusplus.com\,https://www.podcastplusplus.com \
      --set-secrets=DATABASE_URL=<secret-name>:latest,SECRET_KEY=<secret-name>:latest,SESSION_SECRET=<secret-name>:latest
    ```
    Replace `<secret-name>` with the Secret Manager entries that hold your configuration secrets and `<your-media-bucket>` with the bucket from step 3. If you prefer direct values, swap `--set-secrets` for `--set-env-vars=...`. If you serve the SPA on additional domains (apex or www), add them to `CORS_ALLOWED_ORIGINS` as well (separate with semicolons like `https://example.com;https://www.example.com`).

@@ -34,6 +34,10 @@ function deriveApiOriginFromWindowOrigin() {
       return makeOrigin(swapped);
     }
 
+    // Explicit host mappings (new primary + legacy)
+    if (lowerHost === 'podcastplusplus.com') {
+      return makeOrigin('api.podcastplusplus.com');
+    }
     if (lowerHost === 'getpodcastplus.com') {
       return makeOrigin('api.getpodcastplus.com');
     }
@@ -49,6 +53,9 @@ function deriveApiOriginFromWindowOrigin() {
 
     return makeOrigin(hostname, true);
   } catch (err) {
+    if (fallback.includes('//podcastplusplus.com')) {
+      return fallback.replace('://', '://api.');
+    }
     if (fallback.includes('//getpodcastplus.com')) {
       return fallback.replace('://', '://api.');
     }
@@ -64,7 +71,7 @@ export function resolveRuntimeApiBase() {
   if (envBase) return envBase;
   const derived = deriveApiOriginFromWindowOrigin();
   // Hard fallback to prod API to avoid silent misroutes when derivation fails
-  return derived || 'https://api.getpodcastplus.com';
+  return derived || 'https://api.podcastplusplus.com';
 }
 
 // Base URL for API requests. In dev, you can leave this blank and rely on Vite's /api proxy.

@@ -49,6 +49,7 @@ pnpm-debug.log*
 # Frontend builds
 /frontend/dist/
 /frontend/build/
+/frontend/src/_backup/
 
 # Local environment variables / secrets
 .env
