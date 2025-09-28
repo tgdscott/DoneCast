@@ -12,6 +12,7 @@ the logic from the module so both import styles work.
 from typing import List, Dict, Any
 import logging
 from pathlib import Path
+import os
 
 from ...core.paths import MEDIA_DIR
 from ..transcription_assemblyai import assemblyai_transcribe_with_speakers
@@ -27,6 +28,7 @@ def get_word_timestamps(filename: str) -> List[Dict[str, Any]]:
 
 	Raises on failure to keep callers' error handling consistent.
 	"""
+	# filename is expected to be a local name relative to MEDIA_DIR.
 	audio_path = MEDIA_DIR / filename
 	if not audio_path.exists():
 		raise FileNotFoundError(f"Audio file not found: {filename}")
@@ -52,6 +54,50 @@ def get_word_timestamps(filename: str) -> List[Dict[str, Any]]:
 
 
 def transcribe_media_file(filename: str):
-	"""Synchronous entrypoint for internal task: transcribe a media file."""
-	return get_word_timestamps(filename)
+	"""Synchronous entrypoint for internal task: transcribe a media file.
+
+	Accepts either a local filename (relative to MEDIA_DIR) or a gs:// URI.
+	When a gs:// path is provided (prod uploads), this will download the
+	object to MEDIA_DIR and transcribe that temporary local copy.
+	"""
+
+	def _is_gcs_path(p: str) -> bool:
+		return isinstance(p, str) and p.startswith("gs://")
+
+	def _download_gcs_to_media(gcs_uri: str) -> str:
+		"""Download gs://bucket/key to MEDIA_DIR and return the local filename (basename)."""
+		from google.cloud import storage  # lazy import, available in prod
+		try:
+			# Parse gs://bucket/key
+			without_scheme = gcs_uri[len("gs://"):]
+			bucket_name, key = without_scheme.split("/", 1)
+			dst_name = os.path.basename(key) or "audio"
+			dst_path = MEDIA_DIR / dst_name
+			MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+			client = storage.Client()
+			bucket = client.bucket(bucket_name)
+			blob = bucket.blob(key)
+			blob.download_to_filename(str(dst_path))
+			return dst_name
+		except Exception as e:
+			logging.error("[transcription] GCS download failed for %s: %s", gcs_uri, e)
+			raise
+
+	local_name: str = filename
+	delete_after: bool = False
+	if _is_gcs_path(filename):
+		local_name = _download_gcs_to_media(filename)
+		delete_after = True
+
+	try:
+		return get_word_timestamps(local_name)
+	except Exception:
+		raise
+	finally:
+		# Best-effort cleanup of the temporary local copy for gs:// inputs
+		if delete_after:
+			try:
+				(MEDIA_DIR / local_name).unlink(missing_ok=True)
+			except Exception:
+				pass
 
