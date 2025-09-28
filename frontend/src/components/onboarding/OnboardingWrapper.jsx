@@ -487,7 +487,8 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
                     if (ok) {
                       try { localStorage.setItem('ppp.onboarding.completed', '1'); } catch {}
                       try { localStorage.removeItem('ppp.onboarding.step'); } catch {}
-                      try { window.location.assign('/dashboard'); } catch {}
+                      // Add onboarding=0 so App.jsx gating does not relaunch the wizard when user has 0 podcasts
+                      try { window.location.assign('/dashboard?onboarding=0'); } catch {}
                     }
                   }}
                 >

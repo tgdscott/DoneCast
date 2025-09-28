@@ -628,11 +628,16 @@ async def get_user_podcasts(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
-    statement = select(Podcast).where(Podcast.user_id == current_user.id)
-    pods = session.exec(statement).all()
-    # Ensure remote_cover_url is preferred when present (response_model will include fields automatically)
-    # Nothing to mutate except legacy cover_path retention for now.
-    return pods
+    try:
+        statement = select(Podcast).where(Podcast.user_id == current_user.id)
+        pods = session.exec(statement).all()
+        # Ensure remote_cover_url is preferred when present (response_model will include fields automatically)
+        # Nothing to mutate except legacy cover_path retention for now.
+        return pods
+    except Exception as e:
+        # Never let dashboard gating depend on a 500 here; return an empty list on error.
+        log.warning(f"[podcasts.list] failed to load podcasts for user={getattr(current_user, 'id', None)}: {e}")
+        return []
 
 
 log = logging.getLogger(__name__)

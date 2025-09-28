@@ -165,7 +165,10 @@ export default function App() {
         const onboardingParam = params.get('onboarding');
         const forceOnboarding = onboardingParam === '1';
         const skipOnboarding = onboardingParam === '0' || params.get('skip_onboarding') === '1';
-        if (!skipOnboarding && (podcastCheck.count === 0 || forceOnboarding)) {
+        // Honor a persisted completion flag so users who chose to skip aren't forced back into onboarding
+        let completedFlag = false;
+        try { completedFlag = localStorage.getItem('ppp.onboarding.completed') === '1'; } catch {}
+        if (!skipOnboarding && !completedFlag && (podcastCheck.count === 0 || forceOnboarding)) {
             // Always use the new full-page onboarding; retire the legacy wizard
             return <Onboarding />;
         }
