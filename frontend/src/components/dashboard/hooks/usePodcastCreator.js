@@ -547,22 +547,33 @@ export default function usePodcastCreator({
     }
   }, [templates, selectedTemplate, currentStep]);
 
+  const prefillNumbering = useCallback(async () => {
+    try {
+      const api = makeApi(token);
+      const qs = [];
+      if (selectedTemplate && selectedTemplate.podcast_id) {
+        qs.push(`podcast_id=${encodeURIComponent(selectedTemplate.podcast_id)}`);
+      }
+      const url = `/api/episodes/last/numbering${qs.length ? `?${qs.join('&')}` : ''}`;
+      const data = await api.get(url);
+      if (data && (data.season_number != null || data.episode_number != null)) {
+        setEpisodeDetails(prev => {
+          // Only prefill if user hasn’t changed these yet
+          if (prev.episodeNumber && String(prev.episodeNumber).trim()) return prev;
+          if (prev.season && String(prev.season).trim() !== '1') return prev;
+          const season = (data.season_number != null) ? String(data.season_number) : '1';
+          const nextEp = (data.episode_number != null) ? String(Number(data.episode_number) + 1) : '1';
+          return { ...prev, season, episodeNumber: nextEp };
+        });
+      }
+    } catch(_) {}
+  }, [token, selectedTemplate?.podcast_id]);
+
+  useEffect(() => { prefillNumbering(); }, [prefillNumbering]);
+  // Also attempt prefill when entering Step 5 if needed
   useEffect(() => {
-    (async () => {
-      try {
-        const api = makeApi(token);
-        const data = await api.get('/api/episodes/last/numbering');
-        if(data && (data.season_number || data.episode_number)){
-          setEpisodeDetails(prev => {
-            if(prev.episodeNumber || prev.season !== '1') return prev;
-            const season = data.season_number ? String(data.season_number) : '1';
-            const nextEp = data.episode_number ? String(Number(data.episode_number)+1) : '1';
-            return { ...prev, season, episodeNumber: nextEp };
-          });
-        }
-      } catch(_){ }
-    })();
-  }, [token]);
+    if (currentStep === 5) prefillNumbering();
+  }, [currentStep, prefillNumbering]);
 
   useEffect(() => {
     if (!jobId) return;

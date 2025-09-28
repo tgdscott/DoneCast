@@ -19,6 +19,7 @@ from fastapi import (
     Request,
 )
 from sqlmodel import Session, select
+from sqlalchemy import func
 
 from api.core.paths import MEDIA_DIR
 from api.models.podcast import MediaItem, MediaCategory, PodcastTemplate
@@ -92,21 +93,7 @@ async def upload_media_files(
     created_items: List[MediaItem] = []
     names = parse_friendly_names(friendly_names)
 
-    # Enforce unique friendly_name per user (case-insensitive) to avoid accidental duplicates
-    # NOTE: Do NOT enforce for main_content uploads; duplicate names are allowed there.
-    # Preload existing names for the current user for fast checks
-    rows = session.exec(
-        select(MediaItem.friendly_name).where(MediaItem.user_id == current_user.id)
-    ).all() or []
-    existing_names_lower: set[str] = set()
-    for r in rows:
-        # r may be a 1-tuple or a bare value depending on driver
-        name_val = r[0] if isinstance(r, tuple) else r
-        if name_val:
-            try:
-                existing_names_lower.add(str(name_val).strip().lower())
-            except Exception:
-                pass
+    # Track duplicates within this request batch
     batch_names_lower: set[str] = set()
 
     MB = 1024 * 1024
@@ -159,16 +146,24 @@ async def upload_media_files(
 
         _validate_meta(file, category)
 
+        # Determine proposed friendly name for this file (before any upload)
         original_filename = Path(file.filename).stem
         default_friendly_name = " ".join(original_filename.split("_")).title()
+        friendly_name = names[i] if i < len(names) and str(names[i]).strip() else default_friendly_name
+        fn_norm = str(friendly_name).strip() or default_friendly_name
+        fn_key = fn_norm.lower()
 
-        safe_orig = sanitize_name(file.filename or "")
-        # GCS object key: user_id/category/uuid4_safe_filename
-        gcs_key = f"{current_user.id}/{category.value}/{uuid4().hex}_{safe_orig}"
+        # Only enforce uniqueness for specific library categories. For episode/podcast covers
+        # and main content, duplicates are allowed.
+        ENFORCE_UNIQUE = {
+            MediaCategory.intro,
+            MediaCategory.outro,
+            MediaCategory.sfx,
+        }
 
-        # Prefer streaming upload to GCS without buffering entire file in memory
+        # Prepare upload environment
         max_bytes = CATEGORY_SIZE_LIMITS.get(category, 50 * MB)
-        bucket = _require_bucket()
+        default_bucket = _require_bucket()
         content_type = file.content_type or "application/octet-stream"
 
         # SpooledTemporaryFile used by Starlette/UploadFile provides .file with potential ._file attribute
@@ -197,50 +192,93 @@ async def upload_media_files(
             pass
         if file_size is not None and file_size > max_bytes:
             raise HTTPException(status_code=413, detail="File too large.")
+        # Helper to stream upload to a specific bucket/key
+        async def _upload_to(bucket_name: str, object_key: str):
+            nonlocal file_size
+            # Prefer streaming upload from underlying file object
+            try:
+                if raw_f is None or not hasattr(raw_f, "read"):
+                    raise RuntimeError("no file object; fallback path")
+                uri = upload_fileobj(bucket_name, object_key, raw_f, size=file_size, content_type=content_type, chunk_mb=8)
+                written = file_size if file_size is not None else None
+                return uri, written
+            except Exception:
+                # Fallback: buffer and upload as bytes (with size enforcement)
+                written = 0
+                buf = bytearray()
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > max_bytes:
+                        try:
+                            logging.warning(
+                                "event=upload.reject_too_large filename=%s category=%s bytes=%s limit=%s",
+                                file.filename, category.value, written, max_bytes
+                            )
+                        except Exception:
+                            pass
+                        raise HTTPException(status_code=413, detail="File too large.")
+                    buf.extend(chunk)
+                uri = upload_bytes(bucket_name, object_key, bytes(buf), content_type)
+                return uri, written
 
-        # Upload from the underlying file object; if size unknown, GCS library will stream until EOF
-        # Use a larger chunk for throughput
-        try:
-            if raw_f is None or not hasattr(raw_f, "read"):
-                raise RuntimeError("no file object; fallback path")
-            gcs_uri = upload_fileobj(bucket, gcs_key, raw_f, size=file_size, content_type=content_type, chunk_mb=8)
-            bytes_written = file_size if file_size is not None else None
-        except Exception as ex:
-            # As a fallback, buffer in chunks enforcing size limit and upload as bytes (smaller files)
-            bytes_written = 0
-            buf = bytearray()
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                bytes_written += len(chunk)
-                if bytes_written > max_bytes:
+        # If an item with the same friendly name already exists for this user/category, overwrite its file and return it
+        existing_item = session.exec(
+            select(MediaItem)
+            .where(
+                MediaItem.user_id == current_user.id,
+                MediaItem.category == category,
+                func.lower(MediaItem.friendly_name) == fn_key,
+            )
+        ).first()
+
+        if existing_item is not None:
+                # Parse target bucket/key from existing filename if gs://, else use default bucket and existing filename as key
+                target_bucket = default_bucket
+                target_key = str(existing_item.filename or "").strip()
+                if target_key.startswith("gs://"):
                     try:
-                        logging.warning(
-                            "event=upload.reject_too_large filename=%s category=%s bytes=%s limit=%s",
-                            file.filename, category.value, bytes_written, max_bytes
-                        )
+                        # gs://bucket/key...
+                        without = target_key[len("gs://"):]
+                        bname, _, kpart = without.partition("/")
+                        if bname and kpart:
+                            target_bucket, target_key = bname, kpart
                     except Exception:
-                        pass
-                    raise HTTPException(status_code=413, detail="File too large.")
-                buf.extend(chunk)
-            gcs_uri = upload_bytes(bucket, gcs_key, bytes(buf), content_type)
+                        # Fall back to default bucket and original key sans prefix
+                        try:
+                            target_key = target_key.split("/", 3)[-1]
+                        except Exception:
+                            target_key = Path(file.filename or "").name
 
-        # Determine proposed friendly name for this file
-        friendly_name = names[i] if i < len(names) and str(names[i]).strip() else default_friendly_name
-        fn_norm = str(friendly_name).strip()
-        if not fn_norm:
-            fn_norm = default_friendly_name
-        fn_key = fn_norm.lower()
-        # Only enforce uniqueness for non-main_content categories
-        if category != MediaCategory.main_content:
-            # Check duplicate against existing library
-            if fn_key in existing_names_lower:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"A media item named '{fn_norm}' already exists. Please choose a different name.",
-                )
-            # Check duplicate within this batch
+                uri, written = await _upload_to(target_bucket, target_key)
+
+                # Normalize filename to whatever form was already stored (do not force gs:// if legacy value)
+                existing_item.content_type = (file.content_type or None)
+                try:
+                    existing_item.filesize = int(written) if isinstance(written, int) and written >= 0 else None
+                except Exception:
+                    existing_item.filesize = None
+                # Keep friendly_name and category unchanged
+                session.add(existing_item)
+                session.commit()
+                session.refresh(existing_item)
+                created_items.append(existing_item)
+                batch_names_lower.add(fn_key)
+                # Structured log: overwrite
+                try:
+                    logging.info(
+                        "event=upload.overwrite user_id=%s category=%s name=%s key=%s",
+                        current_user.id, category.value, fn_norm, target_key
+                    )
+                except Exception:
+                    pass
+                # Done with this file (we overwrote existing item)
+                continue
+
+        # No existing item with this name. For enforced categories, block duplicates within the same request batch
+        if category in ENFORCE_UNIQUE:
             if fn_key in batch_names_lower:
                 raise HTTPException(
                     status_code=409,
@@ -248,11 +286,16 @@ async def upload_media_files(
                 )
             batch_names_lower.add(fn_key)
 
+        # No overwrite case -> upload to a fresh object path and create a new media item
+        safe_orig = sanitize_name(file.filename or "")
+        gcs_key = f"{current_user.id}/{category.value}/{uuid4().hex}_{safe_orig}"
+        uri, written = await _upload_to(default_bucket, gcs_key)
+
         media_item = MediaItem(
-            filename=gcs_uri,  # Store gs:// URI
+            filename=uri,  # Store gs:// URI when available
             friendly_name=str(fn_norm),
             content_type=(file.content_type or None),
-            filesize=(int(bytes_written) if isinstance(bytes_written, int) and bytes_written >= 0 else None),
+            filesize=(int(written) if isinstance(written, int) and written >= 0 else None),
             user_id=current_user.id,
             category=category,
         )
@@ -273,8 +316,8 @@ async def upload_media_files(
         # Kick transcription (best-effort)
         try:
             if category == MediaCategory.main_content:
-                task = enqueue_http_task("/api/tasks/transcribe", {"filename": gcs_uri})
-                logging.info("event=upload.enqueue ok=true filename=%s task_name=%s", gcs_uri, task.get("name"))
+                task = enqueue_http_task("/api/tasks/transcribe", {"filename": media_item.filename})
+                logging.info("event=upload.enqueue ok=true filename=%s task_name=%s", media_item.filename, task.get("name"))
         except Exception:
             # background task is best-effort; never fail the upload
             pass
@@ -282,7 +325,7 @@ async def upload_media_files(
         # Structured log: upload.receive
         logging.info(
             "event=upload.receive user_id=%s category=%s filename=%s size=%d content_type=%s",
-            current_user.id, category.value, file.filename, bytes_written, file.content_type or ""
+            current_user.id, category.value, file.filename, media_item.filesize or -1, file.content_type or ""
         )
 
     session.commit()
