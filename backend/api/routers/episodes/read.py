@@ -248,16 +248,16 @@ def publish_status(
 	ep = _svc_repo.get_episode_by_id(session, eid, user_id=current_user.id)
 	if not ep:
 		raise HTTPException(status_code=404, detail="Episode not found")
-        final_audio_exists = False
-        if getattr(ep, 'final_audio_path', None):
-                base = os.path.basename(str(ep.final_audio_path))
-                candidates = []
-                try:
-                        candidates.append((FINAL_DIR / base).resolve())
-                except Exception:
-                        candidates.append(FINAL_DIR / base)
-                candidates.append(MEDIA_DIR / base)
-                final_audio_exists = any(c.is_file() for c in candidates)
+	final_audio_exists = False
+	if getattr(ep, 'final_audio_path', None):
+		base = os.path.basename(str(ep.final_audio_path))
+		candidates = []
+		try:
+			candidates.append((FINAL_DIR / base).resolve())
+		except Exception:
+			candidates.append(FINAL_DIR / base)
+		candidates.append(MEDIA_DIR / base)
+		final_audio_exists = any(c.is_file() for c in candidates)
 	_pa = getattr(ep, 'publish_at', None)
 	return {
 		'episode_id': str(ep.id),
@@ -310,16 +310,16 @@ def list_episodes(
 	for e in eps:
 		final_exists = False
 		cover_exists = False
-                try:
-                        if e.final_audio_path:
-                                base = os.path.basename(str(e.final_audio_path))
-                                cands = []
-                                try:
-                                        cands.append((FINAL_DIR / base).resolve())
-                                except Exception:
-                                        cands.append(FINAL_DIR / base)
-                                cands.append(MEDIA_DIR / base)
-                                final_exists = any(c.is_file() for c in cands)
+		try:
+			if e.final_audio_path:
+				base = os.path.basename(str(e.final_audio_path))
+				cands = []
+				try:
+					cands.append((FINAL_DIR / base).resolve())
+				except Exception:
+					cands.append(FINAL_DIR / base)
+				cands.append(MEDIA_DIR / base)
+				final_exists = any(c.is_file() for c in cands)
 			if getattr(e, 'remote_cover_url', None):
 				cover_exists = True
 			else:

@@ -14,6 +14,7 @@ from ...models.podcast import Episode, EpisodeStatus, Podcast
 from ...models.user import User
 from ...services.episodes import publisher as episode_publisher
 from ...services.publisher import SpreakerClient
+from ...services.episodes.sync import sync_spreaker_episodes
 
 router = APIRouter()
 
@@ -180,67 +181,33 @@ async def recover_spreaker_episodes(
         raise HTTPException(status_code=400, detail="Podcast is not linked to Spreaker or user is not connected.")
 
     client = SpreakerClient(api_token=current_user.spreaker_access_token)
-    ok, spreaker_episodes_data = client.get_all_episodes_for_show(podcast.spreaker_show_id)
-    if not ok or not isinstance(spreaker_episodes_data, dict):
-        log.error(
-            "Failed to fetch episodes from Spreaker for show %s: %s",
-            podcast.spreaker_show_id,
-            spreaker_episodes_data,
-        )
-        raise HTTPException(status_code=502, detail="Could not fetch episodes from Spreaker.")
-
-    spreaker_episodes = spreaker_episodes_data.get("items", [])
-    if not spreaker_episodes:
-        return {"recovered_count": 0, "message": "No episodes found on Spreaker for this show."}
-
-    existing_spreaker_ids_stmt = select(Episode.spreaker_episode_id).where(
-        Episode.podcast_id == podcast.id,
-        Episode.spreaker_episode_id != None,  # noqa: E711
-    )
-    existing_ids = set(session.exec(existing_spreaker_ids_stmt).all())
-
-    recovered_count = 0
-    episodes_to_add = []
-    for spk_ep in spreaker_episodes:
-        spreaker_episode_id = str(spk_ep.get("episode_id"))
-        if spreaker_episode_id in existing_ids:
-            continue
-
-        publish_date_str = spk_ep.get("published_at")
-        publish_date = None
-        if publish_date_str:
-            try:
-                dt = datetime.strptime(publish_date_str, "%Y-%m-%d %H:%M:%S")
-                publish_date = dt.replace(tzinfo=timezone.utc)
-            except (ValueError, TypeError):
-                log.warning(
-                    "Could not parse publish date '%s' for episode %s",
-                    publish_date_str,
-                    spreaker_episode_id,
-                )
-
-        new_episode = Episode(
-            user_id=current_user.id,
-            podcast_id=podcast.id,
-            title=spk_ep.get("title", "Untitled Recovered Episode"),
-            show_notes=spk_ep.get("description"),
-            spreaker_episode_id=spreaker_episode_id,
-            final_audio_path=spk_ep.get("stream_url") or spk_ep.get("download_url"),
-            remote_cover_url=spk_ep.get("image_original_url") or spk_ep.get("image_url"),
-            status=EpisodeStatus.published if publish_date and publish_date <= datetime.now(timezone.utc) else EpisodeStatus.processed,
-            publish_at=publish_date,
-            is_published_to_spreaker=True,
-            created_at=publish_date or datetime.now(timezone.utc),
-        )
-        episodes_to_add.append(new_episode)
-        recovered_count += 1
-
-    if episodes_to_add:
-        session.add_all(episodes_to_add)
+    try:
+        summary = sync_spreaker_episodes(session, podcast, current_user, client=client)
         session.commit()
-        log.info("Recovered and created %s new episode records for podcast %s", recovered_count, podcast.id)
+    except RuntimeError as exc:
+        log.error("Failed to sync Spreaker episodes for show %s: %s", podcast.spreaker_show_id, exc)
+        raise HTTPException(status_code=502, detail="Could not fetch episodes from Spreaker.")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
-    return {"recovered_count": recovered_count, "message": f"Successfully recovered {recovered_count} missing episodes."}
+    created = summary.get("created", 0)
+    updated = summary.get("updated", 0)
+    fetched = summary.get("fetched", 0)
+    message = (
+        f"Recovered {created} new episodes"
+        + (f" and merged {updated} existing episodes" if updated else "")
+        + (f" out of {fetched} fetched" if fetched else "")
+        + "."
+    )
+
+    return {
+        "recovered_count": created,
+        "updated_count": updated,
+        "fetched": fetched,
+        "duplicates": summary.get("duplicates"),
+        "conflicts": summary.get("conflicts", []),
+        "message": message,
+    }
 
 
 @router.post("/{podcast_id}/link-spreaker-show", status_code=200)
