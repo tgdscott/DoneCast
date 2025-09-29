@@ -25,6 +25,8 @@ import re
 import uuid
 import shutil
 import requests
+import time
+from sqlalchemy.exc import OperationalError
 try:
     import stripe as _stripe
 except Exception:  # pragma: no cover
@@ -59,6 +61,27 @@ def _exec_text(session: Session, sql: str, params: Optional[dict] = None):
     if params:
         return session.execute(stmt, params)
     return session.execute(stmt)
+
+# Best-effort commit retry for transient SQLite lock errors
+def _commit_with_retry(session: Session, attempts: int = 3, base_sleep: float = 0.2):
+    last_err = None
+    for i in range(attempts):
+        try:
+            session.commit()
+            return
+        except OperationalError as e:  # pragma: no cover - env-specific
+            msg = str(e).lower()
+            if "database is locked" in msg or "database is busy" in msg or "database table is locked" in msg:
+                last_err = e
+                time.sleep(base_sleep * (i + 1))
+                continue
+            # Non-lock OperationalError: propagate
+            raise
+        except Exception as e:  # pragma: no cover
+            last_err = e
+            break
+    if last_err:
+        raise last_err
 
 # --- Admin Dependency ---
 def get_current_admin_user(current_user: User = Depends(get_current_user)) -> User:
@@ -913,8 +936,13 @@ def admin_update_user(
     if changed:
         logger.info("Admin %s updating user %s; fields changed tier=%s is_active=%s subscription_expires_at=%s", admin_user.email, user_id, update.tier is not None, update.is_active is not None, update.subscription_expires_at is not None)
         session.add(user)
-        session.commit()
-        session.refresh(user)
+        # Commit with retry to mitigate transient SQLite lock errors during concurrent writes
+        _commit_with_retry(session)
+        try:
+            session.refresh(user)
+        except Exception:
+            # On rare occasions, refresh may race; ignore and proceed with reloaded fields below
+            pass
     # compute counts/activity
     episode_count = session.exec(select(func.count(Episode.id)).where(Episode.user_id==user.id)).scalar_one_or_none() or 0
     last_activity = session.exec(select(func.max(Episode.processed_at)).where(Episode.user_id==user.id)).scalar_one_or_none() or user.created_at

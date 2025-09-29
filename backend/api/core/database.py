@@ -58,15 +58,46 @@ else:
     engine = create_engine(
         _DEFAULT_SQLITE_URL,
         echo=False,
-        connect_args={"check_same_thread": False},
+        # check_same_thread False allows usage across threads (uvicorn workers, threadpools)
+        # timeout gives sqlite time to wait on locks before failing
+        connect_args={
+            "check_same_thread": False,
+            "timeout": float(os.getenv("SQLITE_TIMEOUT_SECONDS", "30")),
+        },
     )
 
-    def _enable_foreign_keys(dbapi_connection, connection_record):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+    def _sqlite_pragmas(dbapi_connection, connection_record):
+        """Set recommended SQLite PRAGMAs for concurrency and integrity.
 
-    listen(engine, "connect", _enable_foreign_keys)
+        - foreign_keys=ON ensures FK constraints
+        - journal_mode=WAL allows readers during writes
+        - synchronous=NORMAL balances durability/perf with WAL
+        - busy_timeout waits for locks before raising OperationalError
+        """
+        try:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL")
+            except Exception:
+                # Not critical if WAL cannot be set (older sqlite)
+                pass
+            try:
+                cursor.execute("PRAGMA synchronous=NORMAL")
+            except Exception:
+                pass
+            try:
+                # default 5000 ms; can be overridden via env var
+                busy_ms = int(float(os.getenv("SQLITE_BUSY_TIMEOUT_MS", "5000")))
+                cursor.execute(f"PRAGMA busy_timeout={busy_ms}")
+            except Exception:
+                pass
+            cursor.close()
+        except Exception:
+            # Best-effort; if PRAGMAs fail we proceed with defaults
+            pass
+
+    listen(engine, "connect", _sqlite_pragmas)
 
 
 def _is_sqlite_engine() -> bool:
