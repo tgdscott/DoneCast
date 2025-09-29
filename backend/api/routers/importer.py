@@ -16,6 +16,9 @@ from ..models.podcast import Podcast, Episode, EpisodeStatus
 from api.core.auth import get_current_user
 from api.core.paths import FINAL_DIR
 from infrastructure.gcs import upload_fileobj
+from api.services.episodes.merge import merge_podcast_episode_duplicates
+from api.services.episodes.sync import sync_spreaker_episodes, push_local_episodes_to_spreaker
+from api.services.publisher import SpreakerClient
 
 import logging
 
@@ -32,6 +35,16 @@ class RssPayload(BaseModel):
     attempt_link_spreaker: bool | None = True
     auto_publish_to_spreaker: bool | None = False
     publish_state: str | None = None  # 'unpublished' | 'public' | 'limited'
+
+class ImportSyncPayload(BaseModel):
+    podcast_id: UUID | None = None
+    rss_url: str | None = None
+    download_audio: bool | None = False
+    import_tags: bool | None = True
+    limit: int | None = None
+    attempt_link_spreaker: bool | None = True
+    auto_publish_to_spreaker: bool | None = None
+    publish_state: str | None = None
 
 @router.post("/rss", status_code=201)
 async def import_from_rss(
@@ -479,9 +492,15 @@ async def import_from_rss(
             else:
                 auto_publish_skipped = "no_show_id"
 
+        merge_summary = merge_podcast_episode_duplicates(session, new_podcast.id)
+        if merge_summary.get("changed"):
+            session.commit()
+            session.refresh(new_podcast)
+
         return {
             "message": "Import successful!",
             "podcast_name": new_podcast.name,
+            "podcast_id": str(new_podcast.id),
             "episodes_imported": len(episodes_to_add),
             "mirrored_count": mirrored_ok,
             "gcs_mirrored_count": gcs_ok,
@@ -498,6 +517,7 @@ async def import_from_rss(
             "spreaker_show_id": (chosen_show_id or getattr(new_podcast, 'spreaker_show_id', None)),
             "auto_publish_started": publish_jobs_started,
             "auto_publish_skipped": auto_publish_skipped,
+            "merge_summary": merge_summary,
         }
     except HTTPException:
         # Propagate expected HTTP errors
@@ -509,3 +529,144 @@ async def import_from_rss(
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
+
+
+@router.post("/sync", status_code=200)
+async def sync_import(
+    payload: ImportSyncPayload,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    logger = logging.getLogger("api.importer")
+
+    podcasts = session.exec(select(Podcast).where(Podcast.user_id == current_user.id)).all()
+
+    if not podcasts:
+        if not payload.rss_url:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "rss_required", "message": "Provide an RSS feed URL to import your first podcast."},
+            )
+        rss_payload = RssPayload(
+            rss_url=payload.rss_url,
+            download_audio=payload.download_audio,
+            import_tags=payload.import_tags,
+            limit=payload.limit,
+            attempt_link_spreaker=payload.attempt_link_spreaker,
+            auto_publish_to_spreaker=payload.auto_publish_to_spreaker,
+            publish_state=payload.publish_state,
+        )
+        result = await import_from_rss(rss_payload, session=session, current_user=current_user)
+        result["mode"] = "rss_bootstrap"
+        return result
+
+    target: Podcast | None = None
+    if payload.podcast_id:
+        target = session.get(Podcast, payload.podcast_id)
+        if not target or target.user_id != current_user.id:
+            raise HTTPException(status_code=404, detail="Podcast not found.")
+    elif len(podcasts) == 1:
+        target = podcasts[0]
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "podcast_required",
+                "message": "Multiple podcasts detected. Provide podcast_id to select which show to sync.",
+            },
+        )
+
+    token = getattr(current_user, "spreaker_access_token", None)
+    auto_publish = payload.auto_publish_to_spreaker if payload.auto_publish_to_spreaker is not None else True
+    attempt_link = payload.attempt_link_spreaker if payload.attempt_link_spreaker is not None else True
+
+    if not getattr(target, "spreaker_show_id", None):
+        if not attempt_link:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "spreaker_link_required", "message": "Link this podcast to Spreaker to continue."},
+            )
+        if not token:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "spreaker_not_connected", "message": "Connect your Spreaker account to continue."},
+            )
+
+        client = SpreakerClient(api_token=token)
+        show_id: str | None = None
+        try:
+            ok_shows, shows = client.get_shows()
+            if ok_shows and isinstance(shows, list):
+                target_name = (target.name or "").strip().lower()
+                for it in shows:
+                    if not isinstance(it, dict):
+                        continue
+                    title = (it.get("title") or it.get("name") or "").strip().lower()
+                    if title and title == target_name:
+                        show_id = str(it.get("show_id") or it.get("id"))
+                        break
+        except Exception as ex:
+            logger.warning("Failed to list Spreaker shows: %s", ex)
+
+        if not show_id:
+            ok_create, create_resp = client.create_show(
+                title=(target.name or "Untitled Podcast").strip() or "Untitled Podcast",
+                description=target.description or "",
+                language="en",
+            )
+            if not ok_create:
+                raise HTTPException(status_code=502, detail=f"Failed to create Spreaker show: {create_resp}")
+            show_obj = create_resp.get("show") if isinstance(create_resp, dict) else create_resp
+            show_id = str((show_obj or {}).get("show_id") or (show_obj or {}).get("id"))
+        if not show_id:
+            raise HTTPException(status_code=502, detail="Unable to resolve Spreaker show id.")
+
+        target.spreaker_show_id = show_id
+        session.add(target)
+        session.commit()
+        session.refresh(target)
+
+        publish_state = payload.publish_state or "public"
+        publish_result = {}
+        if auto_publish:
+            publish_result = push_local_episodes_to_spreaker(
+                session=session,
+                podcast=target,
+                user=current_user,
+                publish_state=publish_state,
+            )
+            session.commit()
+
+        merge_summary = merge_podcast_episode_duplicates(session, target.id)
+        if merge_summary.get("changed"):
+            session.commit()
+
+        return {
+            "mode": "linked_spreaker_show",
+            "podcast_id": str(target.id),
+            "spreaker_show_id": target.spreaker_show_id,
+            "publish_result": publish_result,
+            "auto_publish_enabled": auto_publish,
+            "merge_summary": merge_summary,
+        }
+
+    if not token:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "spreaker_not_connected", "message": "Connect your Spreaker account to continue."},
+        )
+
+    client = SpreakerClient(api_token=token)
+    try:
+        sync_summary = sync_spreaker_episodes(session, target, current_user, client=client)
+        session.commit()
+    except RuntimeError as exc:
+        logger.error("Failed to sync Spreaker show %s: %s", target.spreaker_show_id, exc)
+        raise HTTPException(status_code=502, detail="Could not fetch episodes from Spreaker.")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    sync_summary["mode"] = "spreaker_recovery"
+    sync_summary["podcast_id"] = str(target.id)
+    sync_summary["spreaker_show_id"] = target.spreaker_show_id
+    return sync_summary

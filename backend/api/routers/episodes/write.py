@@ -144,16 +144,16 @@ def update_episode_metadata(
 	def _serialize_single(ep_obj: Episode) -> Dict[str, Any]:
 		final_exists = False
 		cover_exists = False
-                try:
-                        if ep_obj.final_audio_path:
-                                base = os.path.basename(str(ep_obj.final_audio_path))
-                                final_candidates = []
-                                try:
-                                        final_candidates.append((FINAL_DIR / base).resolve())
-                                except Exception:
-                                        final_candidates.append(FINAL_DIR / base)
-                                final_candidates.append(MEDIA_DIR / base)
-                                final_exists = any(c.is_file() for c in final_candidates)
+		try:
+			if ep_obj.final_audio_path:
+				base = os.path.basename(str(ep_obj.final_audio_path))
+				final_candidates = []
+				try:
+					final_candidates.append((FINAL_DIR / base).resolve())
+				except Exception:
+					final_candidates.append(FINAL_DIR / base)
+				final_candidates.append(MEDIA_DIR / base)
+				final_exists = any(c.is_file() for c in final_candidates)
 			if getattr(ep_obj, 'remote_cover_url', None):
 				cover_exists = True
 			else:

@@ -12,9 +12,15 @@ from .jobs import router as jobs_router
 from .edit import router as edit_router
 from .retry import router as retry_router
 
+# Register the assemble router before the generic read/write routers so the
+# static path (/episodes/assemble) is not shadowed by parameterised routes such
+# as /episodes/{episode_id}. FastAPI normally prefers static routes, but the
+# import order becomes important when routers are dynamically attached during
+# runtime startup. By including the assemble router first we ensure POST
+# requests hit the intended handler instead of returning an unexpected 405.
+router.include_router(assemble_router)
 router.include_router(read_router)
 router.include_router(write_router)
-router.include_router(assemble_router)
 router.include_router(publish_router)
 router.include_router(jobs_router)
 router.include_router(edit_router)
