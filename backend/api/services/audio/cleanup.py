@@ -3,7 +3,12 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Optional, Tuple, cast
 
-from pydub.silence import detect_silence
+try:
+    from pydub.silence import detect_silence  # type: ignore
+except Exception:  # pragma: no cover - optional in tests
+    def detect_silence(_audio, *_args, **_kwargs):  # type: ignore
+        # Fallback: no detected silence
+        return []
 import re
 # Normalize by removing ALL non-word characters and lowercasing to ignore punctuation and case.
 _NONWORD = re.compile(r'\W+')

@@ -2,11 +2,14 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from typing import Dict
 import os
-from api.core.database import engine
+from api.core import database as _db
 from api.core.paths import FINAL_DIR, MEDIA_DIR
 
 def _check_db() -> bool:
     try:
+        # Always dereference the current engine from the database module so
+        # test fixtures that patch api.core.database.engine take effect.
+        engine = getattr(_db, "engine")
         with engine.connect() as conn:
             conn.exec_driver_sql("SELECT 1")
         return True

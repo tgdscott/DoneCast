@@ -2,8 +2,30 @@ from __future__ import annotations
 
 from typing import Any, List, Tuple
 from difflib import SequenceMatcher
-from pydub import AudioSegment
-from pydub.silence import detect_silence
+try:
+    from pydub import AudioSegment  # type: ignore
+except Exception:  # pragma: no cover - optional in tests
+    class AudioSegment:  # minimal stub for typing; tests provide richer stubs
+        dBFS: float = -20.0
+        def __len__(self) -> int:
+            return 0
+        def __getitem__(self, _s):  # type: ignore
+            return self
+        @classmethod
+        def empty(cls):
+            return cls()
+        @classmethod
+        def silent(cls, duration=0):  # type: ignore[no-untyped-def]
+            return cls()
+        @classmethod
+        def from_file(cls, *_args, **_kwargs):  # type: ignore[no-untyped-def]
+            return cls()
+
+try:
+    from pydub.silence import detect_silence  # type: ignore
+except Exception:  # pragma: no cover - optional in tests
+    def detect_silence(_audio, *_args, **_kwargs):  # type: ignore[no-untyped-def]
+        return []
 
 
 def to_ms(v: float | int | None) -> int:

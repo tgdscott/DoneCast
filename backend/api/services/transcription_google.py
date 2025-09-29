@@ -3,12 +3,16 @@ import os
 from pathlib import Path
 from typing import List, Dict, Any
 
-from google.cloud import speech_v1p1beta1 as speech
-from pydub import AudioSegment
+CHUNK_DURATION_MS = 10 * 60 * 1000  # reuse chunk size
+
+try:
+    # Optional dependency; we import inside function as well, this is just a type hint convenience.
+    # Keep at module level guarded to avoid hard failure during import in tests.
+    from google.cloud import speech_v1p1beta1 as _speech  # type: ignore
+except Exception:  # pragma: no cover - optional
+    _speech = None  # type: ignore
 
 from api.core.paths import MEDIA_DIR
-
-CHUNK_DURATION_MS = 10 * 60 * 1000  # reuse chunk size
 
 class GoogleTranscriptionError(Exception):
     pass
@@ -17,6 +21,16 @@ def google_transcribe_with_words(filename: str) -> List[Dict[str, Any]]:
     audio_path = MEDIA_DIR / filename
     if not audio_path.exists():
         raise GoogleTranscriptionError(f"Audio file not found: {filename}")
+
+    # Import optional dependencies lazily
+    try:
+        if _speech is None:
+            from google.cloud import speech_v1p1beta1 as speech  # type: ignore
+        else:
+            speech = _speech  # type: ignore
+        from pydub import AudioSegment  # type: ignore
+    except Exception as exc:
+        raise GoogleTranscriptionError("google-cloud-speech and pydub are required for Google transcription") from exc
 
     client = speech.SpeechClient()
 

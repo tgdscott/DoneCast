@@ -17,8 +17,6 @@ import logging
 import os
 
 from ...core.paths import MEDIA_DIR, TRANSCRIPTS_DIR
-from ..transcription_assemblyai import assemblyai_transcribe_with_speakers
-from ..transcription_google import google_transcribe_with_words
 
 
 class TranscriptionError(Exception):
@@ -39,13 +37,17 @@ def get_word_timestamps(filename: str) -> List[Dict[str, Any]]:
     if not audio_path.exists():
         raise FileNotFoundError(f"Audio file not found: {filename}")
 
+    # Prefer AssemblyAI. Import lazily to avoid optional deps during package import.
     try:
+        from ..transcription_assemblyai import assemblyai_transcribe_with_speakers  # local import
         logging.info("[transcription/pkg] Using AssemblyAI with disfluencies=True")
         return assemblyai_transcribe_with_speakers(filename)
     except Exception:
         logging.warning("[transcription/pkg] AssemblyAI failed; falling back to Google", exc_info=True)
 
     try:
+        # Lazy import to avoid ImportError if google-cloud-speech isn't installed in test envs
+        from ..transcription_google import google_transcribe_with_words  # local import
         words = google_transcribe_with_words(filename)
         for w in words:
             if "speaker" not in w:
@@ -63,7 +65,10 @@ def _is_gcs_path(path: str) -> bool:
 def _download_gcs_to_media(gcs_uri: str) -> str:
     """Download ``gs://bucket/key`` to ``MEDIA_DIR`` and return the local filename."""
 
-    from google.cloud import storage  # type: ignore - optional dependency in tests
+    try:
+        from google.cloud import storage  # type: ignore - optional dependency in tests
+    except Exception as exc:  # pragma: no cover - optional dependency missing in tests
+        raise RuntimeError("google-cloud-storage not installed") from exc
 
     without_scheme = gcs_uri[len("gs://") :]
     bucket_name, key = without_scheme.split("/", 1)

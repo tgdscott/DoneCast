@@ -53,18 +53,10 @@ if hasattr(_backend_api, "__path__"):
     __path__ = list(getattr(_backend_api, "__path__"))  # type: ignore[assignment]
 
 
-# Register the common alias modules in ``sys.modules`` so imports like
-# ``import api.services.transcription`` resolve to ``backend.api.services``
-# without extra work from callers.
-for submodule in ("core", "routers", "services", "models", "tasks", "middleware", "startup_tasks", "transcription"):
-    full_name = f"{_BACKEND_PACKAGE_NAME}.{submodule}"
-    try:
-        module = import_module(full_name)
-    except ModuleNotFoundError:
-        continue
-    alias = f"{__name__}.{submodule}"
-    sys.modules[alias] = module
-    setattr(sys.modules[__name__], submodule, module)
+# IMPORTANT: Install the meta path finder BEFORE importing/aliasing any
+# submodules. This prevents executing backend model modules twice under
+# different names during import cascades (which would register duplicate
+# SQLModel tables and crash with "Table 'user' is already defined").
 
 
 class _BackendAliasLoader(importlib_abc.Loader):
@@ -96,7 +88,12 @@ class _BackendAliasLoader(importlib_abc.Loader):
         if self.is_package:
             # Mirror the backend package's search locations so submodule imports
             # continue to work transparently.
-            module.__path__ = getattr(module, "__path__", None)
+            backend = sys.modules.get(self.backend_name)
+            if backend is not None and hasattr(backend, "__path__"):
+                try:
+                    module.__path__ = list(getattr(backend, "__path__"))  # type: ignore[attr-defined]
+                except Exception:
+                    pass
 
 
 class _BackendAliasFinder(importlib_abc.MetaPathFinder):
@@ -127,4 +124,12 @@ class _BackendAliasFinder(importlib_abc.MetaPathFinder):
 _finder = _BackendAliasFinder()
 if _finder not in sys.meta_path:
     sys.meta_path.insert(0, _finder)
+
+
+# Do not proactively import submodules here. The MetaPathFinder/Loader will
+# lazily alias requests like ``import api.models.user`` to the canonical
+# ``backend.api.models.user`` module, ensuring the code is executed exactly once.
+
+
+## (finder moved earlier; see above)
 

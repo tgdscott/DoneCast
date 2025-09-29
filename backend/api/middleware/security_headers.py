@@ -12,6 +12,43 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger("security_headers")
 
+def _normalize_origin(raw: str | None) -> str:
+    """Return a canonical origin string (scheme://host[:port]) for comparisons."""
+    if not raw:
+        return ""
+    candidate = raw.strip()
+    if not candidate:
+        return ""
+    candidate = candidate.rstrip("/")
+    try:
+        parsed = urlparse(candidate)
+        if parsed.scheme and parsed.netloc:
+            scheme = parsed.scheme.lower()
+            host = parsed.netloc.lower()
+            return f"{scheme}://{host}"
+    except Exception:
+        pass
+    return candidate.lower()
+
+def _select_origin(effective_origin: str | None, allowed: list[str]) -> str | None:
+    """Choose the concrete allowlist entry that matches the request origin."""
+    if not effective_origin:
+        return None
+    normalized = _normalize_origin(effective_origin)
+    if not normalized:
+        return None
+    try:
+        mapping = {_normalize_origin(o): o for o in allowed if o}
+    except Exception:
+        mapping = {}
+    match = mapping.get(normalized)
+    if match:
+        return match
+    if effective_origin in allowed:
+        return effective_origin
+    return None
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response: Response = await call_next(request)
@@ -114,21 +151,25 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         effective_origin = origin
         if not effective_origin:
-            # Attempt to parse scheme://host[:port] from Referer
+            # Attempt to derive scheme://host[:port] from Referer for credentialed flows
             ref = request.headers.get('referer') or request.headers.get('referrer')
             if ref:
                 try:
                     parsed = urlparse(ref)
                     if parsed.scheme and parsed.netloc:
-                        # Reconstruct origin (scheme://host[:port])
                         effective_origin = f"{parsed.scheme}://{parsed.netloc}"
                 except Exception:
-                    effective_origin = None  # keep fallback silent
+                    effective_origin = None
 
-        if effective_origin and effective_origin in allowed_origins:
-            response.headers['Access-Control-Allow-Origin'] = effective_origin
+        selected_origin = _select_origin(effective_origin, allowed_origins)
+        if not selected_origin:
+            existing = response.headers.get('access-control-allow-origin') or response.headers.get('Access-Control-Allow-Origin')
+            if existing:
+                selected_origin = existing
+
+        if selected_origin:
+            response.headers['Access-Control-Allow-Origin'] = selected_origin
             response.headers.setdefault('Access-Control-Allow-Credentials', 'true')
-            # Vary on both Origin and Referer since either may influence the header
             existing_vary = response.headers.get('Vary')
             vary_values = [] if not existing_vary else [v.strip() for v in existing_vary.split(',') if v.strip()]
             for v in ("Origin", "Referer"):
