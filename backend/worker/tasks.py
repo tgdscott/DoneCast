@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Optional
 from sqlmodel import select
 from api.core.database import get_session
-from api.core.paths import WS_ROOT as PROJECT_ROOT, FINAL_DIR
+from api.core.paths import WS_ROOT as PROJECT_ROOT, FINAL_DIR, MEDIA_DIR, APP_ROOT as APP_ROOT_DIR
 from api.core import crud
 from api.core.config import settings
 from api.services import audio_processor
@@ -210,8 +210,82 @@ def create_podcast_episode(
 
         cover_image_path = (episode_details or {}).get("cover_image_path")
         logging.info(f"[assemble] start: output={output_filename}, template={template_id}, user={user_id}")
+        new_cover_basename: Optional[str] = None
         if cover_image_path:
             logging.info(f"[assemble] cover_image_path from FE: {cover_image_path}")
+
+            def _resolve_image_to_local(path_like: str) -> Optional[Path]:
+                try:
+                    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
+                try:
+                    candidate_path = Path(str(path_like))
+                    if candidate_path.is_absolute() and candidate_path.exists():
+                        return candidate_path
+                except Exception:
+                    pass
+                try:
+                    s = str(path_like)
+                    if s.startswith("gs://"):
+                        without = s[len("gs://"):]
+                        bucket_name, key = without.split("/", 1)
+                        base = Path(key).name
+                        local = MEDIA_DIR / base
+                        try:
+                            from google.cloud import storage
+                        except Exception as storage_err:
+                            logging.warning("[assemble] google storage unavailable for cover download: %s", storage_err)
+                            return None
+                        client = storage.Client()
+                        blob = client.bucket(bucket_name).blob(key)
+                        blob.download_to_filename(str(local))
+                        return local
+                except Exception:
+                    logging.warning("[assemble] Failed to download gs:// cover", exc_info=True)
+                try:
+                    s = str(path_like)
+                    if s.lower().startswith(("http://", "https://")):
+                        import requests
+                        base = sanitize_filename(Path(s).name)
+                        if not any(base.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp")):
+                            base = f"{Path(base).stem}.jpg"
+                        local = MEDIA_DIR / base
+                        resp = requests.get(s, timeout=10)
+                        if resp.status_code == 200 and resp.content:
+                            data = resp.content[:10 * 1024 * 1024]
+                            with open(local, "wb") as fh:
+                                fh.write(data)
+                            return local
+                except Exception:
+                    logging.warning("[assemble] Failed to download http(s) cover", exc_info=True)
+                try:
+                    base = Path(str(path_like)).name
+                    for candidate in (
+                        PROJECT_ROOT / "media_uploads" / base,
+                        APP_ROOT_DIR / "media_uploads" / base,
+                        MEDIA_DIR / base,
+                    ):
+                        if candidate.exists():
+                            return candidate
+                except Exception:
+                    pass
+                return None
+
+            try:
+                _local_cover = _resolve_image_to_local(cover_image_path)
+                if _local_cover and _local_cover.exists():
+                    cover_image_path = str(_local_cover)
+                    new_cover_basename = _local_cover.name
+                    logging.info(f"[assemble] resolved local cover image: {cover_image_path}")
+            except Exception:
+                logging.warning("[assemble] Failed to resolve local cover image; continuing without embed", exc_info=True)
+
+        if not new_cover_basename and cover_image_path:
+            try:
+                new_cover_basename = Path(str(cover_image_path)).name
+            except Exception:
+                new_cover_basename = str(cover_image_path)
 
         # User cleanup settings
         user_obj = crud.get_user_by_id(session, UUID(user_id)) if hasattr(crud, 'get_user_by_id') else None
@@ -720,8 +794,19 @@ def create_podcast_episode(
 
         # Store final audio basename and optional cover
         episode.final_audio_path = os.path.basename(str(final_path))
-        if cover_image_path and not getattr(episode, "cover_path", None):
-            episode.cover_path = Path(cover_image_path).name
+        if new_cover_basename:
+            existing_cover = getattr(episode, "cover_path", None)
+            needs_update = not existing_cover
+            if not needs_update:
+                existing_str = str(existing_cover)
+                try:
+                    existing_basename = Path(existing_str).name
+                except Exception:
+                    existing_basename = existing_str
+                if existing_basename != new_cover_basename or existing_str.lower().startswith(("http://", "https://", "gs://")):
+                    needs_update = True
+            if needs_update:
+                episode.cover_path = new_cover_basename
 
         session.add(episode)
         session.commit()
