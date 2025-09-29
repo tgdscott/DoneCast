@@ -15,7 +15,7 @@ from sqlalchemy import desc as _sa_desc
 from ..models.podcast import MediaItem, MediaCategory
 from ..models.user import User
 from ..core.database import get_session
-from api.core.auth import get_current_user
+from api.routers.auth import get_current_user
 
 router = APIRouter(
     prefix="/media",

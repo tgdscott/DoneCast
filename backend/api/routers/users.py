@@ -7,7 +7,7 @@ from ..core.config import settings
 from ..models.user import User, UserPublic
 from ..core.database import get_session
 from ..core import crud
-from api.core.auth import get_current_user
+from api.routers.auth import get_current_user
 
 # lowercase tag
 router = APIRouter(

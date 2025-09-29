@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 
-from api.core.auth import get_current_user
+from api.routers.auth import get_current_user
 from api.core.database import get_session
 from api.core.paths import MEDIA_DIR
 from api.models.podcast import MusicAsset

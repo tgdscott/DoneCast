@@ -10,7 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
 from sqlmodel import SQLModel, Session, delete, select
 
-from ...core.auth import get_current_user
+from ...routers.auth import get_current_user
 from ...core.database import get_session
 from ...core.paths import MEDIA_DIR
 from ...models.podcast import (

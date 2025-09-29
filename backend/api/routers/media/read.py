@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 from api.models.podcast import MediaItem, MediaCategory
 from api.models.user import User
 from api.core.database import get_session
-from api.core.auth import get_current_user
+from api.routers.auth import get_current_user
 
 router = APIRouter(prefix="/media", tags=["Media Library"])
 

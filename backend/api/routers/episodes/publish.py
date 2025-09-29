@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlmodel import select
 
 from api.core.database import get_session
-from api.core.auth import get_current_user
+from api.routers.auth import get_current_user
 from api.models.user import User
 from api.models.podcast import Episode, Podcast
 from api.services.episodes import repo as _svc_repo

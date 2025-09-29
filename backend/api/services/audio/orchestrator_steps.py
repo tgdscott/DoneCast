@@ -171,13 +171,27 @@ def load_content_and_init_transcripts(
     Returns: (content_path, main_content_audio, words, sanitized_output_filename)
     """
     # Load content
-    content_path = MEDIA_DIR / main_content_filename
-    if not content_path.exists():
-        alt = CLEANED_DIR / main_content_filename
-        if alt.exists():
-            content_path = alt
-        else:
-            raise RuntimeError(f"Main content file not found: {main_content_filename}")
+    candidates = [
+        MEDIA_DIR / main_content_filename,
+        MEDIA_DIR / "media_uploads" / main_content_filename,
+        CLEANED_DIR / main_content_filename,
+    ]
+    try:
+        cwd_media = Path.cwd() / "media_uploads" / main_content_filename
+        candidates.append(cwd_media)
+    except Exception:
+        pass
+
+    content_path: Optional[Path] = None
+    for cand in candidates:
+        try:
+            if cand.exists():
+                content_path = cand
+                break
+        except Exception:
+            continue
+    if content_path is None:
+        raise RuntimeError(f"Main content file not found: {main_content_filename}")
     main_content_audio = AudioSegment.from_file(content_path)
     log.append(f"Loaded main content: {main_content_filename}")
 

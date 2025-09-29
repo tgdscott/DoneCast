@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from api.core.config import settings
 from api.services.elevenlabs_service import ElevenLabsService
-from api.core.auth import get_current_user
+from api.routers.auth import get_current_user
 from api.models.user import User
 
 

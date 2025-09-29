@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session
 
 from api.core.database import get_session
-from api.core.auth import get_current_user
+from api.routers.auth import get_current_user
 from api.models.user import User
 from api.services.publisher import SpreakerClient
 from api.core.config import settings

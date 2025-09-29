@@ -14,7 +14,7 @@ import json
 from ..core.database import get_session
 from ..models.user import User
 from ..models.podcast import Podcast, Episode, EpisodeStatus, PodcastImportState
-from api.core.auth import get_current_user
+from api.routers.auth import get_current_user
 from api.core.paths import FINAL_DIR
 from infrastructure.gcs import upload_fileobj
 from api.services.episodes.merge import merge_podcast_episode_duplicates

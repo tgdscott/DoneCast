@@ -25,7 +25,7 @@ from api.core.paths import MEDIA_DIR
 from api.models.podcast import MediaItem, MediaCategory, PodcastTemplate
 from api.models.user import User
 from api.core.database import get_session
-from api.core.auth import get_current_user
+from api.routers.auth import get_current_user
 from infrastructure.tasks_client import enqueue_http_task
 from infrastructure.gcs import upload_bytes, upload_fileobj, delete_blob
 

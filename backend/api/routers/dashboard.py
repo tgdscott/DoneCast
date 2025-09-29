@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func
 from sqlmodel import Session, select
 
-from api.core.auth import get_current_user
+from api.routers.auth import get_current_user
 from api.core.database import get_session
 from api.models.podcast import Episode, EpisodeStatus, Podcast
 from api.models.user import User

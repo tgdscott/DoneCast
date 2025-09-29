@@ -15,7 +15,30 @@ from .config import settings
 
 log = logging.getLogger(__name__)
 
-IS_CLOUD_SQL = bool(settings.INSTANCE_CONNECTION_NAME)
+
+def _is_truthy(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+_ENV_VALUE = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower()
+_FORCE_SQLITE = False
+if _is_truthy(os.getenv("TEST_FORCE_SQLITE")):
+    _FORCE_SQLITE = True
+elif os.getenv("PYTEST_CURRENT_TEST"):
+    _FORCE_SQLITE = True
+elif _ENV_VALUE in {"dev", "development", "local", "test", "testing"}:
+    _FORCE_SQLITE = True
+
+if _FORCE_SQLITE and settings.INSTANCE_CONNECTION_NAME:
+    log.info(
+        "[db] Forcing SQLite (test/dev override); ignoring INSTANCE_CONNECTION_NAME=%s",
+        settings.INSTANCE_CONNECTION_NAME,
+    )
+
+_INSTANCE_CONNECTION_NAME = settings.INSTANCE_CONNECTION_NAME if not _FORCE_SQLITE else ""
+IS_CLOUD_SQL = bool(_INSTANCE_CONNECTION_NAME)
 DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT", "5432")
 
@@ -23,7 +46,7 @@ if IS_CLOUD_SQL:
     db_user = settings.DB_USER
     db_pass = settings.DB_PASS
     db_name = settings.DB_NAME
-    instance_connection = settings.INSTANCE_CONNECTION_NAME
+    instance_connection = _INSTANCE_CONNECTION_NAME
     # Prefer TCP when DB_HOST is provided (recommended on Windows with Cloud SQL Proxy)
     if DB_HOST:
         password = quote_plus(db_pass)
@@ -62,7 +85,7 @@ else:
         # timeout gives sqlite time to wait on locks before failing
         connect_args={
             "check_same_thread": False,
-            "timeout": float(os.getenv("SQLITE_TIMEOUT_SECONDS", "30")),
+            "timeout": float(os.getenv("SQLITE_TIMEOUT_SECONDS", "60")),
         },
     )
 
@@ -88,7 +111,7 @@ else:
                 pass
             try:
                 # default 5000 ms; can be overridden via env var
-                busy_ms = int(float(os.getenv("SQLITE_BUSY_TIMEOUT_MS", "5000")))
+                busy_ms = int(float(os.getenv("SQLITE_BUSY_TIMEOUT_MS", "15000")))
                 cursor.execute(f"PRAGMA busy_timeout={busy_ms}")
             except Exception:
                 pass

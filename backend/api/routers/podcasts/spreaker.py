@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlmodel import Session, select
 
-from ...core.auth import get_current_user
+from ...routers.auth import get_current_user
 from ...core.database import get_session
 from ...models.podcast import Episode, EpisodeStatus, Podcast, PodcastImportState
 from ...models.user import User
