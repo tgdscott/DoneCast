@@ -1,0 +1,203 @@
+from __future__ import annotations
+
+import re
+from collections import defaultdict
+from pathlib import Path
+from typing import Dict, Iterable, Optional, Tuple
+from urllib.parse import quote_plus
+from uuid import UUID, uuid4
+
+from fastapi import HTTPException, UploadFile, status
+
+from ...models.podcast import DistributionStatus
+
+MB = 1024 * 1024
+
+
+def sanitize_cover_filename(filename: str) -> str:
+    """Return a filesystem-safe representation of ``filename``."""
+    name = Path(filename or "cover").name
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", name).strip("._")
+    return safe or "cover"
+
+
+def save_cover_upload(
+    cover_image: UploadFile,
+    user_id: UUID,
+    *,
+    upload_dir: Path,
+    max_bytes: int = 10 * MB,
+    allowed_extensions: Optional[Iterable[str]] = None,
+    require_image_content_type: bool = False,
+) -> Tuple[str, Path]:
+    """Persist an uploaded cover image to ``upload_dir``.
+
+    Returns the stored filename and absolute path. Raises :class:`HTTPException`
+    for validation issues so API handlers can surface friendly errors.
+    """
+
+    if not cover_image or not cover_image.filename:
+        raise HTTPException(status_code=400, detail="Cover image filename missing.")
+
+    extension = Path(cover_image.filename).suffix.lower()
+    if allowed_extensions is not None:
+        allowed = {ext.lower() for ext in allowed_extensions}
+        if extension not in allowed:
+            raise HTTPException(
+                status_code=400,
+                detail="Unsupported cover image extension. Allowed: "
+                + ", ".join(sorted(allowed)),
+            )
+
+    if require_image_content_type:
+        content_type = (getattr(cover_image, "content_type", "") or "").lower()
+        if not content_type.startswith("image/"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid cover content type '{content_type or 'unknown'}'. Expected image/*.",
+            )
+
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_name = sanitize_cover_filename(cover_image.filename)
+    file_extension = Path(safe_name).suffix.lower() or extension or ".png"
+    unique_filename = f"{user_id}_{uuid4()}{file_extension}"
+    save_path = upload_dir / unique_filename
+
+    total = 0
+    try:
+        with save_path.open("wb") as buffer:
+            while True:
+                chunk = cover_image.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if max_bytes and total > max_bytes:
+                    try:
+                        save_path.unlink(missing_ok=True)  # type: ignore[call-arg]
+                    except Exception:
+                        pass
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="Cover image exceeds 10 MB limit.",
+                    )
+                buffer.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive cleanup
+        try:
+            save_path.unlink(missing_ok=True)  # type: ignore[call-arg]
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"Failed to store cover image: {exc}") from exc
+
+    return unique_filename, save_path
+
+
+def build_distribution_context(podcast: "Podcast") -> Dict[str, Optional[str]]:
+    from ...models.podcast import Podcast  # Local import to avoid circular refs
+
+    if not isinstance(podcast, Podcast):
+        raise TypeError("podcast must be a Podcast instance")
+
+    rss_url = (
+        getattr(podcast, "rss_feed_url", None)
+        or getattr(podcast, "rss_url_locked", None)
+        or getattr(podcast, "rss_url", None)
+    )
+    spreaker_show_id = getattr(podcast, "spreaker_show_id", None)
+    spreaker_show_url = f"https://www.spreaker.com/show/{spreaker_show_id}" if spreaker_show_id else None
+    encoded_rss = quote_plus(rss_url) if rss_url else ""
+    return {
+        "rss_feed_url": rss_url,
+        "rss_feed_encoded": encoded_rss,
+        "rss_feed_or_placeholder": rss_url or "your CloudPod RSS feed",
+        "spreaker_show_id": spreaker_show_id or "",
+        "spreaker_show_url": spreaker_show_url,
+        "podcast_name": getattr(podcast, "name", None) or "",
+    }
+
+
+def format_distribution_template(value: Optional[str], context: Dict[str, Optional[str]]) -> Optional[str]:
+    if not value:
+        return value
+    safe = defaultdict(str)
+    for key, val in context.items():
+        safe[key] = "" if val is None else str(val)
+    try:
+        return value.format_map(safe)
+    except Exception:
+        return value
+
+
+def build_distribution_item_payload(
+    host_def: Dict[str, object],
+    status: Optional["PodcastDistributionStatus"],
+    context: Dict[str, Optional[str]],
+) -> Dict[str, object]:
+    from ...models.podcast import PodcastDistributionStatus  # Local import to avoid circular refs
+
+    disabled_reason: Optional[str] = None
+    requires_rss_feed = bool(host_def.get("requires_rss_feed"))
+    requires_spreaker_show = bool(host_def.get("requires_spreaker_show"))
+    if requires_rss_feed and not context.get("rss_feed_url"):
+        disabled_reason = host_def.get("rss_missing_help") or "Add your RSS feed first."
+    if requires_spreaker_show and not context.get("spreaker_show_id"):
+        disabled_reason = host_def.get("spreaker_missing_help") or "Link your show to Spreaker first."
+
+    default_status_key = host_def.get("default_status") or DistributionStatus.not_started.value
+    try:
+        default_status = DistributionStatus(default_status_key)
+    except Exception:
+        default_status = DistributionStatus.not_started
+
+    current_status = default_status
+    notes = None
+    updated_at = None
+    if status is not None:
+        try:
+            current_status = DistributionStatus(status.status)
+        except Exception:
+            current_status = default_status
+        notes = status.notes
+        updated_at = getattr(status, "updated_at", None)
+
+    instructions_list: list[str] = []
+    for text in (host_def.get("instructions") or []):
+        if not text:
+            continue
+        formatted = format_distribution_template(str(text), context)
+        if formatted:
+            instructions_list.append(formatted)
+
+    action_url = format_distribution_template(host_def.get("action_url_template"), context)
+    if not action_url:
+        action_url = format_distribution_template(host_def.get("action_url"), context)
+    docs_url = format_distribution_template(host_def.get("docs_url"), context)
+
+    return {
+        "key": str(host_def.get("key")),
+        "name": str(host_def.get("name") or host_def.get("key")),
+        "summary": format_distribution_template(host_def.get("summary"), context),
+        "automation": str(host_def.get("automation", "manual")),
+        "automation_notes": format_distribution_template(host_def.get("automation_notes"), context),
+        "action_label": host_def.get("action_label"),
+        "action_url": action_url,
+        "docs_url": docs_url,
+        "instructions": instructions_list,
+        "requires_rss_feed": requires_rss_feed,
+        "requires_spreaker_show": requires_spreaker_show,
+        "disabled_reason": disabled_reason,
+        "status": current_status,
+        "notes": notes,
+        "status_updated_at": updated_at,
+    }
+
+
+__all__ = [
+    "save_cover_upload",
+    "sanitize_cover_filename",
+    "build_distribution_context",
+    "format_distribution_template",
+    "build_distribution_item_payload",
+]
