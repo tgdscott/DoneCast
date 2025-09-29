@@ -194,6 +194,28 @@ def create_podcast_episode(
 					return p
 			except Exception:
 				pass
+
+			# If a GCS URI is provided, download to MEDIA_DIR and return that path
+			try:
+				s = str(name)
+				if s.startswith("gs://"):
+					try:
+						# Parse gs://bucket/key
+						without_scheme = s[len("gs://"):]
+						bucket_name, key = without_scheme.split("/", 1)
+						base = _Path(key).name
+						dst = MEDIA_DIR / base
+						MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+						from google.cloud import storage  # lazy import; available in prod
+						client = storage.Client()
+						blob = client.bucket(bucket_name).blob(key)
+						blob.download_to_filename(str(dst))
+						return dst
+					except Exception:
+						# Best-effort: fall through to local candidate paths
+						pass
+			except Exception:
+				pass
 			try:
 				base = _Path(str(name)).name
 			except Exception:
