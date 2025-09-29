@@ -99,6 +99,27 @@ async def import_from_rss(
                     it_owner = feed_info.get("itunes_owner") or feed_info.get("itunes:owner")
                     if isinstance(it_owner, dict):
                         owner_email = it_owner.get("email") or it_owner.get("itunes:email")
+
+                    if not owner_email:
+                        publisher_detail = feed_info.get("publisher_detail")
+                        if isinstance(publisher_detail, dict):
+                            owner_email = publisher_detail.get("email") or publisher_detail.get("itunes:email")
+
+                    if not owner_email:
+                        author_detail = feed_info.get("author_detail")
+                        if isinstance(author_detail, dict):
+                            owner_email = author_detail.get("email") or author_detail.get("itunes:email")
+
+                    if not owner_email:
+                        authors = feed_info.get("authors")
+                        if isinstance(authors, list):
+                            for author in authors:
+                                if isinstance(author, dict):
+                                    owner_email = author.get("email") or author.get("itunes:email")
+                                    if owner_email:
+                                        break
+                    if isinstance(owner_email, str):
+                        owner_email = owner_email.strip() or None
                 except Exception:
                     owner_email = None
             else:
