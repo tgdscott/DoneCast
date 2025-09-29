@@ -1,49 +1,75 @@
-"""
-worker.tasks package bootstrap.
+"""Bootstrap for the modular ``worker.tasks`` package.
 
-Exports celery_app and re-exports legacy task functions from the monolith
-worker/tasks.py so existing imports like `from worker.tasks import create_podcast_episode`
-continue to work until tasks are migrated in WT-2.
+The legacy monolithic ``worker.tasks`` module exposed a handful of task
+functions directly.  This package keeps that import surface stable by
+re-exporting the implementations that now live in dedicated modules.  If
+something goes wrong when importing the new modules we make a best-effort
+attempt to fall back to the legacy ``tasks.py`` implementation so existing
+deployments keep working.
 """
+
+from __future__ import annotations
 
 from .app import celery_app  # backwards-compatible import path
 
-# Prefer re-exporting from new domain modules
-try:
-	from .transcription import transcribe_media_file  # type: ignore F401
-except Exception:
-	transcribe_media_file = None  # type: ignore
-try:
-        from .assembly import create_podcast_episode  # type: ignore F401
-except Exception:
-        create_podcast_episode = None  # type: ignore
-try:
-	from .publish import publish_episode_to_spreaker_task  # type: ignore F401
-except Exception:
-	publish_episode_to_spreaker_task = None  # type: ignore
+# Prefer re-exporting from the new modular implementations
+try:  # pragma: no cover - defensive import shim
+    from .transcription import transcribe_media_file  # type: ignore F401
+except Exception:  # pragma: no cover
+    transcribe_media_file = None  # type: ignore[assignment]
 
-# Fallback: attempt to load legacy monolith if any symbol missing
-if not (transcribe_media_file and create_podcast_episode and publish_episode_to_spreaker_task):
-	import sys
-	import importlib.util
-	from pathlib import Path
+try:  # pragma: no cover - defensive import shim
+    from .assembly import create_podcast_episode  # type: ignore F401
+except Exception:  # pragma: no cover
+    create_podcast_episode = None  # type: ignore[assignment]
 
-	_pkg_dir = Path(__file__).resolve().parent
-	_legacy_mod_path = _pkg_dir.parent / "tasks.py"
-	if _legacy_mod_path.is_file():
-		try:
-			spec = importlib.util.spec_from_file_location("worker.tasks_legacy", str(_legacy_mod_path))
-			if spec and spec.loader:
-				legacy = importlib.util.module_from_spec(spec)
-				sys.modules["worker.tasks_legacy"] = legacy
-				spec.loader.exec_module(legacy)
-				for _name in (
-					"transcribe_media_file",
-					"create_podcast_episode",
-					"publish_episode_to_spreaker_task",
-				):
-					if globals().get(_name) is None and hasattr(legacy, _name):
-						globals()[_name] = getattr(legacy, _name)
-		except Exception:
-			pass
+try:  # pragma: no cover - defensive import shim
+    from .publish import publish_episode_to_spreaker_task  # type: ignore F401
+except Exception:  # pragma: no cover
+    publish_episode_to_spreaker_task = None  # type: ignore[assignment]
+
+
+def _load_legacy_shim() -> None:
+    """Attempt to populate globals from the deprecated ``tasks.py`` module."""
+
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    pkg_dir = Path(__file__).resolve().parent
+    legacy_mod_path = pkg_dir.parent / "tasks.py"
+    if not legacy_mod_path.is_file():
+        return
+
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "worker.tasks_legacy", str(legacy_mod_path)
+        )
+        if spec and spec.loader:
+            legacy = importlib.util.module_from_spec(spec)
+            sys.modules["worker.tasks_legacy"] = legacy
+            spec.loader.exec_module(legacy)
+            for name in (
+                "transcribe_media_file",
+                "create_podcast_episode",
+                "publish_episode_to_spreaker_task",
+            ):
+                if globals().get(name) is None and hasattr(legacy, name):
+                    globals()[name] = getattr(legacy, name)
+    except Exception:  # pragma: no cover - fallback is best-effort only
+        pass
+
+
+if not (
+    transcribe_media_file and create_podcast_episode and publish_episode_to_spreaker_task
+):
+    _load_legacy_shim()
+
+
+__all__ = [
+    "celery_app",
+    "transcribe_media_file",
+    "create_podcast_episode",
+    "publish_episode_to_spreaker_task",
+]
 

@@ -1,80 +1,99 @@
-import logging
-from datetime import datetime, timedelta
+"""Periodic maintenance Celery tasks."""
 
-from worker.tasks import celery_app
-from api.core.database import get_session
-from api.core.paths import MEDIA_DIR
-from api.models.podcast import MediaItem, MediaCategory, Episode
+from __future__ import annotations
+
+import logging
+from datetime import datetime
+
 from sqlmodel import select
 
-try:
-	from zoneinfo import ZoneInfo  # Python 3.9+
+from .app import celery_app
+from api.core.database import get_session
+from api.core.paths import MEDIA_DIR
+from api.models.podcast import Episode, MediaCategory, MediaItem
+
+try:  # pragma: no cover - Python <3.9 fallback
+    from zoneinfo import ZoneInfo
 except Exception:  # pragma: no cover
-	ZoneInfo = None  # type: ignore
+    ZoneInfo = None  # type: ignore[assignment]
 
 
 @celery_app.task(name="maintenance.purge_expired_uploads")
 def purge_expired_uploads() -> dict:
-	"""Delete raw uploads that have expired (expires_at <= now) and are not used by any episode.
+    """Delete expired raw uploads that are no longer referenced."""
 
-	Safety:
-	- Only targets MediaCategory.main_content.
-	- Skips items missing filename.
-	- Idempotent: deleting missing files is tolerated.
-	- Does not remove media referenced by Episode.working_audio_name or Episode.final_audio_path.
-	"""
-	session = next(get_session())
-	now = datetime.utcnow()
-	removed = 0
-	skipped_in_use = 0
-	checked = 0
-	try:
-		# Fetch candidates: expired main_content
-		q = (
-			select(MediaItem)
-			.where(MediaItem.category == MediaCategory.main_content)  # type: ignore
-			.where(MediaItem.expires_at != None)  # type: ignore
-			.where(MediaItem.expires_at <= now)  # type: ignore
-			.limit(10000)
-		)
-		items = session.exec(q).all()
-		# Build a set of in-use basenames from episodes to avoid deleting source files that are still referenced
-		q_eps = select(Episode)
-		eps = session.exec(q_eps).all()
-		in_use = set()
-		for e in eps:
-			for name in (getattr(e, 'working_audio_name', None), getattr(e, 'final_audio_path', None)):
-				if name:
-					try:
-						from pathlib import Path
-						in_use.add(Path(str(name)).name)
-					except Exception:
-						in_use.add(str(name))
-		for m in items:
-			checked += 1
-			fn = getattr(m, 'filename', None)
-			if not fn:
-				continue
-			if fn in in_use:
-				skipped_in_use += 1
-				continue
-			try:
-				path = MEDIA_DIR / fn
-				if path.exists():
-					try:
-						path.unlink()
-					except Exception:
-						logging.warning("[purge] Failed to unlink %s", path, exc_info=True)
-				session.delete(m)
-				removed += 1
-			except Exception:
-				logging.warning("[purge] Failed to delete MediaItem %s", getattr(m, 'id', None), exc_info=True)
-		if removed:
-			session.commit()
-	except Exception:
-		session.rollback()
-		logging.warning("[purge] purge_expired_uploads failed", exc_info=True)
-	finally:
-		session.close()
-	logging.info("[purge] expired uploads: checked=%s removed=%s skipped_in_use=%s", checked, removed, skipped_in_use)
-	return {"checked": checked, "removed": removed, "skipped_in_use": skipped_in_use}
+    session = next(get_session())
+    now = datetime.utcnow()
+    removed = 0
+    skipped_in_use = 0
+    checked = 0
+
+    try:
+        query = (
+            select(MediaItem)
+            .where(MediaItem.category == MediaCategory.main_content)  # type: ignore
+            .where(MediaItem.expires_at != None)  # type: ignore
+            .where(MediaItem.expires_at <= now)  # type: ignore
+            .limit(10_000)
+        )
+        items = session.exec(query).all()
+
+        episode_query = select(Episode)
+        episodes = session.exec(episode_query).all()
+        in_use: set[str] = set()
+        for ep in episodes:
+            for name in (
+                getattr(ep, "working_audio_name", None),
+                getattr(ep, "final_audio_path", None),
+            ):
+                if not name:
+                    continue
+                try:
+                    from pathlib import Path
+
+                    in_use.add(Path(str(name)).name)
+                except Exception:
+                    in_use.add(str(name))
+
+        for media_item in items:
+            checked += 1
+            filename = getattr(media_item, "filename", None)
+            if not filename:
+                continue
+            if filename in in_use:
+                skipped_in_use += 1
+                continue
+
+            try:
+                path = MEDIA_DIR / filename
+                if path.exists():
+                    try:
+                        path.unlink()
+                    except Exception:
+                        logging.warning(
+                            "[purge] Failed to unlink %s", path, exc_info=True
+                        )
+                session.delete(media_item)
+                removed += 1
+            except Exception:
+                logging.warning(
+                    "[purge] Failed to delete MediaItem %s",
+                    getattr(media_item, "id", None),
+                    exc_info=True,
+                )
+
+        if removed:
+            session.commit()
+    except Exception:
+        session.rollback()
+        logging.warning("[purge] purge_expired_uploads failed", exc_info=True)
+    finally:
+        session.close()
+
+    logging.info(
+        "[purge] expired uploads: checked=%s removed=%s skipped_in_use=%s",
+        checked,
+        removed,
+        skipped_in_use,
+    )
+    return {"checked": checked, "removed": removed, "skipped_in_use": skipped_in_use}

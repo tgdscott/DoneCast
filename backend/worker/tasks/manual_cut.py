@@ -9,7 +9,7 @@ from typing import Any
 from pydub import AudioSegment
 from sqlmodel import select
 
-from worker.tasks import celery_app
+from .app import celery_app
 from api.core.database import get_session
 from api.core.paths import FINAL_DIR, MEDIA_DIR
 from api.models.podcast import Episode
