@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Play, Pause, Plus, Trash2, Save, Upload as UploadIcon, Link as LinkIcon } from 'lucide-react';
 import { useAuth } from '@/AuthContext';
 import { useToast } from '@/hooks/use-toast';
-import { makeApi } from '@/lib/apiClient';
+import { makeApi, buildApiUrl } from '@/lib/apiClient';
 
 export default function AdminMusicLibrary() {
   const { token } = useAuth();
@@ -16,9 +16,8 @@ export default function AdminMusicLibrary() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [previewingId, setPreviewingId] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState({});
   const audioRef = useRef(null);
-
-  const auth = token ? { Authorization: `Bearer ${token}` } : {};
 
   const loadAssets = async () => {
     setLoading(true);
@@ -84,6 +83,20 @@ export default function AdminMusicLibrary() {
     setAssets(prev => prev.map(a => a.id === id ? { ...a, _file: file } : a));
   };
 
+  const updateProgress = (id, data) => {
+    setUploadProgress(prev => ({ ...prev, [id]: data }));
+  };
+
+  const clearProgressLater = (id, delay = 800) => {
+    setTimeout(() => {
+      setUploadProgress(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }, delay);
+  };
+
   const uploadFile = async (asset) => {
     if (!asset._file) {
       try { toast({ title: 'No file selected', variant: 'destructive' }); } catch {}
@@ -95,10 +108,55 @@ export default function AdminMusicLibrary() {
       fd.append('file', asset._file);
       if (asset.display_name) fd.append('display_name', asset.display_name);
       if (Array.isArray(asset.mood_tags) && asset.mood_tags.length) fd.append('mood_tags', JSON.stringify(asset.mood_tags));
-      await makeApi(token).raw('/api/admin/music/assets/upload', { method: 'POST', body: fd });
+
+      updateProgress(asset.id, { state: 'uploading', percent: 0 });
+
+      await new Promise((resolve, reject) => {
+        try {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', buildApiUrl('/api/admin/music/assets/upload'));
+          if (token) {
+            xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+          }
+          xhr.upload.onprogress = (event) => {
+            if (!event.lengthComputable) return;
+            const pct = Math.min(100, Math.round((event.loaded / event.total) * 100));
+            updateProgress(asset.id, { state: 'uploading', percent: pct });
+          };
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              updateProgress(asset.id, { state: 'complete', percent: 100 });
+              resolve();
+            } else {
+              let message = 'Upload failed';
+              try {
+                const parsed = JSON.parse(xhr.responseText);
+                message = parsed?.detail || parsed?.message || message;
+              } catch {}
+              updateProgress(asset.id, { state: 'error', percent: 0, message });
+              reject(new Error(message));
+            }
+          };
+          xhr.onerror = () => {
+            const message = 'Network error while uploading';
+            updateProgress(asset.id, { state: 'error', percent: 0, message });
+            reject(new Error(message));
+          };
+          xhr.onabort = () => {
+            const message = 'Upload cancelled';
+            updateProgress(asset.id, { state: 'error', percent: 0, message });
+            reject(new Error(message));
+          };
+          xhr.send(fd);
+        } catch (err) {
+          reject(err instanceof Error ? err : new Error('Upload failed'));
+        }
+      });
       try { toast({ title: 'Uploaded', description: `${asset.display_name || asset._file.name} uploaded.` }); } catch {}
       await loadAssets();
+      clearProgressLater(asset.id);
     } catch (e) {
+      updateProgress(asset.id, { state: 'error', percent: 0, message: e?.message || 'Upload failed' });
       try { toast({ title: 'Upload failed', description: e.message || 'Could not upload file', variant: 'destructive' }); } catch {}
     } finally { setSaving(false); }
   };
@@ -176,6 +234,7 @@ export default function AdminMusicLibrary() {
               {assets.map(a => {
                 const canPreview = !!(a.preview_url || a.url || a.filename);
                 const moods = Array.isArray(a.mood_tags) ? a.mood_tags.join(', ') : (a.mood_tags || '');
+                const progress = uploadProgress[a.id];
                 return (
                   <TableRow key={a.id}>
                     <TableCell>
@@ -188,8 +247,32 @@ export default function AdminMusicLibrary() {
                     </TableCell>
                     {a.isNew ? (
                       <>
-                        <TableCell><Input value={a.url || ''} onChange={(e) => updateField(a.id, 'url', e.target.value)} placeholder="https://.../track.mp3" /></TableCell>
-                        <TableCell><input type="file" accept="audio/*" onChange={(e) => setFileFor(a.id, e.target.files?.[0] || null)} /></TableCell>
+                        <TableCell>
+                          <Input value={a.url || ''} onChange={(e) => updateField(a.id, 'url', e.target.value)} placeholder="https://.../track.mp3" />
+                          {progress && progress.state === 'error' && !a._file && (
+                            <div className="text-xs text-red-500 mt-1">{progress.message || 'Upload failed'}</div>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <input type="file" accept="audio/*" onChange={(e) => setFileFor(a.id, e.target.files?.[0] || null)} />
+                          {progress && (
+                            <div className="mt-2 space-y-1">
+                              <div className="h-2 bg-muted rounded overflow-hidden">
+                                <div
+                                  className={`h-2 ${progress.state === 'error' ? 'bg-red-500' : 'bg-blue-500'}`}
+                                  style={{ width: `${progress.percent}%` }}
+                                />
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {progress.state === 'error'
+                                  ? (progress.message || 'Upload failed')
+                                  : progress.percent === 100
+                                    ? 'Processing…'
+                                    : `${progress.percent}%`}
+                              </div>
+                            </div>
+                          )}
+                        </TableCell>
                       </>
                     ) : (
                       <>

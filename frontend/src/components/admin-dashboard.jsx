@@ -310,7 +310,7 @@ export default function AdminDashboard() {
             <Headphones className="w-8 h-8" style={{ color: "#2C3E50" }} />
             <div>
               <h1 className="text-xl font-bold" style={{ color: "#2C3E50" }}>
-                EffortlessCast
+                Podcast Plus Plus
               </h1>
               <p className="text-sm text-gray-600">Admin Panel</p>
             </div>
@@ -1405,7 +1405,7 @@ export default function AdminDashboard() {
           )}
 
           {/* Other tabs placeholder */}
-          {!["users", "analytics", "settings", "dashboard"].includes(activeTab) && (
+          {!["users", "analytics", "settings", "dashboard", "music"].includes(activeTab) && (
             <div className="text-center py-12">
               <h3 className="text-xl font-semibold text-gray-600 mb-2">
                 {navigationItems.find((item) => item.id === activeTab)?.label} Coming Soon
