@@ -6,8 +6,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Mapping, Optional, cast
 
-from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import HTTPException, Request, status
 from sqlmodel import Session
 
 from api.core import crud
@@ -17,10 +16,12 @@ from api.core.security import verify_password
 from api.limits import DISABLE as RL_DISABLED
 from api.limits import limiter
 from api.models.user import User, UserPublic
+from api.core.auth import (
+    get_current_user as core_get_current_user,
+    oauth2_scheme as core_oauth2_scheme,
+)
 
 logger = logging.getLogger(__name__)
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
 try:  # pragma: no cover - executed only when python-jose is missing in prod builds
     from jose import JWTError, jwt
@@ -93,33 +94,13 @@ def create_access_token(data: Mapping[str, Any], expires_delta: timedelta | None
     return encoded_jwt
 
 
-def get_current_user(
-    request: Request,
-    session: Session = Depends(get_session),
-    token: str = Depends(oauth2_scheme),
-) -> User:
-    """Decode the JWT token to get the current user."""
+oauth2_scheme = core_oauth2_scheme
 
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    if jwt is None:
-        raise_jwt_missing("validating credentials")
-    try:
-        jwt_mod = cast(Any, jwt)
-        payload = jwt_mod.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        email = payload.get("sub")
-        if not isinstance(email, str) or not email:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
-
-    user = crud.get_user_by_email(session=session, email=email)
-    if user is None:
-        raise credentials_exception
-    return user
+# ``get_current_user`` in ``api.core.auth`` performs additional checks (such
+# as maintenance mode enforcement).  Re-export it here so FastAPI dependencies
+# across the codebase share the exact same callable, which also simplifies
+# overriding the dependency in tests.
+get_current_user = core_get_current_user
 
 
 def to_user_public(user: User) -> UserPublic:
