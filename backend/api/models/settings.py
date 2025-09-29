@@ -4,6 +4,8 @@ import json
 import logging
 from datetime import datetime
 from typing import Optional
+
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from pydantic import BaseModel
 from sqlmodel import Field, Session, SQLModel
 
@@ -62,22 +64,60 @@ def load_admin_settings(session: Session) -> AdminSettings:
             session.rollback()
         except Exception:  # pragma: no cover - rollback may fail if session closed
             pass
+        if _is_missing_table_error(exc):
+            _ensure_appsetting_table(session)
         logger.warning("Failed loading admin settings, using defaults: %s", exc)
         return AdminSettings()
 
 
+def _is_missing_table_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return (
+        "no such table" in text
+        or "does not exist" in text
+        or "undefined table" in text
+    )
+
+
+def _ensure_appsetting_table(session: Session) -> None:
+    try:
+        bind = session.get_bind()
+        if bind is None:
+            return
+        AppSetting.__table__.create(bind, checkfirst=True)  # type: ignore[arg-type]
+    except Exception as exc:  # pragma: no cover - best effort safeguard
+        logger.debug("Unable to ensure appsetting table: %s", exc)
+
+
 def save_admin_settings(session: Session, settings: AdminSettings) -> AdminSettings:
     """Persist AdminSettings into AppSetting row 'admin_settings'. Returns the reloaded value."""
-    rec = session.get(AppSetting, 'admin_settings')
-    payload = json.dumps(settings.model_dump())
-    if not rec:
-        rec = AppSetting(key='admin_settings', value_json=payload)
-    else:
-        rec.value_json = payload
+
+    def _load_or_create() -> AppSetting:
+        rec = session.get(AppSetting, 'admin_settings')
+        payload = json.dumps(settings.model_dump())
+        if not rec:
+            rec = AppSetting(key='admin_settings', value_json=payload)
+        else:
+            rec.value_json = payload
+        try:
+            rec.updated_at = datetime.utcnow()
+        except Exception:  # pragma: no cover - timestamp best effort
+            pass
+        session.add(rec)
+        return rec
+
     try:
-        rec.updated_at = datetime.utcnow()
+        rec = _load_or_create()
+        session.commit()
+    except (ProgrammingError, OperationalError) as exc:
+        if not _is_missing_table_error(exc):
+            session.rollback()
+            raise
+        session.rollback()
+        _ensure_appsetting_table(session)
+        rec = _load_or_create()
+        session.commit()
     except Exception:
-        pass
-    session.add(rec)
-    session.commit()
+        session.rollback()
+        raise
     return load_admin_settings(session)
