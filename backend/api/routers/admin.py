@@ -101,13 +101,13 @@ def admin_summary(
     admin_user: User = Depends(get_current_admin_user)
 ):
     """Simple platform summary for admin dashboard MVP."""
-    user_count = session.exec(select(func.count(User.id))).one()[0]  # type: ignore[arg-type]
-    podcast_count = session.exec(select(func.count(Podcast.id))).one()[0]  # type: ignore[arg-type]
-    template_count = session.exec(select(func.count(PodcastTemplate.id))).one()[0]  # type: ignore[arg-type]
-    episode_count = session.exec(select(func.count(Episode.id))).one()[0]  # type: ignore[arg-type]
+    user_count = session.exec(select(func.count(User.id))).one()  # type: ignore[arg-type]
+    podcast_count = session.exec(select(func.count(Podcast.id))).one()  # type: ignore[arg-type]
+    template_count = session.exec(select(func.count(PodcastTemplate.id))).one()  # type: ignore[arg-type]
+    episode_count = session.exec(select(func.count(Episode.id))).one()  # type: ignore[arg-type]
     published_count = session.exec(
         select(func.count(Episode.id)).where(Episode.status == "published")
-    ).one()[0]  # type: ignore[arg-type]
+    ).one()  # type: ignore[arg-type]
     return {
         "users": user_count,
         "podcasts": podcast_count,
