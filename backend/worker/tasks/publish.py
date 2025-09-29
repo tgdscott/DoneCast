@@ -11,7 +11,7 @@ from uuid import UUID
 from .app import celery_app
 from api.core import crud
 from api.core.database import get_session
-from api.core.paths import FINAL_DIR, WS_ROOT as PROJECT_ROOT
+from api.core.paths import FINAL_DIR, MEDIA_DIR, WS_ROOT as PROJECT_ROOT
 from api.services.image_utils import ensure_cover_image_constraints
 from api.services.publisher import SpreakerClient
 
@@ -75,8 +75,17 @@ def publish_episode_to_spreaker_task(
             candidate = (FINAL_DIR / os.path.basename(audio_path)).resolve()
             if candidate.is_file():
                 audio_path = str(candidate)
+            else:
+                alt = (MEDIA_DIR / os.path.basename(audio_path)).resolve()
+                if alt.is_file():
+                    audio_path = str(alt)
         if not os.path.isfile(audio_path):
-            raise RuntimeError(f"Final audio file not found for publishing: {audio_path}")
+            # Final fallback: check media mirror for absolute paths as well
+            alt = os.path.join(str(MEDIA_DIR), os.path.basename(audio_path))
+            if os.path.isfile(alt):
+                audio_path = alt
+            else:
+                raise RuntimeError(f"Final audio file not found for publishing: {audio_path}")
 
         client = SpreakerClient(spreaker_access_token)
 

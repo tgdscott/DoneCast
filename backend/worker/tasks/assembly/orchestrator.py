@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from pathlib import Path
 from uuid import UUID
 
@@ -13,7 +14,7 @@ from api.core.database import get_session
 from api.models.notification import Notification
 from api.models.podcast import MediaCategory, MediaItem
 from api.services import audio_processor
-from api.core.paths import WS_ROOT as PROJECT_ROOT
+from api.core.paths import WS_ROOT as PROJECT_ROOT, FINAL_DIR, MEDIA_DIR
 
 from . import billing, media, transcript
 
@@ -124,12 +125,85 @@ def _finalize_episode(
             "[assemble] Added %s AI shownote additions", len(ai_note_additions)
         )
 
-    episode.final_audio_path = os.path.basename(str(final_path))
-    if media_context.cover_image_path and not getattr(episode, "cover_path", None):
-        try:
-            episode.cover_path = Path(str(media_context.cover_image_path)).name
-        except Exception:
-            episode.cover_path = Path(media_context.cover_image_path).name
+    try:
+        final_path_obj = Path(final_path)
+    except Exception:
+        final_path_obj = Path(str(final_path))
+
+    final_basename = final_path_obj.name
+
+    # Ensure the canonical copy lives under FINAL_DIR
+    try:
+        dest_final = FINAL_DIR / final_basename
+        src_exists = final_path_obj.exists()
+        if src_exists:
+            try:
+                if final_path_obj.resolve() != dest_final.resolve():
+                    dest_final.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(final_path_obj, dest_final)
+                    final_path_obj = dest_final
+            except Exception:
+                dest_final.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(final_path_obj, dest_final)
+                final_path_obj = dest_final
+        elif dest_final.exists():
+            final_path_obj = dest_final
+        else:
+            logging.warning(
+                "[assemble] Final audio missing at %s and %s",
+                str(final_path),
+                str(dest_final),
+            )
+    except Exception:
+        logging.warning(
+            "[assemble] Failed to ensure final audio resides in FINAL_DIR", exc_info=True
+        )
+
+    # Mirror into MEDIA_DIR so the API container can serve previews even if the worker
+    # generated the file in a different workspace location.
+    try:
+        media_mirror = MEDIA_DIR / final_basename
+        if final_path_obj.exists():
+            try:
+                if final_path_obj.resolve() != media_mirror.resolve():
+                    media_mirror.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(final_path_obj, media_mirror)
+            except Exception:
+                media_mirror.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(final_path_obj, media_mirror)
+    except Exception:
+        logging.warning(
+            "[assemble] Failed to mirror final audio into MEDIA_DIR", exc_info=True
+        )
+
+    episode.final_audio_path = final_basename
+
+    cover_value = media_context.cover_image_path
+    if cover_value:
+        cover_str = str(cover_value)
+        if cover_str.lower().startswith(("http://", "https://")):
+            episode.cover_path = cover_str
+        else:
+            try:
+                cover_path = Path(cover_str)
+                cover_name = cover_path.name
+                if cover_path.exists():
+                    dest_cover = MEDIA_DIR / cover_name
+                    try:
+                        if cover_path.resolve() != dest_cover.resolve():
+                            dest_cover.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(cover_path, dest_cover)
+                            cover_path = dest_cover
+                    except Exception:
+                        dest_cover.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(cover_path, dest_cover)
+                        cover_path = dest_cover
+                    media_context.cover_image_path = str(cover_path)
+                episode.cover_path = cover_name
+            except Exception:
+                logging.warning(
+                    "[assemble] Failed to persist cover image locally", exc_info=True
+                )
 
     session.add(episode)
     session.commit()

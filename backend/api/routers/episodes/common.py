@@ -1,11 +1,24 @@
 import os
 from typing import Optional
 
+from api.core.paths import FINAL_DIR, MEDIA_DIR
+
 
 def _final_url_for(path: Optional[str]) -> Optional[str]:
     if not path:
         return None
-    return f"/static/final/{os.path.basename(str(path))}"
+    base = os.path.basename(str(path))
+    try:
+        if (FINAL_DIR / base).is_file():
+            return f"/static/final/{base}"
+    except Exception:
+        pass
+    try:
+        if (MEDIA_DIR / base).is_file():
+            return f"/static/media/{base}"
+    except Exception:
+        pass
+    return f"/static/final/{base}"
 
 
 def _cover_url_for(path: Optional[str]) -> Optional[str]:
