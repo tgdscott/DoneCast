@@ -8,12 +8,18 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request, UploadFile, status
 from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
-from sqlmodel import SQLModel, Session, select
+from sqlmodel import SQLModel, Session, delete, select
 
 from ...core.auth import get_current_user
 from ...core.database import get_session
 from ...core.paths import MEDIA_DIR
-from ...models.podcast import Podcast, PodcastType
+from ...models.podcast import (
+    EpisodeSection,
+    Podcast,
+    PodcastDistributionStatus,
+    PodcastTemplate,
+    PodcastType,
+)
 from ...models.user import User
 from ...services.image_utils import ensure_cover_image_constraints
 from ...services.podcasts.utils import save_cover_upload
@@ -423,6 +429,24 @@ async def delete_podcast(
 
     if not podcast_to_delete:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Podcast not found.")
+
+    # Clean up dependent records referencing this podcast.
+    # Templates retain their data but should no longer be scoped to a deleted show.
+    templates = session.exec(
+        select(PodcastTemplate).where(PodcastTemplate.podcast_id == podcast_id)
+    ).all()
+    for template in templates:
+        template.podcast_id = None
+        session.add(template)
+
+    session.exec(
+        delete(PodcastDistributionStatus).where(
+            PodcastDistributionStatus.podcast_id == podcast_id
+        )
+    )
+    session.exec(
+        delete(EpisodeSection).where(EpisodeSection.podcast_id == podcast_id)
+    )
 
     session.delete(podcast_to_delete)
     session.commit()
