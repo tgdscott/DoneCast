@@ -27,8 +27,9 @@ celery_app.conf.update(
     # Prefer explicit include of task modules; package stubs will exist
     include=(
         "worker.tasks.transcription",
+        "worker.tasks.assembly",
+        "worker.tasks.publishing",
         "worker.tasks.audio",
-        "worker.tasks.publish",
         "worker.tasks.maintenance",
         "worker.tasks.images",
         "worker.tasks.clean",
