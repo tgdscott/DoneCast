@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button"
+import GoogleSignInButton from "@/components/GoogleSignInButton"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -481,11 +482,7 @@ const LoginModal = ({ onClose }) => {
             </div>
           </div>)}
           {mode !== 'verify' && (
-            <a href={googleLoginUrl} className="block">
-              <Button variant="outline" className="w-full">
-                Sign In with Google
-              </Button>
-            </a>
+            <GoogleSignInButton href={googleLoginUrl} />
           )}
         </CardContent>
       </Card>
