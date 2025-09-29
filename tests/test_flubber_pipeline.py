@@ -1,4 +1,4 @@
-import tempfile
+﻿import tempfile
 import unittest
 from pathlib import Path
 from tests.helpers.audio import make_tiny_wav
@@ -8,16 +8,14 @@ class TestFlubberPipeline(unittest.TestCase):
     def setUp(self):
         # Ensure app import root is on sys.path
         import sys
-    root = Path(__file__).resolve().parents[1] / 'backend'
+        root = Path(__file__).resolve().parents[1] / 'backend'
         if str(root) not in sys.path:
             sys.path.insert(0, str(root))
 
         # Mock GCS client for local dev
         from infrastructure import gcs
         gcs.IS_DEV_ENV = True
-        gcs._client = None # type: ignore
-
-            sys.path.insert(0, str(root))
+        gcs._client = None  # type: ignore
 
     def _stub_audiosegment(self, target_module):
         class _AS:
