@@ -14,9 +14,9 @@ try:
 except Exception:
 	transcribe_media_file = None  # type: ignore
 try:
-	from .audio import create_podcast_episode  # type: ignore F401
+        from .assembly import create_podcast_episode  # type: ignore F401
 except Exception:
-	create_podcast_episode = None  # type: ignore
+        create_podcast_episode = None  # type: ignore
 try:
 	from .publish import publish_episode_to_spreaker_task  # type: ignore F401
 except Exception:
