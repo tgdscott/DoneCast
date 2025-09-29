@@ -28,6 +28,8 @@ celery_app.conf.update(
     include=(
         "worker.tasks.transcription",
         "worker.tasks.audio",
+        "worker.tasks.assembly",
+        "worker.tasks.manual_cut",
         "worker.tasks.publish",
         "worker.tasks.maintenance",
         "worker.tasks.images",
