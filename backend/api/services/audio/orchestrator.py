@@ -9,15 +9,13 @@ and will be removed after 2025-10-15.
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, cast
-import json
+from typing import Any, Dict, List
 import time
 from datetime import datetime
 
 from pydub import AudioSegment
 
-from api.services import ai_enhancer
-from api.services.audio.common import MEDIA_DIR, match_target_dbfs, sanitize_filename
+from api.services.audio.common import MEDIA_DIR, sanitize_filename
 from api.core.paths import (
     FINAL_DIR as _FINAL_DIR,
     CLEANED_DIR as _CLEANED_DIR,
@@ -61,80 +59,10 @@ def run_episode_pipeline(paths: Dict[str, Any], cfg: Dict[str, Any], log: List[s
     elevenlabs_api_key = cfg.get("elevenlabs_api_key")
     mix_only = bool(cfg.get("mix_only") or False)
 
-    # Local helpers (same as processor)
-    def _to_float(v: Any) -> Optional[float]:
-        try:
-            if v is None or v == "":
-                return None
-            return float(v)
-        except Exception:
-            return None
-
     total_start_time = time.time()
     log.append(f"Workflow started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     if cover_image_path:
         log.append(f"Cover image path: {cover_image_path}")
-
-    def _fmt_ts(s: float) -> str:
-        try:
-            ms = int(max(0.0, float(s)) * 1000)
-            mm = ms // 60000
-            ss = (ms % 60000) / 1000.0
-            return f"{mm:02d}:{ss:06.3f}"
-        except Exception:
-            return "00:00.000"
-
-    def _build_phrases(words_list: List[Dict[str, Any]], gap_s: float = 0.8) -> List[Dict[str, Any]]:
-        phrases: List[Dict[str, Any]] = []
-        cur: Optional[Dict[str, Any]] = None
-        prev_end: Optional[float] = None
-        prev_speaker: Optional[str] = None
-        for w in (words_list or []):
-            if not isinstance(w, dict):
-                continue
-            txt = str((w.get('word') or '')).strip()
-            if txt == '':
-                continue
-            st = float(w.get('start') or 0.0)
-            en = float(w.get('end') or st)
-            spk = (w.get('speaker') or '') or 'Speaker'
-            gap = (st - float(prev_end)) if (prev_end is not None) else 0.0
-            if cur is None or spk != prev_speaker or (gap_s and gap >= gap_s):
-                if cur is not None:
-                    phrases.append(cur)
-                cur = {
-                    'speaker': spk,
-                    'start': st,
-                    'end': en,
-                    'text': txt,
-                }
-            else:
-                cur['end'] = en
-                cur['text'] = (cur['text'] + ' ' + txt).strip()
-            prev_end = en
-            prev_speaker = spk
-        if cur is not None:
-            phrases.append(cur)
-        return phrases
-
-    def _write_phrase_txt(path: Path, phrases: List[Dict[str, Any]]):
-        lines: List[str] = []
-        for p in phrases:
-            lines.append(f"[{_fmt_ts(p.get('start', 0.0))} - {_fmt_ts(p.get('end', 0.0))}] {p.get('speaker','Speaker')}: {p.get('text','').strip()}")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, 'w', encoding='utf-8') as fh:
-            fh.write('\n'.join(lines) + ('\n' if lines else ''))
-
-    def _offset_phrases(phrases: List[Dict[str, Any]], offset_s: float, *, speaker_override: Optional[str] = None) -> List[Dict[str, Any]]:
-        out: List[Dict[str, Any]] = []
-        for p in phrases:
-            out.append({
-                'speaker': speaker_override or p.get('speaker') or 'Speaker',
-                'start': float(p.get('start', 0.0)) + float(offset_s or 0.0),
-                'end': float(p.get('end', 0.0)) + float(offset_s or 0.0),
-                'text': p.get('text', ''),
-            })
-        return out
 
     # 1) Load content & words + initial transcripts
     _out = do_transcript_io(paths, cfg, log)
@@ -155,7 +83,6 @@ def run_episode_pipeline(paths: Dict[str, Any], cfg: Dict[str, Any], log: List[s
     # Optional explicit flubber phase (no-op; already handled in do_intern_sfx)
     _ = do_flubber(paths, cfg, log, mutable_words=mutable_words, commands_cfg=commands_cfg)
 
-    # 3) Primary cleanup and rebuild
     # 3) Primary cleanup and rebuild (fillers)
     _f = do_fillers(paths, cfg, log, content_path=content_path, mutable_words=mutable_words)
     cleaned_audio = _f.get('cleaned_audio', AudioSegment.from_file(content_path))
@@ -163,7 +90,6 @@ def run_episode_pipeline(paths: Dict[str, Any], cfg: Dict[str, Any], log: List[s
     filler_freq_map = _f.get('filler_freq_map', {})
     filler_removed_count = _f.get('filler_removed_count', 0)
 
-    # 4) Execute Intern commands
     # 4) Execute Intern commands (may synthesize TTS)
     _tts = do_tts(paths, cfg, log, ai_cmds=ai_cmds, cleaned_audio=cleaned_audio, content_path=content_path, mutable_words=mutable_words)
     cleaned_audio = _tts.get('cleaned_audio', cleaned_audio)
@@ -171,13 +97,10 @@ def run_episode_pipeline(paths: Dict[str, Any], cfg: Dict[str, Any], log: List[s
 
     # 5) Optional pause compression
     log.append("[ORDER_CHECK] before_pause_compress")
-    # 5) Optional pause compression
-    log.append("[ORDER_CHECK] before_pause_compress")
     _sil = do_silence(paths, cfg, log, cleaned_audio=cleaned_audio, mutable_words=mutable_words)
     cleaned_audio = _sil.get('cleaned_audio', cleaned_audio)
     mutable_words = _sil.get('mutable_words', mutable_words)
 
-    # 6) Export cleaned audio (diagnostic/reference)
     # 6) Export cleaned + template/final mix, transcripts, cleanup
     _exp = do_export(
         paths,
@@ -197,45 +120,6 @@ def run_episode_pipeline(paths: Dict[str, Any], cfg: Dict[str, Any], log: List[s
 
     # 6b) Prepare template segments & build final mix
     # The rest of template/mix/export/transcripts are handled in do_export
-
-    # Media roots: rely on centralized MEDIA_DIR only (no ad-hoc roots)
-    _MEDIA_ROOTS: List[Path] = []
-    try:
-        _MEDIA_ROOTS.append(MEDIA_DIR.resolve())
-    except Exception:
-        _MEDIA_ROOTS.append(MEDIA_DIR)
-
-    def _resolve_media_file(name: Optional[str]) -> Optional[Path]:
-        if not name:
-            return None
-        try:
-            base = Path(name).name
-            base_lower = base.lower()
-            base_noext = Path(base_lower).stem
-            best: Optional[Path] = None
-            best_mtime = -1.0
-            for root in _MEDIA_ROOTS:
-                try:
-                    direct = root / base
-                    if direct.exists():
-                        mt = direct.stat().st_mtime
-                        if mt > best_mtime:
-                            best, best_mtime = direct, mt
-                    for p in root.glob('*'):
-                        try:
-                            nm = p.name.lower()
-                            if nm.endswith(base_lower) or Path(nm).stem.endswith(base_noext):
-                                mt = p.stat().st_mtime
-                                if mt > best_mtime:
-                                    best, best_mtime = p, mt
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-            return best
-        except Exception:
-            return None
-        return None
 
     log.append(f"[TIMING] Workflow completed in {time.time() - total_start_time:.2f}s")
     return {
