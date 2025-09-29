@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from worker.tasks import celery_app
+from ..app import celery_app
 
 from .orchestrator import orchestrate_create_podcast_episode
 
