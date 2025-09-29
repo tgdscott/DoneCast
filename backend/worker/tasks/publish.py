@@ -203,6 +203,8 @@ def publish_episode_to_spreaker_task(
                         exc_info=True,
                     )
 
+        remote_stream_url: Optional[str] = None
+
         try:
             if isinstance(result, dict) and result.get("episode_id"):
                 ep_id = str(result["episode_id"])
@@ -215,6 +217,7 @@ def publish_episode_to_spreaker_task(
                         or ep_obj.get("image_original_url")
                         or ep_obj.get("image_large_url")
                     )
+                    remote_stream_url = ep_obj.get("download_url") or ep_obj.get("stream_url")
                 if not remote_url and image_file_path and os.path.isfile(image_file_path):
                     try:
                         ok_img, _ = client.update_episode_image(ep_id, image_file_path)
@@ -242,6 +245,7 @@ def publish_episode_to_spreaker_task(
                             or ep_obj.get("image_original_url")
                             or ep_obj.get("image_large_url")
                         )
+                        remote_stream_url = remote_stream_url or ep_obj.get("download_url") or ep_obj.get("stream_url")
                 if remote_url:
                     if remote_url != getattr(episode, "remote_cover_url", None):
                         setattr(episode, "remote_cover_url", remote_url)
@@ -265,6 +269,8 @@ def publish_episode_to_spreaker_task(
 
         if isinstance(result, dict) and result.get("episode_id"):
             episode.spreaker_episode_id = str(result["episode_id"])
+            if remote_stream_url:
+                episode.final_audio_path = remote_stream_url
 
         episode.spreaker_publish_error = None
         episode.spreaker_publish_error_detail = None

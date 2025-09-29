@@ -3,37 +3,41 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ArrowLeft, Loader2, Rss } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { makeApi } from '@/lib/apiClient';
 
 export default function RssImporter({ onBack, token }) {
     const [rssUrl, setRssUrl] = useState("");
     const [isLoading, setIsLoading] = useState(false);
-    const [downloadAudio, setDownloadAudio] = useState(false);
-    const [importTags, setImportTags] = useState(true);
-    const [limit, setLimit] = useState(50);
-    const [attemptLinkSpreaker, setAttemptLinkSpreaker] = useState(true);
     const [autoPublish, setAutoPublish] = useState(false);
     const [publishState, setPublishState] = useState('public');
     const { toast } = useToast();
 
+    const trimmedUrl = rssUrl.trim();
+    const detectedSpreaker = useMemo(() => {
+        if (!trimmedUrl) return false;
+        try {
+            return /spreaker\.com/i.test(new URL(trimmedUrl).hostname || "");
+        } catch {
+            return /spreaker\.com/i.test(trimmedUrl);
+        }
+    }, [trimmedUrl]);
+
     const handleImport = async () => {
-        if (!rssUrl) {
+        if (!trimmedUrl) {
             toast({ title: "Error", description: "Please enter an RSS feed URL.", variant: "destructive" });
             return;
         }
         setIsLoading(true);
         try {
-            const result = await makeApi(token).post('/api/import/rss', {
-                rss_url: rssUrl,
-                download_audio: downloadAudio,
-                import_tags: importTags,
-                limit: (limit ? Number(limit) : null),
-                attempt_link_spreaker: attemptLinkSpreaker,
+            const payload = {
+                rss_url: trimmedUrl,
+                attempt_link_spreaker: detectedSpreaker,
                 auto_publish_to_spreaker: autoPublish,
                 publish_state: autoPublish ? publishState : null,
-            });
+            };
+            const result = await makeApi(token).post('/api/import/rss', payload);
             if (result && result.status && result.status >= 400) throw new Error(result.detail || 'Failed to import from RSS feed.');
             const parts = [
               `Imported "${result.podcast_name}" with ${result.episodes_imported} episodes.`,
@@ -41,7 +45,11 @@ export default function RssImporter({ onBack, token }) {
               (typeof result.spreaker_linked === 'number' && result.spreaker_attempted ? `${result.spreaker_linked} linked to Spreaker` : null),
               (typeof result.auto_publish_started === 'number' && autoPublish ? `${result.auto_publish_started} publish jobs started` : null),
             ].filter(Boolean);
-            toast({ title: "Import Successful!", description: parts.join(' • ') });
+            const extra = [];
+            if (result?.import_status?.needs_full_import) {
+                extra.push('Additional episodes detected — use "Import remaining episodes" on the Manage Podcasts page once you are ready.');
+            }
+            toast({ title: "Import Successful!", description: [parts.join(' • '), ...extra].filter(Boolean).join(' \n') });
             onBack();
         } catch (err) {
             toast({ title: "Import Failed", description: err.message, variant: "destructive" });
@@ -62,39 +70,44 @@ export default function RssImporter({ onBack, token }) {
                         <Rss /> Import from RSS Feed
                     </CardTitle>
                     <CardDescription>
-                        Enter the URL of a public RSS feed to import a podcast and its episodes for testing.
+                        Paste your public feed URL. We’ll pull the newest five episodes as a preview so you can verify everything looks right before recovering the rest.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <div className="space-y-2">
                         <Label htmlFor="rss-url">RSS Feed URL</Label>
-                        <Input 
-                            id="rss-url" 
-                            placeholder="https://example.com/podcast.xml" 
+                        <Input
+                            id="rss-url"
+                            placeholder="https://example.com/podcast.xml"
                             value={rssUrl}
                             onChange={(e) => setRssUrl(e.target.value)}
                         />
                     </div>
-                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={downloadAudio} onChange={e=>setDownloadAudio(e.target.checked)} />Download audio</label>
-                      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={importTags} onChange={e=>setImportTags(e.target.checked)} />Import tags</label>
-                      <div className="flex items-center gap-2 text-sm">
-                        <span>Limit</span>
-                        <Input type="number" min={1} className="h-8 w-24" value={limit} onChange={e=>setLimit(e.target.value)} />
-                      </div>
+                    <div className="rounded-lg border border-border bg-muted/40 p-4 space-y-1 text-sm">
+                        <p className="font-medium text-foreground">{detectedSpreaker ? 'Spreaker feed detected' : 'External feed detected'}</p>
+                        <p className="text-muted-foreground">
+                            {detectedSpreaker
+                                ? 'We will link directly to your existing Spreaker show and skip mirroring audio.'
+                                : 'We will mirror audio locally for seven days so you can review and publish to Spreaker, then automatically clean it up.'}
+                        </p>
                     </div>
-                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={attemptLinkSpreaker} onChange={e=>setAttemptLinkSpreaker(e.target.checked)} />Link to Spreaker if connected</label>
-                                            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={autoPublish} onChange={e=>setAutoPublish(e.target.checked)} />Auto-publish to Spreaker</label>
-                                            <div className="flex items-center gap-2 text-sm opacity-100">
-                                                <span>Visibility</span>
-                                                <select className="h-8 px-2 border rounded" disabled={!autoPublish} value={publishState} onChange={e=>setPublishState(e.target.value)}>
-                                                    <option value="public">Public</option>
-                                                    <option value="unpublished">Private (unpublished)</option>
-                                                    <option value="limited">Limited</option>
-                                                </select>
-                                            </div>
-                                        </div>
+                    <div className="space-y-3">
+                        <label className="flex items-center gap-2 text-sm">
+                            <input type="checkbox" checked={autoPublish} onChange={e=>setAutoPublish(e.target.checked)} />
+                            Auto-publish preview episodes to Spreaker
+                        </label>
+                        <div className="flex items-center gap-2 text-sm">
+                            <span>Visibility</span>
+                            <select className="h-9 px-2 border rounded" disabled={!autoPublish} value={publishState} onChange={e=>setPublishState(e.target.value)}>
+                                <option value="public">Public</option>
+                                <option value="unpublished">Private (unpublished)</option>
+                                <option value="limited">Limited</option>
+                            </select>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                            You can recover every episode from the Manage Podcasts screen once you have confirmed the preview looks right.
+                        </p>
+                    </div>
                     <Button onClick={handleImport} disabled={isLoading} className="w-full">
                         {isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Importing...</> : "Import Podcast"}
                     </Button>

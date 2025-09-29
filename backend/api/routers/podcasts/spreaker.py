@@ -10,7 +10,7 @@ from sqlmodel import Session, select
 
 from ...core.auth import get_current_user
 from ...core.database import get_session
-from ...models.podcast import Episode, EpisodeStatus, Podcast
+from ...models.podcast import Episode, EpisodeStatus, Podcast, PodcastImportState
 from ...models.user import User
 from ...services.episodes import publisher as episode_publisher
 from ...services.publisher import SpreakerClient
@@ -200,6 +200,17 @@ async def recover_spreaker_episodes(
         + "."
     )
 
+    state = session.get(PodcastImportState, podcast.id)
+    import_status = None
+    if state:
+        import_status = {
+            "source": state.source,
+            "feed_total": state.feed_total,
+            "imported_count": state.imported_count,
+            "needs_full_import": state.needs_full_import,
+            "updated_at": state.updated_at.isoformat() if state.updated_at else None,
+        }
+
     return {
         "recovered_count": created,
         "updated_count": updated,
@@ -207,6 +218,7 @@ async def recover_spreaker_episodes(
         "duplicates": summary.get("duplicates"),
         "conflicts": summary.get("conflicts", []),
         "message": message,
+        "import_status": import_status,
     }
 
 

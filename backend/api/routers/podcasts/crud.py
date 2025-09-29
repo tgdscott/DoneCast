@@ -17,6 +17,7 @@ from ...models.podcast import (
     EpisodeSection,
     Podcast,
     PodcastDistributionStatus,
+    PodcastImportState,
     PodcastTemplate,
     PodcastType,
 )
@@ -221,13 +222,38 @@ def _load_user_podcasts(session: Session, user_id: UUID) -> List[Podcast]:
         return podcasts
 
 
-@router.get("/", response_model=List[Podcast])
+@router.get("/")
 async def get_user_podcasts(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
     try:
-        return _load_user_podcasts(session, current_user.id)
+        podcasts = _load_user_podcasts(session, current_user.id)
+        podcast_ids = [p.id for p in podcasts]
+        import_states: dict[UUID, PodcastImportState] = {}
+        if podcast_ids:
+            state_rows = session.exec(
+                select(PodcastImportState).where(PodcastImportState.podcast_id.in_(podcast_ids))
+            ).all()
+            import_states = {row.podcast_id: row for row in state_rows}
+
+        enriched: List[dict] = []
+        for pod in podcasts:
+            payload = pod.model_dump()
+            state = import_states.get(pod.id)
+            if state:
+                payload["import_status"] = {
+                    "source": state.source,
+                    "feed_total": state.feed_total,
+                    "imported_count": state.imported_count,
+                    "needs_full_import": state.needs_full_import,
+                    "updated_at": state.updated_at.isoformat() if state.updated_at else None,
+                }
+            else:
+                payload["import_status"] = None
+            enriched.append(payload)
+
+        return enriched
     except Exception as exc:
         log.warning(
             "[podcasts.list] failed to load podcasts for user=%s: %s",

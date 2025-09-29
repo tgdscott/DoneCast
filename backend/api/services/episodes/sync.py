@@ -4,10 +4,11 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 import json
+import logging
 
 from sqlmodel import Session, select
 
-from api.models.podcast import Episode, EpisodeStatus, Podcast
+from api.models.podcast import Episode, EpisodeStatus, Podcast, PodcastImportState
 from api.models.user import User
 from api.services.publisher import SpreakerClient
 
@@ -51,6 +52,25 @@ def _spreaker_payload(item: Dict[str, Any]) -> Dict[str, Any]:
 
     download_url = item.get("download_url") or item.get("stream_url")
 
+    def _first_text(*keys: str) -> str | None:
+        for key in keys:
+            val = item.get(key)
+            if not val:
+                continue
+            if isinstance(val, list):
+                # Spreaker occasionally returns content arrays; join visible text
+                text_parts = []
+                for part in val:
+                    if isinstance(part, dict) and part.get("value"):
+                        text_parts.append(str(part["value"]))
+                    elif isinstance(part, str):
+                        text_parts.append(part)
+                if text_parts:
+                    return "\n\n".join(text_parts)
+            else:
+                return str(val)
+        return None
+
     meta: Dict[str, Any] = {}
     if item.get("permalink"):
         meta["spreaker_permalink"] = item["permalink"]
@@ -60,7 +80,14 @@ def _spreaker_payload(item: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "title": item.get("title") or item.get("name") or "Untitled Episode",
-        "show_notes": item.get("description") or item.get("summary"),
+        "show_notes": _first_text(
+            "description_html",
+            "description",
+            "content_html",
+            "content",
+            "body",
+            "summary",
+        ),
         "final_audio_path": item.get("stream_url") or download_url,
         "cover_path": item.get("image_url"),
         "remote_cover_url": item.get("image_original_url") or item.get("image_url"),
@@ -71,7 +98,13 @@ def _spreaker_payload(item: Dict[str, Any]) -> Dict[str, Any]:
         "publish_at_local": None,
         "season_number": item.get("season"),
         "episode_number": item.get("episode"),
-        "tags": tags,
+        "tags": tags
+        or [str(t).strip() for t in (item.get("category") or []) if str(t).strip()]
+        or [
+            str(t).strip()
+            for t in (item.get("categories") or item.get("topics") or [])
+            if str(t).strip()
+        ],
         "is_explicit": str(item.get("explicit") or "").lower() in {"1", "true", "yes", "explicit"},
         "meta": meta,
         "processed_at": publish_dt or datetime.utcnow(),
@@ -170,6 +203,19 @@ def sync_spreaker_episodes(
             session.add(new_ep)
             title_index[title_key] = new_ep
             created += 1
+
+    try:
+        state = session.get(PodcastImportState, podcast.id)
+        if not state:
+            state = PodcastImportState(podcast_id=podcast.id, user_id=user.id)
+        state.source = "spreaker"
+        state.feed_total = len(items)
+        state.imported_count = len(items)
+        state.needs_full_import = False
+        state.updated_at = datetime.utcnow()
+        session.add(state)
+    except Exception:
+        logging.getLogger("api.importer").warning("Failed to update import state after recovery", exc_info=True)
 
     return {
         "fetched": len(items),

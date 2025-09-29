@@ -88,11 +88,16 @@ try:
     celery_app.conf.update(
         timezone=tz,
         beat_schedule={
-        "purge-expired-uploads-2am-pt": {
-            "task": "maintenance.purge_expired_uploads",
-            "schedule": crontab(hour=2, minute=0),
+            "purge-expired-uploads-2am-pt": {
+                "task": "maintenance.purge_expired_uploads",
+                "schedule": crontab(hour=2, minute=0),
+            },
+            "purge-published-mirrors-315am-pt": {
+                "task": "maintenance.purge_published_episode_mirrors",
+                "schedule": crontab(hour=3, minute=15),
+            },
         }
-    })
+    )
     logging.info("[celery] Beat schedule configured for purge at 2:00 in %s", tz)
 except Exception:
     logging.warning("[celery] Failed to configure beat schedule", exc_info=True)
