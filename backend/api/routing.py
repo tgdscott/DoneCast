@@ -87,6 +87,7 @@ music_router           = _safe_import("api.routers.music")
 ai_metadata            = _safe_import("api.routers.ai_metadata")
 sections_router        = _safe_import("api.routers.sections")
 ai_suggestions         = _safe_import("api.routers.ai_suggestions")
+transcripts_router     = _safe_import("api.routers.transcripts")
 elevenlabs_router      = _safe_import("api.routers.elevenlabs")
 media_tts_router       = _safe_import("api.routers.media_tts")
 dashboard_router       = _safe_import("api.routers.dashboard")
@@ -154,6 +155,8 @@ def attach_routers(app: FastAPI) -> dict:
     availability['sections_router'] = sections_router is not None
     _maybe(app, ai_suggestions)
     availability['ai_suggestions'] = ai_suggestions is not None
+    _maybe(app, transcripts_router)
+    availability['transcripts_router'] = transcripts_router is not None
     _maybe(app, elevenlabs_router)
     availability['elevenlabs_router'] = elevenlabs_router is not None
     _maybe(app, media_tts_router)

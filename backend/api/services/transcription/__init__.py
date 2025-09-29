@@ -103,7 +103,17 @@ def transcribe_media_file(filename: str):
 			out_path = TRANSCRIPTS_DIR / f"{stem}.json"
 			if not out_path.exists():
 				import json as _json
-				out_path.write_text(_json.dumps(words, ensure_ascii=False, indent=2), encoding="utf-8")
+				payload = _json.dumps(words, ensure_ascii=False, indent=2)
+				out_path.write_text(payload, encoding="utf-8")
+				# Best-effort durable copy to GCS if configured
+				try:
+					bucket = (os.getenv("TRANSCRIPTS_BUCKET") or os.getenv("MEDIA_BUCKET") or "").strip()
+					if bucket:
+						from ...infrastructure.gcs import upload_bytes  # type: ignore
+						key = f"transcripts/{stem}.json"
+						upload_bytes(bucket, key, payload.encode("utf-8"), content_type="application/json; charset=utf-8")
+				except Exception:
+					pass
 		except Exception:
 			# Best-effort; do not fail transcription if persisting the JSON has issues
 			pass

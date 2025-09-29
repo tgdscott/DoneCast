@@ -60,27 +60,48 @@ def get_last_numbering(
 ):
 	try:
 		from sqlalchemy import text as _sa_text
+		import re
+
+		def _parse_numbers_from_title(title: str) -> tuple[int | None, int | None]:
+			if not title:
+				return (None, None)
+			t = str(title)
+			# Combined S/E patterns first (S2E187, S2 E187, Season 2 Episode 187)
+			patterns = [
+				r"\bS(?:eason)?\s*(\d+)\s*(?:,|-|\s)*\s*E(?:p(?:isode)?)?\.?\s*(\d+)\b",
+				r"\bSeason\s*(\d+)\s*(?:,|-|\s)*\s*Episode\s*(\d+)\b",
+			]
+			for pat in patterns:
+				m = re.search(pat, t, flags=re.IGNORECASE)
+				if m:
+					try:
+						return (int(m.group(1)), int(m.group(2)))
+					except Exception:
+						pass
+			# Separate captures (Episode N), (Season N)
+			se_m = re.search(r"\bSeason\s*(\d+)\b", t, flags=re.IGNORECASE)
+			ep_m = re.search(r"\b(?:Ep|Episode)\.?\s*(\d+)\b", t, flags=re.IGNORECASE)
+			s_val = int(se_m.group(1)) if se_m else None
+			e_val = int(ep_m.group(1)) if ep_m else None
+			return (s_val, e_val)
+
+		# Base query for this user (and optional podcast scope)
 		q = select(Episode).where(Episode.user_id == current_user.id)
-		# Consider only published episodes for numbering defaults
-		try:
-			q = q.where(Episode.status == EpisodeStatus.published)
-		except Exception:
-			pass
-		# Optionally scope to a single podcast
 		if podcast_id:
 			try:
 				from uuid import UUID as _UUID
 				pid = _UUID(str(podcast_id))
 				q = q.where(Episode.podcast_id == pid)
 			except Exception:
-				# Ignore invalid podcast_id and fall back to user-wide search
 				pass
+
+		# Pass 1: prefer rows with explicit season/episode set; choose highest season then episode
 		eps = session.execute(
 			q.order_by(
 				_sa_text("season_number DESC"),
 				_sa_text("episode_number DESC"),
 				_sa_text("created_at DESC"),
-			).limit(100)
+			).limit(200)
 		).scalars().all()
 		latest_season = None
 		latest_episode = None
@@ -95,7 +116,38 @@ def get_last_numbering(
 				latest_episode = e.episode_number
 			elif e.season_number == latest_season and latest_episode is not None and e.episode_number > latest_episode:
 				latest_episode = e.episode_number
-		return {"season_number": latest_season, "episode_number": latest_episode}
+		if latest_season is not None and latest_episode is not None:
+			return {"season_number": latest_season, "episode_number": latest_episode}
+
+		# Pass 2: fallback — parse from recent titles (covers imported episodes)
+		eps_recent = session.execute(
+			q.order_by(
+				_sa_text("COALESCE(source_published_at, created_at) DESC"),
+			).limit(300)
+		).scalars().all()
+		cand_s = None
+		cand_e = None
+		for e in eps_recent:
+			s_val, e_val = _parse_numbers_from_title(getattr(e, 'title', '') or '')
+			if s_val is not None and e_val is not None:
+				cand_s, cand_e = s_val, e_val
+				break
+			# If only episode parsed, keep as candidate while searching for season in others
+			if e_val is not None and cand_e is None:
+				cand_e = e_val
+		if cand_s is None and cand_e is not None:
+			# Derive season from any explicit season on episodes, else default 1
+			for e in eps:
+				if e.season_number is not None:
+					cand_s = int(e.season_number)
+					break
+			if cand_s is None:
+				cand_s = 1
+		if cand_s is not None and cand_e is not None:
+			return {"season_number": cand_s, "episode_number": cand_e}
+
+		# Nothing found
+		return {"season_number": None, "episode_number": None}
 	except Exception:
 		return {"season_number": None, "episode_number": None}
 

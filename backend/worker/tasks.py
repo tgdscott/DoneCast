@@ -840,6 +840,13 @@ def publish_episode_to_spreaker_task(
                 image_file_path = ensure_cover_image_constraints(str(p))
 
         desc = description or getattr(episode, "description", None) or getattr(episode, "show_notes", None) or ""
+        try:
+            base = (settings.OAUTH_BACKEND_BASE or "https://api.podcastplusplus.com").rstrip("/")
+            t_url = f"{base}/api/transcripts/episodes/{episode_id}.txt"
+            if t_url not in desc:
+                desc = (desc + ("\n\n" if desc else "")) + f"Transcript: {t_url}"
+        except Exception:
+            pass
 
         # Audio path resolution
         audio_path = str(episode.final_audio_path)

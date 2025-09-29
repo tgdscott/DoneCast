@@ -134,3 +134,17 @@ def delete_blob(bucket: str, key: str):
     except Exception as e:
         # Log and ignore, as per the pattern in delete_media_item
         print(f"Warning: Failed to delete GCS blob gs://{bucket}/{key}: {e}")
+
+def download_bytes(bucket: str, key: str) -> bytes:
+    """Download an object and return contents as bytes (dev/prod aware)."""
+    if IS_DEV_ENV:
+        # Read from local MEDIA_DIR mirror in dev
+        from api.core.paths import MEDIA_DIR  # type: ignore
+        path = (MEDIA_DIR / os.path.basename(key)).resolve()
+        with open(path, "rb") as f:
+            return f.read()
+    if not _client:
+        raise RuntimeError("GCS client not initialized.")
+    b = _client.bucket(bucket)
+    blob = b.blob(key)
+    return blob.download_as_bytes()

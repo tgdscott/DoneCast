@@ -302,6 +302,23 @@ async def upload_media_files(
                 )
             except Exception:
                 pass
+            # Kick transcription on overwrite for main content as well (best-effort)
+            try:
+                if category == MediaCategory.main_content:
+                    logging.info(
+                        "event=upload.enqueue attempt=true (overwrite) filename=%s cfg_project=%s cfg_loc=%s cfg_queue=%s cfg_base=%s dev=%s",
+                        existing_item.filename,
+                        os.getenv("GOOGLE_CLOUD_PROJECT"), os.getenv("TASKS_LOCATION"), os.getenv("TASKS_QUEUE"), os.getenv("TASKS_URL_BASE"), _is_dev_env()
+                    )
+                    task = enqueue_http_task("/api/tasks/transcribe", {"filename": existing_item.filename})
+                    logging.info("event=upload.enqueue ok=true (overwrite) filename=%s task_name=%s", existing_item.filename, task.get("name"))
+            except Exception as enqueue_err:
+                logging.warning(
+                    "event=upload.enqueue ok=false (overwrite) filename=%s err=%s hint=%s",
+                    existing_item.filename,
+                    enqueue_err,
+                    f"Check Cloud Tasks config GOOGLE_CLOUD_PROJECT={os.getenv('GOOGLE_CLOUD_PROJECT')} TASKS_LOCATION={os.getenv('TASKS_LOCATION')} TASKS_QUEUE={os.getenv('TASKS_QUEUE')} TASKS_URL_BASE={os.getenv('TASKS_URL_BASE')} (dev={_is_dev_env()})",
+                )
         else:
             # No existing item with this name. For enforced categories, block duplicates within the same request batch
             if category in ENFORCE_UNIQUE:
