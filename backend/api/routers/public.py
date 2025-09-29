@@ -5,7 +5,7 @@ from api.core.database import get_session
 from api.models.podcast import Episode
 import os
 from pathlib import Path
-from api.core.paths import FINAL_DIR
+from api.core.paths import FINAL_DIR, MEDIA_DIR
 
 router = APIRouter(prefix="/public", tags=["Public"])
 
@@ -28,9 +28,13 @@ def public_episodes(limit: int = Query(10, ge=1, le=50), session: Session = Depe
         audio_url = None
         if e.final_audio_path:
             base = os.path.basename(e.final_audio_path)
-            file_path = FINAL_DIR / base
-            if file_path.exists():
-                audio_url = f"/static/final/{base}"
+            candidates = [FINAL_DIR / base, MEDIA_DIR / base]
+            existing = next((c for c in candidates if c.exists()), None)
+            if existing is not None:
+                if existing.parent == MEDIA_DIR:
+                    audio_url = f"/static/media/{base}"
+                else:
+                    audio_url = f"/static/final/{base}"
             else:
                 missing_audio_count += 1
         

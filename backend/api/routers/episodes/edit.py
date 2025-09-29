@@ -8,7 +8,7 @@ from api.core.database import get_session
 from api.core.auth import get_current_user
 from api.models.user import User
 from api.models.podcast import Episode
-from api.core.paths import FINAL_DIR
+from api.core.paths import FINAL_DIR, MEDIA_DIR
 from .common import _final_url_for
 from pathlib import Path
 
@@ -41,11 +41,15 @@ async def get_edit_context(episode_id: str, session: Session = Depends(get_sessi
     try:
         fa = getattr(ep, 'final_audio_path', None)
         if fa:
+            base = Path(str(fa)).name
+            candidates = []
             try:
-                candidate = (FINAL_DIR / Path(str(fa)).name).resolve()
+                candidates.append((FINAL_DIR / base).resolve())
             except Exception:
-                candidate = FINAL_DIR / Path(str(fa)).name
-            if candidate.is_file():
+                candidates.append(FINAL_DIR / base)
+            candidates.append(MEDIA_DIR / base)
+            found = next((c for c in candidates if c.is_file()), None)
+            if found is not None:
                 final_audio_exists = True
                 playback_url = _final_url_for(fa)
                 playback_type = 'local'
