@@ -6,10 +6,18 @@ from worker.tasks import celery_app
 
 
 def get_status(job_id: str) -> Dict[str, Any]:
-    task = celery_app.AsyncResult(job_id)
-    status_val = getattr(task, "status", "PENDING")
-    result = getattr(task, "result", None)
-    return {"raw_status": status_val, "raw_result": result}
+    """Return raw Celery status. If the broker is unavailable (common in dev),
+    gracefully degrade to a pseudo status so callers can continue.
+    """
+    try:
+        task = celery_app.AsyncResult(job_id)
+        status_val = getattr(task, "status", "PENDING")
+        result = getattr(task, "result", None)
+        return {"raw_status": status_val, "raw_result": result}
+    except Exception:
+        # Dev-safe fallback: when broker is down or not configured, report PENDING
+        # and let router apply heuristics to map to processed/queued.
+        return {"raw_status": "PENDING", "raw_result": None, "note": "broker_unavailable"}
 
 
 def retry(job_id: str) -> bool:

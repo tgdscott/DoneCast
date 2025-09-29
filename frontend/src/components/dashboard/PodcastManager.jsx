@@ -310,7 +310,10 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
         <CardContent>
           {podcasts.length > 0 ? (
             <div className="space-y-4">
-              {podcasts.map(podcast => (
+              {podcasts.map(podcast => {
+                const issues = getComplianceIssues(podcast);
+                const hasShowId = !!podcast.spreaker_show_id;
+                return (
                 <Card key={podcast.id} className="flex items-center justify-between p-4">
                   <div className="flex items-center gap-4">
                     {podcast.cover_path ? (
@@ -335,20 +338,22 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
                     </div>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <Button variant="outline" size="sm" onClick={() => openDistributionDialog(podcast)}>
-                      <Icons.Share2 className="w-4 h-4 mr-2" /> Distribution
-                    </Button>
+                    {/* Show Distribution when either compliant OR already linked to Spreaker */}
+                    {(issues.length === 0 || hasShowId) && (
+                      <Button variant="outline" size="sm" onClick={() => openDistributionDialog(podcast)}>
+                        <Icons.Share2 className="w-4 h-4 mr-2" /> Distribution
+                      </Button>
+                    )}
                     {/* Spreaker publish/setup pills */}
                     {(() => {
-                      const issues = getComplianceIssues(podcast);
-                      const hasShowId = !!podcast.spreaker_show_id;
                       // Only one pill at a time.
-                      // Rule: Yellow requires a Spreaker ID (i.e., show exists on Spreaker) but is incomplete locally
+                      // Yellow pill: show exists on Spreaker but local Show Info is incomplete
                       if (hasShowId && issues.length > 0) {
                         return (
                           <button
-                            className="px-3 py-1 rounded-full bg-yellow-400 text-black text-xs"
+                            className="px-3 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-300 text-xs hover:bg-amber-200/60"
                             onClick={() => openEditDialog(podcast)}
+                            title={`Open Show Info to finish required fields: ${issues.join(', ')}`}
                           >
                             Complete setup to publish to Spreaker
                           </button>
@@ -358,7 +363,7 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
                       if (!isSpreakerConnected && !hasShowId && issues.length === 0) {
                         return (
                           <button
-                            className="px-3 py-1 rounded-full bg-green-600 text-white text-xs"
+                            className="px-3 py-1 rounded-full bg-green-600 text-white text-xs hover:bg-green-700"
                             onClick={() => handlePublishToSpreaker(podcast)}
                           >
                             Publish to Spreaker
@@ -440,7 +445,7 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
                     </Button>
                   </div>
                 </Card>
-              ))}
+              );})}
             </div>
           ) : (
       <div className="text-center py-10">

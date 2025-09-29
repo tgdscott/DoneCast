@@ -50,6 +50,7 @@ export default function DistributionChecklistDialog({ open, onOpenChange, podcas
   const [rssFeedUrl, setRssFeedUrl] = useState("");
   const [spreakerUrl, setSpreakerUrl] = useState("");
   const [savingKeys, setSavingKeys] = useState({});
+  const [openKeys, setOpenKeys] = useState({});
 
   const podcastId = podcast?.id;
 
@@ -212,6 +213,7 @@ export default function DistributionChecklistDialog({ open, onOpenChange, podcas
               const statusMeta = STATUS_META[item.status] || STATUS_META.not_started;
               const automationLabel = formatAutomationLabel(item.automation);
               const saving = Boolean(savingKeys[item.key]);
+              const open = Boolean(openKeys[item.key]);
               return (
                 <div key={item.key} className="rounded-lg border bg-card px-4 py-4 shadow-sm">
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -227,6 +229,13 @@ export default function DistributionChecklistDialog({ open, onOpenChange, podcas
                       ) : null}
                     </div>
                     <div className="flex flex-col items-start gap-2 md:items-end">
+                      <button
+                        type="button"
+                        className="text-xs text-primary underline"
+                        onClick={() => setOpenKeys((prev) => ({ ...prev, [item.key]: !open }))}
+                      >
+                        {open ? "Collapse" : "Expand"}
+                      </button>
                       {item.action_label && item.action_url ? (
                         <Button
                           type="button"
@@ -259,7 +268,7 @@ export default function DistributionChecklistDialog({ open, onOpenChange, podcas
                     </div>
                   ) : null}
 
-                  {Array.isArray(item.instructions) && item.instructions.length > 0 ? (
+                  {open && Array.isArray(item.instructions) && item.instructions.length > 0 ? (
                     <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
                       {item.instructions.map((step, idx) => (
                         <li key={idx}>{step}</li>
@@ -267,6 +276,7 @@ export default function DistributionChecklistDialog({ open, onOpenChange, podcas
                     </ol>
                   ) : null}
 
+                  {open && (
                   <div className="mt-4 grid gap-4 md:grid-cols-[minmax(0,220px)_minmax(0,1fr)] md:items-start">
                     <div className="space-y-2">
                       <Label htmlFor={`status-${item.key}`}>Status</Label>
@@ -314,6 +324,7 @@ export default function DistributionChecklistDialog({ open, onOpenChange, podcas
                       </div>
                     </div>
                   </div>
+                  )}
                 </div>
               );
             })}

@@ -79,7 +79,8 @@ def parse_friendly_names(raw: str | None) -> list[str]:
 async def upload_media_files(
     request: Request,                              # required so SlowAPI can see "request"
     category: MediaCategory,
-    files: List[UploadFile] = File(...),
+    files: List[UploadFile] | None = File(None),
+    single_file: UploadFile | None = File(None),
     friendly_names: Optional[str] = Form(None),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
@@ -129,7 +130,8 @@ async def upload_media_files(
     def _validate_meta(f: UploadFile, cat: MediaCategory) -> None:
         ct = (getattr(f, "content_type", None) or "").lower()
         type_prefix = CATEGORY_TYPE_PREFIX.get(cat)
-        if type_prefix and not ct.startswith(type_prefix):
+        # Tolerate missing or generic content types from some clients; enforce when clearly mismatched
+        if type_prefix and ct not in ("", "application/octet-stream") and not ct.startswith(type_prefix):
             expected = "audio" if type_prefix == AUDIO_PREFIX else "image"
             raise HTTPException(
                 status_code=400,
@@ -142,14 +144,23 @@ async def upload_media_files(
         if ext not in allowed:
             raise HTTPException(status_code=400, detail=f"Unsupported file extension '{ext}'.")
 
-    for i, file in enumerate(files):
-        if not file.filename:
+    # Normalize inputs: support both 'files' (list) and single 'file'
+    incoming_files: List[UploadFile] = []
+    if files:
+        incoming_files.extend([f for f in files if f is not None])
+    if single_file is not None:
+        incoming_files.append(single_file)
+    if not incoming_files:
+        raise HTTPException(status_code=400, detail="No files provided. Expected form field 'files' or 'file'.")
+
+    for i, uf in enumerate(incoming_files):
+        if not uf.filename:
             continue
 
-        _validate_meta(file, category)
+        _validate_meta(uf, category)
 
         # Determine proposed friendly name for this file (before any upload)
-        original_filename = Path(file.filename).stem
+        original_filename = Path(uf.filename or "").stem
         default_friendly_name = " ".join(original_filename.split("_")).title()
         friendly_name = names[i] if i < len(names) and str(names[i]).strip() else default_friendly_name
         fn_norm = str(friendly_name).strip() or default_friendly_name
@@ -166,11 +177,11 @@ async def upload_media_files(
         # Prepare upload environment
         max_bytes = CATEGORY_SIZE_LIMITS.get(category, 50 * MB)
         default_bucket = _require_bucket()
-        content_type = file.content_type or "application/octet-stream"
+        content_type = uf.content_type or "application/octet-stream"
 
         # SpooledTemporaryFile used by Starlette/UploadFile provides .file with potential ._file attribute
         # We will stream that file object to GCS. First, try to determine size cheaply.
-        raw_f = getattr(file, "file", None)
+        raw_f = getattr(uf, "file", None)
         file_size = None
         try:
             # Some implementations expose a ._file that is a SpooledTemporaryFile or disk file
@@ -188,7 +199,7 @@ async def upload_media_files(
         try:
             logging.info(
                 "event=upload.precheck filename=%s category=%s size=%s limit=%s content_type=%s",
-                file.filename, category.value, (file_size if file_size is not None else "unknown"), max_bytes, content_type
+                uf.filename, category.value, (file_size if file_size is not None else "unknown"), max_bytes, content_type
             )
         except Exception:
             pass
@@ -226,7 +237,7 @@ async def upload_media_files(
                 written = 0
                 buf = bytearray()
                 while True:
-                    chunk = await file.read(1024 * 1024)
+                    chunk = await uf.read(1024 * 1024)
                     if not chunk:
                         break
                     written += len(chunk)
@@ -234,7 +245,7 @@ async def upload_media_files(
                         try:
                             logging.warning(
                                 "event=upload.reject_too_large filename=%s category=%s bytes=%s limit=%s",
-                                file.filename, category.value, written, max_bytes
+                                uf.filename, category.value, written, max_bytes
                             )
                         except Exception:
                             pass
@@ -278,12 +289,12 @@ async def upload_media_files(
                     try:
                         target_key = target_key.split("/", 3)[-1]
                     except Exception:
-                        target_key = Path(file.filename or "").name
+                        target_key = Path(uf.filename or "").name
 
             uri, written = await _upload_to(target_bucket, target_key)
 
             # Normalize filename to whatever form was already stored (do not force gs:// if legacy value)
-            existing_item.content_type = (file.content_type or None)
+            existing_item.content_type = (uf.content_type or None)
             try:
                 existing_item.filesize = int(written) if isinstance(written, int) and written >= 0 else None
             except Exception:
@@ -330,7 +341,7 @@ async def upload_media_files(
                 batch_names_lower.add(fn_key)
 
             # No overwrite case -> upload to a fresh object path and create a new media item
-            safe_orig = sanitize_name(file.filename or "")
+            safe_orig = sanitize_name(uf.filename or "")
             gcs_key = f"{current_user.id}/{category.value}/{uuid4().hex}_{safe_orig}"
             uri, written = await _upload_to(default_bucket, gcs_key)
             # Remember this object so we can clean it up if DB commit fails
@@ -346,7 +357,7 @@ async def upload_media_files(
             media_item = MediaItem(
                 filename=uri,  # Store gs:// URI when available
                 friendly_name=str(fn_norm),
-                content_type=(file.content_type or None),
+                content_type=(uf.content_type or None),
                 filesize=(int(written) if isinstance(written, int) and written >= 0 else None),
                 user_id=current_user.id,
                 category=category,
@@ -385,7 +396,7 @@ async def upload_media_files(
             # Structured log: upload.receive
             logging.info(
                 "event=upload.receive user_id=%s category=%s filename=%s size=%d content_type=%s",
-                current_user.id, category.value, file.filename, media_item.filesize or -1, file.content_type or ""
+                current_user.id, category.value, uf.filename, media_item.filesize or -1, uf.content_type or ""
             )
 
     # Commit all rows; on failure, delete any newly uploaded objects to avoid orphans

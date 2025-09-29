@@ -317,6 +317,78 @@ def create_podcast_episode(
 		if cover_image_path:
 			logging.info(f"[assemble] cover_image_path from FE: {cover_image_path}")
 
+		# If a cover image path was provided, ensure we have a local copy on disk for both
+		# embedding into metadata and serving via /static/media. Handles gs:// and http(s).
+		def _resolve_image_to_local(path_like: str) -> Optional[Path]:
+			try:
+				MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+			except Exception:
+				pass
+			try:
+				p = Path(str(path_like))
+				# If already an existing absolute/local file, return as-is
+				if p.is_absolute() and p.exists():
+					return p
+			except Exception:
+				pass
+			# gs:// download
+			try:
+				s = str(path_like)
+				if s.startswith("gs://"):
+					without = s[len("gs://"):]
+					bucket_name, key = without.split("/", 1)
+					base = Path(key).name
+					local = MEDIA_DIR / base
+					from google.cloud import storage
+					client = storage.Client()
+					blob = client.bucket(bucket_name).blob(key)
+					blob.download_to_filename(str(local))
+					return local
+			except Exception:
+				# best-effort; fall through
+				pass
+			# http(s) download
+			try:
+				s = str(path_like)
+				if s.lower().startswith(("http://", "https://")):
+					import requests
+					base = sanitize_filename(Path(s).name)
+					# Default to jpg when extension is ambiguous
+					if not any(base.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp")):
+						base = f"{Path(base).stem}.jpg"
+					local = MEDIA_DIR / base
+					try:
+						resp = requests.get(s, timeout=10)
+						if resp.status_code == 200 and resp.content:
+							# Cap write size to 10MB to avoid abuse
+							data = resp.content[:10 * 1024 * 1024]
+							with open(local, "wb") as fh:
+								fh.write(data)
+							return local
+					except Exception:
+						pass
+			except Exception:
+				pass
+			# Lastly, check common local candidates by basename
+			try:
+				base = Path(str(path_like)).name
+				for c in [PROJECT_ROOT / 'media_uploads' / base, APP_ROOT_DIR / 'media_uploads' / base, MEDIA_DIR / base]:
+					if c.exists():
+						return c
+			except Exception:
+				pass
+			return None
+
+		# Normalize cover image to a local path if provided
+		if cover_image_path:
+			try:
+				_local_cover = _resolve_image_to_local(cover_image_path)
+				if _local_cover and _local_cover.exists():
+					cover_image_path = str(_local_cover)
+					logging.info(f"[assemble] resolved local cover image: {cover_image_path}")
+			except Exception:
+				logging.warning("[assemble] Failed to resolve local cover image; continuing without embed", exc_info=True)
+
 		# User cleanup settings
 		user_obj = crud.get_user_by_id(session, UUID(user_id)) if hasattr(crud, 'get_user_by_id') else None
 		cleanup_settings = {}
@@ -386,6 +458,41 @@ def create_podcast_episode(
 		base_audio_name = getattr(episode, 'working_audio_name', None) or main_content_filename
 		# Resolve the actual file path for the base audio (dev may store under backend/media_uploads or media_uploads root)
 		source_audio_path = _resolve_media_file(base_audio_name) or (PROJECT_ROOT / 'media_uploads' / Path(str(base_audio_name)).name)
+		# If not found locally yet and the name isn't a gs:// URI, try to find a matching GCS object by basename
+		try:
+			if (not source_audio_path) or (not Path(str(source_audio_path)).exists()):
+				from sqlalchemy import func as _func
+				bn = Path(str(base_audio_name)).name
+				gcs_uri = None
+				try:
+					q = select(MediaItem).where(MediaItem.user_id == UUID(user_id))
+					q = q.where(MediaItem.category == MediaCategory.main_content)
+					# filename stored as full gs://bucket/key; find any that endswith "/<basename>"
+					cands = session.exec(q).all()
+					for item in cands:
+						fn = str(getattr(item, 'filename', '') or '')
+						if fn.startswith('gs://') and fn.rstrip().lower().endswith('/' + bn.lower()):
+							gcs_uri = fn
+							break
+				except Exception:
+					gcs_uri = None
+				if gcs_uri:
+					try:
+						logging.info(f"[assemble] downloading main content from GCS: {gcs_uri}")
+						dl = _resolve_media_file(gcs_uri)
+						if dl and Path(str(dl)).exists():
+							source_audio_path = Path(str(dl))
+							base_audio_name = Path(str(dl)).name
+							# Persist working_audio_name for downstream lookups
+							try:
+								episode.working_audio_name = base_audio_name
+								session.add(episode); session.commit()
+							except Exception:
+								session.rollback()
+					except Exception:
+						logging.warning("[assemble] failed to download main content from GCS", exc_info=True)
+		except Exception:
+			pass
 		try:
 			logging.info(f"[assemble] resolved base audio path={str(source_audio_path)}")
 		except Exception:
@@ -454,8 +561,53 @@ def create_podcast_episode(
 						_pref_raw2 = None
 				target_dir = PROJECT_ROOT / 'transcripts'
 				target_dir.mkdir(parents=True, exist_ok=True)
-				_fn = str(base_audio_name)
-				words_list = trans.get_word_timestamps(_fn)
+				# Ensure a local copy exists in MEDIA_DIR before attempting transcription
+				try:
+					bn2 = Path(str(base_audio_name)).name
+					local_candidate = MEDIA_DIR / bn2
+					if not local_candidate.exists():
+						# If we can resolve a GCS URI for this basename, download it now
+						gcs_uri2 = None
+						try:
+							q2 = select(MediaItem).where(MediaItem.user_id == UUID(user_id)).where(MediaItem.category == MediaCategory.main_content)
+							for item in session.exec(q2).all():
+								fn2 = str(getattr(item, 'filename', '') or '')
+								if fn2.startswith('gs://') and fn2.rstrip().lower().endswith('/' + bn2.lower()):
+									gcs_uri2 = fn2
+									break
+						except Exception:
+							gcs_uri2 = None
+						if gcs_uri2:
+							try:
+								logging.info(f"[assemble] prepping transcript: downloading {gcs_uri2} -> {local_candidate}")
+								_dl = _resolve_media_file(gcs_uri2)
+								if _dl and Path(str(_dl)).exists():
+									local_candidate = Path(str(_dl))
+							except Exception:
+								logging.warning("[assemble] failed GCS download prior to transcription", exc_info=True)
+				except Exception:
+					pass
+				_fn = Path(str(base_audio_name)).name
+				# Prefer direct local transcription; fall back to gs://-aware helper if local missing and we have a GCS URI
+				words_list = None
+				try:
+					words_list = trans.get_word_timestamps(_fn)
+				except Exception:
+					# Try to locate a gs:// uri and transcribe via helper (which downloads temporarily)
+					try:
+						gcs_uri3 = None
+						q3 = select(MediaItem).where(MediaItem.user_id == UUID(user_id)).where(MediaItem.category == MediaCategory.main_content)
+						for item in session.exec(q3).all():
+							fn3 = str(getattr(item, 'filename', '') or '')
+							if fn3.startswith('gs://') and fn3.rstrip().lower().endswith('/' + _fn.lower()):
+								gcs_uri3 = fn3
+								break
+						if gcs_uri3:
+							words_list = trans.transcribe_media_file(gcs_uri3)
+					except Exception as _e_txfallback:
+						logging.warning(f"[assemble] transcript fallback failed for {_fn}: {_e_txfallback}")
+				if words_list is None:
+					raise RuntimeError("transcription failed: no source media available")
 				out_stem = sanitize_filename(f"{_pref_raw2 or Path(str(_fn)).stem}")
 				out_path = target_dir / f"{out_stem}.json"
 				import json as _json
@@ -824,7 +976,12 @@ def create_podcast_episode(
 
 		episode.final_audio_path = os.path.basename(str(final_path))
 		if cover_image_path and not getattr(episode, "cover_path", None):
-			episode.cover_path = Path(cover_image_path).name
+			try:
+				# Store only the basename for serving via /static/media
+				episode.cover_path = Path(str(cover_image_path)).name
+			except Exception:
+				# Fallback to raw string
+				episode.cover_path = Path(cover_image_path).name
 
 		session.add(episode)
 		session.commit()

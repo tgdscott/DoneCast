@@ -18,7 +18,7 @@ logger = logging.getLogger("ppp.episodes.jobs")
 router = APIRouter(tags=["episodes"])  # parent episodes router provides '/episodes' prefix
 
 
-@router.get("/status/{job_id}")
+@router.get("/status/{job_id:path}")
 def get_job_status(job_id: str, session: Session = Depends(get_session)):
     """Return job status and, if completed, the assembled episode info.
 
@@ -160,7 +160,7 @@ def get_job_status(job_id: str, session: Session = Depends(get_session)):
         err_text = str(result)
     return {"job_id": job_id, "status": "error", "error": err_text}
 
-@router.get("/dev/job-debug/{job_id}")
+@router.get("/dev/job-debug/{job_id:path}")
 def job_debug(job_id: str):
     """Return raw celery state for debugging (dev only)."""
     if os.getenv("APP_ENV","dev").lower() not in {"dev","development","local","test"}:
