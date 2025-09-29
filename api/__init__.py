@@ -14,6 +14,8 @@ works exactly the same as ``import backend.api.services.transcription``.
 from __future__ import annotations
 
 from importlib import import_module
+from importlib import util as importlib_util
+from importlib import abc as importlib_abc
 from types import ModuleType
 from typing import Iterable
 
@@ -63,4 +65,66 @@ for submodule in ("core", "routers", "services", "models", "tasks", "middleware"
     alias = f"{__name__}.{submodule}"
     sys.modules[alias] = module
     setattr(sys.modules[__name__], submodule, module)
+
+
+class _BackendAliasLoader(importlib_abc.Loader):
+    """Load ``api`` modules by delegating to ``backend.api`` modules.
+
+    The loader ensures that the module code is only executed once using the
+    canonical ``backend.api`` module name.  All ``api`` imports then simply
+    reference the already-loaded module which prevents duplicate SQLModel table
+    registrations during test collection.
+    """
+
+    def __init__(self, fullname: str, backend_name: str, is_package: bool) -> None:
+        self.fullname = fullname
+        self.backend_name = backend_name
+        self.is_package = is_package
+
+    def create_module(self, spec):  # type: ignore[override]
+        # ``import_module`` returns the canonical backend module instance.  It
+        # only executes the module once and returns the cached module on
+        # subsequent calls which is exactly what we want.
+        return import_module(self.backend_name)
+
+    def exec_module(self, module):  # type: ignore[override]
+        # Register the alias so ``sys.modules['api.foo']`` points at the same
+        # module object as ``sys.modules['backend.api.foo']``.  This ensures the
+        # module body isn't executed a second time when imported through the
+        # compatibility namespace.
+        sys.modules[self.fullname] = module
+        if self.is_package:
+            # Mirror the backend package's search locations so submodule imports
+            # continue to work transparently.
+            module.__path__ = getattr(module, "__path__", None)
+
+
+class _BackendAliasFinder(importlib_abc.MetaPathFinder):
+    """Redirect ``api.*`` imports to the matching ``backend.api.*`` module."""
+
+    _prefix = f"{__name__}."
+
+    def find_spec(self, fullname, path, target=None):  # type: ignore[override]
+        if not fullname.startswith(self._prefix):
+            return None
+
+        backend_name = fullname.replace(__name__, _BACKEND_PACKAGE_NAME, 1)
+        backend_spec = importlib_util.find_spec(backend_name)
+        if backend_spec is None:
+            return None
+
+        is_package = backend_spec.submodule_search_locations is not None
+        loader = _BackendAliasLoader(fullname, backend_name, is_package)
+        alias_spec = importlib_util.spec_from_loader(fullname, loader, is_package=is_package)
+        if alias_spec and is_package and backend_spec.submodule_search_locations is not None:
+            alias_spec.submodule_search_locations = list(backend_spec.submodule_search_locations)
+        return alias_spec
+
+
+# Install the alias finder ahead of the default path finder so submodule imports
+# (e.g. ``import api.models.podcast``) reuse the already imported backend
+# modules instead of executing them twice under a new name.
+_finder = _BackendAliasFinder()
+if _finder not in sys.meta_path:
+    sys.meta_path.insert(0, _finder)
 
