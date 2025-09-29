@@ -12,6 +12,13 @@ class TestFlubberPipeline(unittest.TestCase):
         if str(root) not in sys.path:
             sys.path.insert(0, str(root))
 
+        # Mock GCS client for local dev
+        from infrastructure import gcs
+        gcs.IS_DEV_ENV = True
+        gcs._client = None # type: ignore
+
+            sys.path.insert(0, str(root))
+
     def _stub_audiosegment(self, target_module):
         class _AS:
             def __init__(self, d=0):

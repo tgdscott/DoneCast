@@ -1,14 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlmodel import select, Session
-from typing import List, Optional, Sequence
-from api.core.database import get_session
-from api.core.auth import get_current_user
-from api.models.user import User
-from api.models.podcast import MusicAsset
+import mimetypes
 import os
-from fastapi import Request
+from io import BytesIO
+from typing import Optional, Sequence
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
+from sqlmodel import Session, select
+
+from api.core.auth import get_current_user
+from api.core.database import get_session
 from api.core.paths import MEDIA_DIR
-from infrastructure.gcs import make_signed_url
+from api.models.podcast import MusicAsset
+from api.models.user import User
+from infrastructure.gcs import download_bytes, make_signed_url
 
 router = APIRouter(prefix="/music", tags=["music"])
 
@@ -40,8 +44,8 @@ def list_music_assets(request: Request, session: Session = Depends(get_session),
                 filename_url = make_signed_url(bucket, key, minutes=60)
                 file_exists = True
             except Exception:
-                # Fallback: report original value
-                filename_url = filename
+                # Fallback: proxy through API so the client gets an http(s) URL
+                filename_url = str(request.url_for("preview_music_asset", asset_id=str(a.id)))
                 file_exists = True
         elif filename.startswith('http://') or filename.startswith('https://'):
             filename_url = filename
@@ -87,3 +91,42 @@ def register_music_selection(asset_id: str,
     session.commit()
     session.refresh(asset)
     return {"id": str(asset.id), "select_count": asset.user_select_count}
+
+
+@router.get("/assets/{asset_id}/preview")
+def preview_music_asset(
+    asset_id: str,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    asset = session.exec(select(MusicAsset).where(MusicAsset.id == asset_id)).first()
+    if not asset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Music asset not found")
+
+    filename = asset.filename or ""
+    data: Optional[bytes] = None
+
+    try:
+        if filename.startswith("gs://"):
+            without = filename[len("gs://"): ]
+            bucket, key = without.split("/", 1)
+            data = download_bytes(bucket, key)
+        else:
+            rel = filename.lstrip("/")
+            if rel.startswith("static/media/"):
+                rel = rel.split("static/media/", 1)[-1]
+            path_obj = (MEDIA_DIR / rel).resolve()
+            if not path_obj.is_file():
+                raise FileNotFoundError(str(path_obj))
+            data = path_obj.read_bytes()
+    except FileNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Music asset file not found")
+    except Exception as exc:  # noqa: BLE001 - normalise unexpected errors
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Failed to load music asset: {exc}")
+
+    if not data:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Music asset returned no data")
+
+    guessed, _ = mimetypes.guess_type(filename)
+    media_type = guessed or "audio/mpeg"
+    return StreamingResponse(BytesIO(data), media_type=media_type)

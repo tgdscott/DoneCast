@@ -310,7 +310,7 @@ export default function DistributionChecklistDialog({ open, onOpenChange, podcas
                         disabled={disabled}
                       />
                       <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <span>Only visible inside CloudPod.</span>
+                        <span>Only visible inside Plus Plus.</span>
                         <Button
                           type="button"
                           size="sm"

@@ -158,7 +158,7 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
       summary: "Music rules control when theme tracks fade in or out across segments.",
       steps: [
         "Pick a library track now—we'll let you fine-tune timing inside the Template Editor.",
-        "Unsure? Select “Let CloudPod decide” and we'll recommend something calm to start.",
+        "Unsure? Select “Let Plus Plus decide” and we'll recommend something calm to start.",
       ],
     },
     elevenlabs: {

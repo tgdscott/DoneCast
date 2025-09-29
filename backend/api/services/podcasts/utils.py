@@ -111,7 +111,7 @@ def build_distribution_context(podcast: "Podcast") -> Dict[str, Optional[str]]:
     return {
         "rss_feed_url": rss_url,
         "rss_feed_encoded": encoded_rss,
-        "rss_feed_or_placeholder": rss_url or "your CloudPod RSS feed",
+        "rss_feed_or_placeholder": rss_url or "your Plus Plus RSS feed",
         "spreaker_show_id": spreaker_show_id or "",
         "spreaker_show_url": spreaker_show_url,
         "podcast_name": getattr(podcast, "name", None) or "",

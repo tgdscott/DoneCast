@@ -24,14 +24,14 @@ from typing import Dict, List, Optional
 _PLATFORMS: List[Dict[str, object]] = [
     {
         "key": "spreaker",
-        "name": "Spreaker (CloudPod Hosting)",
-        "summary": "Episodes published from CloudPod are automatically hosted on Spreaker.",
+        "name": "Spreaker (Plus Plus Hosting)",
+        "summary": "Episodes published from Plus Plus are automatically hosted on Spreaker.",
         "automation": "automatic",
         "automation_notes": "We create and update the Spreaker show when you publish episodes.",
         "instructions": [
-            "We sync your show details and episodes to Spreaker automatically whenever you publish from CloudPod.",
+            "We sync your show details and episodes to Spreaker automatically whenever you publish from Plus Plus.",
             "Use the Spreaker dashboard to confirm artwork, categories, and analytics.",
-            "If you need the public page, copy it from the button below or Settings → Distribution in CloudPod.",
+            "If you need the public page, copy it from the button below or Settings → Distribution in Plus Plus.",
         ],
         "action_label": "Open Spreaker dashboard",
         "action_url_template": "https://www.spreaker.com/show/{spreaker_show_id}",
@@ -72,7 +72,7 @@ _PLATFORMS: List[Dict[str, object]] = [
             "Verify ownership via the email sent to your podcast contact address, then complete the show setup.",
         ],
         "requires_rss_feed": True,
-        "rss_missing_help": "We need your CloudPod RSS feed before we can pre-fill the Spotify form.",
+        "rss_missing_help": "We need your Plus Plus RSS feed before we can pre-fill the Spotify form.",
     },
     {
         "key": "amazon_music",
@@ -103,7 +103,7 @@ _PLATFORMS: List[Dict[str, object]] = [
             "Submit the form. iHeartRadio reviews feeds manually; approval can take several business days.",
         ],
         "requires_rss_feed": True,
-        "rss_missing_help": "Generate your CloudPod RSS feed before applying to iHeartRadio.",
+        "rss_missing_help": "Generate your Plus Plus RSS feed before applying to iHeartRadio.",
     },
     {
         "key": "tunein",
@@ -118,7 +118,7 @@ _PLATFORMS: List[Dict[str, object]] = [
             "Submit the request. TuneIn will email you once the show is approved and listed.",
         ],
         "requires_rss_feed": True,
-        "rss_missing_help": "Publish a CloudPod RSS feed so TuneIn can ingest your show.",
+        "rss_missing_help": "Publish a Plus Plus RSS feed so TuneIn can ingest your show.",
     },
     {
         "key": "pandora",
@@ -133,7 +133,7 @@ _PLATFORMS: List[Dict[str, object]] = [
             "Pandora performs a manual review focused on audio quality and metadata completeness.",
         ],
         "requires_rss_feed": True,
-        "rss_missing_help": "Once your RSS feed is live we’ll pre-fill this step with your CloudPod URL.",
+        "rss_missing_help": "Once your RSS feed is live we’ll pre-fill this step with your Plus Plus URL.",
     },
     {
         "key": "samsung_podcasts",
@@ -148,7 +148,7 @@ _PLATFORMS: List[Dict[str, object]] = [
             "Samsung reviews submissions in batches; approval can take up to two weeks.",
         ],
         "requires_rss_feed": True,
-        "rss_missing_help": "Create your CloudPod RSS feed first so Samsung can pull episodes.",
+        "rss_missing_help": "Create your Plus Plus RSS feed first so Samsung can pull episodes.",
     },
     {
         "key": "podchaser",
@@ -163,7 +163,7 @@ _PLATFORMS: List[Dict[str, object]] = [
             "Claim ownership to unlock analytics and collaboration tools.",
         ],
         "requires_rss_feed": True,
-        "rss_missing_help": "Publish your CloudPod RSS feed before claiming on Podchaser.",
+        "rss_missing_help": "Publish your Plus Plus RSS feed before claiming on Podchaser.",
     },
 ]
 

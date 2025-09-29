@@ -190,7 +190,7 @@
   border-radius: 1rem;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
   padding: clamp(1.75rem, 2vw + 1.25rem, 3rem);
-  font-size: 1rem;
+  font-size: calc(1rem - 2pt);
   line-height: 1.75;
   color: #1f2937;
 }

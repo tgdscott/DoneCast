@@ -1,4 +1,4 @@
-# Aggressive .gitignore for CloudPod
+# Aggressive .gitignore for Plus Plus
 # - Ignores virtual environments, caches, build artifacts, node modules
 # - Ignores media folders, large exports, DB files, logs and local secrets
 

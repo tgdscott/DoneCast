@@ -3,24 +3,11 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { makeApi } from '@/lib/apiClient';
 import { toast } from '@/hooks/use-toast';
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const FALLBACK_TIMEZONES = [
-  'UTC',
-  'America/New_York',
-  'America/Chicago',
-  'America/Denver',
-  'America/Los_Angeles',
-  'Europe/London',
-  'Europe/Berlin',
-  'Europe/Paris',
-  'Asia/Tokyo',
-  'Australia/Sydney',
-];
 
 const sortSlots = (slots) => {
   return [...slots].sort((a, b) => {
@@ -62,19 +49,14 @@ const formatNext = (slot) => {
   });
 };
 
-function getTimezoneOptions() {
-  if (typeof Intl !== 'undefined' && typeof Intl.supportedValuesOf === 'function') {
-    try {
-      const values = Intl.supportedValuesOf('timeZone');
-      if (Array.isArray(values) && values.length > 0) {
-        return [...values];
-      }
-    } catch (err) {
-      // ignore and fall back
-    }
+const detectDeviceTimezone = (fallback = 'UTC') => {
+  try {
+    const resolved = Intl?.DateTimeFormat?.().resolvedOptions?.().timeZone;
+    return resolved || fallback;
+  } catch (err) {
+    return fallback;
   }
-  return FALLBACK_TIMEZONES;
-}
+};
 
 export default function RecurringScheduleManager({
   token,
@@ -83,21 +65,16 @@ export default function RecurringScheduleManager({
   isNewTemplate,
   onDirtyChange,
 }) {
+  const deviceTimezone = useMemo(() => detectDeviceTimezone(userTimezone || 'UTC'), [userTimezone]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [slots, setSlots] = useState([]);
-  const [timezone, setTimezone] = useState(userTimezone || 'UTC');
+  const [timezone, setTimezone] = useState(deviceTimezone);
   const [scheduleDirty, setScheduleDirty] = useState(false);
   const [timeInput, setTimeInput] = useState('05:00');
   const [daySelection, setDaySelection] = useState(() => new Set([0]));
-  const [baseline, setBaseline] = useState({ timezone: userTimezone || 'UTC', slots: [] });
-
-  const timezoneOptions = useMemo(() => {
-    const list = getTimezoneOptions();
-    const sorted = [...new Set([...list, userTimezone || 'UTC'])];
-    return sorted.sort((a, b) => a.localeCompare(b));
-  }, [userTimezone]);
+  const [baseline, setBaseline] = useState({ timezone: deviceTimezone, slots: [] });
 
   useEffect(() => {
     if (typeof onDirtyChange === 'function') {
@@ -107,7 +84,7 @@ export default function RecurringScheduleManager({
 
   useEffect(() => {
     if (!templateId || templateId === 'new' || isNewTemplate) {
-      const defaultTz = userTimezone || 'UTC';
+      const defaultTz = deviceTimezone;
       setSlots([]);
       setScheduleDirty(false);
       setError(null);
@@ -130,7 +107,7 @@ export default function RecurringScheduleManager({
         const incoming = Array.isArray(data?.schedules) ? data.schedules : [];
         const normalized = sortSlots(incoming.map(normalizeSlot));
         const cloned = normalized.map((slot) => ({ ...slot }));
-        const resolvedTz = data?.timezone || userTimezone || normalized[0]?.timezone || 'UTC';
+        const resolvedTz = data?.timezone || normalized[0]?.timezone || deviceTimezone;
         setSlots(cloned);
         setTimezone(resolvedTz);
         setBaseline({
@@ -154,7 +131,7 @@ export default function RecurringScheduleManager({
     return () => {
       cancelled = true;
     };
-  }, [templateId, token, isNewTemplate, userTimezone, onDirtyChange]);
+  }, [templateId, token, isNewTemplate, userTimezone, deviceTimezone, onDirtyChange]);
 
   const toggleDay = useCallback((index) => {
     setDaySelection((prev) => {
@@ -292,7 +269,7 @@ export default function RecurringScheduleManager({
       <CardHeader>
         <CardTitle>Recurring Publish Schedule</CardTitle>
         <CardDescription>
-          Tell CloudPod when episodes made from this template should go live. We&rsquo;ll skip conflicts with already scheduled
+          Tell Plus Plus when episodes made from this template should go live. We&rsquo;ll skip conflicts with already scheduled
           episodes.
         </CardDescription>
       </CardHeader>
@@ -300,55 +277,38 @@ export default function RecurringScheduleManager({
         {error && <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
         <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
-          <div className="grid gap-3 sm:grid-cols-[repeat(2,minmax(0,1fr))] md:grid-cols-[repeat(3,minmax(0,1fr))]">
-            <div className="space-y-2">
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Timezone</Label>
-              <Select
-                value={timezone}
-                onValueChange={(value) => {
-                  setTimezone(value);
-                  setSlots((prev) => prev.map((slot) => ({ ...slot, timezone: value })));
-                  setScheduleDirty(true);
-                }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select timezone" />
-                </SelectTrigger>
-                <SelectContent className="max-h-64">
-                  {timezoneOptions.map((tz) => (
-                    <SelectItem key={tz} value={tz}>
-                      {tz}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Time</Label>
-              <Input type="time" value={timeInput} onChange={(event) => setTimeInput(event.target.value)} className="h-9" />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Days</Label>
-              <div className="flex flex-wrap gap-2">
-                {DAY_LABELS.map((label, index) => {
-                  const checked = daySelection.has(index);
-                  return (
-                    <button
-                      type="button"
-                      key={label}
-                      onClick={() => toggleDay(index)}
-                      className={`rounded border px-2 py-1 text-xs font-medium transition-colors ${
-                        checked ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Scheduling uses your local timezone (<span className="font-medium text-slate-700">{timezone}</span>).
+            </p>
+            <div className="grid gap-3 sm:grid-cols-[repeat(2,minmax(0,1fr))] md:grid-cols-[repeat(2,minmax(0,1fr))]">
+              <div className="space-y-2">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Time</Label>
+                <Input type="time" value={timeInput} onChange={(event) => setTimeInput(event.target.value)} className="h-9" />
               </div>
-              {selectedDaysSummary.length === 0 && (
-                <p className="text-xs text-muted-foreground">Select at least one day.</p>
-              )}
+              <div className="space-y-2">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Days</Label>
+                <div className="flex flex-wrap gap-2">
+                  {DAY_LABELS.map((label, index) => {
+                    const checked = daySelection.has(index);
+                    return (
+                      <button
+                        type="button"
+                        key={label}
+                        onClick={() => toggleDay(index)}
+                        className={`rounded border px-2 py-1 text-xs font-medium transition-colors ${
+                          checked ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {selectedDaysSummary.length === 0 && (
+                  <p className="text-xs text-muted-foreground">Select at least one day.</p>
+                )}
+              </div>
             </div>
           </div>
           <Button onClick={handleAddSlots} disabled={daySelection.size === 0 || !timeInput}>

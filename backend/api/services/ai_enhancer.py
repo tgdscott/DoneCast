@@ -47,27 +47,51 @@ def _generate_with_elevenlabs(
     voice_id: str | None,
     user: Optional[User],
 ) -> AudioSegment:
-    try:
-        from elevenlabs.client import ElevenLabs
-    except ImportError as exc:  # pragma: no cover - dependency optional in tests
-        raise AIEnhancerError("ElevenLabs client is not installed. Run 'pip install elevenlabs'.") from exc
-
     api_key = (user and user.elevenlabs_api_key) or settings.ELEVENLABS_API_KEY
     if not api_key or api_key == "dummy":
         raise AIEnhancerError("ElevenLabs API key is not configured on the server or for your user account.")
 
     resolved_voice_id = voice_id or _DEFAULT_ELEVENLABS_VOICE_ID
-    client = ElevenLabs(api_key=api_key)
-
     try:
-        iterator = client.text_to_speech.convert(
-            voice_id=resolved_voice_id,
-            text=text,
-            model_id=_ELEVENLABS_MODEL_ID,
-        )
-        audio_bytes = b"".join(iterator)
-    except Exception as exc:  # noqa: BLE001 - we normalise the error below
-        raise _translate_elevenlabs_error(exc, resolved_voice_id)
+        from elevenlabs.client import ElevenLabs  # type: ignore
+    except ImportError:
+        ElevenLabs = None  # type: ignore[assignment]
+
+    if ElevenLabs is not None:
+        client = ElevenLabs(api_key=api_key)
+
+        try:
+            iterator = client.text_to_speech.convert(
+                voice_id=resolved_voice_id,
+                text=text,
+                model_id=_ELEVENLABS_MODEL_ID,
+            )
+            audio_bytes = b"".join(iterator)
+        except Exception as exc:  # noqa: BLE001 - we normalise the error below
+            raise _translate_elevenlabs_error(exc, resolved_voice_id)
+    else:
+        if httpx is None:
+            raise AIEnhancerError(
+                "ElevenLabs client is not installed and no HTTP client is available. Install 'elevenlabs' or 'httpx'."
+            )
+        try:
+            with httpx.Client(timeout=60.0) as client:  # type: ignore[call-arg]
+                response = client.post(
+                    f"https://api.elevenlabs.io/v1/text-to-speech/{resolved_voice_id}",
+                    headers={
+                        "xi-api-key": api_key,
+                        "Accept": "audio/mpeg",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "text": text,
+                        "model_id": _ELEVENLABS_MODEL_ID,
+                    },
+                )
+                response.raise_for_status()
+                audio_bytes = response.content
+        except Exception as exc:  # noqa: BLE001 - normalised soon
+            raise _translate_elevenlabs_error(exc, resolved_voice_id)
 
     if not isinstance(audio_bytes, bytes) or not audio_bytes:
         raise AIEnhancerError("ElevenLabs returned no audio data.")

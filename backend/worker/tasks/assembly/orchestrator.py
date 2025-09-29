@@ -71,6 +71,29 @@ def _cleanup_main_content(*, session, episode, main_content_filename: str) -> No
         logging.warning("[cleanup] Failed to remove main content media item", exc_info=True)
 
 
+def _mark_episode_error(session, episode, reason: str) -> None:
+    """Persist a failure state for the episode when assembly cannot produce audio."""
+
+    try:
+        from api.models.podcast import EpisodeStatus as EpStatus
+
+        episode.status = EpStatus.error  # type: ignore[attr-defined]
+    except Exception:
+        episode.status = "error"  # type: ignore[assignment]
+
+    try:
+        episode.final_audio_path = None
+    except Exception:
+        pass
+
+    try:
+        session.add(episode)
+        session.commit()
+    except Exception:
+        session.rollback()
+    logging.error("[assemble] %s", reason)
+
+
 def _finalize_episode(
     *,
     session,
@@ -110,27 +133,28 @@ def _finalize_episode(
         else "None",
     )
 
-    try:
-        from api.models.podcast import EpisodeStatus as EpStatus
-
-        episode.status = EpStatus.processed  # type: ignore[attr-defined]
-    except Exception:
-        episode.status = "processed"  # type: ignore[assignment]
-
-    if ai_note_additions:
-        existing = episode.show_notes or ""
-        combined = existing + ("\n\n" if existing else "") + "\n\n".join(ai_note_additions)
-        episode.show_notes = combined
-        logging.info(
-            "[assemble] Added %s AI shownote additions", len(ai_note_additions)
+    final_path_str = str(final_path or "").strip()
+    if not final_path_str:
+        _mark_episode_error(
+            session,
+            episode,
+            reason="Episode assembly did not return a final audio path",
         )
+        raise RuntimeError("Episode assembly produced no final audio path")
 
     try:
-        final_path_obj = Path(final_path)
+        final_path_obj = Path(final_path_str)
     except Exception:
         final_path_obj = Path(str(final_path))
 
     final_basename = final_path_obj.name
+    if not final_basename:
+        _mark_episode_error(
+            session,
+            episode,
+            reason=f"Episode assembly produced invalid filename from path={final_path_str!r}",
+        )
+        raise RuntimeError("Episode assembly produced an invalid final audio filename")
 
     # Ensure the canonical copy lives under FINAL_DIR
     try:
@@ -154,6 +178,15 @@ def _finalize_episode(
                 str(final_path),
                 str(dest_final),
             )
+            if not dest_final.exists():
+                _mark_episode_error(
+                    session,
+                    episode,
+                    reason=f"Final audio missing after export: {final_path_str}",
+                )
+                raise RuntimeError(
+                    f"Episode assembly completed without producing an audio file ({final_path_str})"
+                )
     except Exception:
         logging.warning(
             "[assemble] Failed to ensure final audio resides in FINAL_DIR", exc_info=True
@@ -174,6 +207,35 @@ def _finalize_episode(
     except Exception:
         logging.warning(
             "[assemble] Failed to mirror final audio into MEDIA_DIR", exc_info=True
+        )
+
+    if not final_path_obj.exists():
+        fallback_candidate = FINAL_DIR / final_basename
+        if fallback_candidate.exists():
+            final_path_obj = fallback_candidate
+        else:
+            _mark_episode_error(
+                session,
+                episode,
+                reason=f"Final audio file not found after assembly: {final_basename}",
+            )
+            raise RuntimeError(
+                f"Episode final audio file not found after assembly ({final_basename})"
+            )
+
+    try:
+        from api.models.podcast import EpisodeStatus as EpStatus
+
+        episode.status = EpStatus.processed  # type: ignore[attr-defined]
+    except Exception:
+        episode.status = "processed"  # type: ignore[assignment]
+
+    if ai_note_additions:
+        existing = episode.show_notes or ""
+        combined = existing + ("\n\n" if existing else "") + "\n\n".join(ai_note_additions)
+        episode.show_notes = combined
+        logging.info(
+            "[assemble] Added %s AI shownote additions", len(ai_note_additions)
         )
 
     episode.final_audio_path = final_basename
