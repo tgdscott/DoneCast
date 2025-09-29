@@ -89,10 +89,24 @@ def preview_media(
     else:
         # Local dev file under MEDIA_DIR -> mount is at /static/media
         filename = path.lstrip("/\\")
-        full = MEDIA_DIR / filename
-        if not str(full).startswith(str(MEDIA_DIR)):
+        # Resolve the candidate path and ensure it remains inside MEDIA_DIR to
+        # avoid ``..`` traversal or symlink escapes. ``resolve(strict=False)``
+        # keeps nonexistent files from raising but still normalizes ``..``.
+        try:
+            media_root = MEDIA_DIR.resolve()
+        except Exception:
+            media_root = MEDIA_DIR
+        try:
+            candidate = (MEDIA_DIR / filename).resolve(strict=False)
+        except Exception:
             raise HTTPException(status_code=400, detail="Invalid path")
-        rel = f"/static/media/{filename}"
+
+        try:
+            relative_path = candidate.relative_to(media_root)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid path")
+
+        rel = f"/static/media/{relative_path.as_posix()}"
         # Build absolute URL for clients so they don't depend on frontend proxying
         try:
             base = str(request.base_url).rstrip("/")
