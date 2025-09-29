@@ -59,6 +59,10 @@ def transcribe_media_file(filename: str):
 	Accepts either a local filename (relative to MEDIA_DIR) or a gs:// URI.
 	When a gs:// path is provided (prod uploads), this will download the
 	object to MEDIA_DIR and transcribe that temporary local copy.
+
+	Side-effect: writes a transcript JSON to TRANSCRIPTS_DIR using the stem
+	of the input filename (e.g., my_audio.json) so that UI polling for
+	/api/ai/transcript-ready and AI suggestion endpoints can discover it.
 	"""
 
 	def _is_gcs_path(p: str) -> bool:
@@ -90,7 +94,20 @@ def transcribe_media_file(filename: str):
 		delete_after = True
 
 	try:
-		return get_word_timestamps(local_name)
+		words = get_word_timestamps(local_name)
+		# Persist transcript JSON for discovery by the AI endpoints
+		try:
+			from ...core.paths import TRANSCRIPTS_DIR  # lazy import to avoid cycles
+			TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+			stem = Path(local_name).stem
+			out_path = TRANSCRIPTS_DIR / f"{stem}.json"
+			if not out_path.exists():
+				import json as _json
+				out_path.write_text(_json.dumps(words, ensure_ascii=False, indent=2), encoding="utf-8")
+		except Exception:
+			# Best-effort; do not fail transcription if persisting the JSON has issues
+			pass
+		return words
 	except Exception:
 		raise
 	finally:

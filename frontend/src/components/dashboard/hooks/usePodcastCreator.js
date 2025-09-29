@@ -625,7 +625,7 @@ export default function usePodcastCreator({
       }
       const url = `/api/episodes/last/numbering${qs.length ? `?${qs.join('&')}` : ''}`;
       const data = await api.get(url);
-      if (data && (data.season_number != null || data.episode_number != null)) {
+      if (data) {
         setEpisodeDetails(prev => {
           // Only prefill if user hasn’t changed these yet
           if (prev.episodeNumber && String(prev.episodeNumber).trim()) return prev;
@@ -633,6 +633,12 @@ export default function usePodcastCreator({
           const season = (data.season_number != null) ? String(data.season_number) : '1';
           const nextEp = (data.episode_number != null) ? String(Number(data.episode_number) + 1) : '1';
           return { ...prev, season, episodeNumber: nextEp };
+        });
+      } else {
+        setEpisodeDetails(prev => {
+          if (prev.episodeNumber && String(prev.episodeNumber).trim()) return prev;
+          if (prev.season && String(prev.season).trim() !== '1') return prev;
+          return { ...prev, season: '1', episodeNumber: '1' };
         });
       }
     } catch(_) {}
