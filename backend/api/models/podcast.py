@@ -70,7 +70,7 @@ class Podcast(PodcastBase, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
     user_id: UUID = Field(foreign_key="user.id")
     user: Optional[User] = Relationship()
-    
+
     episodes: List["Episode"] = Relationship(back_populates="podcast", sa_relationship_kwargs={"cascade": "all, delete-orphan"})
 
     @property
@@ -86,6 +86,24 @@ class Podcast(PodcastBase, table=True):
     def preferred_cover_url(self) -> Optional[str]:
         """Preferred cover image URL for this podcast (remote if available, else legacy cover_path)."""
         return getattr(self, 'remote_cover_url', None) or getattr(self, 'cover_path', None)
+
+
+class PodcastImportState(SQLModel, table=True):
+    """Lightweight progress tracker for partial RSS imports."""
+
+    podcast_id: UUID = Field(primary_key=True, foreign_key="podcast.id")
+    user_id: UUID = Field(foreign_key="user.id")
+    source: Optional[str] = Field(
+        default=None,
+        description="Heuristic source label for the last RSS import (spreaker|external)",
+    )
+    feed_total: Optional[int] = Field(default=None, description="Total items detected in the feed during the last import")
+    imported_count: int = Field(default=0, description="How many items were created during the preview import")
+    needs_full_import: bool = Field(
+        default=False,
+        description="True when additional episodes remain to be recovered after the preview import",
+    )
+    updated_at: datetime = Field(default_factory=datetime.utcnow, description="Timestamp of the most recent import snapshot")
 
 class StaticSegmentSource(SQLModel):
     source_type: Literal["static"] = "static"

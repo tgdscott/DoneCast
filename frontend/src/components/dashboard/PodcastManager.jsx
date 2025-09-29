@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Badge } from "@/components/ui/badge";
 import * as Icons from "lucide-react";
 import { useState, useEffect } from "react";
 import EditPodcastDialog from "./EditPodcastDialog";
@@ -189,7 +189,9 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
 
   const handleRecovery = async (podcast) => {
     if (!podcast || !podcast.id) return;
-    if (!window.confirm(`This will scan Spreaker for episodes belonging to "${podcast.name}" and create local records for any that are missing. This cannot be undone. Continue?`)) {
+    const needsFullImport = !!podcast?.import_status?.needs_full_import;
+    const actionText = needsFullImport ? 'import the remaining episodes from Spreaker' : 'scan Spreaker for missing episodes';
+    if (!window.confirm(`We will ${actionText} for "${podcast.name}". Continue?`)) {
       return;
     }
 
@@ -201,14 +203,19 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
       const count = result?.recovered_count || 0;
       if (count > 0) {
         toast({
-          title: "Recovery Complete",
-          description: `Successfully recovered and created records for ${count} missing episodes. Please refresh the episode history to see them.`,
+          title: needsFullImport ? "Import complete" : "Recovery complete",
+          description: needsFullImport
+            ? `Imported ${count} additional episode${count === 1 ? '' : 's'} from Spreaker. The rest of your library is now available locally.`
+            : `Successfully recovered and created records for ${count} missing episodes. Please refresh the episode history to see them.`,
         });
       } else {
         toast({
           title: "Scan Complete",
           description: "No missing episodes were found on Spreaker for this show.",
         });
+      }
+      if (result?.import_status) {
+        setPodcasts(prev => prev.map(p => p.id === podcast.id ? { ...p, import_status: result.import_status } : p));
       }
     } catch (error) {
       const detail = error?.detail || error?.message || "An unknown error occurred.";
@@ -289,9 +296,18 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
     } finally { setCreatingShowId(null); }
   };
 
+  const ActionButton = ({ icon: IconEl, children, className = "", variant = "outline", ...props }) => (
+    <Button variant={variant} className={`w-full justify-start ${className}`} {...props}>
+      {IconEl ? <IconEl className="w-4 h-4 mr-2" /> : null}
+      {children}
+    </Button>
+  );
+
+  const pendingImports = podcasts.filter(p => p?.import_status?.needs_full_import);
+
   return (
     <div className="p-6">
-  <Button onClick={onBack} variant="ghost" className="mb-4"><Icons.ArrowLeft className="w-4 h-4 mr-2" />Back to Dashboard</Button>
+      <Button onClick={onBack} variant="ghost" className="mb-4"><Icons.ArrowLeft className="w-4 h-4 mr-2" />Back to Dashboard</Button>
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
@@ -307,153 +323,154 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
             </div>
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-6">
+          {pendingImports.length > 0 && (
+            <div className="rounded-lg border border-border bg-muted/40 p-4 text-sm space-y-1">
+              <p className="font-medium text-foreground">Finish importing your back catalogue</p>
+              <p className="text-muted-foreground">
+                {pendingImports.length === 1
+                  ? `We only imported a preview of ${pendingImports[0].name}. Link the show to Spreaker and use “Import remaining episodes” to pull the rest.`
+                  : `We only imported previews for ${pendingImports.length} shows. Link them to Spreaker and use “Import remaining episodes” to complete the migration.`}
+              </p>
+            </div>
+          )}
           {podcasts.length > 0 ? (
-            <div className="space-y-4">
+            <div className="space-y-6">
               {podcasts.map(podcast => {
                 const issues = getComplianceIssues(podcast);
                 const hasShowId = !!podcast.spreaker_show_id;
+                const importStatus = podcast.import_status || null;
+                const needsFullImport = !!importStatus?.needs_full_import;
+                const importedCount = importStatus?.imported_count ?? 0;
+                const feedTotal = importStatus?.feed_total ?? 0;
+                const previewSummary = needsFullImport && feedTotal
+                  ? `${Math.min(importedCount, feedTotal)} of ${feedTotal} episodes imported in preview`
+                  : null;
                 return (
-                <Card key={podcast.id} className="flex items-center justify-between p-4">
-                  <div className="flex items-center gap-4">
-                    {podcast.cover_path ? (
-                      <img
-                        src={
-                          podcast.cover_path.startsWith('http')
-                            ? podcast.cover_path
-                            : `/static/media/${podcast.cover_path.replace(/^\/+/, '').split('/').pop()}`
-                        }
-                        alt={`${podcast.name} cover`}
-                        className="w-16 h-16 rounded-md object-cover"
-                        onError={(e)=>{e.currentTarget.style.display='none'; const sib=e.currentTarget.nextSibling; if(sib) sib.style.display='flex';}}
-                      />
-                    ) : (
-                      <div className="w-16 h-16 rounded-md bg-gray-100 flex items-center justify-center">
-                        <Icons.Image className="w-8 h-8 text-gray-400" />
-                      </div>
-                    )}
-                    <div>
-                      <h3 className="font-semibold">{podcast.name}</h3>
-                      <p className="text-sm text-gray-500 line-clamp-2">{podcast.description || "No description."}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    {/* Show Distribution when either compliant OR already linked to Spreaker */}
-                    {(issues.length === 0 || hasShowId) && (
-                      <Button variant="outline" size="sm" onClick={() => openDistributionDialog(podcast)}>
-                        <Icons.Share2 className="w-4 h-4 mr-2" /> Distribution
-                      </Button>
-                    )}
-                    {/* Spreaker publish/setup pills */}
-                    {(() => {
-                      // Only one pill at a time.
-                      // Yellow pill: show exists on Spreaker but local Show Info is incomplete
-                      if (hasShowId && issues.length > 0) {
-                        return (
-                          <button
-                            className="px-3 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-300 text-xs hover:bg-amber-200/60"
-                            onClick={() => openEditDialog(podcast)}
-                            title={`Open Show Info to finish required fields: ${issues.join(', ')}`}
-                          >
-                            Complete setup to publish to Spreaker
-                          </button>
-                        );
-                      }
-                      // If not connected and no Spreaker show yet, offer green publish CTA when compliant
-                      if (!isSpreakerConnected && !hasShowId && issues.length === 0) {
-                        return (
-                          <button
-                            className="px-3 py-1 rounded-full bg-green-600 text-white text-xs hover:bg-green-700"
-                            onClick={() => handlePublishToSpreaker(podcast)}
-                          >
-                            Publish to Spreaker
-                          </button>
-                        );
-                      }
-                      // Otherwise, no pill for non-Spreaker shows or when fully compliant with ID
-                      return null;
-                    })()}
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" aria-label={`Actions for ${podcast.name}`}>
-                          <Icons.Settings className="h-5 w-5" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        {/* Link/Create appear only when no show is linked */}
-                        {!podcast.spreaker_show_id && (
-                          <DropdownMenuItem onClick={() => handleLinkSpreakerShow(podcast)} disabled={linkingShowId === podcast.id}>
-                            {linkingShowId === podcast.id ? (
-                              <Icons.Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                            ) : (
-                              <Icons.Link2 className="w-4 h-4 mr-2" />
-                            )}
-                            <span>Link existing Spreaker Show…</span>
-                          </DropdownMenuItem>
+                  <Card key={podcast.id} className="p-6">
+                    <div className="flex flex-col lg:flex-row gap-6">
+                      <div className="flex gap-4 lg:w-1/2">
+                        {podcast.cover_path ? (
+                          <img
+                            src={
+                              podcast.cover_path.startsWith('http')
+                                ? podcast.cover_path
+                                : `/static/media/${podcast.cover_path.replace(/^\/+/, '').split('/').pop()}`
+                            }
+                            alt={`${podcast.name} cover`}
+                            className="w-24 h-24 rounded-md object-cover"
+                            onError={(e)=>{e.currentTarget.style.display='none'; const sib=e.currentTarget.nextSibling; if(sib) sib.style.display='flex';}}
+                          />
+                        ) : (
+                          <div className="w-24 h-24 rounded-md bg-gray-100 flex items-center justify-center">
+                            <Icons.Image className="w-10 h-10 text-gray-400" />
+                          </div>
                         )}
-                        {!podcast.spreaker_show_id && isSpreakerConnected && (
-                          <DropdownMenuItem onClick={() => handleCreateSpreakerShow(podcast)} disabled={creatingShowId === podcast.id}>
-                            {creatingShowId === podcast.id ? (
-                              <Icons.Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                            ) : (
-                              <Icons.Plus className="w-4 h-4 mr-2" />
-                            )}
-                            <span>Create Spreaker Show</span>
-                          </DropdownMenuItem>
-                        )}
-                        <DropdownMenuItem
-                          onClick={() => handleRecovery(podcast)}
-                          disabled={recoveringId === podcast.id || !podcast.spreaker_show_id}
-                        >
-                          {recoveringId === podcast.id ? (
-                            <Icons.Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          ) : (
-                            <Icons.RefreshCw className="w-4 h-4 mr-2" />
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="font-semibold text-lg">{podcast.name}</h3>
+                            {hasShowId && <Badge variant="secondary">Linked to Spreaker</Badge>}
+                            {needsFullImport && <Badge variant="outline" className="border-amber-500 text-amber-700 bg-amber-50">Preview only</Badge>}
+                          </div>
+                          {previewSummary && (
+                            <p className="text-sm text-amber-700 flex items-center gap-2"><Icons.AlertTriangle className="w-4 h-4" /> {previewSummary}</p>
                           )}
-                          <span>Recover Missing Episodes</span>
-                        </DropdownMenuItem>
-                        {(() => {
-                          const summary = episodeSummaryByPodcast[String(podcast.id)] || { unpublished_or_unscheduled: 0 };
-                          const eligible = summary.unpublished_or_unscheduled || 0;
-                          const canShow = isSpreakerConnected && !!podcast.spreaker_show_id && eligible >= 2;
-                          if (!canShow) return null;
-                          return (
-                            <DropdownMenuItem
-                              onClick={() => handlePublishAll(podcast)}
-                              disabled={publishingAllId === podcast.id}
+                          <p className="text-sm text-muted-foreground leading-relaxed max-w-xl">{podcast.description || "No description."}</p>
+                        </div>
+                      </div>
+                      <div className="flex-1 space-y-4">
+                        <div className="grid sm:grid-cols-2 gap-3">
+                          <ActionButton icon={Icons.Settings} onClick={() => openEditDialog(podcast)}>Edit show details</ActionButton>
+                          {(issues.length === 0 || hasShowId) && (
+                            <ActionButton icon={Icons.Share2} onClick={() => openDistributionDialog(podcast)}>
+                              Distribution checklist
+                            </ActionButton>
+                          )}
+                          {!hasShowId && (
+                            <ActionButton
+                              icon={Icons.Link2}
+                              onClick={() => handleLinkSpreakerShow(podcast)}
+                              disabled={linkingShowId === podcast.id}
                             >
-                              {publishingAllId === podcast.id ? (
-                                <Icons.Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                              ) : (
-                                <Icons.Send className="w-4 h-4 mr-2" />
-                              )}
-                              <span>Publish All to Spreaker</span>
-                            </DropdownMenuItem>
-                          );
-                        })()}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                    {/* Small inline CTA when not linked to Spreaker */}
-                    {!podcast.spreaker_show_id && (
-                      <Button variant="secondary" size="sm" onClick={() => handleLinkSpreakerShow(podcast)} title="Link Spreaker show id">
-                        <Icons.Link2 className="w-4 h-4 mr-1" /> Link Spreaker Show
-                      </Button>
-                    )}
-                    <Button variant="outline" size="sm" onClick={() => openEditDialog(podcast)}>Edit</Button>
-                    <Button variant="destructive" size="sm" onClick={() => openDeleteDialog(podcast)}>
-                      <Icons.Trash2 className="w-4 h-4 mr-2" /> Delete
-                    </Button>
-                  </div>
-                </Card>
-              );})}
+                              {linkingShowId === podcast.id ? 'Linking…' : 'Link existing Spreaker show'}
+                            </ActionButton>
+                          )}
+                          {!isSpreakerConnected && issues.length === 0 && (
+                            <ActionButton
+                              icon={Icons.Radio}
+                              onClick={() => handlePublishToSpreaker(podcast)}
+                            >
+                              Connect to Spreaker to publish
+                            </ActionButton>
+                          )}
+                          {!hasShowId && isSpreakerConnected && (
+                            <ActionButton
+                              icon={Icons.Plus}
+                              onClick={() => handleCreateSpreakerShow(podcast)}
+                              disabled={creatingShowId === podcast.id}
+                            >
+                              {creatingShowId === podcast.id ? 'Creating…' : 'Create new Spreaker show'}
+                            </ActionButton>
+                          )}
+                          {needsFullImport && (
+                            <ActionButton
+                              icon={Icons.DownloadCloud}
+                              onClick={() => handleRecovery(podcast)}
+                              disabled={recoveringId === podcast.id || !podcast.spreaker_show_id}
+                            >
+                              {recoveringId === podcast.id ? 'Importing remaining episodes…' : 'Import remaining episodes'}
+                            </ActionButton>
+                          )}
+                          {!needsFullImport && hasShowId && (
+                            <ActionButton
+                              icon={Icons.RefreshCw}
+                              onClick={() => handleRecovery(podcast)}
+                              disabled={recoveringId === podcast.id}
+                            >
+                              {recoveringId === podcast.id ? 'Scanning Spreaker…' : 'Recover missing episodes'}
+                            </ActionButton>
+                          )}
+                          {(() => {
+                            const summary = episodeSummaryByPodcast[String(podcast.id)] || { unpublished_or_unscheduled: 0 };
+                            const eligible = summary.unpublished_or_unscheduled || 0;
+                            const canShow = isSpreakerConnected && hasShowId && eligible >= 2;
+                            if (!canShow) return null;
+                            return (
+                              <ActionButton
+                                icon={Icons.Send}
+                                onClick={() => handlePublishAll(podcast)}
+                                disabled={publishingAllId === podcast.id}
+                              >
+                                {publishingAllId === podcast.id ? 'Publishing…' : `Publish ${eligible} episodes to Spreaker`}
+                              </ActionButton>
+                            );
+                          })()}
+                          <ActionButton
+                            icon={Icons.Trash2}
+                            variant="destructive"
+                            onClick={() => openDeleteDialog(podcast)}
+                          >
+                            Delete podcast
+                          </ActionButton>
+                        </div>
+                        {!hasShowId && issues.length === 0 && !isSpreakerConnected && (
+                          <p className="text-sm text-muted-foreground">
+                            Ready to publish? Connect your Spreaker account first so we can push episodes over automatically.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </Card>
+                );
+              })}
             </div>
           ) : (
-      <div className="text-center py-10">
-    <p className="mb-4">You haven't created any podcasts yet.</p>
-        <Button onClick={openWizard}>
-          <Icons.Plus className="w-4 h-4 mr-2" /> {fullPageOnboarding ? 'Get started' : 'Create Your First Show'}
-        </Button>
-      </div>
+            <div className="text-center py-10">
+              <p className="mb-4">You haven't created any podcasts yet.</p>
+              <Button onClick={openWizard}>
+                <Icons.Plus className="w-4 h-4 mr-2" /> {fullPageOnboarding ? 'Get started' : 'Create Your First Show'}
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>

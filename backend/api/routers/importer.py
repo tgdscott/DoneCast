@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Body
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from datetime import datetime
+from urllib.parse import urlparse
 from pathlib import Path
 from uuid import UUID, uuid4
 import os
@@ -12,7 +13,7 @@ import json
 
 from ..core.database import get_session
 from ..models.user import User
-from ..models.podcast import Podcast, Episode, EpisodeStatus
+from ..models.podcast import Podcast, Episode, EpisodeStatus, PodcastImportState
 from api.core.auth import get_current_user
 from api.core.paths import FINAL_DIR
 from infrastructure.gcs import upload_fileobj
@@ -27,22 +28,35 @@ router = APIRouter(
     tags=["Importer"],
 )
 
+DEFAULT_IMPORT_PREVIEW_LIMIT = 5
+
+
+def _is_spreaker_feed(url: str | None) -> bool:
+    if not url:
+        return False
+    try:
+        parsed = urlparse(str(url))
+        host = (parsed.hostname or "").lower()
+        return "spreaker" in host
+    except Exception:
+        return False
+
 class RssPayload(BaseModel):
     rss_url: str
-    download_audio: bool | None = False
-    import_tags: bool | None = True
-    limit: int | None = None
-    attempt_link_spreaker: bool | None = True
     auto_publish_to_spreaker: bool | None = False
     publish_state: str | None = None  # 'unpublished' | 'public' | 'limited'
+    download_audio: bool | None = None
+    import_tags: bool | None = None
+    limit: int | None = None
+    attempt_link_spreaker: bool | None = None
 
 class ImportSyncPayload(BaseModel):
     podcast_id: UUID | None = None
     rss_url: str | None = None
-    download_audio: bool | None = False
-    import_tags: bool | None = True
+    download_audio: bool | None = None
+    import_tags: bool | None = None
     limit: int | None = None
-    attempt_link_spreaker: bool | None = True
+    attempt_link_spreaker: bool | None = None
     auto_publish_to_spreaker: bool | None = None
     publish_state: str | None = None
 
@@ -155,6 +169,8 @@ async def import_from_rss(
             logger.exception(f"Feed parse/validation error: {parse_ex}")
             raise HTTPException(status_code=400, detail="Unable to parse or validate RSS feed.")
 
+        inferred_source_spreaker = _is_spreaker_feed(payload.rss_url)
+
         new_podcast = Podcast(
             name=title_str or "Untitled Podcast",
             description=desc_str,
@@ -218,13 +234,38 @@ async def import_from_rss(
         except Exception:
             pass
 
+        total_entries = len(entries)
+
+        canonical_is_spreaker = _is_spreaker_feed(canonical_url)
+        source_is_spreaker = inferred_source_spreaker or canonical_is_spreaker
+
+        effective_limit = payload.limit if payload.limit is not None else DEFAULT_IMPORT_PREVIEW_LIMIT
+        if effective_limit and effective_limit > 0 and total_entries > effective_limit:
+            selected_entries = entries[-effective_limit:]
+        else:
+            selected_entries = entries
+
+        should_download_audio = (
+            bool(payload.download_audio)
+            if payload.download_audio is not None
+            else not source_is_spreaker
+        )
+        should_import_tags = (
+            bool(payload.import_tags)
+            if payload.import_tags is not None
+            else True
+        )
+        should_attempt_link = (
+            bool(payload.attempt_link_spreaker)
+            if payload.attempt_link_spreaker is not None
+            else source_is_spreaker
+        )
+
         episodes_to_add = []
         count = 0
         mirrored_ok = 0
         gcs_ok = 0
-        for entry in entries:
-            if payload.limit is not None and count >= payload.limit:
-                break
+        for entry in selected_entries:
             links = entry.get("links") if isinstance(entry, dict) else getattr(entry, 'links', None)
             if not isinstance(links, list):
                 links = []
@@ -251,7 +292,7 @@ async def import_from_rss(
 
             # Tags and explicit
             tags = []
-            if bool(payload.import_tags):
+            if bool(should_import_tags):
                 raw_kw = entry.get('itunes_keywords') or entry.get('itunes:keywords') or entry.get('tags')
                 if raw_kw:
                     if isinstance(raw_kw, str):
@@ -267,7 +308,7 @@ async def import_from_rss(
             # Optional audio mirroring: download enclosure to FINAL_DIR and also upload to GCS
             final_audio_path = audio_url  # default to remote URL
             meta_blob: dict = {}
-            if bool(payload.download_audio):
+            if bool(should_download_audio):
                 try:
                     # Determine extension from URL or content-type
                     def _infer_ext(url: str, ct: str | None) -> str:
@@ -387,13 +428,50 @@ async def import_from_rss(
         
         session.add_all(episodes_to_add)
         session.commit()
-        logger.info(f"Imported {len(episodes_to_add)} episodes for podcast {new_podcast.id} (mirrored={mirrored_ok}, gcs={gcs_ok})")
+        preview_imported = len(episodes_to_add)
+        preview_window = len(selected_entries)
+        needs_full_import = total_entries > preview_window
+        source_label = "spreaker" if source_is_spreaker else "external"
+        logger.info(
+            "Imported %s episodes for podcast %s (mirrored=%s, gcs=%s, needs_full_import=%s)",
+            preview_imported,
+            new_podcast.id,
+            mirrored_ok,
+            gcs_ok,
+            needs_full_import,
+        )
+
+        import_status_payload = {
+            "source": source_label,
+            "feed_total": total_entries,
+            "preview_window": preview_window,
+            "imported_count": preview_imported,
+            "needs_full_import": needs_full_import,
+        }
+
+        try:
+            state = session.get(PodcastImportState, new_podcast.id)
+            if not state:
+                state = PodcastImportState(podcast_id=new_podcast.id, user_id=current_user.id)
+            state.source = source_label
+            state.feed_total = total_entries
+            state.imported_count = preview_imported
+            state.needs_full_import = needs_full_import
+            state.updated_at = datetime.utcnow()
+            session.add(state)
+            session.commit()
+        except Exception:
+            logger.warning("Failed to persist import preview state", exc_info=True)
+            try:
+                session.rollback()
+            except Exception:
+                pass
 
         # Optional: attempt to link to an existing Spreaker show and map episodes
         spreaker_linked = 0
         chosen_show_id: str | None = None
         spreaker_attempted = False
-        if bool(payload.attempt_link_spreaker) and getattr(current_user, 'spreaker_access_token', None):
+        if bool(should_attempt_link) and getattr(current_user, 'spreaker_access_token', None):
             spreaker_attempted = True
             try:
                 # Try to infer show id from RSS URL if it's a Spreaker feed
@@ -539,6 +617,7 @@ async def import_from_rss(
             "auto_publish_started": publish_jobs_started,
             "auto_publish_skipped": auto_publish_skipped,
             "merge_summary": merge_summary,
+            "import_status": import_status_payload,
         }
     except HTTPException:
         # Propagate expected HTTP errors
