@@ -7,7 +7,7 @@ from uuid import UUID
 from api.core.database import get_session
 from api.models.podcast import Episode
 from sqlmodel import select
-from api.core.auth import get_current_user
+from api.routers.auth import get_current_user
 from api.models.user import User
 from pydub import AudioSegment
 import shutil

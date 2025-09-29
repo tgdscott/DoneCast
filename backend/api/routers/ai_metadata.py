@@ -3,7 +3,7 @@ import os
 from typing import List, Optional, Iterable
 from fastapi import APIRouter, Body, HTTPException, Depends
 from pydantic import BaseModel
-from api.core.auth import get_current_user
+from api.routers.auth import get_current_user
 from ..models.user import User
 
 router = APIRouter()

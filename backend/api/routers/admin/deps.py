@@ -8,7 +8,7 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy.exc import OperationalError
 from sqlmodel import Session
 
-from api.core.auth import get_current_user
+from api.routers.auth import get_current_user
 from api.core.config import settings
 from api.models.user import User
 

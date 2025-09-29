@@ -4,7 +4,7 @@ from typing import List, Dict, Any
 import openai
 import os
 import json
-from api.core.auth import get_current_user
+from api.routers.auth import get_current_user
 from ..models.user import User
 
 router = APIRouter()

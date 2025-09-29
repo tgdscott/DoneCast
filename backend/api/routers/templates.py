@@ -8,7 +8,7 @@ from ..models.podcast import PodcastTemplate, PodcastTemplateCreate, PodcastTemp
 from ..models.user import User
 from ..core.database import get_session
 from ..core import crud
-from api.core.auth import get_current_user
+from api.routers.auth import get_current_user
 
 router = APIRouter(
     prefix="/templates",
