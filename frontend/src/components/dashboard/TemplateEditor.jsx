@@ -136,6 +136,9 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     const [voiceId, setVoiceId] = useState(null);
     const [showVoicePicker, setShowVoicePicker] = useState(false);
     const [voiceName, setVoiceName] = useState(null);
+    const [internVoiceId, setInternVoiceId] = useState(null);
+    const [showInternVoicePicker, setShowInternVoicePicker] = useState(false);
+    const [internVoiceName, setInternVoiceName] = useState(null);
     // One-time AI voice modal state
     const [ttsOpen, setTtsOpen] = useState(false);
     const [ttsTargetSegment, setTtsTargetSegment] = useState(null);
@@ -286,6 +289,13 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                 : null);
         setVoiceId(tVoice || null);
         setVoiceName(null);
+        const internDefault =
+            template.default_intern_voice_id ||
+            template?.automation_settings?.intern_voice_id ||
+            template?.ai_settings?.intern_voice_id ||
+            null;
+        setInternVoiceId(internDefault || null);
+        setInternVoiceName(null);
     }, [template]);
 
     // Resolve friendly name for template-level default voice if we have an id but no name yet
@@ -302,6 +312,20 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
         })();
         return () => { cancelled = true; };
     }, [voiceId, voiceName, token]);
+
+    useEffect(() => {
+        if (!internVoiceId || internVoiceName) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const api = makeApi(token);
+                const v = await api.get(`/api/elevenlabs/voice/${encodeURIComponent(internVoiceId)}/resolve`);
+                const dn = v?.common_name || v?.name || null;
+                if (!cancelled) setInternVoiceName(dn);
+            } catch (_) { /* ignore */ }
+        })();
+        return () => { cancelled = true; };
+    }, [internVoiceId, internVoiceName, token]);
 
   // --- State Handlers ---
   const handleTemplateChange = (field, value) => {
@@ -499,6 +523,11 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
       } else {
         payload.default_elevenlabs_voice_id = null;
       }
+      if (internVoiceId) {
+        payload.default_intern_voice_id = internVoiceId;
+      } else {
+        payload.default_intern_voice_id = null;
+      }
       if (Array.isArray(payload.segments)) {
         payload.segments = payload.segments.map(seg => {
           if (seg.segment_type !== 'content') {
@@ -556,6 +585,9 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     // IMPORTANT: Hooks (useMemo/useCallback) must run on every render. We compute them
     // before any conditional returns so the hook order is stable across renders.
     const hasContentSegment = template?.segments?.some(s => s.segment_type === 'content') ?? false;
+    const internVoiceDisplay = internVoiceName || (internVoiceId
+        ? internVoiceId
+        : (voiceName || voiceId ? `Using default: ${voiceName || voiceId}` : 'Not set (uses default AI voice)'));
 
         // removed duplicate redeclaration of templateTourSteps (defined earlier above)
 
@@ -730,6 +762,21 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                             </div>
                             <div className="mt-2 sm:mt-0">
                                 <Button variant="outline" onClick={() => setShowVoicePicker(true)}>Choose voice</Button>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {/* Intern command voice selector */}
+                <Card className="shadow-sm">
+                    <CardContent className="p-6">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <Label className="text-sm font-medium text-gray-600 flex items-center gap-1">Intern Command Voice<HelpCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" title="Used when the Intern command creates narrated edits." /></Label>
+                                <div className="text-sm text-gray-800 mt-1">{internVoiceDisplay}</div>
+                            </div>
+                            <div className="mt-2 sm:mt-0">
+                                <Button variant="outline" onClick={() => setShowInternVoicePicker(true)}>Choose voice</Button>
                             </div>
                         </div>
                     </CardContent>
@@ -992,6 +1039,18 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                                 onChange={(id) => setVoiceId(id)}
                                 onSelect={(item) => setVoiceName(item?.common_name || item?.name || null)}
                                 onClose={() => setShowVoicePicker(false)}
+                                token={token}
+                            />
+                        )}
+                        {showInternVoicePicker && (
+                            <VoicePicker
+                                value={internVoiceId || null}
+                                onChange={(id) => {
+                                    setInternVoiceId(id);
+                                    if (!id) setInternVoiceName(null);
+                                }}
+                                onSelect={(item) => setInternVoiceName(item?.common_name || item?.name || null)}
+                                onClose={() => setShowInternVoicePicker(false)}
                                 token={token}
                             />
                         )}
