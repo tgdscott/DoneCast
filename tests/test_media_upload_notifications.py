@@ -16,7 +16,7 @@ from api.models.podcast import MediaCategory, MediaItem
 from api.models.transcription import TranscriptionWatch
 from api.models.user import User
 from api.services.transcription import transcribe_media_file
-from api.services.transcription.watchers import notify_watchers_processed
+from api.services.transcription.watchers import notify_watchers_processed, _candidate_filenames
 
 
 
@@ -245,3 +245,53 @@ def test_transcribe_media_file_notifies_without_email(session, monkeypatch):
     assert len(notes) == 1
     assert friendly in notes[0].body
     assert sent == []
+
+
+@pytest.mark.usefixtures("db_engine")
+def test_candidate_filenames_handles_signed_urls():
+    variants = _candidate_filenames("gs://bucket/path/test.wav?GoogleAccessId=abc&Expires=123")
+    assert "gs://bucket/path/test.wav" in variants
+    assert "bucket/path/test.wav" in variants
+    assert "path/test.wav" in variants
+    assert "test.wav" in variants
+
+    https_variants = _candidate_filenames(
+        "https://storage.googleapis.com/bucket/another/test.wav?X-Goog-Signature=zzz"
+    )
+    assert "gs://bucket/another/test.wav" in https_variants
+    assert "bucket/another/test.wav" in https_variants
+    assert "another/test.wav" in https_variants
+    assert "test.wav" in https_variants
+
+
+@pytest.mark.usefixtures("db_engine")
+def test_notify_watchers_handles_signed_url_variant(session):
+    user, _ = _create_user(session)
+
+    stored = "gs://bucket/path/test.wav"
+    signed = "https://storage.googleapis.com/bucket/path/test.wav?X-Goog-Signature=zzz"
+
+    session.add(
+        TranscriptionWatch(
+            user_id=user.id,
+            filename=stored,
+            friendly_name="Signed URL", 
+            notify_email=None,
+            last_status="queued",
+        )
+    )
+    session.commit()
+
+    notify_watchers_processed(signed)
+
+    session.expire_all()
+
+    notes = session.exec(
+        select(Notification).where(Notification.user_id == user.id)
+    ).all()
+    assert len(notes) == 1
+    assert "Signed URL" in notes[0].body
+    watch = session.exec(
+        select(TranscriptionWatch).where(TranscriptionWatch.user_id == user.id)
+    ).first()
+    assert watch is not None and watch.notified_at is not None
