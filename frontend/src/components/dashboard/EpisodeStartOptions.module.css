@@ -1,0 +1,11 @@
+.uniform-card {
+  min-width: 260px;
+  max-width: 320px;
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 24px;
+  box-sizing: border-box;
+}

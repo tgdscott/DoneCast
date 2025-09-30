@@ -2,6 +2,7 @@ import React from 'react';
 import usePodcastCreator from './hooks/usePodcastCreator';
 import StepTemplateSelection from './podcastCreatorSteps/StepTemplateSelection';
 import StepUploadAudio from './podcastCreatorSteps/StepUploadAudio';
+import StepSelectPreprocessed from './podcastCreatorSteps/StepSelectPreprocessed';
 import StepCustomizeSegments from './podcastCreatorSteps/StepCustomizeSegments';
 import StepCoverArt from './podcastCreatorSteps/StepCoverArt';
 import StepEpisodeDetails from './podcastCreatorSteps/StepEpisodeDetails';
@@ -14,6 +15,8 @@ import IntentQuestions from './IntentQuestions';
 import VoicePicker from '@/components/VoicePicker';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
+import { makeApi } from '@/lib/apiClient';
 
 export default function PodcastCreator({
   onBack,
@@ -132,6 +135,45 @@ export default function PodcastCreator({
     buildActive,
   } = controller;
 
+  const { toast } = useToast();
+
+  const handleDeletePreuploaded = React.useCallback(async (item) => {
+    if (!item || !item.id) return;
+    const ready = !!item.transcript_ready;
+    const confirmationMessage = ready
+      ? 'This upload is marked Ready. Deleting it will not refund the processing minutes already used. Continue?'
+      : 'Delete this upload while it is still processing? No processing minutes have been deducted yet.';
+    if (typeof window !== 'undefined') {
+      const confirmed = window.confirm(confirmationMessage);
+      if (!confirmed) return;
+    }
+
+    try {
+      const api = makeApi(token);
+      await api.delete(`/api/media/${item.id}`);
+      toast({
+        title: 'Upload deleted',
+        description: `${item.friendly_name || item.filename} was removed from your library.`,
+      });
+
+      try {
+        if (selectedPreupload && item.filename === selectedPreupload) {
+          handlePreuploadedSelect(null);
+        }
+      } catch (_) {}
+
+      try {
+        await onRefreshPreuploaded();
+      } catch (_) {}
+    } catch (err) {
+      let description = err?.message || 'Unable to delete upload.';
+      const detail = err?.detail;
+      if (typeof detail === 'string') description = detail;
+      else if (detail && typeof detail === 'object' && typeof detail.detail === 'string') description = detail.detail;
+      toast({ variant: 'destructive', title: 'Delete failed', description });
+    }
+  }, [token, toast, selectedPreupload, handlePreuploadedSelect, onRefreshPreuploaded]);
+
   const intentDetectionCounts = {
     flubber: Number((intentDetections?.flubber?.count) ?? 0),
     intern: Number((intentDetections?.intern?.count) ?? 0),
@@ -212,9 +254,9 @@ export default function PodcastCreator({
               onRefresh={onRefreshPreuploaded}
               intents={intents}
               pendingIntentLabels={pendingIntentLabels}
-              intentsComplete={intentsComplete}
               onIntentSubmit={handleIntentSubmit}
               onEditAutomations={() => setShowIntentQuestions(true)}
+              onDeleteItem={handleDeletePreuploaded}
             />
           );
         }
@@ -231,7 +273,6 @@ export default function PodcastCreator({
             onEditAutomations={() => setShowIntentQuestions(true)}
             onIntentChange={handleIntentAnswerChange}
             onIntentSubmit={handleIntentSubmit}
-            canProceed={!!(uploadedFile || uploadedFilename) && intentsComplete && !isUploading}
             pendingIntentLabels={pendingIntentLabels}
             intents={intents}
             intentVisibility={intentVisibility}
@@ -437,4 +478,3 @@ export default function PodcastCreator({
     </>
   );
 }
-

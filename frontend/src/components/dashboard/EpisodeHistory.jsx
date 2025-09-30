@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import { Loader2, RefreshCw, ImageOff, Play, CheckCircle2, Clock, AlertTriangle, CalendarClock, Trash2, ArrowLeft, LayoutGrid, List as ListIcon, Search, Undo2, Scissors, Grid3X3, Pencil, RotateCcw, FileText } from "lucide-react";
+import { Loader2, RefreshCw, ImageOff, Play, CheckCircle2, Clock, AlertTriangle, CalendarClock, Trash2, ArrowLeft, LayoutGrid, List as ListIcon, Search, Undo2, Scissors, Grid3X3, Pencil, RotateCcw, FileText, Wand2 } from "lucide-react";
 import EpisodeHistoryPreview from './EpisodeHistoryPreview';
 import FlubberReview from './FlubberReview';
 import ManualEditorModal from './ManualEditorModal';
@@ -66,8 +66,12 @@ export default function EpisodeHistory({ token, onBack }) {
   // Preview toggle removed; mosaic view is now permanent
   // Editing panel
   const [editing, setEditing] = useState(null);
-  const [editValues, setEditValues] = useState({ title:'', description:'', publish_state:'', tags:'', is_explicit:false, image_crop:'', cover_file:null, cover_uploading:false, season_number:null, episode_number:null });
+  const [editValues, setEditValues] = useState({ title:'', description:'', publish_state:'', tags:'', is_explicit:false, image_crop:'', cover_file:null, cover_uploading:false, season_number:null, episode_number:null, template_id:null });
   const [saving, setSaving] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [aiBusy, setAiBusy] = useState({ title: false, description: false, tags: false });
+  const [templatePrompt, setTemplatePrompt] = useState({ open: false, field: null, saving: false, savingId: null });
   // Add state for numbering duplicates near other edit state declarations
   const [numberingConflict, setNumberingConflict] = useState(false);
   const [hasGlobalNumberingConflict, setHasGlobalNumberingConflict] = useState(false);
@@ -90,6 +94,7 @@ export default function EpisodeHistory({ token, onBack }) {
       cover_uploading:false,
       season_number: ep.season_number ?? null,
       episode_number: ep.episode_number ?? null,
+      template_id: ep.template_id ?? null,
     });
     // Add reset conflict
     setNumberingConflict(false);
@@ -104,9 +109,11 @@ export default function EpisodeHistory({ token, onBack }) {
     editValues.image_crop !== (editing.image_crop||'') ||
     !!editValues.cover_file ||
     (editValues.season_number !== (editing.season_number ?? null)) ||
-    (editValues.episode_number !== (editing.episode_number ?? null))
+    (editValues.episode_number !== (editing.episode_number ?? null)) ||
+    ((editValues.template_id ?? null) !== (editing.template_id ?? null))
   );
   const cropperRef = useRef(null);
+  const pendingAiFieldRef = useRef(null);
   // Scheduling modal state
   const [scheduleEp, setScheduleEp] = useState(null); // episode object
   const [scheduleDate, setScheduleDate] = useState(""); // YYYY-MM-DD
@@ -269,6 +276,7 @@ export default function EpisodeHistory({ token, onBack }) {
       if(editValues.image_crop !== (editing.image_crop||'')) body.image_crop = editValues.image_crop;
       if(editValues.season_number !== (editing.season_number ?? null)) body.season_number = editValues.season_number;
       if(editValues.episode_number !== (editing.episode_number ?? null)) body.episode_number = editValues.episode_number;
+      if((editValues.template_id ?? null) !== (editing.template_id ?? null)) body.template_id = editValues.template_id;
       // Cover upload (if new file)
       let coverPath = null;
       if(editValues.cover_file){
@@ -317,6 +325,7 @@ export default function EpisodeHistory({ token, onBack }) {
         cover_path: coverPath || p.cover_path,
         season_number: body.season_number ?? p.season_number,
         episode_number: body.episode_number ?? p.episode_number,
+        template_id: body.template_id ?? p.template_id,
       }) } : p));
       // Optional cascades for season change and episode increments
       if ((seasonChanged || episodeIncreased) && episodes && episodes.length) {
@@ -352,6 +361,226 @@ export default function EpisodeHistory({ token, onBack }) {
       alert(msg || 'Failed to save changes');
     } finally { setSaving(false); }
   };
+
+  const fetchTemplates = useCallback(async () => {
+    setTemplatesLoading(true);
+    try {
+      const api = makeApi(token);
+      const data = await api.get('/api/templates/');
+      const items = Array.isArray(data) ? data.filter(t => t && t.id) : [];
+      setTemplates(items);
+    } catch (e) {
+      console.warn('Failed to load templates', e);
+    } finally {
+      setTemplatesLoading(false);
+    }
+  }, [token]);
+  useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
+
+  const editingPodcastId = editing ? editing.podcast_id : null;
+  const editingTemplateId = editing ? editing.template_id : null;
+
+  const findTemplateById = useCallback((id) => {
+    if (!id) return null;
+    const target = String(id);
+    return templates.find(t => String(t.id) === target) || null;
+  }, [templates]);
+
+  const activeTemplates = useMemo(() => {
+    return templates.filter(t => t && t.is_active !== false);
+  }, [templates]);
+
+  const relevantTemplates = useMemo(() => {
+    if (!activeTemplates.length) return [];
+    if (!editingPodcastId) return activeTemplates;
+    const scoped = activeTemplates.filter(t => String(t.podcast_id ?? '') === String(editingPodcastId ?? ''));
+    return scoped.length ? scoped : activeTemplates;
+  }, [activeTemplates, editingPodcastId]);
+
+  const editingTemplate = useMemo(() => {
+    const identifier = editValues.template_id ?? editingTemplateId;
+    return identifier ? findTemplateById(identifier) : null;
+  }, [editValues.template_id, editingTemplateId, findTemplateById]);
+
+  const updateAiBusy = (field, value) => {
+    setAiBusy(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleAiError = (err, label) => {
+    let message = '';
+    if (isApiError(err)) {
+      const detail = err.detail;
+      if (detail && typeof detail === 'object') {
+        const code = String(detail.error || detail.code || '').toUpperCase();
+        if (code === 'TRANSCRIPT_NOT_READY') {
+          message = 'Transcript not ready yet. Try again soon.';
+        } else if (code === 'RATE_LIMIT' || err.status === 429) {
+          message = 'Too many AI requests right now. Please wait and retry.';
+        } else if (detail.message) {
+          message = String(detail.message);
+        } else if (detail.detail) {
+          message = String(detail.detail);
+        }
+      } else if (typeof detail === 'string' && detail) {
+        if (detail.toUpperCase() === 'TRANSCRIPT_NOT_READY') {
+          message = 'Transcript not ready yet. Try again soon.';
+        } else {
+          message = detail;
+        }
+      } else if (err.error) {
+        message = String(err.error);
+      } else if (err.message) {
+        message = String(err.message);
+      }
+    }
+    if (!message) {
+      message = `AI ${label} request failed.`;
+    }
+    alert(message);
+  };
+
+  const associateTemplate = useCallback(async (templateId, { silent = false } = {}) => {
+    if (!templateId) return null;
+    if (!editing) {
+      return findTemplateById(templateId);
+    }
+    const normalized = String(templateId);
+    const current = editingTemplateId ? String(editingTemplateId) : null;
+    if (current === normalized) {
+      setEditValues(v => ({ ...v, template_id: templateId }));
+      return findTemplateById(templateId);
+    }
+    try {
+      const api = makeApi(token);
+      await api.patch(`/api/episodes/${editing.id}`, { template_id: templateId });
+      setEpisodes(prev => prev.map(e => e.id === editing.id ? { ...e, template_id: templateId } : e));
+      setEditing(prev => prev ? { ...prev, template_id: templateId } : prev);
+      setEditValues(v => ({ ...v, template_id: templateId }));
+      return findTemplateById(templateId);
+    } catch (err) {
+      if (!silent) {
+        const msg = isApiError(err) ? (err.detail || err.error || err.message) : String(err);
+        alert(msg || 'Failed to link template.');
+      }
+      throw err;
+    }
+  }, [editing, editingTemplateId, token, findTemplateById, setEpisodes, setEditing, setEditValues]);
+
+  const cancelTemplatePrompt = () => {
+    pendingAiFieldRef.current = null;
+    setTemplatePrompt({ open: false, field: null, saving: false, savingId: null });
+  };
+
+  const runAi = async (field, template) => {
+    if (!editing) return;
+    updateAiBusy(field, true);
+    const api = makeApi(token);
+    const hint = deriveEpisodeHint(editing);
+    const basePayload = {
+      episode_id: editing.id,
+      podcast_id: editing.podcast_id,
+      transcript_path: null,
+      hint: hint || null,
+      base_prompt: '',
+    };
+    const settings = template?.ai_settings || {};
+    try {
+      if (field === 'title') {
+        const payload = {
+          ...basePayload,
+          extra_instructions: settings?.title_instructions || undefined,
+        };
+        const res = await api.post('/api/ai/title', payload);
+        const suggestion = res?.title || '';
+        if (suggestion && !/[a-f0-9]{16,}/i.test(suggestion)) {
+          setEditValues(v => ({ ...v, title: suggestion }));
+        }
+      } else if (field === 'description') {
+        const payload = {
+          ...basePayload,
+          extra_instructions: settings?.notes_instructions || undefined,
+        };
+        const res = await api.post('/api/ai/notes', payload);
+        const raw = (res?.description || '').toString();
+        const cleaned = raw
+          .replace(/^(?:\*\*?)?description:?\*?\*?\s*/i, '')
+          .replace(/^#+\s*description\s*/i, '')
+          .trim();
+        if (cleaned) {
+          setEditValues(v => ({ ...v, description: cleaned }));
+        }
+      } else if (field === 'tags') {
+        const payload = {
+          ...basePayload,
+          extra_instructions: settings?.tags_instructions || undefined,
+          tags_always_include: Array.isArray(settings?.tags_always_include) ? settings.tags_always_include : [],
+        };
+        const res = await api.post('/api/ai/tags', payload);
+        let tags = Array.isArray(res?.tags) ? res.tags : [];
+        if ((!tags || !tags.length) && Array.isArray(payload.tags_always_include)) {
+          tags = payload.tags_always_include;
+        }
+        if (tags && tags.length) {
+          const normalized = [...new Set(tags.map(t => String(t).trim()).filter(Boolean))];
+          setEditValues(v => ({ ...v, tags: normalized.join(', ') }));
+        }
+      }
+    } catch (err) {
+      handleAiError(err, field === 'tags' ? 'tags' : field);
+    } finally {
+      updateAiBusy(field, false);
+    }
+  };
+
+  const handleTemplateChoice = async (templateId) => {
+    if (!templateId) return;
+    setTemplatePrompt(prev => ({ ...prev, saving: true, savingId: templateId }));
+    try {
+      const template = await associateTemplate(templateId);
+      setTemplatePrompt({ open: false, field: null, saving: false, savingId: null });
+      const field = pendingAiFieldRef.current;
+      pendingAiFieldRef.current = null;
+      if (field) {
+        await runAi(field, template || findTemplateById(templateId));
+      }
+    } catch (err) {
+      setTemplatePrompt(prev => ({ ...prev, saving: false, savingId: null }));
+    }
+  };
+
+  const handleAiGenerate = async (field) => {
+    if (!editing || !field) return;
+    if (aiBusy[field]) return;
+    let template = editingTemplate;
+    if (!template && templatesLoading) {
+      pendingAiFieldRef.current = field;
+      setTemplatePrompt({ open: true, field, saving: false, savingId: null });
+      return;
+    }
+    if (!template) {
+      const associatedId = editValues.template_id ?? editingTemplateId;
+      if (associatedId) {
+        template = findTemplateById(associatedId);
+      }
+    }
+    if (!template) {
+      const options = relevantTemplates;
+      if (options.length === 1) {
+        try {
+          template = await associateTemplate(options[0].id, { silent: true });
+        } catch (err) {
+          template = options[0];
+        }
+      } else if (options.length > 1) {
+        pendingAiFieldRef.current = field;
+        setTemplatePrompt({ open: true, field, saving: false, savingId: null });
+        return;
+      }
+    }
+    pendingAiFieldRef.current = null;
+    await runAi(field, template);
+  };
+
   const fetchEpisodes = useCallback(async () => {
     setLoading(true); setErr("");
     const controller = new AbortController();
@@ -879,11 +1108,40 @@ export default function EpisodeHistory({ token, onBack }) {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Title</label>
-                <input className="w-full border rounded px-2 py-1 text-sm" value={editValues.title} onChange={e=>setEditValues(v=>({...v,title:e.target.value}))} />
+                <div className="flex items-center gap-2">
+                  <input className="flex-1 border rounded px-2 py-1 text-sm" value={editValues.title} onChange={e=>setEditValues(v=>({...v,title:e.target.value}))} />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => handleAiGenerate('title')}
+                    disabled={saving || aiBusy.title}
+                    title="Regenerate title with AI"
+                  >
+                    {aiBusy.title ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                  </Button>
+                </div>
+                {editingTemplate && (
+                  <div className="mt-1 text-[11px] text-gray-500">
+                    AI template: {editingTemplate.name}
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Description / Show Notes</label>
-                <textarea rows={6} className="w-full border rounded px-2 py-1 text-sm resize-vertical" value={editValues.description} onChange={e=>setEditValues(v=>({...v,description:e.target.value}))} />
+                <div className="flex items-start gap-2">
+                  <textarea rows={6} className="flex-1 border rounded px-2 py-1 text-sm resize-vertical" value={editValues.description} onChange={e=>setEditValues(v=>({...v,description:e.target.value}))} />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => handleAiGenerate('description')}
+                    disabled={saving || aiBusy.description}
+                    title="Regenerate description with AI"
+                  >
+                    {aiBusy.description ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                  </Button>
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Visibility</label>
@@ -896,7 +1154,19 @@ export default function EpisodeHistory({ token, onBack }) {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Tags (comma separated)</label>
-                <input className="w-full border rounded px-2 py-1 text-sm" value={editValues.tags} onChange={e=>setEditValues(v=>({...v,tags:e.target.value}))} placeholder="tag1, tag2" />
+                <div className="flex items-center gap-2">
+                  <input className="flex-1 border rounded px-2 py-1 text-sm" value={editValues.tags} onChange={e=>setEditValues(v=>({...v,tags:e.target.value}))} placeholder="tag1, tag2" />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => handleAiGenerate('tags')}
+                    disabled={saving || aiBusy.tags}
+                    title="Regenerate tags with AI"
+                  >
+                    {aiBusy.tags ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                  </Button>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <input id="explicitFlag" type="checkbox" className="h-4 w-4" checked={editValues.is_explicit} onChange={e=>setEditValues(v=>({...v,is_explicit:e.target.checked}))} />
@@ -934,6 +1204,48 @@ export default function EpisodeHistory({ token, onBack }) {
           </div>
         </div>
       )}
+      {templatePrompt.open && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white w-full max-w-sm rounded shadow-lg p-5 space-y-4">
+            <h3 className="text-lg font-semibold flex items-center gap-2 text-slate-800">
+              <Wand2 className="w-5 h-5 text-primary" />Choose Template
+            </h3>
+            <div className="text-sm text-gray-700">
+              Select which template rules to use for AI regeneration. We'll remember your choice for this episode.
+            </div>
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {templatesLoading ? (
+                <div className="flex items-center gap-2 text-sm text-gray-500">
+                  <Loader2 className="w-4 h-4 animate-spin" />Loading templates...
+                </div>
+              ) : relevantTemplates.length ? (
+                relevantTemplates.map(template => (
+                  <Button
+                    key={template.id}
+                    variant="outline"
+                    className="w-full flex items-center justify-between"
+                    disabled={templatePrompt.saving}
+                    onClick={() => handleTemplateChoice(template.id)}
+                  >
+                    <span>{template.name}</span>
+                    {templatePrompt.saving && templatePrompt.savingId === template.id ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : null}
+                  </Button>
+                ))
+              ) : (
+                <div className="text-sm text-gray-500">No templates available.</div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" size="sm" disabled={templatePrompt.saving} onClick={cancelTemplatePrompt}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {unpublishEp && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white w-full max-w-sm rounded shadow-lg p-5 space-y-4">

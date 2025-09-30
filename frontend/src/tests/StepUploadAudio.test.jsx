@@ -8,7 +8,7 @@ describe('StepUploadAudio step controls', () => {
   const noop = () => {};
   const ref = { current: null };
 
-  it('keeps Continue disabled until automation answers are provided', () => {
+  it('prompts for automation answers before continuing', () => {
     const handleNext = vi.fn();
     const handleEdit = vi.fn();
 
@@ -21,17 +21,14 @@ describe('StepUploadAudio step controls', () => {
         onBack={noop}
         onNext={handleNext}
         onEditAutomations={handleEdit}
-        canProceed={false}
         pendingIntentLabels={['Flubber']}
       />
     );
 
-    expect(screen.getByText(/We still need your answer/i)).toBeInTheDocument();
+    expect(screen.getByText(/We need your answer/i)).toBeInTheDocument();
     const continueBtn = screen.getByRole('button', { name: /continue/i });
-    expect(continueBtn).toBeDisabled();
-
-    const answerBtn = screen.getByRole('button', { name: /answer now/i });
-    fireEvent.click(answerBtn);
+    expect(continueBtn).not.toBeDisabled();
+    fireEvent.click(continueBtn);
     expect(handleEdit).toHaveBeenCalledTimes(1);
     expect(handleNext).not.toHaveBeenCalled();
   });
@@ -48,12 +45,11 @@ describe('StepUploadAudio step controls', () => {
         onBack={noop}
         onNext={handleNext}
         onEditAutomations={noop}
-        canProceed={true}
         pendingIntentLabels={[]}
       />
     );
 
-    expect(screen.getByText(/Automation answers saved/i)).toBeInTheDocument();
+    expect(screen.getByText(/These answers are saved automatically/i)).toBeInTheDocument();
     const continueBtn = screen.getByRole('button', { name: /continue/i });
     expect(continueBtn).not.toBeDisabled();
     fireEvent.click(continueBtn);

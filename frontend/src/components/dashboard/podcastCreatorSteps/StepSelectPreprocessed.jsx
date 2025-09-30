@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Badge } from '../../ui/badge';
@@ -33,19 +33,11 @@ export default function StepSelectPreprocessed({
   onRefresh,
   intents = {},
   pendingIntentLabels = [],
-  intentsComplete = false,
   onIntentSubmit,
   onEditAutomations,
+  onDeleteItem = null,
 }) {
-  const autoOpenRef = useRef(false);
   const hasPendingIntents = Array.isArray(pendingIntentLabels) && pendingIntentLabels.length > 0;
-
-  useEffect(() => {
-    if (selectedFilename && hasPendingIntents && typeof onEditAutomations === 'function' && !autoOpenRef.current) {
-      autoOpenRef.current = true;
-      setTimeout(() => { try { onEditAutomations(); } catch {} }, 150);
-    }
-  }, [selectedFilename, hasPendingIntents, onEditAutomations]);
 
   const selected = useMemo(
     () => items.find((item) => item.filename === selectedFilename) || null,
@@ -58,14 +50,19 @@ export default function StepSelectPreprocessed({
   const sfxCount = Number((counts?.sfx?.count) ?? 0);
 
   const handleContinue = async () => {
+    if (hasPendingIntents && typeof onEditAutomations === 'function') {
+      onEditAutomations();
+      return;
+    }
     if (typeof onIntentSubmit === 'function') {
       const result = await onIntentSubmit(intents);
       if (result === false) return;
+      if (result === true) return;
     }
     if (typeof onNext === 'function') onNext();
   };
 
-  const isReady = !!selected && intentsComplete;
+  const canContinue = !!selected;
 
   return (
     <div className="space-y-6">
@@ -112,29 +109,60 @@ export default function StepSelectPreprocessed({
                   const flubber = Number((intentsData?.flubber?.count) ?? 0);
                   const intern = Number((intentsData?.intern?.count) ?? 0);
                   const sfx = Number((intentsData?.sfx?.count) ?? 0);
+                  const canInteract = ready && typeof onSelect === 'function';
+                  const deleteHintReady = 'Deleting a ready upload will not refund processing minutes already used.';
+                  const deleteHintPending = 'Delete this upload while it is still processing? No processing minutes have been deducted yet.';
                   return (
-                    <button
+                    <div
                       key={item.id || item.filename}
-                      type="button"
+                      role="button"
+                      tabIndex={ready ? 0 : -1}
+                      aria-disabled={!ready}
                       className={`text-left p-4 transition border-r border-b border-slate-200 focus:outline-none focus-visible:ring ${
-                        ready ? 'bg-white hover:bg-slate-50' : 'bg-slate-100 cursor-not-allowed opacity-70'
+                        ready ? 'bg-white hover:bg-slate-50 cursor-pointer' : 'bg-slate-100 cursor-not-allowed opacity-70'
                       } ${isSelected ? 'ring-2 ring-blue-500' : ''}`}
-                      onClick={() => ready && typeof onSelect === 'function' && onSelect(item)}
-                      disabled={!ready}
+                      onClick={() => {
+                        if (!ready || !canInteract) return;
+                        onSelect(item);
+                      }}
+                      onKeyDown={(event) => {
+                        if (!ready || !canInteract) return;
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          onSelect(item);
+                        }
+                      }}
                     >
                       <div className="flex items-start gap-3">
                         <FileAudio className={`w-10 h-10 ${ready ? 'text-blue-500' : 'text-slate-400'}`} />
                         <div className="flex-1 space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-slate-800">{item.friendly_name || item.filename}</span>
-                            {ready ? (
-                              <Badge variant={isSelected ? 'default' : 'outline'} className="bg-emerald-100 text-emerald-700 border-emerald-200">
-                                Ready
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-200">
-                                Processing
-                              </Badge>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-slate-800">{item.friendly_name || item.filename}</span>
+                              {ready ? (
+                                <Badge variant={isSelected ? 'default' : 'outline'} className="bg-emerald-100 text-emerald-700 border-emerald-200">
+                                  Ready
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-200">
+                                  Processing
+                                </Badge>
+                              )}
+                            </div>
+                            {typeof onDeleteItem === 'function' && (
+                              <button
+                                type="button"
+                                className="inline-flex items-center justify-center rounded-full border border-transparent bg-slate-100 p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-800 focus:outline-none focus-visible:ring"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onDeleteItem(item);
+                                }}
+                                onKeyDown={(event) => event.stopPropagation()}
+                                title={ready ? deleteHintReady : deleteHintPending}
+                                aria-label={`Delete ${item.friendly_name || item.filename}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
                             )}
                           </div>
                           <div className="text-xs text-slate-500">
@@ -160,7 +188,7 @@ export default function StepSelectPreprocessed({
                           )}
                         </div>
                       </div>
-                    </button>
+                    </div>
                   );
                 })}
               </div>
@@ -219,7 +247,7 @@ export default function StepSelectPreprocessed({
         <Button variant="ghost" onClick={onBack}>
           Back
         </Button>
-        <Button onClick={handleContinue} disabled={!isReady}>
+        <Button onClick={handleContinue} disabled={!canContinue || loading}>
           Continue
         </Button>
       </div>

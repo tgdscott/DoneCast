@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { FileAudio, Loader2, Mic, Upload, ArrowLeft, Lightbulb } from 'lucide-react';
@@ -17,7 +17,6 @@ export default function StepUploadAudio({
   onEditAutomations,
   onIntentChange,
   onIntentSubmit,
-  canProceed = false,
   pendingIntentLabels = [],
   intents = {},
   intentVisibility = {},
@@ -51,23 +50,11 @@ export default function StepUploadAudio({
     } catch { return name; }
   };
 
-  const autoOpenedRef = useRef(false);
-  // Auto-open the intent questionnaire immediately after file upload if pending.
-  useEffect(() => {
-    if (!autoOpenedRef.current && (uploadedFile || uploadedFilename) && hasPendingIntents && typeof onEditAutomations === 'function') {
-      autoOpenedRef.current = true;
-      // Slight delay to allow UI to render the success state first.
-      setTimeout(() => { try { onEditAutomations(); } catch {} }, 150);
-    }
-  }, [uploadedFile, uploadedFilename, hasPendingIntents, onEditAutomations]);
-
-  const handleIntentSelect = (key, value) => {
-    if (typeof onIntentChange === 'function') {
-      onIntentChange(key, value);
-    }
-  };
-
   const handleContinue = async () => {
+    if (hasPendingIntents && typeof onEditAutomations === 'function') {
+      onEditAutomations();
+      return;
+    }
     if (typeof onIntentSubmit === 'function') {
       const result = await onIntentSubmit(intents);
       if (result === false) return;
@@ -233,7 +220,7 @@ export default function StepUploadAudio({
                 size="lg"
                 className="text-white"
                 style={{ backgroundColor: '#2C3E50' }}
-                disabled={!(canProceed || uploadedFilename)}
+                disabled={isUploading || !(uploadedFile || uploadedFilename)}
               >
                 Continue
               </Button>

@@ -2,6 +2,7 @@ import React from 'react';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 import { AlertTriangle, ArrowLeft, Library, Mic, Upload } from 'lucide-react';
+import styles from './EpisodeStartOptions.module.css';
 
 export default function EpisodeStartOptions({
   loading = false,
@@ -34,7 +35,7 @@ export default function EpisodeStartOptions({
           <button
             type="button"
             onClick={onChooseUpload}
-            className="border border-slate-200 rounded-xl p-6 text-left hover:border-blue-400 hover:shadow-sm transition"
+            className={`border border-slate-200 rounded-xl text-left hover:border-blue-400 hover:shadow-sm transition ${styles['uniform-card']}`}
           >
             <Upload className="w-6 h-6 text-blue-500 mb-4" />
             <div className="font-semibold text-slate-800 mb-1">Upload new audio</div>
@@ -49,11 +50,11 @@ export default function EpisodeStartOptions({
               onClick={hasReadyAudio ? onChooseLibrary : undefined}
               disabled={!hasReadyAudio || loading}
               title={!hasReadyAudio ? 'You must upload audio first' : undefined}
-              className={`border rounded-xl p-6 text-left transition ${
+              className={`border rounded-xl text-left transition ${
                 hasReadyAudio
                   ? 'border-emerald-200 hover:border-emerald-500 hover:shadow-sm'
                   : 'border-slate-200 bg-slate-100 cursor-not-allowed text-slate-400'
-              }`}
+              } ${styles['uniform-card']}`}
             >
               <Library className={`w-6 h-6 mb-4 ${hasReadyAudio ? 'text-emerald-500' : 'text-slate-400'}`} />
               <div className="font-semibold text-slate-800 mb-1">Use processed audio</div>
@@ -74,7 +75,7 @@ export default function EpisodeStartOptions({
           <button
             type="button"
             onClick={onChooseRecord}
-            className="border border-slate-200 rounded-xl p-6 text-left hover:border-purple-400 hover:shadow-sm transition"
+            className={`border border-slate-200 rounded-xl text-left hover:border-purple-400 hover:shadow-sm transition ${styles['uniform-card']}`}
           >
             <Mic className="w-6 h-6 text-purple-500 mb-4" />
             <div className="font-semibold text-slate-800 mb-1">Record your show</div>

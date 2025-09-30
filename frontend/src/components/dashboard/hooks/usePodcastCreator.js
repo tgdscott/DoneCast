@@ -898,17 +898,6 @@ export default function usePodcastCreator({
     });
   }, []);
 
-  // Auto-open intent modal when on Step 2 with pending answers
-  useEffect(() => {
-    if (currentStep !== 2) return;
-    if (!(uploadedFile || uploadedFilename)) return;
-    if (!intentDetectionReady) return;
-    if (!intentsComplete && !intentsPromptedRef.current) {
-      setShowIntentQuestions(true);
-      intentsPromptedRef.current = true;
-    }
-  }, [currentStep, uploadedFile, uploadedFilename, intentsComplete, intentDetectionReady]);
-
   const cancelBuild = () => {
     // Abort in-flight audio upload, if any
     try {
@@ -1754,4 +1743,3 @@ export default function usePodcastCreator({
     updateCoverCrop,
   };
 }
-
