@@ -174,7 +174,22 @@ export default function PodcastPlusDashboard() {
       setPreuploadError(null);
       return data;
     } catch (err) {
-      setPreuploadError(err?.message || 'Failed to load uploads');
+      const status = err?.status;
+      let msg = 'Failed to load your uploaded main-content audio.';
+      if (status === 401) {
+        msg = 'Your session expired. Please sign in again to load your uploads.';
+      } else if (status === 403) {
+        msg = 'You are not allowed to view uploads for this account.';
+      } else if (status === 404) {
+        // In some setups this route might be gated; treat as empty rather than fatal
+        msg = 'No uploads found yet.';
+      } else if (typeof err?.message === 'string') {
+        const em = err.message.toLowerCase();
+        if (em.includes('failed to fetch') || em.includes('network') || em.includes('cors')) {
+          msg = 'Network issue loading your uploads. Check your connection or try again.';
+        }
+      }
+      setPreuploadError(msg);
       setPreuploadItems([]);
       return [];
     } finally {
@@ -423,6 +438,7 @@ export default function PodcastPlusDashboard() {
             loading={preuploadLoading}
             hasReadyAudio={hasReadyAudio}
             errorMessage={preuploadError || ''}
+            onRetry={() => { try { refreshPreuploads(); } catch {} }}
             onBack={handleBackToDashboard}
             onChooseUpload={() => {
               setCreatorMode('standard');

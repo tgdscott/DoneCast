@@ -42,7 +42,7 @@ def _notify_watchers_processed(filename: str) -> None:
                 if email:
                     subject = "Your upload is ready to edit"
                     body = (
-                        f"Good news! The audio file '{friendly}' has finished processing and is ready in Podcast++.\n\n"
+                        f"Good news! The audio file '{friendly}' has finished processing and is ready in Podcast Plus Plus.\n\n"
                         "You can return to the dashboard to continue building your episode."
                     )
                     try:

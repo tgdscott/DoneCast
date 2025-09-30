@@ -7,6 +7,7 @@ export default function EpisodeStartOptions({
   loading = false,
   hasReadyAudio = false,
   errorMessage = '',
+  onRetry,
   onBack,
   onChooseUpload,
   onChooseLibrary,
@@ -42,22 +43,33 @@ export default function EpisodeStartOptions({
             </p>
           </button>
 
-          <button
-            type="button"
-            onClick={hasReadyAudio ? onChooseLibrary : undefined}
-            disabled={!hasReadyAudio || loading}
-            className={`border rounded-xl p-6 text-left transition ${
-              hasReadyAudio
-                ? 'border-emerald-200 hover:border-emerald-500 hover:shadow-sm'
-                : 'border-slate-200 bg-slate-100 cursor-not-allowed text-slate-400'
-            }`}
-          >
-            <Library className={`w-6 h-6 mb-4 ${hasReadyAudio ? 'text-emerald-500' : 'text-slate-400'}`} />
-            <div className="font-semibold text-slate-800 mb-1">Use processed audio</div>
-            <p className="text-sm text-slate-600">
-              Jump straight into editing with transcripts and automations ready. {hasReadyAudio ? '' : 'Upload audio first and we will unlock this option.'}
-            </p>
-          </button>
+          <div className={`relative ${!hasReadyAudio ? 'group' : ''}`}>
+            <button
+              type="button"
+              onClick={hasReadyAudio ? onChooseLibrary : undefined}
+              disabled={!hasReadyAudio || loading}
+              title={!hasReadyAudio ? 'You must upload audio first' : undefined}
+              className={`border rounded-xl p-6 text-left transition ${
+                hasReadyAudio
+                  ? 'border-emerald-200 hover:border-emerald-500 hover:shadow-sm'
+                  : 'border-slate-200 bg-slate-100 cursor-not-allowed text-slate-400'
+              }`}
+            >
+              <Library className={`w-6 h-6 mb-4 ${hasReadyAudio ? 'text-emerald-500' : 'text-slate-400'}`} />
+              <div className="font-semibold text-slate-800 mb-1">Use processed audio</div>
+              <p className="text-sm text-slate-600">
+                Jump straight into editing with transcripts and automations ready. {hasReadyAudio ? '' : 'Upload audio first and we will unlock this option.'}
+              </p>
+            </button>
+
+            {!hasReadyAudio && (
+              <div className="absolute left-0 -bottom-2 translate-y-full z-10 hidden group-hover:block">
+                <div className="max-w-xs rounded-md border border-red-200 bg-white shadow-md p-2">
+                  <span className="text-sm text-red-600">You must upload audio first</span>
+                </div>
+              </div>
+            )}
+          </div>
 
           <button
             type="button"
@@ -75,9 +87,20 @@ export default function EpisodeStartOptions({
 
       {errorMessage && (
         <Card className="border border-red-200 bg-red-50">
-          <CardContent className="flex items-start gap-3 text-sm text-red-700">
-            <AlertTriangle className="w-5 h-5 mt-1" />
-            <div>{errorMessage}</div>
+          <CardContent className="flex items-start justify-between gap-3 text-sm text-red-700">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 mt-1" />
+              <div>{errorMessage}</div>
+            </div>
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="ml-4 shrink-0 inline-flex items-center rounded-md border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+              >
+                Try again
+              </button>
+            )}
           </CardContent>
         </Card>
       )}

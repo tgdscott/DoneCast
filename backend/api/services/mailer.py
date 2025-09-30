@@ -23,7 +23,7 @@ class Mailer:
             logger.info("Using SMTP_PASSWORD fallback for mailer secret")
         # Rebrand default sender domain (retain old via SMTP_FROM override if needed)
         self.sender = os.getenv("SMTP_FROM", "no-reply@podcastplusplus.com")
-        self.sender_name = os.getenv("SMTP_FROM_NAME", "Podcast++")
+        self.sender_name = os.getenv("SMTP_FROM_NAME", "Podcast Plus Plus")
 
     def send(self, to: str, subject: str, text: str, html: Optional[str] = None) -> bool:
         """Send an email. Returns True if accepted by remote SMTP server.

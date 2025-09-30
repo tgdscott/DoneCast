@@ -5,10 +5,15 @@ export function isApiError(e) {
 const LOCAL_LIKE_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]']);
 
 function deriveApiOriginFromWindowOrigin() {
-  // Prefer same-origin relative API (e.g., "/api") so users never see api.*.
-  // Return empty string to signal buildApiUrl to construct relative URLs.
-  // An explicit VITE_API_BASE can still override this when cross-origin is required.
-  return '';
+  if (typeof window === 'undefined' || typeof window.location === 'undefined') {
+    return '';
+  }
+  const host = window.location.hostname || '';
+  if (LOCAL_LIKE_HOSTS.has(host)) {
+    return '';
+  }
+  // Default production API host when no build-time override is provided.
+  return 'https://api.podcastplusplus.com';
 }
 
 export function resolveRuntimeApiBase() {

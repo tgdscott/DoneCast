@@ -115,22 +115,22 @@ async def register_user(
 
     app_base = (settings.APP_BASE_URL or "https://app.podcastplusplus.com").rstrip("/")
     verify_url = f"{app_base}/verify?token={token}"
-    subj = "Podcast++: Confirm your email"
+    subj = "Podcast Plus Plus: Confirm your email"
     body = (
-        f"Your Podcast++ verification code is: {code}\n\n"
+        f"Your Podcast Plus Plus verification code is: {code}\n\n"
         f"Click to verify instantly: {verify_url}\n\n"
         "This code expires in 15 minutes. If you didn’t request it, you can ignore this email."
     )
     html_body = f"""
     <div style='font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:8px 4px;'>
       <h2 style='font-size:20px;margin:0 0 12px;'>Confirm your email</h2>
-      <p style='font-size:15px;line-height:1.5;margin:0 0 16px;'>Use the code below or click the button to finish creating your Podcast++ account.</p>
+    <p style='font-size:15px;line-height:1.5;margin:0 0 16px;'>Use the code below or click the button to finish creating your Podcast Plus Plus account.</p>
       <div style='background:#111;color:#fff;font-size:26px;letter-spacing:4px;padding:12px 16px;text-align:center;border-radius:6px;font-weight:600;margin:0 0 20px;'>{code}</div>
       <p style='text-align:center;margin:0 0 24px;'>
         <a href='{verify_url}' style='display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 20px;border-radius:6px;font-weight:600;'>Verify Email</a>
       </p>
       <p style='font-size:13px;color:#555;margin:0 0 12px;'>This code expires in 15 minutes. If you did not request it, you can safely ignore this email.</p>
-      <p style='font-size:12px;color:#777;margin:24px 0 0;'>© {datetime.utcnow().year} Podcast++</p>
+    <p style='font-size:12px;color:#777;margin:24px 0 0;'>© {datetime.utcnow().year} Podcast Plus Plus</p>
     </div>
     """.strip()
 
