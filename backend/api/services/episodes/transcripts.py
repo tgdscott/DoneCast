@@ -37,16 +37,23 @@ def _candidate_stems_from_episode(episode: Any) -> list[str]:
         if stem:
             stems.append(stem)
     try:
-        meta = json.loads(getattr(episode, "meta_json", "{}") or "{}")
+        meta_raw = getattr(episode, "meta_json", "{}") or "{}"
+        meta = json.loads(meta_raw)
         transcripts_meta = meta.get("transcripts") or {}
-        for val in transcripts_meta.values():
-            stem = _safe_stem(val)
-            if stem:
-                stems.append(stem)
+        if isinstance(transcripts_meta, dict):
+            for val in transcripts_meta.values():
+                stem = _safe_stem(val)
+                if stem:
+                    stems.append(stem)
         extra = meta.get("transcript_stem")
         stem = _safe_stem(extra)
         if stem:
             stems.append(stem)
+        # Assembly pipeline stores helpful filenames under these keys
+        for key in ("main_content_filename", "output_filename", "source_filename"):
+            stem = _safe_stem(meta.get(key))
+            if stem:
+                stems.append(stem)
     except Exception:
         pass
     # Deduplicate order preserving
@@ -100,11 +107,16 @@ def transcript_endpoints_for_episode(
     try:
         meta = json.loads(getattr(episode, "meta_json", "{}") or "{}")
         transcripts_meta = meta.get("transcripts") or {}
-        if transcripts_meta:
+        if isinstance(transcripts_meta, dict):
             for val in transcripts_meta.values():
                 if val:
                     available = True
                     break
+        if not available:
+            spreaker_meta = meta.get("spreaker") or {}
+            if isinstance(spreaker_meta, dict):
+                if spreaker_meta.get("transcript_url"):
+                    available = True
     except Exception:
         transcripts_meta = {}
 
