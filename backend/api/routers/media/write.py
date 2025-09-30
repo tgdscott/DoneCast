@@ -115,8 +115,15 @@ async def upload_media_files(
         notify_target = ""
 
     def _queue_watch(filename: str, friendly: str) -> None:
-        if not (filename and notify_requested and notify_target and category == MediaCategory.main_content):
+        if not filename or category != MediaCategory.main_content:
             return
+
+        # Always record a watch so in-app notifications fire even when the
+        # user didn't request an email. Only persist an email target when one
+        # was explicitly supplied/derived.
+        email_target = (
+            notify_target if notify_requested and notify_target else None
+        )
         try:
             existing_watch = session.exec(
                 select(TranscriptionWatch).where(
@@ -130,7 +137,7 @@ async def upload_media_files(
         friendly_clean = (friendly or "").strip() or Path(filename).stem
 
         if existing_watch:
-            existing_watch.notify_email = notify_target
+            existing_watch.notify_email = email_target
             existing_watch.friendly_name = friendly_clean
             existing_watch.notified_at = None
             existing_watch.last_status = "queued"
@@ -141,7 +148,7 @@ async def upload_media_files(
                     user_id=current_user.id,
                     filename=filename,
                     friendly_name=friendly_clean,
-                    notify_email=notify_target,
+                    notify_email=email_target,
                     last_status="queued",
                 )
             )
