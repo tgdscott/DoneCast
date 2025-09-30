@@ -8,8 +8,13 @@ import pytest
 from sqlmodel import select
 
 from api.core.security import get_password_hash
+from api.core.paths import MEDIA_DIR
+from api.models.notification import Notification
+from api.models.podcast import MediaCategory, MediaItem
 from api.models.transcription import TranscriptionWatch
 from api.models.user import User
+from api.services.transcription import transcribe_media_file
+
 
 
 def _create_user(session) -> Tuple[User, str]:
@@ -121,3 +126,119 @@ def test_main_content_upload_records_email_target(session, client, monkeypatch):
     assert watch is not None
     assert watch.notify_email == notify_email
     assert watch.last_status == "queued"
+
+@pytest.mark.usefixtures("db_engine")
+def test_transcribe_media_file_notifies_watchers_with_email(session, monkeypatch):
+    user, _ = _create_user(session)
+
+    filename = "notify-me.wav"
+    friendly = "Notify Me"
+    (MEDIA_DIR / filename).write_bytes(b"RIFF....WAVE")
+
+    media_item = MediaItem(
+        filename=filename,
+        friendly_name=friendly,
+        user_id=user.id,
+        category=MediaCategory.main_content,
+    )
+    session.add(media_item)
+    watch = TranscriptionWatch(
+        user_id=user.id,
+        filename=filename,
+        friendly_name=friendly,
+        notify_email="alerts@example.com",
+        last_status="queued",
+    )
+    session.add(watch)
+    session.commit()
+
+    sent: list[tuple[str, str, str]] = []
+
+    def fake_send(email: str, subject: str, body: str) -> bool:
+        sent.append((email, subject, body))
+        return True
+
+    monkeypatch.setattr("api.services.transcription.watchers.mailer.send", fake_send)
+    monkeypatch.setattr(
+        "api.services.transcription.get_word_timestamps",
+        lambda _: [{"word": "ok", "start": 0.0, "end": 0.5}],
+    )
+
+    transcribe_media_file(filename)
+
+    updated_watch = session.exec(
+        select(TranscriptionWatch).where(
+            TranscriptionWatch.user_id == user.id,
+            TranscriptionWatch.filename == filename,
+        )
+    ).first()
+    assert updated_watch is not None
+    assert updated_watch.notified_at is not None
+    assert updated_watch.last_status == "sent"
+
+    notes = session.exec(
+        select(Notification).where(Notification.user_id == user.id)
+    ).all()
+    assert len(notes) == 1
+    assert friendly in notes[0].body
+    assert sent and sent[0][0] == "alerts@example.com"
+
+
+@pytest.mark.usefixtures("db_engine")
+def test_transcribe_media_file_notifies_without_email(session, monkeypatch):
+    user, _ = _create_user(session)
+
+    filename = "notify-none.wav"
+    friendly = "Notify None"
+    (MEDIA_DIR / filename).write_bytes(b"RIFF....WAVE")
+
+    session.add(
+        MediaItem(
+            filename=filename,
+            friendly_name=friendly,
+            user_id=user.id,
+            category=MediaCategory.main_content,
+        )
+    )
+    session.add(
+        TranscriptionWatch(
+            user_id=user.id,
+            filename=filename,
+            friendly_name=friendly,
+            notify_email=None,
+            last_status="queued",
+        )
+    )
+    session.commit()
+
+    sent: list[tuple[str, str, str]] = []
+
+    def fake_send(email: str, subject: str, body: str) -> bool:
+        sent.append((email, subject, body))
+        return True
+
+    monkeypatch.setattr("api.services.transcription.watchers.mailer.send", fake_send)
+    monkeypatch.setattr(
+        "api.services.transcription.get_word_timestamps",
+        lambda _: [{"word": "ok", "start": 0.0, "end": 0.5}],
+    )
+
+    transcribe_media_file(filename)
+
+    updated_watch = session.exec(
+        select(TranscriptionWatch).where(
+            TranscriptionWatch.user_id == user.id,
+            TranscriptionWatch.filename == filename,
+        )
+    ).first()
+    assert updated_watch is not None
+    assert updated_watch.notified_at is not None
+    assert updated_watch.last_status == "no-email"
+
+    notes = session.exec(
+        select(Notification).where(Notification.user_id == user.id)
+    ).all()
+    assert len(notes) == 1
+    assert friendly in notes[0].body
+    assert sent == []
+
