@@ -24,6 +24,11 @@ export default function PodcastCreator({
   testInject,
   preselectedMainFilename,
   preselectedTranscriptReady,
+  creatorMode = 'standard',
+  preuploadedItems = [],
+  preuploadedLoading = false,
+  onRefreshPreuploaded = () => {},
+  preselectedStartStep,
 }) {
   const controller = usePodcastCreator({
     token,
@@ -32,6 +37,8 @@ export default function PodcastCreator({
     testInject,
     preselectedMainFilename,
     preselectedTranscriptReady,
+    creatorMode,
+    preselectedStartStep,
   });
 
   const {
@@ -43,9 +50,11 @@ export default function PodcastCreator({
     handleTemplateSelect,
     uploadedFile,
     uploadedFilename,
+    selectedPreupload,
     isUploading,
     uploadProgress,
     handleFileChange,
+    handlePreuploadedSelect,
     fileInputRef,
     mediaLibrary,
     ttsValues,
@@ -191,6 +200,24 @@ export default function PodcastCreator({
           />
         );
       case 2:
+        if (creatorMode === 'preuploaded') {
+          return (
+            <StepSelectPreprocessed
+              items={preuploadedItems}
+              loading={preuploadedLoading}
+              selectedFilename={selectedPreupload || uploadedFilename}
+              onSelect={handlePreuploadedSelect}
+              onBack={() => setCurrentStep(1)}
+              onNext={() => setCurrentStep(3)}
+              onRefresh={onRefreshPreuploaded}
+              intents={intents}
+              pendingIntentLabels={pendingIntentLabels}
+              intentsComplete={intentsComplete}
+              onIntentSubmit={handleIntentSubmit}
+              onEditAutomations={() => setShowIntentQuestions(true)}
+            />
+          );
+        }
         return (
           <StepUploadAudio
             uploadedFile={uploadedFile}
