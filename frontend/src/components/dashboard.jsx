@@ -18,8 +18,6 @@ import {
   Search,
   Target,
   Zap,
-  Mic,
-  Upload,
   FileText,
   Music,
   BarChart3,
@@ -31,18 +29,19 @@ import {
   Settings as SettingsIcon,
   DollarSign,
   Globe2,
-  ChevronDown,
 } from "lucide-react";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+
 import { makeApi, coerceArray } from "@/lib/apiClient";
 import { useAuth } from "@/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import Logo from "@/components/Logo.jsx";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import Joyride, { STATUS } from "react-joyride";
 
 import TemplateEditor from "@/components/dashboard/TemplateEditor";
 import PodcastCreator from "@/components/dashboard/PodcastCreator";
+import EpisodeStartOptions from "@/components/dashboard/EpisodeStartOptions";
+import PreUploadManager from "@/components/dashboard/PreUploadManager";
 import MediaLibrary from "@/components/dashboard/MediaLibrary";
 import EpisodeHistory from "@/components/dashboard/EpisodeHistory";
 import PodcastManager from "@/components/dashboard/PodcastManager";
@@ -117,6 +116,10 @@ export default function PodcastPlusDashboard() {
   const [preselectedMainFilename, setPreselectedMainFilename] = useState(null);
   const [preselectedTranscriptReady, setPreselectedTranscriptReady] = useState(false);
   const [shouldRunTour, setShouldRunTour] = useState(false);
+  const [creatorMode, setCreatorMode] = useState('standard');
+  const [preuploadItems, setPreuploadItems] = useState([]);
+  const [preuploadLoading, setPreuploadLoading] = useState(false);
+  const [preuploadError, setPreuploadError] = useState(null);
 
   const tourSteps = useMemo(() => [
     {
@@ -156,6 +159,28 @@ export default function PodcastPlusDashboard() {
       content: 'If it doesn\'t fit in one of the categories above, look for it here.',
     },
   ], []);
+
+  const refreshPreuploads = useCallback(async () => {
+    if (!token) return [];
+    setPreuploadLoading(true);
+    try {
+      const api = makeApi(token);
+      const data = await api.get('/api/media/main-content');
+      if (Array.isArray(data)) {
+        setPreuploadItems(data);
+      } else {
+        setPreuploadItems([]);
+      }
+      setPreuploadError(null);
+      return data;
+    } catch (err) {
+      setPreuploadError(err?.message || 'Failed to load uploads');
+      setPreuploadItems([]);
+      return [];
+    } finally {
+      setPreuploadLoading(false);
+    }
+  }, [token]);
 
   const handleTourCallback = (data) => {
     const { status } = data;
@@ -240,6 +265,23 @@ export default function PodcastPlusDashboard() {
 
   // Initial load + token change: fetch other data (user already fetched by AuthContext)
   useEffect(() => { if (token) { fetchData(); } }, [token, logout]);
+  useEffect(() => {
+    if (!token) return;
+    if (currentView === 'episodeStart' || currentView === 'preuploadUpload') {
+      refreshPreuploads();
+    }
+  }, [token, currentView, refreshPreuploads]);
+  useEffect(() => {
+    if (!token) return;
+    if (
+      currentView === 'createEpisode' &&
+      creatorMode === 'preuploaded' &&
+      !preuploadLoading &&
+      preuploadItems.length === 0
+    ) {
+      refreshPreuploads();
+    }
+  }, [token, currentView, creatorMode, preuploadLoading, preuploadItems.length, refreshPreuploads]);
   // When navigating back to the Dashboard view, refresh data so cards reflect latest state
   useEffect(() => {
     if (token && currentView === 'dashboard') {
@@ -329,6 +371,7 @@ export default function PodcastPlusDashboard() {
 
   const handleBackToDashboard = () => {
     setSelectedTemplateId(null);
+    setCreatorMode('standard');
     setCurrentView('dashboard');
     // Ensure counts (podcasts/templates/stats) are fresh when returning
     try { fetchData(); } catch {}
@@ -359,17 +402,56 @@ export default function PodcastPlusDashboard() {
   const renderCurrentView = () => {
     switch (currentView) {
       case 'recorder':
-  return (
+        return (
           <Recorder
             onBack={handleBackToDashboard}
             token={token}
-            onFinish={({ filename, hint, transcriptReady, startStep }) => {
+            onFinish={({ filename, hint, transcriptReady }) => {
               try {
                 setPreselectedMainFilename(filename || hint || null);
                 setPreselectedTranscriptReady(!!transcriptReady);
               } catch {}
+              setCreatorMode('standard');
               setCurrentView('createEpisode');
             }}
+          />
+        );
+      case 'episodeStart': {
+        const hasReadyAudio = preuploadItems.some((item) => item?.transcript_ready);
+        return (
+          <EpisodeStartOptions
+            loading={preuploadLoading}
+            hasReadyAudio={hasReadyAudio}
+            errorMessage={preuploadError || ''}
+            onBack={handleBackToDashboard}
+            onChooseUpload={() => {
+              setCreatorMode('standard');
+              setCurrentView('preuploadUpload');
+            }}
+            onChooseLibrary={async () => {
+              setCreatorMode('preuploaded');
+              setPreselectedMainFilename(null);
+              setPreselectedTranscriptReady(false);
+              if (!preuploadLoading && preuploadItems.length === 0) {
+                try { await refreshPreuploads(); } catch {}
+              }
+              setCurrentView('createEpisode');
+            }}
+            onChooseRecord={() => {
+              setCreatorMode('standard');
+              setCurrentView('recorder');
+            }}
+          />
+        );
+      }
+      case 'preuploadUpload':
+        return (
+          <PreUploadManager
+            token={token}
+            onBack={() => setCurrentView('episodeStart')}
+            onDone={handleBackToDashboard}
+            defaultEmail={user?.email || ''}
+            onUploaded={refreshPreuploads}
           />
         );
       case 'templateManager':
@@ -385,6 +467,11 @@ export default function PodcastPlusDashboard() {
             podcasts={podcasts}
             preselectedMainFilename={preselectedMainFilename}
             preselectedTranscriptReady={preselectedTranscriptReady}
+            creatorMode={creatorMode}
+            preuploadedItems={preuploadItems}
+            preuploadedLoading={preuploadLoading}
+            onRefreshPreuploaded={refreshPreuploads}
+            preselectedStartStep={creatorMode === 'preuploaded' ? 1 : undefined}
           />
         );
       case 'mediaLibrary':
@@ -396,7 +483,9 @@ export default function PodcastPlusDashboard() {
       case 'rssImporter':
         return <RssImporter onBack={handleBackToDashboard} token={token} />;
       case 'devTools':
-  return isAdmin(authUser) ? <DevTools token={token} /> : <div className="p-6 text-sm text-red-600">Not authorized.</div>;
+        return isAdmin(authUser)
+          ? <DevTools token={token} />
+          : <div className="p-6 text-sm text-red-600">Not authorized.</div>;
       case 'settings':
         return <Settings token={token} />;
       case 'templateWizard':
@@ -451,26 +540,24 @@ export default function PodcastPlusDashboard() {
                         <div className={`font-semibold mt-0.5 ${canCreateEpisode ? 'text-green-600' : 'text-amber-600'}`}>{canCreateEpisode ? 'Yes' : 'Setup needed'}</div>
                       </div>
                     </div>
-                    <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-                      {canCreateEpisode ? (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button className="flex-1 md:flex-none" title="Start a new episode" data-tour-id="dashboard-new-episode">
-                              <Plus className="w-4 h-4 mr-2" />
-                              Start New Episode
-                              <ChevronDown className="w-4 h-4 ml-2 opacity-80" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="min-w-[220px]">
-                            <DropdownMenuItem onClick={() => setCurrentView('createEpisode')} className="cursor-pointer">
-                              <Upload className="w-4 h-4 mr-2" /> Use Prerecorded Audio
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => setCurrentView('recorder')} className="cursor-pointer">
-                              <Mic className="w-4 h-4 mr-2" /> Record Your Show Now
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      ) : (
+                      <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+                        {canCreateEpisode ? (
+                          <Button
+                            className="flex-1 md:flex-none"
+                            title="Start a new episode"
+                            data-tour-id="dashboard-new-episode"
+                            onClick={() => {
+                              setCreatorMode('standard');
+                              setPreselectedMainFilename(null);
+                              setPreselectedTranscriptReady(false);
+                              setCurrentView('episodeStart');
+                              refreshPreuploads();
+                            }}
+                          >
+                            <Plus className="w-4 h-4 mr-2" />
+                            Start New Episode
+                          </Button>
+                        ) : (
                         <div className="flex gap-2 flex-wrap">
                           {templates.length === 0 && (
                             <Button

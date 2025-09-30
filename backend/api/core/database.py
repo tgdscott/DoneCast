@@ -11,6 +11,7 @@ from ..models import recurring as _recurring_models  # noqa: F401
 # Import usage ledger model so metadata contains it during create_all
 from ..models import usage as _usage_models  # noqa: F401
 from ..models import website as _website_models  # noqa: F401
+from ..models import transcription as _transcription_models  # noqa: F401
 from pathlib import Path
 from .config import settings
 
