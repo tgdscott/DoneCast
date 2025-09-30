@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ArrowLeft, Loader2, Music, Trash2, Upload, Edit, Save, XCircle, Play, Pause, CheckSquare, Square } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { makeApi, buildApiUrl } from "@/lib/apiClient";
+import { makeApi, buildApiUrl, coerceArray } from "@/lib/apiClient";
 
 export default function MediaLibrary({ onBack, token }) {
   const [mediaFiles, setMediaFiles] = useState([]);
@@ -29,7 +29,7 @@ export default function MediaLibrary({ onBack, token }) {
     try {
       const api = makeApi(token);
       const data = await api.get('/api/media/');
-      setMediaFiles(data);
+      setMediaFiles(coerceArray(data));
     } catch (err) {
       setError(err.message);
     } finally {

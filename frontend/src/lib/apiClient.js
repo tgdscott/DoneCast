@@ -23,6 +23,16 @@ export function resolveRuntimeApiBase() {
 // Base URL for API requests. In dev, you can leave this blank and rely on Vite's /api proxy.
 const runtimeBase = resolveRuntimeApiBase();
 
+export function coerceArray(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== 'object') return [];
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.data)) return payload.data;
+  if (Array.isArray(payload.records)) return payload.records;
+  return [];
+}
+
 export function buildApiUrl(path) {
   const base = runtimeBase;
   if (!path) return base || '';
@@ -85,3 +95,4 @@ export const api = {
   get: (p, opts) => req(p, { ...(opts||{}), method: "GET" }),
   post: (p, body, opts) => req(p, { ...(opts||{}), method: "POST", headers: { 'Content-Type': 'application/json', ...((opts&&opts.headers)||{}) }, body: jsonBody(body) }),
 };
+

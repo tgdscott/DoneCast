@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from '@/hooks/use-toast';
-import { makeApi, buildApiUrl } from '@/lib/apiClient';
+import { makeApi, buildApiUrl, coerceArray } from '@/lib/apiClient';
 import { fetchVoices as fetchElevenVoices } from '@/api/elevenlabs';
 import { useAuth } from '@/AuthContext.jsx';
 
@@ -187,7 +187,7 @@ export default function usePodcastCreator({
     const fetchMedia = async () => {
       try {
         const data = await api.get('/api/media/');
-        setMediaLibrary(data);
+        setMediaLibrary(coerceArray(data));
       } catch (err) {
         setError(err.message);
       }
@@ -1704,3 +1704,4 @@ export default function usePodcastCreator({
     updateCoverCrop,
   };
 }
+

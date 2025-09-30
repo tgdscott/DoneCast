@@ -216,10 +216,12 @@ async def auth_google_callback(request: Request, db_session: Session = Depends(g
     except Exception:
         session_frontend_base = None
 
-    # Prefer an explicit app base if provided
-    frontend_base = (settings.APP_BASE_URL or "").strip()
-    if not frontend_base and session_frontend_base:
-        frontend_base = session_frontend_base
+    # Prefer any loopback/private base we captured during the login redirect
+    # (e.g., http://127.0.0.1:5173 while running Vite). This keeps local dev
+    # flows from being forced back to the production APP_BASE_URL.
+    frontend_base = (session_frontend_base or "").strip()
+    if not frontend_base:
+        frontend_base = (settings.APP_BASE_URL or "").strip()
     if not frontend_base:
         try:
             from api.routers.auth.utils import external_base_url as _ext

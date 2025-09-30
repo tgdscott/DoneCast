@@ -19,29 +19,37 @@ import {
   ArrowRight,
   X,
 } from "lucide-react"
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
 import { useAuth } from "@/AuthContext.jsx"
-import { makeApi, buildApiUrl, resolveRuntimeApiBase } from "@/lib/apiClient";
+import { makeApi, buildApiUrl } from "@/lib/apiClient";
 import { useBrand } from "@/brand/BrandContext.jsx";
 import Logo from "@/components/Logo.jsx";
 
 const apiUrl = (path) => buildApiUrl(path);
 
-const googleLoginUrl = (() => {
-  const direct = buildApiUrl("/api/auth/login/google");
-  if (/^https?:\/\//i.test(direct)) {
-    return direct;
+const buildGoogleLoginUrl = () => {
+  let url = buildApiUrl("/api/auth/login/google");
+  if (!url) {
+    url = "/api/auth/login/google";
   }
-  const base = resolveRuntimeApiBase();
-  if (base) {
-    return `${base.replace(/\/+$/, "")}/api/auth/login/google`;
+  if (!/^https?:\/\//i.test(url)) {
+    if (!url.startsWith("/")) {
+      url = `/${url}`;
+    }
   }
-  // Rebrand: point to new API host (legacy host still accepted for a transition period)
-  return "https://api.podcastplusplus.com/api/auth/login/google";
-})();
+  if (typeof window !== "undefined") {
+    const origin = (window.location && window.location.origin) ? window.location.origin.replace(/\/+$/, "") : "";
+    if (origin) {
+      const sep = url.includes("?") ? "&" : "?";
+      url = `${url}${sep}return_to=${encodeURIComponent(origin)}`;
+    }
+  }
+  return url;
+};
 
 const LoginModal = ({ onClose }) => {
   const { login } = useAuth();
+  const googleLoginUrl = useMemo(buildGoogleLoginUrl, []);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");

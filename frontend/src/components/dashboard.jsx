@@ -34,7 +34,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
-import { makeApi } from "@/lib/apiClient";
+import { makeApi, coerceArray } from "@/lib/apiClient";
 import { useAuth } from "@/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import Logo from "@/components/Logo.jsx";
@@ -182,7 +182,8 @@ export default function PodcastPlusDashboard() {
 
       // Templates
       if (templatesRes.status === 'fulfilled') {
-        setTemplates(templatesRes.value);
+        const templatesList = coerceArray(templatesRes.value);
+        setTemplates(templatesList);
       } else {
         const reason = templatesRes.reason || {};
         if (reason.status === 401) {
@@ -197,7 +198,8 @@ export default function PodcastPlusDashboard() {
 
       // Podcasts
       if (podcastsRes.status === 'fulfilled') {
-        setPodcasts(podcastsRes.value);
+        const podcastList = coerceArray(podcastsRes.value);
+        setPodcasts(podcastList);
       } else {
         const reason = podcastsRes.reason || {};
         if (reason.status === 401) {
@@ -707,3 +709,4 @@ export default function PodcastPlusDashboard() {
     </div>
   );
 }
+
