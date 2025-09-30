@@ -11,7 +11,7 @@ from pathlib import Path
 from sqlmodel import Session, select
 
 from .app import celery_app
-from api.core.paths import WS_ROOT as PROJECT_ROOT
+from api.core.paths import TRANSCRIPTS_DIR, MEDIA_DIR
 from api.core.database import engine
 from api.models.notification import Notification
 from api.models.podcast import MediaItem
@@ -92,7 +92,7 @@ def transcribe_media_file(filename: str) -> dict:
     """Generate transcript artifacts for the uploaded media file."""
 
     try:
-        tr_dir = PROJECT_ROOT / "transcripts"
+        tr_dir = TRANSCRIPTS_DIR
         tr_dir.mkdir(parents=True, exist_ok=True)
 
         force_refresh = (
@@ -182,7 +182,7 @@ def transcribe_media_file(filename: str) -> dict:
             }:
                 from pydub import AudioSegment as _AudioSegment
 
-                src = PROJECT_ROOT / "media_uploads" / filename
+                src = MEDIA_DIR / filename
                 audio = (
                     _AudioSegment.from_file(src)
                     if src.is_file()
@@ -205,7 +205,7 @@ def transcribe_media_file(filename: str) -> dict:
                     current += 0.5
                     idx += 1
 
-                tr_dir = PROJECT_ROOT / "transcripts"
+                tr_dir = TRANSCRIPTS_DIR
                 tr_dir.mkdir(parents=True, exist_ok=True)
                 import json as _json
 

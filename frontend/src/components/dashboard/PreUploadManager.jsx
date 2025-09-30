@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui
 import { Input } from '../ui/input';
 import { Checkbox } from '../ui/checkbox';
 import { AlertCircle, ArrowLeft, CheckCircle2, Loader2, Upload } from 'lucide-react';
-import { makeApi } from '@/lib/apiClient';
+import { makeApi, buildApiUrl } from '@/lib/apiClient';
 import { useToast } from '@/hooks/use-toast';
 
 export default function PreUploadManager({
@@ -20,6 +20,7 @@ export default function PreUploadManager({
   const [notify, setNotify] = useState(true);
   const [email, setEmail] = useState(defaultEmail || '');
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(null);
   const [successMessage, setSuccessMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -48,31 +49,70 @@ export default function PreUploadManager({
       setError('Select an audio file to upload.');
       return;
     }
-    setUploading(true);
-    setError('');
-    setSuccessMessage('');
-    try {
-      const form = new FormData();
-      form.append('files', file);
-      if (displayName) {
-        form.append('friendly_names', JSON.stringify([displayName]));
-      }
-      form.append('notify_when_ready', notify ? 'true' : 'false');
-      if (notify && email) {
-        form.append('notify_email', email);
-      }
-      const api = makeApi(token);
-      await api.raw('/api/media/upload/main_content', { method: 'POST', body: form });
-      setSuccessMessage('Upload received! We will notify you once it is processed.');
-      setFile(null);
-      setFriendlyName('');
-      onUploaded();
-    } catch (err) {
-      setError(err?.message || 'Upload failed.');
-      toast({ variant: 'destructive', title: 'Upload failed', description: err?.message || 'Unable to upload audio.' });
-    } finally {
-      setUploading(false);
+    // Build the form once
+    const form = new FormData();
+    form.append('files', file);
+    if (displayName) {
+      form.append('friendly_names', JSON.stringify([displayName]));
     }
+    form.append('notify_when_ready', notify ? 'true' : 'false');
+    if (notify && email) {
+      form.append('notify_email', email);
+    }
+
+    // Fire-and-forget upload: start it and immediately return user to dashboard
+    const startBackgroundUpload = () => new Promise((resolve, reject) => {
+      try {
+        if (typeof XMLHttpRequest === 'undefined') {
+          const api = makeApi(token);
+          api
+            .raw('/api/media/upload/main_content', { method: 'POST', body: form })
+            .then(resolve)
+            .catch(reject);
+          return;
+        }
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', buildApiUrl('/api/media/upload/main_content'));
+        xhr.withCredentials = true;
+        if (token) {
+          try { xhr.setRequestHeader('Authorization', `Bearer ${token}`); } catch {}
+        }
+        xhr.responseType = 'json';
+        // Avoid updating component state after unmount; no progress callback here.
+        xhr.onerror = () => reject(new Error('Upload failed. Please try again.'));
+        xhr.onabort = () => reject(new Error('Upload cancelled'));
+        xhr.onload = () => {
+          const ok = xhr.status >= 200 && xhr.status < 300;
+          if (!ok) {
+            const payload = xhr.response ?? (() => { try { return JSON.parse(xhr.responseText || ''); } catch { return null; } })();
+            const msg = (payload && (payload.error || payload.detail || payload.message)) || `Upload failed with status ${xhr.status}`;
+            reject(new Error(msg));
+            return;
+          }
+          resolve(xhr.response);
+        };
+        xhr.send(form);
+      } catch (e) {
+        reject(e);
+      }
+    });
+
+    // Let the user leave immediately
+    toast({
+      title: 'Uploading in background',
+      description: 'You can return to your dashboard. We\'ll email you when it\'s processed.',
+    });
+
+    const p = startBackgroundUpload();
+    p.then(() => {
+      toast({ title: 'Upload received', description: 'Transcription has started.' });
+      onUploaded();
+    }).catch((err) => {
+      toast({ variant: 'destructive', title: 'Upload failed', description: err?.message || 'Unable to upload audio.' });
+    });
+
+    // Navigate away immediately
+    onDone();
   };
 
   const hasFile = !!file;
@@ -95,6 +135,20 @@ export default function PreUploadManager({
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {(uploading || (typeof uploadProgress === 'number' && uploadProgress < 100)) && (
+            <div className="rounded-md border border-slate-200 bg-white p-3 mb-4" aria-live="polite">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-700">Uploading audio…</span>
+                <span className="text-slate-600">{Math.max(0, Math.min(100, Number(uploadProgress) || 0))}%</span>
+              </div>
+              <div className="mt-2 h-2 w-full rounded-full bg-slate-200 overflow-hidden">
+                <div
+                  className="h-full bg-slate-600 transition-all duration-200"
+                  style={{ width: `${Math.max(5, Math.min(100, Number(uploadProgress) || 5))}%` }}
+                />
+              </div>
+            </div>
+          )}
           <form className="space-y-6" onSubmit={handleSubmit}>
             <div className="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center">
               <input type="file" accept="audio/*" id="preupload-file" className="hidden" onChange={handleFileChange} />
@@ -155,9 +209,9 @@ export default function PreUploadManager({
               <Button type="button" variant="ghost" onClick={onDone}>
                 Return to dashboard
               </Button>
-              <Button type="submit" disabled={!hasFile || uploading}>
-                {uploading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-                {uploading ? 'Uploading…' : 'Upload audio'}
+              <Button type="submit" disabled={!hasFile}>
+                <Upload className="w-4 h-4 mr-2" />
+                Upload and return
               </Button>
             </div>
           </form>

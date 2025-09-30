@@ -113,6 +113,14 @@ async def list_main_content_uploads(
         filename = str(item.filename)
         transcript_path = _resolve_transcript_path(filename)
         ready = transcript_path.exists()
+        # If a worker already notified watchers for this filename, consider it ready
+        if not ready:
+            try:
+                wlist = watch_map.get(filename, [])
+                if any(getattr(w, "notified_at", None) is not None for w in wlist):
+                    ready = True
+            except Exception:
+                pass
         intents = {}
         duration = None
         if ready:

@@ -31,8 +31,29 @@ _backend_api: ModuleType = import_module(_BACKEND_PACKAGE_NAME)
 
 
 def __getattr__(name: str) -> object:
-    """Proxy attribute access to :mod:`backend.api`."""
+    """Proxy attribute access to :mod:`backend.api` and lazily import submodules.
 
+    pytest monkeypatch often resolves dotted paths via attribute access like
+    ``getattr(api, "services")``. If the submodule hasn't been imported yet,
+    this will raise AttributeError by default. To keep compatibility with
+    attribute-based resolution, attempt to import ``api.<name>`` on demand
+    and then return that module if it exists; otherwise, delegate to the
+    backend package attribute (for things like constants exported at package
+    level).
+    """
+
+    alias_fq = f"{__name__}.{name}"
+    if alias_fq in sys.modules:
+        return sys.modules[alias_fq]
+    try:
+        # Trigger the meta path alias to load the backend module and register
+        # it under the alias name in sys.modules
+        import_module(alias_fq)
+        if alias_fq in sys.modules:
+            return sys.modules[alias_fq]
+    except Exception:
+        # Fall back to attributes exposed by backend.api if any
+        pass
     return getattr(_backend_api, name)
 
 
