@@ -49,9 +49,10 @@ export default function StepSelectPreprocessed({
   const flubberCount = Number((counts?.flubber?.count) ?? 0);
   const internCount = Number((counts?.intern?.count) ?? 0);
   const sfxCount = Number((counts?.sfx?.count) ?? 0);
+  const hasDetectedAutomations = flubberCount > 0 || internCount > 0 || sfxCount > 0;
 
   const handleContinue = async () => {
-    if (hasPendingIntents && typeof onEditAutomations === 'function') {
+    if (hasDetectedAutomations && hasPendingIntents && typeof onEditAutomations === 'function') {
       onEditAutomations();
       return;
     }
@@ -198,7 +199,7 @@ export default function StepSelectPreprocessed({
         </CardContent>
       </Card>
 
-      {selected && (
+      {selected && hasDetectedAutomations && (
         <Card className="border border-slate-200">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-base text-slate-800">
