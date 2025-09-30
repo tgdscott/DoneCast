@@ -158,7 +158,7 @@ export default function PodcastCreator({
 
     try {
       const api = makeApi(token);
-      await api.delete(`/api/media/${item.id}`);
+      await api.del(`/api/media/${item.id}`);
       toast({
         title: 'Upload deleted',
         description: `${item.friendly_name || item.filename} was removed from your library.`,
