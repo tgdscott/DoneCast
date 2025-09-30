@@ -131,7 +131,7 @@ def parse_forwarded_header(forwarded: str | None) -> tuple[str | None, str | Non
 
 
 def external_base_url(request: Request) -> str:
-    """Determine the external base URL (scheme://host) for this request."""
+    """Determine the external base URL (scheme://host) without leaking app/api subdomains."""
 
     hdr = request.headers
     xf_proto = (hdr.get("x-forwarded-proto") or "").split(",")[0].strip()
@@ -147,10 +147,12 @@ def external_base_url(request: Request) -> str:
         base_cfg = (settings.OAUTH_BACKEND_BASE or "").strip()
         if base_cfg:
             parsed = _urlp.urlparse(base_cfg)
-            if parsed.scheme and parsed.hostname and host:
-                if parsed.hostname == host or host.endswith("podcastplusplus.com"):
-                    proto = parsed.scheme
-        if host and host.endswith("podcastplusplus.com") and proto != "https":
+            # If configured, prefer its scheme and host
+            if parsed.scheme and parsed.hostname:
+                host = parsed.hostname
+                proto = parsed.scheme
+        # Enforce https for our production domains
+        if isinstance(host, str) and host.endswith(("podcastplusplus.com", "getpodcastplus.com")) and proto != "https":
             proto = "https"
     except Exception:
         pass

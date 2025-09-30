@@ -13,6 +13,7 @@ from sqlmodel import Session
 
 from api.core import crud
 from api.core.config import settings
+from urllib.parse import urlparse, urlunparse
 from api.core.database import get_session
 from api.models.settings import load_admin_settings
 from api.models.user import User, UserCreate
@@ -102,12 +103,12 @@ async def auth_google_callback(request: Request, session: Session = Depends(get_
     if not isinstance(google_user_data, Mapping) or "email" not in google_user_data:
         google_user_data = None
         id_token = token.get("id_token")
-        if id_token:
+        if id_token and client is not None:
             try:
                 google_user_data = await client.parse_id_token(request, token)
             except Exception as parse_err:
                 log.warning("Failed to parse Google ID token: %s", parse_err)
-        if not google_user_data:
+        if not google_user_data and client is not None:
             try:
                 google_user_data = await client.userinfo(token=token)
             except Exception as userinfo_err:
@@ -150,7 +151,24 @@ async def auth_google_callback(request: Request, session: Session = Depends(get_
 
     access_token = create_access_token({"sub": user.email})
 
-    frontend_base = (settings.APP_BASE_URL or "https://app.podcastplusplus.com").rstrip("/")
+    # Prefer an explicit app base if provided
+    frontend_base = (settings.APP_BASE_URL or "").strip()
+    if not frontend_base:
+        # Derive from current request host, removing app/api subdomain prefixes
+        try:
+            from api.routers.auth.utils import external_base_url as _ext
+            base = _ext(request)
+            parsed = urlparse(base)
+            host = parsed.hostname or ""
+            for pref in ("app.", "api.", "dashboard.", "backend."):
+                if host.startswith(pref):
+                    host = host[len(pref):]
+                    break
+            # Recompose URL with same scheme and stripped host
+            frontend_base = urlunparse((parsed.scheme or "https", host, "", "", "", ""))
+        except Exception:
+            frontend_base = "https://podcastplusplus.com"
+    frontend_base = frontend_base.rstrip("/")
     frontend_url = f"{frontend_base}/#access_token={access_token}&token_type=bearer"
     if user.is_admin:
         frontend_url = f"{frontend_base}/admin#access_token={access_token}&token_type=bearer"

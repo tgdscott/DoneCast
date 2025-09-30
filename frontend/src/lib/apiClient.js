@@ -5,63 +5,10 @@ export function isApiError(e) {
 const LOCAL_LIKE_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]']);
 
 function deriveApiOriginFromWindowOrigin() {
-  if (typeof window === 'undefined' || !window.location?.origin) {
-    return '';
-  }
-
-  const fallback = window.location.origin.replace(/\/+$/, '');
-
-  try {
-    const url = new URL(window.location.origin);
-    const { protocol, hostname } = url;
-    const lowerHost = hostname.toLowerCase();
-    const makeOrigin = (host, keepPort = false) => {
-      const port = keepPort && url.port ? `:${url.port}` : '';
-      return `${protocol}//${host}${port}`.replace(/\/+$/, '');
-    };
-
-    const swapSubdomain = (prefix) => {
-      const needle = `${prefix}.`;
-      return lowerHost.startsWith(needle) ? `api.${hostname.slice(needle.length)}` : null;
-    };
-
-    const swapped =
-      swapSubdomain('app') ||
-      swapSubdomain('dashboard') ||
-      swapSubdomain('www');
-
-    if (swapped) {
-      return makeOrigin(swapped);
-    }
-
-    // Explicit host mappings (new primary + legacy)
-    if (lowerHost === 'podcastplusplus.com') {
-      return makeOrigin('api.podcastplusplus.com');
-    }
-    if (lowerHost === 'getpodcastplus.com') {
-      return makeOrigin('api.getpodcastplus.com');
-    }
-
-    const hostSegments = lowerHost.split('.');
-    if (
-      !lowerHost.startsWith('api.') &&
-      !LOCAL_LIKE_HOSTS.has(lowerHost) &&
-      hostSegments.length === 2
-    ) {
-      return makeOrigin(`api.${hostname}`);
-    }
-
-    return makeOrigin(hostname, true);
-  } catch (err) {
-    if (fallback.includes('//podcastplusplus.com')) {
-      return fallback.replace('://', '://api.');
-    }
-    if (fallback.includes('//getpodcastplus.com')) {
-      return fallback.replace('://', '://api.');
-    }
-  }
-
-  return fallback;
+  // Prefer same-origin relative API (e.g., "/api") so users never see api.*.
+  // Return empty string to signal buildApiUrl to construct relative URLs.
+  // An explicit VITE_API_BASE can still override this when cross-origin is required.
+  return '';
 }
 
 export function resolveRuntimeApiBase() {
@@ -69,9 +16,8 @@ export function resolveRuntimeApiBase() {
     ? String(import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_BASE_URL).replace(/\/+$/, '')
     : '';
   if (envBase) return envBase;
-  const derived = deriveApiOriginFromWindowOrigin();
-  // Hard fallback to prod API to avoid silent misroutes when derivation fails
-  return derived || 'https://api.podcastplusplus.com';
+  // Use same-origin by default; front proxies should route /api → backend.
+  return deriveApiOriginFromWindowOrigin();
 }
 
 // Base URL for API requests. In dev, you can leave this blank and rely on Vite's /api proxy.

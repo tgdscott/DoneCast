@@ -166,7 +166,7 @@ class LoginRequest(BaseModel):
 @limiter.limit("10/minute")
 async def login_for_access_token(
     request: Request,
-    form_data: OAuth2PasswordRequestForm = Depends(),
+    form_data: OAuth2PasswordRequestForm = Depends(OAuth2PasswordRequestForm),
     session: Session = Depends(get_session),
 ) -> dict:
     """Login user with email/password and return an access token."""
