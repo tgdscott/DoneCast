@@ -29,6 +29,7 @@ import {
   Settings as SettingsIcon,
   DollarSign,
   Globe2,
+  BookOpen,
 } from "lucide-react";
 import { useState, useEffect, useMemo, useCallback } from "react";
 
@@ -52,6 +53,7 @@ import Settings from "@/components/dashboard/Settings";
 import TemplateManager from "@/components/dashboard/TemplateManager";
 import BillingPage from "@/components/dashboard/BillingPage";
 import Recorder from "@/components/quicktools/Recorder";
+import WebsiteBuilder from "@/components/dashboard/WebsiteBuilder.jsx";
 
 const isAdmin = (u) => !!(u && (u.is_admin || u.role === 'admin'));
 const DASHBOARD_TOUR_STORAGE_KEY = 'ppp_dashboard_tour_completed';
@@ -120,6 +122,10 @@ export default function PodcastPlusDashboard() {
   const [preuploadItems, setPreuploadItems] = useState([]);
   const [preuploadLoading, setPreuploadLoading] = useState(false);
   const [preuploadError, setPreuploadError] = useState(null);
+
+  const proEligibleTiers = useMemo(() => new Set(['pro', 'enterprise', 'business', 'team', 'agency']), []);
+  const normalizedTier = (user?.tier || '').toLowerCase();
+  const canManageCustomDomain = proEligibleTiers.has(normalizedTier);
 
   const tourSteps = useMemo(() => [
     {
@@ -494,6 +500,15 @@ export default function PodcastPlusDashboard() {
         return <MediaLibrary onBack={handleBackToDashboard} token={token} />;
       case 'episodeHistory':
         return <EpisodeHistory onBack={handleBackToDashboard} token={token} />;
+      case 'websiteBuilder':
+        return (
+          <WebsiteBuilder
+            token={token}
+            podcasts={podcasts}
+            onBack={handleBackToDashboard}
+            allowCustomDomain={canManageCustomDomain}
+          />
+        );
       case 'podcastManager':
         return <PodcastManager onBack={handleBackToDashboard} token={token} podcasts={podcasts} setPodcasts={setPodcasts}/>;
       case 'rssImporter':
@@ -510,9 +525,7 @@ export default function PodcastPlusDashboard() {
         return <BillingPage token={token} onBack={() => setCurrentView('dashboard')} />;
       case 'dashboard':
       default: {
-        const normalizedTier = (user?.tier || '').toLowerCase();
-        const proEligibleTiers = new Set(['pro', 'enterprise', 'business', 'team', 'agency']);
-        const canViewWebsiteBuilderDocs = proEligibleTiers.has(normalizedTier);
+        const canViewWebsiteBuilderDocs = canManageCustomDomain;
         const canCreateEpisode = podcasts.length > 0 && templates.length > 0;
         return (
           <div className="space-y-8">
@@ -663,6 +676,13 @@ export default function PodcastPlusDashboard() {
           <Button onClick={() => setCurrentView('episodeHistory')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-episodes"><BarChart3 className="w-4 h-4 mr-2" />Episodes</Button>
           {/* Import moved under Podcasts */}
           <Button onClick={() => setCurrentView('billing')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-subscription"><DollarSign className="w-4 h-4 mr-2" />Subscription</Button>
+                      <Button
+                        onClick={() => setCurrentView('websiteBuilder')}
+                        variant="outline"
+                        className="justify-start text-sm h-10"
+                      >
+                        <Globe2 className="w-4 h-4 mr-2" />Website Builder
+                      </Button>
                       {canViewWebsiteBuilderDocs && (
                         <Button
                           asChild
@@ -674,7 +694,7 @@ export default function PodcastPlusDashboard() {
                             target="_blank"
                             rel="noopener noreferrer"
                           >
-                            <Globe2 className="w-4 h-4 mr-2" />Website Builder Guide
+                            <BookOpen className="w-4 h-4 mr-2" />Website Builder Guide
                           </a>
                         </Button>
                       )}
