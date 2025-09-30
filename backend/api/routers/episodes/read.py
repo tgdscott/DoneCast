@@ -16,6 +16,7 @@ from api.models.podcast import Episode, Podcast, EpisodeStatus
 from api.services.episodes import jobs as _svc_jobs
 from .common import _final_url_for, _cover_url_for, _status_value
 from api.services.episodes import repo as _svc_repo
+from api.services.episodes.transcripts import transcript_endpoints_for_episode
 from uuid import UUID as _UUID
 from pathlib import Path
 from api.core.paths import FINAL_DIR, MEDIA_DIR, APP_ROOT
@@ -119,7 +120,7 @@ def get_last_numbering(
 		if latest_season is not None and latest_episode is not None:
 			return {"season_number": latest_season, "episode_number": latest_episode}
 
-		# Pass 2: fallback — parse from recent titles (covers imported episodes)
+		# Pass 2: fallback - parse from recent titles (covers imported episodes)
 		eps_recent = session.execute(
 			q.order_by(
 				_sa_text("COALESCE(source_published_at, created_at) DESC"),
@@ -411,6 +412,9 @@ def list_episodes(
 			"stream_url": stream_url,
 			"playback_url": playback_url,
 			"playback_type": playback_type,
+			"has_transcript": bool(transcript_info.get("available", False)),
+			"transcript_url": transcript_info.get("text"),
+			"transcript_json_url": transcript_info.get("json"),
 		})
 
 	try:
@@ -584,3 +588,4 @@ def list_missing_spreaker_ids(
 			"publish_at": (_pa.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z') if _pa else None),
 		})
 	return {"count": len(items), "items": items}
+

@@ -76,16 +76,23 @@ class Settings(BaseSettings):
     @property
     def cors_allowed_origin_list(self) -> list[str]:
         raw = self.CORS_ALLOWED_ORIGINS or ""
-        normalized = raw.replace(';', ',')
-        configured = [origin.strip() for origin in normalized.split(',') if origin.strip()]
-
+        normalized = raw.replace(';', ",")
+        
+        def _clean(origin: str) -> str:
+            value = (origin or "").strip()
+            if not value:
+                return ""
+            return value.rstrip('/')
+        
+        configured = [_clean(origin) for origin in normalized.split(',') if _clean(origin)]
+        
         # Always allow the marketing site to call the API; browsers enforce exact origin
         # matching, so include both the bare and www variants. These entries are appended
         # even when the operator forgets to list them explicitly, preventing the
         # "No 'Access-Control-Allow-Origin' header" failures seen on getpodcastplus.com.
         # Rebrand: keep BOTH old and new domains during transitional period so existing
         # deployed frontends or cached service workers on the old domain continue to
-        # function. Old domain entries can be removed after DNS / marketing cut‑over.
+        # function. Old domain entries can be removed after DNS / marketing cut-over.
         defaults = [
             # New brand (preferred)
             "https://podcastplusplus.com",
@@ -98,14 +105,15 @@ class Settings(BaseSettings):
             "https://app.getpodcastplus.com",
             "https://api.getpodcastplus.com",
         ]
-
+        
         seen: set[str] = set()
         merged: list[str] = []
         for origin in [*configured, *defaults]:
-            if origin and origin not in seen:
-                seen.add(origin)
-                merged.append(origin)
-
+            cleaned = _clean(origin)
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                merged.append(cleaned)
+        
         return merged
 
     @model_validator(mode="after")

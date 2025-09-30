@@ -24,7 +24,9 @@ import sys
 
 _BACKEND_PACKAGE_NAME = "backend.api"
 
-# Import the actual backend package once so we can delegate all lookups to it.
+# Import the actual backend package once so we can delegate attribute lookups
+# and mirror its path. Importing the package (whose __init__ is empty) is safe
+# and does not execute application startup code.
 _backend_api: ModuleType = import_module(_BACKEND_PACKAGE_NAME)
 
 
@@ -74,26 +76,52 @@ class _BackendAliasLoader(importlib_abc.Loader):
         self.is_package = is_package
 
     def create_module(self, spec):  # type: ignore[override]
-        # ``import_module`` returns the canonical backend module instance.  It
-        # only executes the module once and returns the cached module on
-        # subsequent calls which is exactly what we want.
-        return import_module(self.backend_name)
+        # Create a lightweight alias module with a proper spec. We'll proxy
+        # attribute access to the canonical backend module in exec_module.
+        alias = ModuleType(self.fullname)
+        alias.__loader__ = self  # type: ignore[attr-defined]
+        alias.__package__ = self.fullname if self.is_package else self.fullname.rpartition(".")[0]
+        # Provide a distinct spec for the alias name to satisfy importlib/pytest
+        alias.__spec__ = importlib_util.spec_from_loader(self.fullname, self, is_package=self.is_package)  # type: ignore[attr-defined]
+        return alias
 
     def exec_module(self, module):  # type: ignore[override]
-        # Register the alias so ``sys.modules['api.foo']`` points at the same
-        # module object as ``sys.modules['backend.api.foo']``.  This ensures the
-        # module body isn't executed a second time when imported through the
-        # compatibility namespace.
+        # Import (or retrieve) the canonical backend module, then make the
+        # alias module proxy its attributes to the backend module.
+        backend = import_module(self.backend_name)
+
+        # Define proxy getattr/dir so attribute access forwards to backend
+        def _alias_getattr(name: str):  # type: ignore[reportGeneralTypeIssues]
+            return getattr(backend, name)
+
+        def _alias_dir():  # type: ignore[reportGeneralTypeIssues]
+            try:
+                return sorted(set(dir(backend)))
+            except Exception:
+                return []
+
+        try:
+            object.__setattr__(module, "__getattr__", _alias_getattr)
+            object.__setattr__(module, "__dir__", _alias_dir)
+        except Exception:
+            # Fallback: copy attributes once
+            try:
+                module.__dict__.update({k: v for k, v in backend.__dict__.items() if not k.startswith("__")})
+            except Exception:
+                pass
+
+        # Mirror selected dunder attributes
+        try:
+            module.__all__ = list(getattr(backend, "__all__", []))  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        if self.is_package and hasattr(backend, "__path__"):
+            try:
+                module.__path__ = list(getattr(backend, "__path__"))  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        # Ensure sys.modules entry points to the alias module we just configured
         sys.modules[self.fullname] = module
-        if self.is_package:
-            # Mirror the backend package's search locations so submodule imports
-            # continue to work transparently.
-            backend = sys.modules.get(self.backend_name)
-            if backend is not None and hasattr(backend, "__path__"):
-                try:
-                    module.__path__ = list(getattr(backend, "__path__"))  # type: ignore[attr-defined]
-                except Exception:
-                    pass
 
 
 class _BackendAliasFinder(importlib_abc.MetaPathFinder):
@@ -126,10 +154,15 @@ if _finder not in sys.meta_path:
     sys.meta_path.insert(0, _finder)
 
 
+## Note: We intentionally avoid symmetrical aliasing (backend.api.* -> api.*).
+## Keeping a single canonical execution path (backend.api.*) and redirecting
+## only api.* imports to it is sufficient and avoids confusing __spec__ state.
+
+
 # Do not proactively import submodules here. The MetaPathFinder/Loader will
 # lazily alias requests like ``import api.models.user`` to the canonical
 # ``backend.api.models.user`` module, ensuring the code is executed exactly once.
 
 
-## (finder moved earlier; see above)
+## (finders installed earlier; see above)
 

@@ -257,6 +257,7 @@ class SpreakerClient:
         image_file: Optional[str] = None,
         tags: Optional[str] = None,
         explicit: Optional[bool] = None,
+        transcript_url: Optional[str] = None,
     ) -> Tuple[bool, Any]:
         """Upload an episode to Spreaker with robust fallbacks.
 
@@ -275,6 +276,8 @@ class SpreakerClient:
             base_data["tags"] = tags
         if explicit is not None:
             base_data["explicit"] = "true" if explicit else "false"
+        if transcript_url:
+            base_data["transcript_url"] = transcript_url
 
         # Visibility variants
         vis_from_state = "PUBLIC"
@@ -370,6 +373,7 @@ class SpreakerClient:
         tags: Optional[str] = None,
         explicit: Optional[bool] = None,
         image_file: Optional[str] = None,
+        transcript_url: Optional[str] = None,
         debug_try_all: bool = False,
         force_all_fields: bool = False,
     ) -> Tuple[bool, Any]:
@@ -394,6 +398,8 @@ class SpreakerClient:
                 data["visibility"] = "LIMITED"
             else:
                 data["visibility"] = "PUBLIC"
+        if transcript_url is not None:
+            data["transcript_url"] = transcript_url
         files = None
         fh = None
         if image_file and os.path.isfile(image_file):

@@ -307,6 +307,8 @@ export default function PodcastCreator({
         steps={steps}
         currentStep={currentStep}
         progressPercentage={progressPercentage}
+        isUploading={isUploading}
+        uploadProgress={uploadProgress}
         usage={usage}
         minutesNearCap={minutesNearCap}
         buildActive={buildActive}

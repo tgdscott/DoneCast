@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import html
 from typing import Any, Dict, List
 
 import json
@@ -43,12 +44,47 @@ def _spreaker_payload(item: Dict[str, Any]) -> Dict[str, Any]:
     now = datetime.now(timezone.utc)
     status = EpisodeStatus.published if publish_dt and publish_dt <= now else EpisodeStatus.processed
 
-    tags_raw = item.get("tags")
-    tags: List[str] = []
-    if isinstance(tags_raw, list):
-        tags = [str(t).strip() for t in tags_raw if str(t).strip()]
-    elif isinstance(tags_raw, str):
-        tags = [t.strip() for t in tags_raw.split(",") if t.strip()]
+    def _coerce_tags(value: Any) -> List[str]:
+        tags: List[str] = []
+        if isinstance(value, list):
+            for entry in value:
+                if isinstance(entry, dict):
+                    for key in ("name", "value", "label", "tag", "title"):
+                        raw = entry.get(key)
+                        if raw:
+                            text = str(raw).strip()
+                            if text and text not in tags:
+                                tags.append(text)
+                            break
+                    else:
+                        raw = str(entry).strip()
+                        if raw and raw not in tags:
+                            tags.append(raw)
+                elif entry is not None:
+                    raw = str(entry).strip()
+                    if raw and raw not in tags:
+                        tags.append(raw)
+        elif isinstance(value, dict):
+            for raw in value.values():
+                text = str(raw).strip()
+                if text and text not in tags:
+                    tags.append(text)
+        elif isinstance(value, str):
+            parts = [part.strip() for part in value.split(",")]
+            for part in parts:
+                if part and part not in tags:
+                    tags.append(part)
+        return tags
+
+    tags = _coerce_tags(item.get("tags"))
+    if not tags:
+        tags = _coerce_tags(item.get("tag_list"))
+    if not tags:
+        tags = _coerce_tags(item.get("category"))
+    if not tags:
+        tags = _coerce_tags(item.get("categories"))
+    if not tags:
+        tags = _coerce_tags(item.get("topics"))
 
     download_url = item.get("download_url") or item.get("stream_url")
 
@@ -58,17 +94,24 @@ def _spreaker_payload(item: Dict[str, Any]) -> Dict[str, Any]:
             if not val:
                 continue
             if isinstance(val, list):
-                # Spreaker occasionally returns content arrays; join visible text
-                text_parts = []
+                text_parts: List[str] = []
                 for part in val:
-                    if isinstance(part, dict) and part.get("value"):
-                        text_parts.append(str(part["value"]))
+                    if isinstance(part, dict):
+                        for inner in ("value", "text", "data", "content"):
+                            if part.get(inner):
+                                text_parts.append(str(part[inner]))
+                                break
                     elif isinstance(part, str):
                         text_parts.append(part)
                 if text_parts:
-                    return "\n\n".join(text_parts)
+                    return html.unescape("\n\n".join(text_parts))
+            elif isinstance(val, dict):
+                for inner in ("value", "text", "data", "content"):
+                    if val.get(inner):
+                        return html.unescape(str(val[inner]))
+                return html.unescape(str(val))
             else:
-                return str(val)
+                return html.unescape(str(val))
         return None
 
     meta: Dict[str, Any] = {}
@@ -82,6 +125,8 @@ def _spreaker_payload(item: Dict[str, Any]) -> Dict[str, Any]:
         "title": item.get("title") or item.get("name") or "Untitled Episode",
         "show_notes": _first_text(
             "description_html",
+            "description_plain",
+            "description_text",
             "description",
             "content_html",
             "content",
@@ -98,13 +143,7 @@ def _spreaker_payload(item: Dict[str, Any]) -> Dict[str, Any]:
         "publish_at_local": None,
         "season_number": item.get("season"),
         "episode_number": item.get("episode"),
-        "tags": tags
-        or [str(t).strip() for t in (item.get("category") or []) if str(t).strip()]
-        or [
-            str(t).strip()
-            for t in (item.get("categories") or item.get("topics") or [])
-            if str(t).strip()
-        ],
+        "tags": tags,
         "is_explicit": str(item.get("explicit") or "").lower() in {"1", "true", "yes", "explicit"},
         "meta": meta,
         "processed_at": publish_dt or datetime.utcnow(),
@@ -112,7 +151,6 @@ def _spreaker_payload(item: Dict[str, Any]) -> Dict[str, Any]:
         "source_media_url": download_url,
         "source_published_at": publish_dt,
     }
-
 
 def sync_spreaker_episodes(
     session: Session,
@@ -267,4 +305,6 @@ def push_local_episodes_to_spreaker(
         "skipped_no_audio": skipped_no_audio,
         "errors": errors,
     }
+
+
 

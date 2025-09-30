@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Tuple
 
 import json
@@ -38,24 +38,36 @@ def _coerce_int(value: Any) -> int | None:
         return None
 
 
-def _coerce_datetime(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, str) and value:
-        text = value.strip()
-        if not text:
-            return None
+def _normalize_publish_datetime(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    tz = getattr(dt, "tzinfo", None)
+    if tz is not None:
         try:
-            # Accept ISO8601 (with or without trailing Z)
-            if text.endswith("Z"):
-                text = text[:-1] + "+00:00"
-            return datetime.fromisoformat(text)
+            return dt.astimezone(timezone.utc).replace(tzinfo=None)
         except Exception:
+            return dt.replace(tzinfo=None)
+    return dt
+
+
+def _coerce_datetime(value: Any) -> datetime | None:
+    candidate: datetime | None = None
+    if isinstance(value, datetime):
+        candidate = value
+    elif isinstance(value, str) and value:
+        text = value.strip()
+        if text:
             try:
-                return datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
+                # Accept ISO8601 (with or without trailing Z)
+                if text.endswith("Z"):
+                    text = text[:-1] + "+00:00"
+                candidate = datetime.fromisoformat(text)
             except Exception:
-                return None
-    return None
+                try:
+                    candidate = datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    candidate = None
+    return _normalize_publish_datetime(candidate)
 
 
 def _coerce_status(value: Any) -> EpisodeStatus | None:

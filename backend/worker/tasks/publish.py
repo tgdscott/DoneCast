@@ -13,6 +13,8 @@ from api.core import crud
 from api.core.database import get_session
 from api.core.paths import FINAL_DIR, MEDIA_DIR, WS_ROOT as PROJECT_ROOT
 from api.services.image_utils import ensure_cover_image_constraints
+from api.services.episodes.transcripts import transcript_endpoints_for_episode
+from api.core.config import settings
 from api.services.publisher import SpreakerClient
 
 
@@ -87,6 +89,22 @@ def publish_episode_to_spreaker_task(
             else:
                 raise RuntimeError(f"Final audio file not found for publishing: {audio_path}")
 
+        api_base_url = None
+        for candidate in [
+            os.getenv("PUBLIC_API_BASE"),
+            os.getenv("API_BASE_URL"),
+            os.getenv("OAUTH_BACKEND_BASE"),
+            getattr(settings, "OAUTH_BACKEND_BASE", None),
+            getattr(settings, "APP_BASE_URL", None),
+        ]:
+            cand = (candidate or "").strip() if candidate else ""
+            if cand:
+                api_base_url = cand.rstrip("/")
+                break
+
+        transcript_info = transcript_endpoints_for_episode(episode, api_base_url=api_base_url)
+        transcript_url = transcript_info.get("absolute_text") or transcript_info.get("text")
+
         client = SpreakerClient(spreaker_access_token)
 
         parsed_auto_str: Optional[str] = None
@@ -138,6 +156,7 @@ def publish_episode_to_spreaker_task(
             image_file=image_file_path,
             tags=tags_arg,
             explicit=explicit_arg,
+            transcript_url=transcript_url,
         )
 
         if not ok:
@@ -188,7 +207,7 @@ def publish_episode_to_spreaker_task(
                 try:
                     ep_id = str(result["episode_id"])
                     ok_upd, upd_resp = client.update_episode(
-                        ep_id, publish_state="unpublished"
+                        ep_id, publish_state="unpublished", transcript_url=transcript_url
                     )
                     logging.info(
                         "[publish] enforced private via update ok=%s", ok_upd

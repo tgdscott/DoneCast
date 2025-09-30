@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import { Loader2, RefreshCw, ImageOff, Play, CheckCircle2, Clock, AlertTriangle, CalendarClock, Trash2, ArrowLeft, LayoutGrid, List as ListIcon, Search, Undo2, Scissors, Grid3X3, Pencil, RotateCcw } from "lucide-react";
+import { Loader2, RefreshCw, ImageOff, Play, CheckCircle2, Clock, AlertTriangle, CalendarClock, Trash2, ArrowLeft, LayoutGrid, List as ListIcon, Search, Undo2, Scissors, Grid3X3, Pencil, RotateCcw, FileText } from "lucide-react";
 import EpisodeHistoryPreview from './EpisodeHistoryPreview';
 import FlubberReview from './FlubberReview';
 import ManualEditorModal from './ManualEditorModal';
@@ -617,6 +617,16 @@ export default function EpisodeHistory({ token, onBack }) {
                 <div className="text-gray-500 text-xs flex items-center"><Play className="w-3 h-3 mr-1"/>No audio</div>
               )}
               {missingAudio && <div className="text-[10px] text-red-600">File missing on server</div>}
+              {ep.has_transcript && ep.transcript_url && (
+                <a
+                  href={ep.transcript_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 underline"
+                >
+                  <FileText className="w-3 h-3" />View transcript
+                </a>
+              )}
             </CardContent>
             </Card>
             {manualEpId === ep.id && (
@@ -664,6 +674,14 @@ export default function EpisodeHistory({ token, onBack }) {
                 {(ep.season_number!=null && ep.episode_number!=null) ? `S${ep.season_number}E${ep.episode_number} · ${ep.title || 'Untitled Episode'}` : (ep.title || 'Untitled Episode')}
               </span>
               {ep.description && <span className="text-[11px] text-gray-500 line-clamp-1" title={ep.description}>{ep.description}</span>}
+              {ep.has_transcript && ep.transcript_url && (
+                <a
+                  href={ep.transcript_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] text-blue-600 hover:text-blue-700 underline mt-1"
+                >Transcript</a>
+              )}
             </div>
             <div className="col-span-2 flex items-center flex-wrap gap-1">{statusChip(ep.status)}</div>
             <div className="col-span-2 text-[11px] text-gray-600">

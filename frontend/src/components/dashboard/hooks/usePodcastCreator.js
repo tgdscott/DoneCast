@@ -18,6 +18,7 @@ export default function usePodcastCreator({
   const [uploadedFile, setUploadedFile] = useState(null);
   const [uploadedFilename, setUploadedFilename] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
+  const uploadXhrRef = useRef(null);
   const [isAssembling, setIsAssembling] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [assemblyComplete, setAssemblyComplete] = useState(false);
@@ -782,6 +783,7 @@ export default function usePodcastCreator({
           return;
         }
         const xhr = new XMLHttpRequest();
+        uploadXhrRef.current = xhr;
         xhr.open('POST', buildApiUrl('/api/media/upload/main_content'));
         xhr.withCredentials = true;
         if (authToken) {
@@ -797,6 +799,7 @@ export default function usePodcastCreator({
           reject(new Error('Upload failed. Please try again.'));
         };
         xhr.onload = () => {
+          uploadXhrRef.current = null;
           const safeResponse = (() => {
             if (xhr.response != null) return xhr.response;
             try {
@@ -812,6 +815,10 @@ export default function usePodcastCreator({
           const message = (safeResponse && (safeResponse.error || safeResponse.detail || safeResponse.message))
             || `Upload failed with status ${xhr.status}`;
           reject(new Error(message));
+        };
+        xhr.onabort = () => {
+          uploadXhrRef.current = null;
+          reject(new Error('Upload cancelled'));
         };
         xhr.send(formData);
       } catch (err) {
@@ -855,6 +862,12 @@ export default function usePodcastCreator({
   }, [currentStep, uploadedFile, uploadedFilename, intentsComplete, intentDetectionReady]);
 
   const cancelBuild = () => {
+    // Abort in-flight audio upload, if any
+    try {
+      if (uploadXhrRef.current && typeof uploadXhrRef.current.abort === 'function') {
+        uploadXhrRef.current.abort();
+      }
+    } catch {}
     try {
       localStorage.removeItem('ppp_uploaded_filename');
       localStorage.removeItem('ppp_uploaded_hint');
@@ -863,6 +876,7 @@ export default function usePodcastCreator({
     } catch {}
     setUploadedFile(null);
     setUploadedFilename(null);
+    setUploadProgress(null);
     setTranscriptReady(false);
     transcriptReadyRef.current = false;
     setIntents({ flubber: null, intern: null, sfx: null });
@@ -872,6 +886,21 @@ export default function usePodcastCreator({
     setStatusMessage('');
     setError('');
     setCurrentStep(1);
+    // Navigate back to dashboard/home
+    try {
+      window.dispatchEvent(new Event('ppp:navigate-dashboard'));
+      // If no router listener, hard redirect as a fallback
+      if (typeof window !== 'undefined') {
+        const base = window.location.origin || '';
+        const dash = base ? `${base}/` : '/';
+        // Use hash route if app uses hash routing
+        if (window.location.hash && !window.location.pathname.includes('/dashboard')) {
+          window.location.href = base + '/';
+        } else {
+          window.location.href = dash;
+        }
+      }
+    } catch {}
   };
 
   const uploadCover = async (file) => {

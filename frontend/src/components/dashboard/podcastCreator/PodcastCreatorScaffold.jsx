@@ -18,6 +18,8 @@ export default function PodcastCreatorScaffold({
   steps,
   currentStep,
   progressPercentage,
+  isUploading,
+  uploadProgress,
   usage,
   minutesNearCap,
   minutesRemaining,
@@ -90,6 +92,20 @@ export default function PodcastCreatorScaffold({
               );
             })}
           </div>
+          {(isUploading || (typeof uploadProgress === 'number' && uploadProgress < 100)) && (
+            <div className="mt-4">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-700">Uploading audio…</span>
+                <span className="text-slate-600">{Math.max(0, Math.min(100, Number(uploadProgress) || 0))}%</span>
+              </div>
+              <div className="h-2 w-full rounded-full bg-slate-200 overflow-hidden">
+                <div
+                  className="h-full bg-slate-600 transition-all duration-200"
+                  style={{ width: `${Math.max(5, Math.min(100, Number(uploadProgress) || 5))}%` }}
+                />
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

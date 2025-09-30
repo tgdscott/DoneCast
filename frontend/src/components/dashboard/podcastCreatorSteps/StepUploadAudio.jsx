@@ -81,6 +81,20 @@ export default function StepUploadAudio({
       <CardHeader className="text-center">
         <CardTitle style={{ color: '#2C3E50' }}>Step 2: Upload Main Content</CardTitle>
       </CardHeader>
+      {(isUploading || (typeof uploadProgress === 'number' && uploadProgress < 100)) && (
+        <div className="rounded-md border border-slate-200 bg-white p-3" aria-live="polite">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-slate-700">Uploading audio…</span>
+            <span className="text-slate-600">{Math.max(0, Math.min(100, Number(uploadProgress) || 0))}%</span>
+          </div>
+          <div className="mt-2 h-2 w-full rounded-full bg-slate-200 overflow-hidden">
+            <div
+              className="h-full bg-slate-600 transition-all duration-200"
+              style={{ width: `${Math.max(5, Math.min(100, Number(uploadProgress) || 5))}%` }}
+            />
+          </div>
+        </div>
+      )}
       <Card className="border border-slate-200 bg-slate-50" data-tour-id="episode-upload-guide">
         <CardHeader className="flex flex-col gap-1 pb-2 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle className="text-base flex items-center gap-2 text-slate-800">
@@ -219,7 +233,7 @@ export default function StepUploadAudio({
                 size="lg"
                 className="text-white"
                 style={{ backgroundColor: '#2C3E50' }}
-                disabled={!canProceed}
+                disabled={!(canProceed || uploadedFilename)}
               >
                 Continue
               </Button>
