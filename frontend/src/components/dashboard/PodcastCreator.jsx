@@ -145,6 +145,22 @@ export default function PodcastCreator({
 
   const { toast } = useToast();
 
+  const selectedPreuploadItem = React.useMemo(
+    () => {
+      if (!selectedPreupload) return null;
+      return preuploadedItems.find((item) => item.filename === selectedPreupload) || null;
+    },
+    [preuploadedItems, selectedPreupload]
+  );
+
+  const uploadedAudioLabel = React.useMemo(() => {
+    if (uploadedFile && uploadedFile.name) return uploadedFile.name;
+    if (selectedPreuploadItem?.friendly_name) return selectedPreuploadItem.friendly_name;
+    if (selectedPreuploadItem?.filename) return selectedPreuploadItem.filename;
+    if (uploadedFilename) return uploadedFilename;
+    return '';
+  }, [uploadedFile, selectedPreuploadItem, uploadedFilename]);
+
   const handleDeletePreuploaded = React.useCallback(async (item) => {
     if (!item || !item.id) return;
     const ready = !!item.transcript_ready;
@@ -295,6 +311,7 @@ export default function PodcastCreator({
             selectedTemplate={selectedTemplate}
             mediaLibrary={mediaLibrary}
             uploadedFile={uploadedFile}
+            uploadedAudioLabel={uploadedAudioLabel}
             ttsValues={ttsValues}
             onTtsChange={handleTtsChange}
             onBack={() => setCurrentStep(2)}

@@ -9,6 +9,7 @@ export default function StepCustomizeSegments({
   selectedTemplate,
   mediaLibrary,
   uploadedFile,
+  uploadedAudioLabel,
   ttsValues,
   onTtsChange,
   onBack,
@@ -19,10 +20,11 @@ export default function StepCustomizeSegments({
 }) {
   const renderSegmentContent = (segment) => {
     if (segment.segment_type === 'content') {
+      const contentLabel = uploadedAudioLabel || uploadedFile?.name || 'Audio not selected yet';
       return (
         <div className="mt-2 bg-blue-50 p-3 rounded-md">
           <p className="font-semibold text-blue-800">Your Uploaded Audio:</p>
-          <p className="text-gray-700">{uploadedFile?.name || 'No file uploaded'}</p>
+          <p className="text-gray-700">{contentLabel}</p>
         </div>
       );
     }

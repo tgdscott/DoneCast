@@ -69,6 +69,7 @@ export default function StepEpisodeDetails({
       </Card>
       <Card className="border-0 shadow-lg bg-white">
         <CardContent className="p-6 space-y-6">
+          <p className="text-xs text-slate-500">It may take a few seconds for the AI fields to autofill.</p>
           <div className="grid md:grid-cols-2 gap-6">
             <div className="col-span-2 md:col-span-1">
               <Label htmlFor="title">Episode Title *</Label>
