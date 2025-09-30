@@ -111,6 +111,7 @@ def _base_layout_for(episode: Episode) -> dict:
     return {
         "hero_title": "AI Builder Central",
         "hero_subtitle": "Launch your site in minutes.",
+        "hero_image_url": "https://example.com/cover.jpg",
         "about": {
             "heading": "About the show",
             "body": "We cover automation for podcasters.",
@@ -133,6 +134,20 @@ def _base_layout_for(episode: Episode) -> dict:
             "button_label": "Listen now",
             "button_url": "https://example.com",
         },
+        "section_suggestions": [
+            {
+                "type": "newsletter",
+                "label": "Join the newsletter",
+                "description": "Fans get new episode drops via email.",
+                "include_by_default": True,
+            },
+            {
+                "type": "press",
+                "label": "Press kit",
+                "description": "A quick overview for collaborators.",
+                "include_by_default": False,
+            },
+        ],
         "additional_sections": [],
         "theme": {
             "primary_color": "#123456",
@@ -162,6 +177,8 @@ def test_generate_website_creates_record(authed_client: TestClient, db: DBSessio
     assert body["default_domain"].endswith("podcastplusplus.com")
     assert body["layout"]["hero_title"] == "AI Builder Central"
     assert body["layout"]["episodes"][0]["episode_id"] == str(episode.id)
+    assert body["layout"]["hero_image_url"] == "https://example.com/cover.jpg"
+    assert len(body["layout"].get("section_suggestions", [])) >= 2
 
     site = db.exec(select(PodcastWebsite).where(PodcastWebsite.podcast_id == podcast.id)).first()
     assert site is not None
@@ -193,6 +210,7 @@ def test_chat_endpoint_updates_layout(authed_client: TestClient, db: DBSession, 
     layout = resp.json()["layout"]
     assert layout["hero_title"] == "AI Builder Hub"
     assert layout["call_to_action"]["button_label"] == "Join the Hub"
+    assert layout["section_suggestions"][0]["include_by_default"] is True
 
     site = db.exec(select(PodcastWebsite).where(PodcastWebsite.podcast_id == podcast.id)).first()
     assert site is not None
