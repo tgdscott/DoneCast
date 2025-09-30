@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     OAUTH_BACKEND_BASE: Optional[str] = None
     APP_BASE_URL: Optional[str] = None  # For frontend redirects
     CORS_ALLOWED_ORIGINS: str = "http://127.0.0.1:5173,http://localhost:5173"
+    PODCAST_WEBSITE_BASE_DOMAIN: str = "podcastplusplus.com"
+    PODCAST_WEBSITE_GCS_BUCKET: str = "ppp-websites-us-west1"
+    PODCAST_WEBSITE_CUSTOM_DOMAIN_MIN_TIER: str = "pro"
 
     # --- Legal ---
     TERMS_VERSION: str = "2025-09-19"
