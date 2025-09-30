@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 import html
-from typing import Any, Dict, List, Optional, Iterable, Set
+from typing import Any, Dict, List, Optional, Iterable, Set, Tuple
 
 import json
 import logging
+
+import feedparser
+import httpx
 
 from sqlmodel import Session, select
 
@@ -18,6 +21,147 @@ from .merge import (
     merge_podcast_episode_duplicates,
     normalize_title,
 )
+
+
+def _safe_entry_get(entry: Any, key: str, default: Any = None) -> Any:
+    if isinstance(entry, dict):
+        return entry.get(key, default)
+    return getattr(entry, key, default)
+
+
+def _extract_entry_text(entry: Any, *keys: str) -> Optional[str]:
+    for key in keys:
+        val = _safe_entry_get(entry, key)
+        if not val:
+            continue
+        if isinstance(val, list):
+            parts: List[str] = []
+            for part in val:
+                if isinstance(part, dict):
+                    for inner in ("value", "text", "data", "content"):
+                        inner_val = _safe_entry_get(part, inner)
+                        if inner_val:
+                            parts.append(str(inner_val))
+                            break
+                elif isinstance(part, str):
+                    parts.append(part)
+            if parts:
+                return html.unescape("\n\n".join(parts))
+        elif isinstance(val, dict):
+            for inner in ("value", "text", "data", "content"):
+                inner_val = _safe_entry_get(val, inner)
+                if inner_val:
+                    return html.unescape(str(inner_val))
+            return html.unescape(str(val))
+        else:
+            return html.unescape(str(val))
+    return None
+
+
+def _coerce_rss_tags(entry: Any) -> List[str]:
+    tags: List[str] = []
+    candidates = [
+        "itunes_keywords",
+        "itunes:keywords",
+        "tags",
+        "itunes:category",
+        "category",
+        "categories",
+    ]
+    for key in candidates:
+        raw = _safe_entry_get(entry, key)
+        if not raw:
+            continue
+        if isinstance(raw, str):
+            parts = [part.strip() for part in raw.split(",") if part.strip()]
+            if parts:
+                tags.extend(parts)
+        elif isinstance(raw, list):
+            for part in raw:
+                if isinstance(part, dict):
+                    name = _safe_entry_get(part, "term") or _safe_entry_get(part, "label")
+                    if name:
+                        text = str(name).strip()
+                        if text:
+                            tags.append(text)
+                elif part is not None:
+                    text = str(part).strip()
+                    if text:
+                        tags.append(text)
+        elif isinstance(raw, dict):
+            for value in raw.values():
+                text = str(value).strip()
+                if text:
+                    tags.append(text)
+        if tags:
+            break
+    # Deduplicate preserving order
+    seen: Set[str] = set()
+    unique: List[str] = []
+    for tag in tags:
+        if tag not in seen:
+            seen.add(tag)
+            unique.append(tag)
+    return unique
+
+
+def _build_rss_lookup(rss_url: str) -> Dict[Tuple[str, Optional[date]], Dict[str, Any]]:
+    """Fetch an RSS feed and return mapping by (normalized_title, publish_date)."""
+
+    lookup: Dict[Tuple[str, Optional[date]], Dict[str, Any]] = {}
+    try:
+        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+            response = client.get(rss_url)
+            response.raise_for_status()
+            feed = feedparser.parse(response.content)
+    except Exception:
+        logging.getLogger("api.importer").warning("Failed to fetch RSS feed for Spreaker sync", exc_info=True)
+        return lookup
+
+    entries = getattr(feed, "entries", []) or []
+    for entry in entries:
+        title = _safe_entry_get(entry, "title")
+        norm_title = normalize_title(title)
+        if not norm_title:
+            continue
+        published = _safe_entry_get(entry, "published_parsed") or _safe_entry_get(entry, "updated_parsed")
+        publish_date: Optional[date] = None
+        if published:
+            try:
+                publish_date = datetime(*published[:6]).date()
+            except Exception:
+                publish_date = None
+
+        show_notes = _extract_entry_text(
+            entry,
+            "content",
+            "summary",
+            "description",
+            "subtitle",
+        )
+        tags = _coerce_rss_tags(entry)
+
+        payload: Dict[str, Any] = {}
+        if show_notes:
+            payload["show_notes"] = show_notes
+        if tags:
+            payload["tags"] = tags
+        if not payload:
+            continue
+
+        keys = [(norm_title, publish_date), (norm_title, None)]
+
+        for key in keys:
+            existing = lookup.get(key)
+            if existing:
+                # Prefer keeping richer payload (with both notes and tags)
+                if ("show_notes" in existing and "show_notes" not in payload) or (
+                    "tags" in existing and "tags" not in payload
+                ):
+                    continue
+            lookup[key] = payload
+
+    return lookup
 
 
 def _parse_spreaker_datetime(value: Any) -> datetime | None:
@@ -187,6 +331,22 @@ def sync_spreaker_episodes(
     for ep in local_eps:
         title_index[normalize_title(ep.title)] = ep
 
+    rss_lookup: Dict[Tuple[str, Optional[date]], Dict[str, Any]] = {}
+    rss_loaded = False
+
+    def _maybe_get_rss_lookup() -> Dict[Tuple[str, Optional[date]], Dict[str, Any]]:
+        nonlocal rss_loaded, rss_lookup
+        if rss_loaded:
+            return rss_lookup
+        rss_loaded = True
+        for rss_candidate in (getattr(podcast, "rss_url_locked", None), getattr(podcast, "rss_url", None)):
+            if not rss_candidate:
+                continue
+            rss_lookup = _build_rss_lookup(str(rss_candidate))
+            if rss_lookup:
+                break
+        return rss_lookup
+
     created = 0
     updated = 0
     conflicts: List[Dict[str, Any]] = []
@@ -197,6 +357,42 @@ def sync_spreaker_episodes(
         if not isinstance(item, dict):
             continue
         payload_dict = _spreaker_payload(item)
+
+        if not payload_dict.get("show_notes") or not payload_dict.get("tags"):
+            lookup = _maybe_get_rss_lookup()
+            if lookup:
+                norm_title = normalize_title(payload_dict.get("title"))
+                publish_date_val: Optional[date] = None
+                publish_at_val = payload_dict.get("publish_at")
+                if isinstance(publish_at_val, datetime):
+                    publish_date_val = publish_at_val.date()
+                elif isinstance(publish_at_val, str):
+                    try:
+                        publish_date_val = datetime.fromisoformat(publish_at_val).date()
+                    except Exception:
+                        publish_date_val = None
+
+                rss_payload = None
+                for key in (
+                    (norm_title, publish_date_val),
+                    (norm_title, None),
+                ):
+                    if key[0]:
+                        rss_payload = lookup.get(key)
+                        if rss_payload:
+                            break
+
+                if rss_payload:
+                    if not payload_dict.get("show_notes") and rss_payload.get("show_notes"):
+                        payload_dict["show_notes"] = rss_payload["show_notes"]
+                    if rss_payload.get("tags"):
+                        existing_tags = payload_dict.get("tags") or []
+                        merged_tags = list(existing_tags)
+                        for tag in rss_payload["tags"]:
+                            if tag not in merged_tags:
+                                merged_tags.append(tag)
+                        if merged_tags and merged_tags != existing_tags:
+                            payload_dict["tags"] = merged_tags
         title_key = normalize_title(payload_dict.get("title"))
         if not title_key:
             continue
