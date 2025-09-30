@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import { Loader2, RefreshCw, ImageOff, Play, CheckCircle2, Clock, AlertTriangle, CalendarClock, Trash2, ArrowLeft, LayoutGrid, List as ListIcon, Search, Undo2, Scissors, Grid3X3, Pencil, RotateCcw, FileText, Wand2 } from "lucide-react";
+import { Loader2, RefreshCw, ImageOff, Play, CheckCircle2, Clock, AlertTriangle, CalendarClock, Trash2, ArrowLeft, LayoutGrid, List as ListIcon, Search, Undo2, Scissors, Grid3x3, Pencil, RotateCcw, FileText, Wand2 } from "lucide-react";
 import EpisodeHistoryPreview from './EpisodeHistoryPreview';
 import FlubberReview from './FlubberReview';
 import ManualEditorModal from './ManualEditorModal';
@@ -1085,7 +1085,7 @@ export default function EpisodeHistory({ token, onBack }) {
                 onClick={()=>setViewMode('mosaic')}
                 title="Mosaic view"
               >
-                <Grid3X3 className="w-4 h-4"/>
+                <Grid3x3 className="w-4 h-4"/>
               </button>
               <button
                 className={`px-2 h-8 text-sm flex items-center gap-1 border-l ${viewMode==='list'?'bg-gray-200 font-medium':'bg-white hover:bg-gray-50'}`}
