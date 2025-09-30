@@ -62,12 +62,13 @@ if hasattr(_backend_api, "__path__"):
 
 
 class _BackendAliasLoader(importlib_abc.Loader):
-    """Load ``api`` modules by delegating to ``backend.api`` modules.
+    """Alias ``api.*`` modules to the canonical ``backend.api.*`` modules.
 
-    The loader ensures that the module code is only executed once using the
-    canonical ``backend.api`` module name.  All ``api`` imports then simply
-    reference the already-loaded module which prevents duplicate SQLModel table
-    registrations during test collection.
+    Instead of creating a proxy wrapper module, we register the alias name in
+    ``sys.modules`` to point directly at the already-imported backend module
+    object. This guarantees a single set of module globals and allows tests to
+    monkeypatch module-level variables (e.g., ``_HTTPX_AVAILABLE``) via either
+    import path.
     """
 
     def __init__(self, fullname: str, backend_name: str, is_package: bool) -> None:
@@ -76,52 +77,15 @@ class _BackendAliasLoader(importlib_abc.Loader):
         self.is_package = is_package
 
     def create_module(self, spec):  # type: ignore[override]
-        # Create a lightweight alias module with a proper spec. We'll proxy
-        # attribute access to the canonical backend module in exec_module.
-        alias = ModuleType(self.fullname)
-        alias.__loader__ = self  # type: ignore[attr-defined]
-        alias.__package__ = self.fullname if self.is_package else self.fullname.rpartition(".")[0]
-        # Provide a distinct spec for the alias name to satisfy importlib/pytest
-        alias.__spec__ = importlib_util.spec_from_loader(self.fullname, self, is_package=self.is_package)  # type: ignore[attr-defined]
-        return alias
+        # Import (or retrieve) the canonical backend module, then register it
+        # under the alias name as well so both entries reference the same object.
+        backend_mod = import_module(self.backend_name)
+        sys.modules[self.fullname] = backend_mod
+        return backend_mod
 
     def exec_module(self, module):  # type: ignore[override]
-        # Import (or retrieve) the canonical backend module, then make the
-        # alias module proxy its attributes to the backend module.
-        backend = import_module(self.backend_name)
-
-        # Define proxy getattr/dir so attribute access forwards to backend
-        def _alias_getattr(name: str):  # type: ignore[reportGeneralTypeIssues]
-            return getattr(backend, name)
-
-        def _alias_dir():  # type: ignore[reportGeneralTypeIssues]
-            try:
-                return sorted(set(dir(backend)))
-            except Exception:
-                return []
-
-        try:
-            object.__setattr__(module, "__getattr__", _alias_getattr)
-            object.__setattr__(module, "__dir__", _alias_dir)
-        except Exception:
-            # Fallback: copy attributes once
-            try:
-                module.__dict__.update({k: v for k, v in backend.__dict__.items() if not k.startswith("__")})
-            except Exception:
-                pass
-
-        # Mirror selected dunder attributes
-        try:
-            module.__all__ = list(getattr(backend, "__all__", []))  # type: ignore[attr-defined]
-        except Exception:
-            pass
-        if self.is_package and hasattr(backend, "__path__"):
-            try:
-                module.__path__ = list(getattr(backend, "__path__"))  # type: ignore[attr-defined]
-            except Exception:
-                pass
-        # Ensure sys.modules entry points to the alias module we just configured
-        sys.modules[self.fullname] = module
+        # Nothing to execute; we've aliased to the canonical module object.
+        return None
 
 
 class _BackendAliasFinder(importlib_abc.MetaPathFinder):

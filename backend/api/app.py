@@ -107,6 +107,7 @@ app.add_middleware(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_allowed_origin_list,
+    allow_origin_regex=r"https://(?:[a-z0-9-]+\.)?(?:podcastplusplus\.com|getpodcastplus\.com)",
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],

@@ -12,6 +12,8 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger("security_headers")
 
+TRUSTED_CORS_SUFFIXES = ("podcastplusplus.com", "getpodcastplus.com")
+
 def _normalize_origin(raw: str | None) -> str:
     """Return a canonical origin string (scheme://host[:port]) for comparisons."""
     if not raw:
@@ -46,6 +48,17 @@ def _select_origin(effective_origin: str | None, allowed: list[str]) -> str | No
         return match
     if effective_origin in allowed:
         return effective_origin
+    try:
+        parsed = urlparse(normalized)
+        host = (parsed.hostname or "").lower()
+        scheme = parsed.scheme or "https"
+        netloc = parsed.netloc or host
+        if host:
+            for suffix in TRUSTED_CORS_SUFFIXES:
+                if host == suffix or host.endswith(f".{suffix}"):
+                    return f"{scheme}://{netloc}"
+    except Exception:
+        pass
     return None
 
 

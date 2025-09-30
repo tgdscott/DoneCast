@@ -17,7 +17,34 @@ The JSON response includes the internal `subdomain` and the computed `default_do
 
 ## Viewing the generated site
 
-After generation, the site is available at `https://<subdomain>.{BASE_DOMAIN}` where `{BASE_DOMAIN}` defaults to `podcastplusplus.com` but can be overridden through `PODCAST_WEBSITE_BASE_DOMAIN` in configuration. The API response also includes any configured custom domain when one is attached.
+After generation, the site is published at a brand-facing domain (no app/api prefixes):
+
+- Default URL: `https://<subdomain>.<BASE_DOMAIN>`
+	- Example: if the subdomain is `myshow` and the base domain is the default, your site will be at `https://myshow.podcastplusplus.com`.
+	- You can change the base domain via the `PODCAST_WEBSITE_BASE_DOMAIN` setting (defaults to `podcastplusplus.com`).
+
+The API response for `GET /api/podcasts/{podcast_id}/website` includes:
+
+- `subdomain`: The internal identifier allocated to the site (e.g., `myshow`).
+- `default_domain`: The fully-qualified host we serve by default (e.g., `myshow.podcastplusplus.com`).
+- `custom_domain` (optional): A user-attached custom hostname when configured.
+- `status`: Current publish state.
+
+### Custom domains
+
+If your plan allows custom domains (minimum tier is controlled by `PODCAST_WEBSITE_CUSTOM_DOMAIN_MIN_TIER`), you can attach one via:
+
+- `PATCH /api/podcasts/{podcast_id}/website/domain` with `{ "custom_domain": "yourdomain.com" }`.
+
+DNS setup (high-level):
+
+- Create a CNAME record for your custom host that points to the `default_domain` returned by the API (e.g., `CNAME www.yourdomain.com -> myshow.podcastplusplus.com`).
+- Allow time for DNS and TLS issuance to complete (typically a few minutes, can be up to an hour depending on DNS TTLs).
+
+Notes:
+
+- The service intentionally avoids exposing `app.` or `api.` subdomains for public websites; visitors see the brand apex (`<subdomain>.<BASE_DOMAIN>`) or your custom domain.
+- During the rebrand transition, existing sites on the legacy base domain may continue to resolve (e.g., `*.getpodcastplus.com`), but new deployments use `podcastplusplus.com` by default.
 
 ## Saved prompts
 
