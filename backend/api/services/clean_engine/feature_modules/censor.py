@@ -13,12 +13,14 @@ from .utils import to_ms
 
 
 _LEET_MAP = str.maketrans({
-    "@": "a", "$": "s", "0": "o", "1": "l", "!": "i", "3": "e", "4": "a", "5": "s", "7": "t", "+": "t"
+    "@": "a", "$": "s", "0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t", "+": "t"
 })
 
 
 def _normalize_token(s: str) -> str:
     s = (s or "").lower()
+    # Treat bang-as-letter forms like "sh!t" while avoiding trailing punctuation like "shit!".
+    s = re.sub(r"(?<=[a-z0-9])[!]+(?=[a-z0-9])", "i", s)
     s = s.translate(_LEET_MAP)
     s = re.sub(r"[^a-z]+", "", s)
     s = re.sub(r"([a-z])\1{2,}", r"\1\1", s)
