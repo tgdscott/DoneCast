@@ -23,6 +23,7 @@ from sqlalchemy import func
 
 from api.core.paths import MEDIA_DIR
 from api.models.podcast import MediaItem, MediaCategory, PodcastTemplate
+from api.models.transcription import TranscriptionWatch
 from api.models.user import User
 from api.core.database import get_session
 from api.routers.auth import get_current_user
@@ -84,6 +85,8 @@ async def upload_media_files(
     friendly_names: Optional[str] = Form(None),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    notify_when_ready: Optional[str] = Form(default=None),
+    notify_email: Optional[str] = Form(default=None),
 ) -> List[MediaItem]:
     """
     Upload one or more media files with optional friendly names.
@@ -95,6 +98,53 @@ async def upload_media_files(
     # Track gs:// objects created in this request so we can delete them on DB failure
     uploaded_objects: list[tuple[str, str]] = []  # (bucket, key)
     names = parse_friendly_names(friendly_names)
+
+    notify_requested = False
+    if isinstance(notify_when_ready, str):
+        notify_requested = notify_when_ready.strip().lower() in {"1", "true", "yes", "on"}
+    elif notify_when_ready:
+        notify_requested = True
+
+    notify_target = (notify_email or "").strip() if notify_email else ""
+    if notify_requested and not notify_target:
+        try:
+            notify_target = (current_user.email or "").strip() if hasattr(current_user, "email") else ""
+        except Exception:
+            notify_target = ""
+    if notify_target and "@" not in notify_target:
+        notify_target = ""
+
+    def _queue_watch(filename: str, friendly: str) -> None:
+        if not (filename and notify_requested and notify_target and category == MediaCategory.main_content):
+            return
+        try:
+            existing_watch = session.exec(
+                select(TranscriptionWatch).where(
+                    TranscriptionWatch.user_id == current_user.id,
+                    TranscriptionWatch.filename == filename,
+                )
+            ).first()
+        except Exception:
+            existing_watch = None
+
+        friendly_clean = (friendly or "").strip() or Path(filename).stem
+
+        if existing_watch:
+            existing_watch.notify_email = notify_target
+            existing_watch.friendly_name = friendly_clean
+            existing_watch.notified_at = None
+            existing_watch.last_status = "queued"
+            session.add(existing_watch)
+        else:
+            session.add(
+                TranscriptionWatch(
+                    user_id=current_user.id,
+                    filename=filename,
+                    friendly_name=friendly_clean,
+                    notify_email=notify_target,
+                    last_status="queued",
+                )
+            )
 
     # Track duplicates within this request batch
     batch_names_lower: set[str] = set()
@@ -305,6 +355,10 @@ async def upload_media_files(
             session.refresh(existing_item)
             created_items.append(existing_item)
             batch_names_lower.add(fn_key)
+            try:
+                _queue_watch(str(existing_item.filename or ""), str(existing_item.friendly_name or fn_norm))
+            except Exception:
+                pass
             # Structured log: overwrite
             try:
                 logging.info(
@@ -375,6 +429,10 @@ async def upload_media_files(
 
             session.add(media_item)
             created_items.append(media_item)
+            try:
+                _queue_watch(str(media_item.filename or ""), str(media_item.friendly_name or fn_norm))
+            except Exception:
+                pass
 
             # Kick transcription (best-effort)
             try:
