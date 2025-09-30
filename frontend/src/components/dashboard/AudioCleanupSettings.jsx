@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 // 'Waveform' is not exported by lucide-react in the installed version; use a stable icon instead.
 import { RefreshCw, Save, Activity as WaveIcon, Sparkles, Scissors, Eraser, Shield, RotateCcw, Bot, Trash2 } from "lucide-react";
 import { useAuth } from "@/AuthContext";
-import { makeApi } from "@/lib/apiClient";
+import { makeApi, coerceArray } from "@/lib/apiClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -79,9 +79,9 @@ export default function AudioCleanupSettings({ className }) {
   useEffect(() => {
     const run = async () => {
       try {
-        const files = await makeApi(token).get("/api/media/");
-        if (!files) return;
-        const sfx = (files || []).filter((f) => f.category === "sfx");
+        const files = coerceArray(await makeApi(token).get("/api/media/"));
+        if (!files.length) return;
+        const sfx = files.filter((f) => f.category === "sfx");
         const opts = sfx.map((f) => ({
           id: f.id,
           label: f.friendly_name || (f.filename?.split("_").slice(1).join("_") || f.filename),
@@ -502,11 +502,4 @@ function TagInput({ values, onChange, placeholder }) {
     </div>
   );
 }
-
-
-
-
-
-
-
 

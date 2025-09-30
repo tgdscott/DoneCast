@@ -131,7 +131,16 @@ def parse_forwarded_header(forwarded: str | None) -> tuple[str | None, str | Non
 
 
 def external_base_url(request: Request) -> str:
-    """Determine the external base URL (scheme://host) for this request."""
+    """Determine the external base URL (scheme://host) without leaking app/api subdomains.
+
+    Behavior:
+    - If the request appears to target a local/dev host (localhost, 127.0.0.1, or RFC1918
+      private LAN ranges), we ALWAYS honor the incoming host and never override with
+      a production-configured OAUTH_BACKEND_BASE.
+    - Otherwise, if OAUTH_BACKEND_BASE is configured, prefer its scheme/host to build
+      redirects consistently behind proxies or Cloud Run.
+    - Force https scheme for our public production domains.
+    """
 
     hdr = request.headers
     xf_proto = (hdr.get("x-forwarded-proto") or "").split(",")[0].strip()
@@ -141,16 +150,35 @@ def external_base_url(request: Request) -> str:
     host = xf_host or f_host or hdr.get("host") or request.url.hostname
     proto = xf_proto or f_proto or request.url.scheme or "https"
 
+    def _is_local(h: str | None) -> bool:
+        if not h:
+            return False
+        try:
+            import ipaddress as _ip
+            name = h.split(":", 1)[0].strip().lower()
+            if name in {"localhost"}:
+                return True
+            try:
+                ip = _ip.ip_address(name)
+                return ip.is_private or ip.is_loopback
+            except ValueError:
+                # Not an IP, treat common dev hostnames as local
+                return name.endswith(".local")
+        except Exception:
+            return False
+
     try:
         import urllib.parse as _urlp
 
         base_cfg = (settings.OAUTH_BACKEND_BASE or "").strip()
-        if base_cfg:
+        # Only apply configured backend base if host is not local/dev
+        if base_cfg and not _is_local(str(host)):
             parsed = _urlp.urlparse(base_cfg)
-            if parsed.scheme and parsed.hostname and host:
-                if parsed.hostname == host or host.endswith("podcastplusplus.com"):
-                    proto = parsed.scheme
-        if host and host.endswith("podcastplusplus.com") and proto != "https":
+            if parsed.scheme and parsed.hostname:
+                host = parsed.hostname
+                proto = parsed.scheme
+        # Enforce https for our production domains
+        if isinstance(host, str) and host.endswith(("podcastplusplus.com", "getpodcastplus.com")) and proto != "https":
             proto = "https"
     except Exception:
         pass

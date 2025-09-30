@@ -25,7 +25,7 @@ except Exception:  # pragma: no cover
 log = logging.getLogger(__name__)
 
 _SITE_SCHEMA_PROMPT = """
-You are Podcast++ SiteBuilder, an expert AI web designer.
+You are Podcast Plus Plus SiteBuilder, an expert AI web designer.
 Create warm, inviting, accessible landing pages that help listeners subscribe.
 ALWAYS respond with a single JSON object matching this schema exactly:
 {
@@ -115,7 +115,7 @@ class WebsiteContext:
         ]
         return {
             "hero_title": self.podcast.name,
-            "hero_subtitle": (self.podcast.description or "A podcast hosted on Podcast++").strip(),
+            "hero_subtitle": (self.podcast.description or "A podcast hosted on Podcast Plus Plus").strip(),
             "about": {
                 "heading": f"About {self.podcast.name}",
                 "body": (self.podcast.description or "We're still learning about this show!").strip(),

@@ -1,11 +1,12 @@
 import React from 'react';
 import { Button } from '../../ui/button';
 import { Progress } from '../../ui/progress';
-import { ArrowLeft, BookText, FileImage, FileUp, Globe, Settings, Wand2, CheckCircle } from 'lucide-react';
+import { ArrowLeft, BookText, FileImage, FileUp, Globe, Settings, Wand2, CheckCircle, Library } from 'lucide-react';
 
 const ICON_MAP = {
   BookText,
   FileUp,
+  Library,
   Wand2,
   FileImage,
   Settings,

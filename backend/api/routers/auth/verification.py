@@ -135,9 +135,9 @@ async def resend_verification(
 
     app_base = (settings.APP_BASE_URL or "https://app.podcastplusplus.com").rstrip("/")
     verify_url = f"{app_base}/verify?token={token}"
-    subj = "Podcast++: Confirm your email"
+    subj = "Podcast Plus Plus: Confirm your email"
     body = (
-        f"Your Podcast++ verification code is: {code}\n\n"
+        f"Your Podcast Plus Plus verification code is: {code}\n\n"
         f"Click to verify instantly: {verify_url}\n\n"
         "This code expires in 15 minutes. If you didn’t request it, you can ignore this email."
     )
@@ -201,9 +201,9 @@ async def update_pending_email(
 
     app_base = (settings.APP_BASE_URL or "https://app.podcastplusplus.com").rstrip("/")
     verify_url = f"{app_base}/verify?token={token}"
-    subj = "Podcast++: Confirm your email"
+    subj = "Podcast Plus Plus: Confirm your email"
     body = (
-        f"Your Podcast++ verification code is: {code}\n\n"
+        f"Your Podcast Plus Plus verification code is: {code}\n\n"
         f"Click to verify instantly: {verify_url}\n\n"
         "This code expires in 15 minutes. If you didn’t request it, you can ignore this email."
     )
@@ -269,7 +269,7 @@ async def request_password_reset(
 
     app_base = (settings.APP_BASE_URL or "https://app.podcastplusplus.com").rstrip("/")
     reset_url = f"{app_base}/reset-password?token={token}"
-    subj = "Podcast++: Password reset request"
+    subj = "Podcast Plus Plus: Password reset request"
     text_body = (
         "We received a request to reset your password.\n\n"
         f"Reset link (valid 30 minutes): {reset_url}\n\n"
@@ -283,7 +283,7 @@ async def request_password_reset(
         <a href='{reset_url}' style='display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 20px;border-radius:6px;font-weight:600;'>Choose New Password</a>
       </p>
       <p style='font-size:13px;color:#555;margin:0 0 12px;'>If you didn't request this, you can safely ignore this email.</p>
-      <p style='font-size:12px;color:#777;margin:24px 0 0;'>&copy; {datetime.utcnow().year} Podcast++</p>
+    <p style='font-size:12px;color:#777;margin:24px 0 0;'>&copy; {datetime.utcnow().year} Podcast Plus Plus</p>
     </div>
     """.strip()
     try:

@@ -5,11 +5,86 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+from datetime import datetime
 from pathlib import Path
+
+from sqlmodel import Session, select
 
 from .app import celery_app
 from api.core.paths import WS_ROOT as PROJECT_ROOT
+from api.core.database import engine
+from api.models.notification import Notification
+from api.models.podcast import MediaItem
+from api.models.transcription import TranscriptionWatch
+from api.models.user import User
 from api.services import transcription as trans
+from api.services.mailer import mailer
+
+
+def _notify_watchers_processed(filename: str) -> None:
+    try:
+        with Session(engine) as session:
+            stmt = select(TranscriptionWatch).where(
+                TranscriptionWatch.filename == filename,
+                TranscriptionWatch.notified_at == None,  # noqa: E711
+            )
+            watches = session.exec(stmt).all()
+            if not watches:
+                return
+
+            media = session.exec(select(MediaItem).where(MediaItem.filename == filename)).first()
+            friendly = getattr(media, "friendly_name", None) or Path(filename).stem
+
+            for watch in watches:
+                user = session.get(User, watch.user_id)
+                email = (watch.notify_email or getattr(user, "email", "") or "").strip()
+                status = "pending"
+                if email:
+                    subject = "Your upload is ready to edit"
+                    body = (
+                        f"Good news! The audio file '{friendly}' has finished processing and is ready in Podcast Plus Plus.\n\n"
+                        "You can return to the dashboard to continue building your episode."
+                    )
+                    try:
+                        sent = mailer.send(email, subject, body)
+                        status = "sent" if sent else "email-failed"
+                    except Exception:
+                        logging.warning("[transcribe] mail send failed for %s", filename, exc_info=True)
+                        status = "email-error"
+                else:
+                    status = "no-email"
+
+                note = Notification(
+                    user_id=watch.user_id,
+                    type="transcription",
+                    title="Upload processed",
+                    body=f"{friendly} is fully transcribed and ready to use.",
+                )
+                session.add(note)
+                watch.notified_at = datetime.utcnow()
+                watch.last_status = status
+                session.add(watch)
+            session.commit()
+    except Exception:
+        logging.warning("[transcribe] failed notifying watchers for %s", filename, exc_info=True)
+
+
+def _mark_watchers_failed(filename: str, detail: str) -> None:
+    try:
+        with Session(engine) as session:
+            stmt = select(TranscriptionWatch).where(
+                TranscriptionWatch.filename == filename,
+                TranscriptionWatch.notified_at == None,  # noqa: E711
+            )
+            watches = session.exec(stmt).all()
+            if not watches:
+                return
+            for watch in watches:
+                watch.last_status = f"error:{detail[:120]}"
+                session.add(watch)
+            session.commit()
+    except Exception:
+        logging.warning("[transcribe] failed recording watcher error for %s", filename, exc_info=True)
 
 
 @celery_app.task(name="transcribe_media_file")
@@ -86,14 +161,17 @@ def transcribe_media_file(filename: str) -> dict:
                 ),
             )
 
-        return {
+        result = {
             "ok": True,
             "filename": filename,
             "original": orig_new.name,
             "working": work_new.name,
         }
+        _notify_watchers_processed(filename)
+        return result
     except Exception as exc:
         logging.warning("[transcribe] failed for %s: %s", filename, exc, exc_info=True)
+        _mark_watchers_failed(filename, str(exc))
 
         try:
             if os.getenv("TRANSCRIPTION_FAKE", "").strip().lower() in {
@@ -166,13 +244,15 @@ def transcribe_media_file(filename: str) -> dict:
                         else ""
                     ),
                 )
-                return {
+                result = {
                     "ok": True,
                     "filename": filename,
                     "original": orig_new.name,
                     "working": work_new.name,
                     "fake": True,
                 }
+                _notify_watchers_processed(filename)
+                return result
         except Exception as fallback_exc:
             logging.warning(
                 "[transcribe] dev-fake fallback failed: %s",

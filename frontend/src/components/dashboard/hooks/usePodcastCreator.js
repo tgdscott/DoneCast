@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from '@/hooks/use-toast';
-import { makeApi, buildApiUrl } from '@/lib/apiClient';
+import { makeApi, buildApiUrl, coerceArray } from '@/lib/apiClient';
 import { fetchVoices as fetchElevenVoices } from '@/api/elevenlabs';
 import { useAuth } from '@/AuthContext.jsx';
 
@@ -11,12 +11,15 @@ export default function usePodcastCreator({
   testInject,
   preselectedMainFilename,
   preselectedTranscriptReady,
+  creatorMode = 'standard',
+  preselectedStartStep,
 }) {
   const { user: authUser } = useAuth();
   const [currentStep, setCurrentStep] = useState(initialStep || 1);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [uploadedFile, setUploadedFile] = useState(null);
   const [uploadedFilename, setUploadedFilename] = useState(null);
+  const [selectedPreupload, setSelectedPreupload] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const uploadXhrRef = useRef(null);
   const [isAssembling, setIsAssembling] = useState(false);
@@ -108,7 +111,8 @@ export default function usePodcastCreator({
         setUploadedFilename(preselectedMainFilename);
         setIntentDetections({ flubber: null, intern: null, sfx: null });
         setIntentDetectionReady(false);
-        setCurrentStep(5);
+        const targetStep = typeof preselectedStartStep === 'number' ? preselectedStartStep : 5;
+        setCurrentStep(targetStep);
         if (preselectedTranscriptReady === true) { setTranscriptReady(true); transcriptReadyRef.current = true; }
         used = true;
       }
@@ -187,7 +191,7 @@ export default function usePodcastCreator({
     const fetchMedia = async () => {
       try {
         const data = await api.get('/api/media/');
-        setMediaLibrary(data);
+        setMediaLibrary(coerceArray(data));
       } catch (err) {
         setError(err.message);
       }
@@ -690,14 +694,18 @@ export default function usePodcastCreator({
     return () => clearInterval(interval);
   }, [jobId, token, expectedEpisodeId, publishMode]);
 
-  const steps = [
-    { number: 1, title: 'Select Template', icon: 'BookText' },
-    { number: 2, title: 'Upload Audio', icon: 'FileUp' },
-    { number: 3, title: 'Customize Segments', icon: 'Wand2' },
-    { number: 4, title: 'Cover Art', icon: 'FileImage' },
-    { number: 5, title: 'Details & Schedule', icon: 'Settings' },
-    { number: 6, title: 'Assemble', icon: 'Globe' },
-  ];
+  const steps = useMemo(() => {
+    const stepTwoTitle = creatorMode === 'preuploaded' ? 'Choose Audio' : 'Upload Audio';
+    const stepTwoIcon = creatorMode === 'preuploaded' ? 'Library' : 'FileUp';
+    return [
+      { number: 1, title: 'Select Template', icon: 'BookText' },
+      { number: 2, title: stepTwoTitle, icon: stepTwoIcon },
+      { number: 3, title: 'Customize Segments', icon: 'Wand2' },
+      { number: 4, title: 'Cover Art', icon: 'FileImage' },
+      { number: 5, title: 'Details & Schedule', icon: 'Settings' },
+      { number: 6, title: 'Assemble', icon: 'Globe' },
+    ];
+  }, [creatorMode]);
 
   const progressPercentage = ((currentStep - 1) / (steps.length - 1)) * 100;
 
@@ -849,6 +857,46 @@ export default function usePodcastCreator({
       setTimeout(() => setUploadProgress(null), 400);
     }
   };
+
+  const handlePreuploadedSelect = useCallback((item) => {
+    if (!item) {
+      setSelectedPreupload(null);
+      setUploadedFilename(null);
+      setTranscriptReady(false);
+      transcriptReadyRef.current = false;
+      setIntentDetections({ flubber: null, intern: null, sfx: null });
+      setIntentDetectionReady(false);
+      setIntents({ flubber: null, intern: null, sfx: null });
+      return;
+    }
+
+    const filename = item.filename || null;
+    setSelectedPreupload(filename);
+    setUploadedFile(null);
+    if (filename) {
+      setUploadedFilename(filename);
+      try { localStorage.setItem('ppp_uploaded_filename', filename); } catch {}
+    }
+    const ready = !!item.transcript_ready;
+    setTranscriptReady(ready);
+    transcriptReadyRef.current = ready;
+    const intentsData = item.intents || {};
+    setIntentDetections(intentsData);
+    setIntentDetectionReady(true);
+    setIntents(prev => {
+      const next = { ...prev };
+      const flubberCount = Number((intentsData?.flubber?.count) ?? 0);
+      const internCount = Number((intentsData?.intern?.count) ?? 0);
+      const sfxCount = Number((intentsData?.sfx?.count) ?? 0);
+      if (flubberCount === 0) next.flubber = 'no';
+      else if (next.flubber === null) next.flubber = 'yes';
+      if (internCount === 0) next.intern = 'no';
+      else if (next.intern === null) next.intern = 'yes';
+      if (sfxCount === 0) next.sfx = 'no';
+      else if (next.sfx === null) next.sfx = 'yes';
+      return next;
+    });
+  }, []);
 
   // Auto-open intent modal when on Step 2 with pending answers
   useEffect(() => {
@@ -1667,6 +1715,7 @@ export default function usePodcastCreator({
     cancelBuild,
     handleTemplateSelect,
     handleFileChange,
+    handlePreuploadedSelect,
     uploadProgress,
     handleCoverFileSelected,
     handleUploadProcessedCover,
@@ -1698,9 +1747,11 @@ export default function usePodcastCreator({
     setScheduleTime,
     setCoverNeedsUpload,
     setCoverMode,
+    selectedPreupload,
     setUsage,
     setError,
     clearCover,
     updateCoverCrop,
   };
 }
+

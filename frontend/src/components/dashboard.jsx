@@ -18,8 +18,6 @@ import {
   Search,
   Target,
   Zap,
-  Mic,
-  Upload,
   FileText,
   Music,
   BarChart3,
@@ -31,18 +29,19 @@ import {
   Settings as SettingsIcon,
   DollarSign,
   Globe2,
-  ChevronDown,
 } from "lucide-react";
-import { useState, useEffect, useMemo } from "react";
-import { makeApi } from "@/lib/apiClient";
+import { useState, useEffect, useMemo, useCallback } from "react";
+
+import { makeApi, coerceArray } from "@/lib/apiClient";
 import { useAuth } from "@/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import Logo from "@/components/Logo.jsx";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import Joyride, { STATUS } from "react-joyride";
 
 import TemplateEditor from "@/components/dashboard/TemplateEditor";
 import PodcastCreator from "@/components/dashboard/PodcastCreator";
+import EpisodeStartOptions from "@/components/dashboard/EpisodeStartOptions";
+import PreUploadManager from "@/components/dashboard/PreUploadManager";
 import MediaLibrary from "@/components/dashboard/MediaLibrary";
 import EpisodeHistory from "@/components/dashboard/EpisodeHistory";
 import PodcastManager from "@/components/dashboard/PodcastManager";
@@ -118,6 +117,10 @@ export default function PodcastPlusDashboard() {
   const [preselectedMainFilename, setPreselectedMainFilename] = useState(null);
   const [preselectedTranscriptReady, setPreselectedTranscriptReady] = useState(false);
   const [shouldRunTour, setShouldRunTour] = useState(false);
+  const [creatorMode, setCreatorMode] = useState('standard');
+  const [preuploadItems, setPreuploadItems] = useState([]);
+  const [preuploadLoading, setPreuploadLoading] = useState(false);
+  const [preuploadError, setPreuploadError] = useState(null);
 
   const tourSteps = useMemo(() => [
     {
@@ -158,6 +161,43 @@ export default function PodcastPlusDashboard() {
     },
   ], []);
 
+  const refreshPreuploads = useCallback(async () => {
+    if (!token) return [];
+    setPreuploadLoading(true);
+    try {
+      const api = makeApi(token);
+      const data = await api.get('/api/media/main-content');
+      if (Array.isArray(data)) {
+        setPreuploadItems(data);
+      } else {
+        setPreuploadItems([]);
+      }
+      setPreuploadError(null);
+      return data;
+    } catch (err) {
+      const status = err?.status;
+      let msg = 'Failed to load your uploaded main-content audio.';
+      if (status === 401) {
+        msg = 'Your session expired. Please sign in again to load your uploads.';
+      } else if (status === 403) {
+        msg = 'You are not allowed to view uploads for this account.';
+      } else if (status === 404) {
+        // In some setups this route might be gated; treat as empty rather than fatal
+        msg = 'No uploads found yet.';
+      } else if (typeof err?.message === 'string') {
+        const em = err.message.toLowerCase();
+        if (em.includes('failed to fetch') || em.includes('network') || em.includes('cors')) {
+          msg = 'Network issue loading your uploads. Check your connection or try again.';
+        }
+      }
+      setPreuploadError(msg);
+      setPreuploadItems([]);
+      return [];
+    } finally {
+      setPreuploadLoading(false);
+    }
+  }, [token]);
+
   const handleTourCallback = (data) => {
     const { status } = data;
     if ([STATUS.FINISHED, STATUS.SKIPPED].includes(status)) {
@@ -183,7 +223,8 @@ export default function PodcastPlusDashboard() {
 
       // Templates
       if (templatesRes.status === 'fulfilled') {
-        setTemplates(templatesRes.value);
+        const templatesList = coerceArray(templatesRes.value);
+        setTemplates(templatesList);
       } else {
         const reason = templatesRes.reason || {};
         if (reason.status === 401) {
@@ -198,7 +239,8 @@ export default function PodcastPlusDashboard() {
 
       // Podcasts
       if (podcastsRes.status === 'fulfilled') {
-        setPodcasts(podcastsRes.value);
+        const podcastList = coerceArray(podcastsRes.value);
+        setPodcasts(podcastList);
       } else {
         const reason = podcastsRes.reason || {};
         if (reason.status === 401) {
@@ -239,6 +281,23 @@ export default function PodcastPlusDashboard() {
 
   // Initial load + token change: fetch other data (user already fetched by AuthContext)
   useEffect(() => { if (token) { fetchData(); } }, [token, logout]);
+  useEffect(() => {
+    if (!token) return;
+    if (currentView === 'episodeStart' || currentView === 'preuploadUpload') {
+      refreshPreuploads();
+    }
+  }, [token, currentView, refreshPreuploads]);
+  useEffect(() => {
+    if (!token) return;
+    if (
+      currentView === 'createEpisode' &&
+      creatorMode === 'preuploaded' &&
+      !preuploadLoading &&
+      preuploadItems.length === 0
+    ) {
+      refreshPreuploads();
+    }
+  }, [token, currentView, creatorMode, preuploadLoading, preuploadItems.length, refreshPreuploads]);
   // When navigating back to the Dashboard view, refresh data so cards reflect latest state
   useEffect(() => {
     if (token && currentView === 'dashboard') {
@@ -328,6 +387,7 @@ export default function PodcastPlusDashboard() {
 
   const handleBackToDashboard = () => {
     setSelectedTemplateId(null);
+    setCreatorMode('standard');
     setCurrentView('dashboard');
     // Ensure counts (podcasts/templates/stats) are fresh when returning
     try { fetchData(); } catch {}
@@ -362,13 +422,53 @@ export default function PodcastPlusDashboard() {
           <Recorder
             onBack={handleBackToDashboard}
             token={token}
-            onFinish={({ filename, hint, transcriptReady, startStep }) => {
+            onFinish={({ filename, hint, transcriptReady }) => {
               try {
                 setPreselectedMainFilename(filename || hint || null);
                 setPreselectedTranscriptReady(!!transcriptReady);
               } catch {}
+              setCreatorMode('standard');
               setCurrentView('createEpisode');
             }}
+          />
+        );
+      case 'episodeStart': {
+        const hasReadyAudio = preuploadItems.some((item) => item?.transcript_ready);
+        return (
+          <EpisodeStartOptions
+            loading={preuploadLoading}
+            hasReadyAudio={hasReadyAudio}
+            errorMessage={preuploadError || ''}
+            onRetry={() => { try { refreshPreuploads(); } catch {} }}
+            onBack={handleBackToDashboard}
+            onChooseUpload={() => {
+              setCreatorMode('standard');
+              setCurrentView('preuploadUpload');
+            }}
+            onChooseLibrary={async () => {
+              setCreatorMode('preuploaded');
+              setPreselectedMainFilename(null);
+              setPreselectedTranscriptReady(false);
+              if (!preuploadLoading && preuploadItems.length === 0) {
+                try { await refreshPreuploads(); } catch {}
+              }
+              setCurrentView('createEpisode');
+            }}
+            onChooseRecord={() => {
+              setCreatorMode('standard');
+              setCurrentView('recorder');
+            }}
+          />
+        );
+      }
+      case 'preuploadUpload':
+        return (
+          <PreUploadManager
+            token={token}
+            onBack={() => setCurrentView('episodeStart')}
+            onDone={handleBackToDashboard}
+            defaultEmail={user?.email || ''}
+            onUploaded={refreshPreuploads}
           />
         );
       case 'templateManager':
@@ -384,6 +484,11 @@ export default function PodcastPlusDashboard() {
             podcasts={podcasts}
             preselectedMainFilename={preselectedMainFilename}
             preselectedTranscriptReady={preselectedTranscriptReady}
+            creatorMode={creatorMode}
+            preuploadedItems={preuploadItems}
+            preuploadedLoading={preuploadLoading}
+            onRefreshPreuploaded={refreshPreuploads}
+            preselectedStartStep={creatorMode === 'preuploaded' ? 1 : undefined}
           />
         );
       case 'mediaLibrary':
@@ -471,26 +576,24 @@ export default function PodcastPlusDashboard() {
                         <div className={`font-semibold mt-0.5 ${canCreateEpisode ? 'text-green-600' : 'text-amber-600'}`}>{canCreateEpisode ? 'Yes' : 'Setup needed'}</div>
                       </div>
                     </div>
-                    <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-                      {canCreateEpisode ? (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button className="flex-1 md:flex-none" title="Start a new episode" data-tour-id="dashboard-new-episode">
-                              <Plus className="w-4 h-4 mr-2" />
-                              Start New Episode
-                              <ChevronDown className="w-4 h-4 ml-2 opacity-80" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="min-w-[220px]">
-                            <DropdownMenuItem onClick={() => setCurrentView('createEpisode')} className="cursor-pointer">
-                              <Upload className="w-4 h-4 mr-2" /> Use Prerecorded Audio
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => setCurrentView('recorder')} className="cursor-pointer">
-                              <Mic className="w-4 h-4 mr-2" /> Record Your Show Now
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      ) : (
+                      <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+                        {canCreateEpisode ? (
+                          <Button
+                            className="flex-1 md:flex-none"
+                            title="Start a new episode"
+                            data-tour-id="dashboard-new-episode"
+                            onClick={() => {
+                              setCreatorMode('standard');
+                              setPreselectedMainFilename(null);
+                              setPreselectedTranscriptReady(false);
+                              setCurrentView('episodeStart');
+                              refreshPreuploads();
+                            }}
+                          >
+                            <Plus className="w-4 h-4 mr-2" />
+                            Start New Episode
+                          </Button>
+                        ) : (
                         <div className="flex gap-2 flex-wrap">
                           {templates.length === 0 && (
                             <Button
@@ -579,14 +682,28 @@ export default function PodcastPlusDashboard() {
                       <Button onClick={() => setCurrentView('mediaLibrary')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-media"><Music className="w-4 h-4 mr-2" />Media</Button>
           <Button onClick={() => setCurrentView('episodeHistory')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-episodes"><BarChart3 className="w-4 h-4 mr-2" />Episodes</Button>
           {/* Import moved under Podcasts */}
-          <Button onClick={() => setCurrentView('billing')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-subscription"><DollarSign className="w-4 h-4 mr-2" />Subscription</Button>
-                      {canUseWebsiteBuilder && (
+                      <Button onClick={() => setCurrentView('billing')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-subscription"><DollarSign className="w-4 h-4 mr-2" />Subscription</Button>
+                      {canUseWebsiteBuilder ? (
                         <Button
                           onClick={() => setCurrentView('websiteBuilder')}
                           variant="outline"
                           className="justify-start text-sm h-10"
                         >
                           <Globe2 className="w-4 h-4 mr-2" />Website Builder
+                        </Button>
+                      ) : (
+                        <Button
+                          asChild
+                          variant="outline"
+                          className="justify-start text-sm h-10"
+                        >
+                          <a
+                            href="/docs/podcast-website-builder"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <Globe2 className="w-4 h-4 mr-2" />Website Builder Guide
+                          </a>
                         </Button>
                       )}
                       <Button onClick={() => setCurrentView('settings')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-settings"><SettingsIcon className="w-4 h-4 mr-2" />Settings</Button>
@@ -723,3 +840,4 @@ export default function PodcastPlusDashboard() {
     </div>
   );
 }
+

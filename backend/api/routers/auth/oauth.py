@@ -13,6 +13,7 @@ from sqlmodel import Session
 
 from api.core import crud
 from api.core.config import settings
+from urllib.parse import urlparse, urlunparse
 from api.core.database import get_session
 from api.models.settings import load_admin_settings
 from api.models.user import User, UserCreate
@@ -29,6 +30,50 @@ router = APIRouter()
 log = logging.getLogger(__name__)
 
 
+FRONTEND_BASE_SESSION_KEY = "oauth_frontend_base"
+
+
+def _normalize_frontend_base(value: str | None) -> str | None:
+    if not value:
+        return None
+    candidate = value.strip()
+    if not candidate:
+        return None
+    try:
+        parsed = urlparse(candidate)
+        scheme = (parsed.scheme or "").lower()
+        netloc = parsed.netloc
+        if not netloc and parsed.path and '://' not in candidate:
+            netloc = parsed.path
+            if ':' in netloc or netloc.startswith(('localhost', '127.', '0.0.0.0')):
+                scheme = scheme or 'http'
+        if not scheme:
+            scheme = 'https'
+        if scheme not in ("http", "https"):
+            return None
+        if not netloc:
+            return None
+        host = parsed.hostname or netloc.split(':', 1)[0]
+        host_lower = (host or '').lower()
+        allowed = False
+        if host_lower in {'localhost'}:
+            allowed = True
+        else:
+            try:
+                import ipaddress as _ip
+
+                ip = _ip.ip_address(host_lower)
+                allowed = ip.is_loopback or ip.is_private
+            except Exception:
+                if host_lower.endswith(('podcastplusplus.com', 'getpodcastplus.com')) or host_lower.endswith('.local'):
+                    allowed = True
+        if not allowed:
+            return None
+        return f"{scheme}://{netloc}".rstrip('/')
+    except Exception:
+        return None
+
+
 @router.get("/login/google")
 async def login_google(request: Request):
     """Redirect the user to Google's login page."""
@@ -41,6 +86,22 @@ async def login_google(request: Request):
         redirect_uri = f"{backend_base.rstrip('/')}/api/auth/google/callback"
 
     dry_run = request.query_params.get("dry_run") or request.query_params.get("debug")
+    frontend_hint = request.query_params.get("return_to") or request.query_params.get("redirect_to")
+    if not frontend_hint:
+        frontend_hint = request.headers.get("origin") or ""
+    if not frontend_hint:
+        referer = request.headers.get("referer") or request.headers.get("referrer")
+        if referer:
+            frontend_hint = referer
+    normalized_hint = _normalize_frontend_base(frontend_hint)
+    try:
+        if normalized_hint:
+            request.session[FRONTEND_BASE_SESSION_KEY] = normalized_hint
+        else:
+            request.session.pop(FRONTEND_BASE_SESSION_KEY, None)
+    except Exception:
+        pass
+
     if dry_run and str(dry_run).lower() not in {"0", "false", "no"}:
         hdr = request.headers
         return {
@@ -68,7 +129,7 @@ async def login_google(request: Request):
 
 
 @router.get("/google/callback")
-async def auth_google_callback(request: Request, session: Session = Depends(get_session)):
+async def auth_google_callback(request: Request, db_session: Session = Depends(get_session)):
     """Handle the callback from Google, create/update the user, and redirect."""
 
     try:
@@ -102,12 +163,12 @@ async def auth_google_callback(request: Request, session: Session = Depends(get_
     if not isinstance(google_user_data, Mapping) or "email" not in google_user_data:
         google_user_data = None
         id_token = token.get("id_token")
-        if id_token:
+        if id_token and client is not None:
             try:
                 google_user_data = await client.parse_id_token(request, token)
             except Exception as parse_err:
                 log.warning("Failed to parse Google ID token: %s", parse_err)
-        if not google_user_data:
+        if not google_user_data and client is not None:
             try:
                 google_user_data = await client.userinfo(token=token)
             except Exception as userinfo_err:
@@ -122,7 +183,7 @@ async def auth_google_callback(request: Request, session: Session = Depends(get_
     if not google_user_id:
         log.warning("Google userinfo missing stable subject identifier for email %s", user_email)
 
-    user = crud.get_user_by_email(session=session, email=user_email)
+    user = crud.get_user_by_email(session=db_session, email=user_email)
 
     if not user:
         user_create = UserCreate(
@@ -131,11 +192,11 @@ async def auth_google_callback(request: Request, session: Session = Depends(get_
             google_id=google_user_id,
         )
         try:
-            admin_settings = load_admin_settings(session)
+            admin_settings = load_admin_settings(db_session)
             user_create.is_active = bool(getattr(admin_settings, "default_user_active", True))
         except Exception:
             user_create.is_active = True
-        user = crud.create_user(session=session, user_create=user_create)
+        user = crud.create_user(session=db_session, user_create=user_create)
 
     if is_admin_email(user.email):
         user.is_admin = True
@@ -144,13 +205,53 @@ async def auth_google_callback(request: Request, session: Session = Depends(get_
         user.google_id = google_user_id
 
     user.last_login = datetime.utcnow()
-    session.add(user)
-    session.commit()
-    session.refresh(user)
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
 
     access_token = create_access_token({"sub": user.email})
 
-    frontend_base = (settings.APP_BASE_URL or "https://app.podcastplusplus.com").rstrip("/")
+    try:
+        session_frontend_base = request.session.pop(FRONTEND_BASE_SESSION_KEY, None)
+    except Exception:
+        session_frontend_base = None
+
+    # Prefer any loopback/private base we captured during the login redirect
+    # (e.g., http://127.0.0.1:5173 while running Vite). This keeps local dev
+    # flows from being forced back to the production APP_BASE_URL.
+    frontend_base = (session_frontend_base or "").strip()
+    if not frontend_base:
+        frontend_base = (settings.APP_BASE_URL or "").strip()
+    if not frontend_base:
+        try:
+            from api.routers.auth.utils import external_base_url as _ext
+
+            base = _ext(request)
+            parsed = urlparse(base)
+            scheme = parsed.scheme or "https"
+            netloc = parsed.netloc or ""
+            host = parsed.hostname or ""
+            port = parsed.port
+            trusted_suffixes = ("podcastplusplus.com", "getpodcastplus.com")
+            trimmed_host = host
+            if host and host.lower().endswith(trusted_suffixes):
+                for pref in ("app.", "api.", "dashboard.", "backend."):
+                    if trimmed_host.lower().startswith(pref):
+                        trimmed_host = trimmed_host[len(pref):]
+                        break
+            if trimmed_host:
+                if port and port not in (80, 443):
+                    netloc_out = f"{trimmed_host}:{port}"
+                else:
+                    netloc_out = trimmed_host
+            else:
+                netloc_out = netloc or host
+            if not netloc_out:
+                raise ValueError("frontend netloc missing")
+            frontend_base = urlunparse((scheme, netloc_out, "", "", "", ""))
+        except Exception:
+            frontend_base = "https://podcastplusplus.com"
+    frontend_base = frontend_base.rstrip("/")
     frontend_url = f"{frontend_base}/#access_token={access_token}&token_type=bearer"
     if user.is_admin:
         frontend_url = f"{frontend_base}/admin#access_token={access_token}&token_type=bearer"

@@ -5,63 +5,15 @@ export function isApiError(e) {
 const LOCAL_LIKE_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]']);
 
 function deriveApiOriginFromWindowOrigin() {
-  if (typeof window === 'undefined' || !window.location?.origin) {
+  if (typeof window === 'undefined' || typeof window.location === 'undefined') {
     return '';
   }
-
-  const fallback = window.location.origin.replace(/\/+$/, '');
-
-  try {
-    const url = new URL(window.location.origin);
-    const { protocol, hostname } = url;
-    const lowerHost = hostname.toLowerCase();
-    const makeOrigin = (host, keepPort = false) => {
-      const port = keepPort && url.port ? `:${url.port}` : '';
-      return `${protocol}//${host}${port}`.replace(/\/+$/, '');
-    };
-
-    const swapSubdomain = (prefix) => {
-      const needle = `${prefix}.`;
-      return lowerHost.startsWith(needle) ? `api.${hostname.slice(needle.length)}` : null;
-    };
-
-    const swapped =
-      swapSubdomain('app') ||
-      swapSubdomain('dashboard') ||
-      swapSubdomain('www');
-
-    if (swapped) {
-      return makeOrigin(swapped);
-    }
-
-    // Explicit host mappings (new primary + legacy)
-    if (lowerHost === 'podcastplusplus.com') {
-      return makeOrigin('api.podcastplusplus.com');
-    }
-    if (lowerHost === 'getpodcastplus.com') {
-      return makeOrigin('api.getpodcastplus.com');
-    }
-
-    const hostSegments = lowerHost.split('.');
-    if (
-      !lowerHost.startsWith('api.') &&
-      !LOCAL_LIKE_HOSTS.has(lowerHost) &&
-      hostSegments.length === 2
-    ) {
-      return makeOrigin(`api.${hostname}`);
-    }
-
-    return makeOrigin(hostname, true);
-  } catch (err) {
-    if (fallback.includes('//podcastplusplus.com')) {
-      return fallback.replace('://', '://api.');
-    }
-    if (fallback.includes('//getpodcastplus.com')) {
-      return fallback.replace('://', '://api.');
-    }
+  const host = window.location.hostname || '';
+  if (LOCAL_LIKE_HOSTS.has(host)) {
+    return '';
   }
-
-  return fallback;
+  // Default production API host when no build-time override is provided.
+  return 'https://api.podcastplusplus.com';
 }
 
 export function resolveRuntimeApiBase() {
@@ -69,13 +21,22 @@ export function resolveRuntimeApiBase() {
     ? String(import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_BASE_URL).replace(/\/+$/, '')
     : '';
   if (envBase) return envBase;
-  const derived = deriveApiOriginFromWindowOrigin();
-  // Hard fallback to prod API to avoid silent misroutes when derivation fails
-  return derived || 'https://api.podcastplusplus.com';
+  // Use same-origin by default; front proxies should route /api → backend.
+  return deriveApiOriginFromWindowOrigin();
 }
 
 // Base URL for API requests. In dev, you can leave this blank and rely on Vite's /api proxy.
 const runtimeBase = resolveRuntimeApiBase();
+
+export function coerceArray(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== 'object') return [];
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.data)) return payload.data;
+  if (Array.isArray(payload.records)) return payload.records;
+  return [];
+}
 
 export function buildApiUrl(path) {
   const base = runtimeBase;
@@ -139,3 +100,4 @@ export const api = {
   get: (p, opts) => req(p, { ...(opts||{}), method: "GET" }),
   post: (p, body, opts) => req(p, { ...(opts||{}), method: "POST", headers: { 'Content-Type': 'application/json', ...((opts&&opts.headers)||{}) }, body: jsonBody(body) }),
 };
+

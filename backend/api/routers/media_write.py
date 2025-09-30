@@ -9,6 +9,7 @@ from sqlmodel import Session, select
 
 from api.core.paths import MEDIA_DIR
 from api.models.podcast import MediaItem, MediaCategory
+from api.models.transcription import TranscriptionWatch
 from api.models.user import User
 from api.core.database import get_session
 from api.routers.auth import get_current_user
@@ -25,14 +26,28 @@ async def upload_media_files(
 	category: MediaCategory,
 	session: Session = Depends(get_session),
 	current_user: User = Depends(get_current_user),
-	files: List[UploadFile] = File(...),
-	friendly_names: Optional[str] = Form(None),
+        files: List[UploadFile] = File(...),
+        friendly_names: Optional[str] = Form(None),
+        notify_when_ready: Optional[str] = Form(None),
+        notify_email: Optional[str] = Form(None),
 ):
-	"""Upload one or more media files with optional friendly names."""
-	created_items = []
-	names = json.loads(friendly_names) if friendly_names else []
+        """Upload one or more media files with optional friendly names."""
+        created_items = []
+        names = json.loads(friendly_names) if friendly_names else []
 
-	MB = 1024 * 1024
+        notify_requested = False
+        if isinstance(notify_when_ready, str):
+            notify_requested = notify_when_ready.strip().lower() in {"1", "true", "yes", "on"}
+        elif notify_when_ready:
+            notify_requested = True
+
+        notify_target = (notify_email or "").strip()
+        if notify_requested and not notify_target:
+            notify_target = (current_user.email or "").strip() if hasattr(current_user, "email") else ""
+        if notify_target and "@" not in notify_target:
+            notify_target = ""
+
+        MB = 1024 * 1024
         CATEGORY_SIZE_LIMITS = {
                 MediaCategory.main_content: 1536 * MB,  # 1.5 GB
 		MediaCategory.intro: 50 * MB,
@@ -107,19 +122,51 @@ async def upload_media_files(
 
 		friendly_name = names[i] if i < len(names) and names[i].strip() else default_friendly_name
 
-		media_item = MediaItem(
-			filename=safe_filename,
-			friendly_name=friendly_name,
-			content_type=(file.content_type or None),
-			filesize=bytes_written,
-			user_id=current_user.id,
-			category=category,
-		)
-		session.add(media_item)
-		created_items.append(media_item)
+                media_item = MediaItem(
+                        filename=safe_filename,
+                        friendly_name=friendly_name,
+                        content_type=(file.content_type or None),
+                        filesize=bytes_written,
+                        user_id=current_user.id,
+                        category=category,
+                )
+                session.add(media_item)
+                created_items.append(media_item)
 
-		try:
-			if category == MediaCategory.main_content:
+                if (
+                    category == MediaCategory.main_content
+                    and notify_requested
+                    and notify_target
+                ):
+                    try:
+                        existing_watch = session.exec(
+                            select(TranscriptionWatch).where(
+                                TranscriptionWatch.user_id == current_user.id,
+                                TranscriptionWatch.filename == safe_filename,
+                            )
+                        ).first()
+                    except Exception:
+                        existing_watch = None
+
+                    if existing_watch:
+                        existing_watch.notify_email = notify_target
+                        existing_watch.friendly_name = friendly_name
+                        existing_watch.notified_at = None
+                        existing_watch.last_status = "queued"
+                        session.add(existing_watch)
+                    else:
+                        session.add(
+                            TranscriptionWatch(
+                                user_id=current_user.id,
+                                filename=safe_filename,
+                                friendly_name=friendly_name,
+                                notify_email=notify_target,
+                                last_status="queued",
+                            )
+                        )
+
+                try:
+                        if category == MediaCategory.main_content:
 				from worker.tasks import transcribe_media_file  # type: ignore
 				transcribe_media_file.delay(safe_filename)
 		except Exception:
