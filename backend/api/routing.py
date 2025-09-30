@@ -73,6 +73,7 @@ spreaker               = _safe_import("api.routers.spreaker")
 spreaker_oauth         = _safe_import("api.routers.spreaker_oauth")
 templates              = _safe_import("api.routers.templates")
 flubber                = _safe_import("api.routers.flubber")
+intern                 = _safe_import("api.routers.intern")
 users                  = _safe_import("api.routers.users")
 admin                  = _safe_import("api.routers.admin")
 podcasts               = _safe_import("api.routers.podcasts")
@@ -127,6 +128,8 @@ def attach_routers(app: FastAPI) -> dict:
     availability['templates'] = templates is not None
     _maybe(app, flubber)
     availability['flubber'] = flubber is not None
+    _maybe(app, intern)
+    availability['intern'] = intern is not None
     _maybe(app, users)
     availability['users'] = users is not None
     _maybe(app, admin)

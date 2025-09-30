@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Badge } from '../../ui/badge';
-import { AlertTriangle, FileAudio, Loader2, RefreshCcw, Sparkles } from 'lucide-react';
+import { AlertTriangle, FileAudio, Loader2, RefreshCcw, Sparkles, Trash2 } from 'lucide-react';
 
 const formatDate = (iso) => {
   if (!iso) return '—';

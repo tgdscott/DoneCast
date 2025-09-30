@@ -33,6 +33,7 @@ else:
 # Define other necessary directories, using environment variables with local defaults
 FINAL_DIR = Path(os.getenv("FINAL_DIR", str(LOCAL_TMP_DIR / "final_episodes")))
 FLUBBER_CTX_DIR = Path(os.getenv("FLUBBER_CONTEXTS_DIR", str(LOCAL_TMP_DIR / "flubber_contexts")))
+INTERN_CTX_DIR = Path(os.getenv("INTERN_CONTEXTS_DIR", str(LOCAL_TMP_DIR / "intern_contexts")))
 CLEANED_DIR = Path(os.getenv("CLEANED_DIR", str(LOCAL_TMP_DIR / "cleaned_audio")))
 if os.getenv("TRANSCRIPTS_DIR"):
     TRANSCRIPTS_DIR = Path(os.getenv("TRANSCRIPTS_DIR", ""))
@@ -45,5 +46,5 @@ AI_SEGMENTS_DIR = Path(os.getenv("AI_SEGMENTS_DIR", str(LOCAL_TMP_DIR / "ai_segm
 
 
 # Ensure all directories exist so the app doesn't crash on first use
-for d in (MEDIA_DIR, FINAL_DIR, FLUBBER_CTX_DIR, CLEANED_DIR, TRANSCRIPTS_DIR, WS_ROOT, AI_SEGMENTS_DIR):
+for d in (MEDIA_DIR, FINAL_DIR, FLUBBER_CTX_DIR, INTERN_CTX_DIR, CLEANED_DIR, TRANSCRIPTS_DIR, WS_ROOT, AI_SEGMENTS_DIR):
     d.mkdir(parents=True, exist_ok=True)
