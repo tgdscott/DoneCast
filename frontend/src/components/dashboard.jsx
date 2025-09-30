@@ -30,6 +30,7 @@ import {
   AlertTriangle,
   Settings as SettingsIcon,
   DollarSign,
+  Globe2,
   ChevronDown,
 } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
@@ -50,6 +51,7 @@ import DevTools from "@/components/dashboard/DevTools";
 import TemplateWizard from "@/components/dashboard/TemplateWizard";
 import Settings from "@/components/dashboard/Settings";
 import TemplateManager from "@/components/dashboard/TemplateManager";
+import WebsiteBuilder from "@/components/dashboard/WebsiteBuilder";
 import BillingPage from "@/components/dashboard/BillingPage";
 import Recorder from "@/components/quicktools/Recorder";
 
@@ -390,6 +392,15 @@ export default function PodcastPlusDashboard() {
         return <EpisodeHistory onBack={handleBackToDashboard} token={token} />;
       case 'podcastManager':
         return <PodcastManager onBack={handleBackToDashboard} token={token} podcasts={podcasts} setPodcasts={setPodcasts}/>;
+      case 'websiteBuilder':
+        return (
+          <WebsiteBuilder
+            token={token}
+            podcasts={podcasts}
+            user={user}
+            onBack={handleBackToDashboard}
+          />
+        );
       case 'rssImporter':
         return <RssImporter onBack={handleBackToDashboard} token={token} />;
       case 'devTools':
@@ -402,6 +413,9 @@ export default function PodcastPlusDashboard() {
         return <BillingPage token={token} onBack={() => setCurrentView('dashboard')} />;
       case 'dashboard':
       default: {
+        const normalizedTier = (user?.tier || '').toLowerCase();
+        const proEligibleTiers = new Set(['pro', 'enterprise', 'business', 'team', 'agency']);
+        const canUseWebsiteBuilder = proEligibleTiers.has(normalizedTier);
         const canCreateEpisode = podcasts.length > 0 && templates.length > 0;
         return (
           <div className="space-y-8">
@@ -554,6 +568,15 @@ export default function PodcastPlusDashboard() {
           <Button onClick={() => setCurrentView('episodeHistory')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-episodes"><BarChart3 className="w-4 h-4 mr-2" />Episodes</Button>
           {/* Import moved under Podcasts */}
           <Button onClick={() => setCurrentView('billing')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-subscription"><DollarSign className="w-4 h-4 mr-2" />Subscription</Button>
+                      {canUseWebsiteBuilder && (
+                        <Button
+                          onClick={() => setCurrentView('websiteBuilder')}
+                          variant="outline"
+                          className="justify-start text-sm h-10"
+                        >
+                          <Globe2 className="w-4 h-4 mr-2" />Website Builder
+                        </Button>
+                      )}
                       <Button onClick={() => setCurrentView('settings')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-settings"><SettingsIcon className="w-4 h-4 mr-2" />Settings</Button>
                       {isAdmin(authUser) && (
                         <Button onClick={() => setCurrentView('devTools')} variant="destructive" className="justify-start text-sm h-10"><AlertTriangle className="w-4 h-4 mr-2" />Dev</Button>
