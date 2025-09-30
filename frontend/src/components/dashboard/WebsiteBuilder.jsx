@@ -52,6 +52,7 @@ function PreviewSection({ website }) {
   const heroBg = theme.primary_color || "#0f172a";
   const heroFg = theme.secondary_color || "#ffffff";
   const accent = theme.accent_color || "#2563eb";
+  const heroImage = layout.hero_image_url;
   const liveUrl = website.custom_domain
     ? `https://${website.custom_domain}`
     : website.default_domain
@@ -64,22 +65,35 @@ function PreviewSection({ website }) {
         className="rounded-2xl shadow-sm overflow-hidden"
         style={{ backgroundColor: heroBg, color: heroFg }}
       >
-        <div className="p-8 md:p-12 space-y-4">
-          <div className="text-xs uppercase tracking-[0.3em] opacity-80">Podcast Plus Plus</div>
-          <h2 className="text-3xl md:text-5xl font-semibold leading-tight">{layout.hero_title || "Your podcast"}</h2>
-          {layout.hero_subtitle && (
-            <p className="text-base md:text-lg max-w-2xl opacity-90">{layout.hero_subtitle}</p>
-          )}
-          {liveUrl && (
-            <Button
-              asChild
-              size="sm"
-              className="mt-2 bg-white text-slate-900 hover:bg-slate-200"
-            >
-              <a href={liveUrl} target="_blank" rel="noopener noreferrer">
-                <ExternalLink className="mr-2 h-4 w-4" /> View live site
-              </a>
-            </Button>
+        <div className="grid gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,0.75fr)]">
+          <div className="p-8 md:p-12 space-y-4">
+            <div className="text-xs uppercase tracking-[0.3em] opacity-80">Podcast Plus Plus</div>
+            <h2 className="text-3xl md:text-5xl font-semibold leading-tight">{layout.hero_title || "Your podcast"}</h2>
+            {layout.hero_subtitle && (
+              <p className="text-base md:text-lg max-w-2xl opacity-90">{layout.hero_subtitle}</p>
+            )}
+            {liveUrl && (
+              <Button
+                asChild
+                size="sm"
+                className="mt-2 bg-white text-slate-900 hover:bg-slate-200"
+              >
+                <a href={liveUrl} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="mr-2 h-4 w-4" /> View live site
+                </a>
+              </Button>
+            )}
+          </div>
+          {heroImage && (
+            <div className="relative flex items-center justify-center bg-slate-900/10 p-6 md:p-8">
+              <div className="relative aspect-square w-full max-w-xs overflow-hidden rounded-xl border border-white/10 shadow-lg">
+                <img
+                  src={heroImage}
+                  alt="Podcast cover art"
+                  className="h-full w-full object-cover"
+                />
+              </div>
+            </div>
           )}
         </div>
       </section>
@@ -166,6 +180,32 @@ function PreviewSection({ website }) {
                   </a>
                 </Button>
               )}
+            </div>
+          )}
+
+          {Array.isArray(layout.section_suggestions) && layout.section_suggestions.length > 0 && (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 shadow-sm">
+              <h3 className="text-lg font-semibold text-slate-900">Section ideas</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Toggle your favorites in the builder. Items marked "recommended" are preloaded on the draft.
+              </p>
+              <ul className="mt-4 space-y-3">
+                {layout.section_suggestions.map((suggestion, idx) => (
+                  <li key={idx} className="rounded-md border border-slate-200 bg-white p-3">
+                    <div className="flex items-center justify-between text-sm font-medium text-slate-900">
+                      <span>{suggestion.label || suggestion.type || "Section"}</span>
+                      {suggestion.include_by_default && (
+                        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: accent }}>
+                          Recommended
+                        </span>
+                      )}
+                    </div>
+                    {suggestion.description && (
+                      <p className="mt-1 text-xs text-slate-500">{suggestion.description}</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
         </aside>
