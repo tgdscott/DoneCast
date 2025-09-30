@@ -11,7 +11,7 @@ from api.core.database import get_session
 from api.services.episodes import jobs as _svc_jobs
 from api.models.podcast import Episode
 from uuid import UUID as _UUID
-from .common import _final_url_for, _cover_url_for, _status_value
+from .common import _cover_url_for, _status_value, compute_playback_info
 
 logger = logging.getLogger("ppp.episodes.jobs")
 
@@ -90,13 +90,15 @@ def get_job_status(job_id: str, session: Session = Depends(get_session)):
         except Exception:
             cleanup_stats = None
 
+        playback = compute_playback_info(ep)
         assembled = {
             "id": str(ep.id),
             "title": ep.title,
             "description": ep.show_notes or "",
-            "final_audio_url": _final_url_for(ep.final_audio_path),
+            "final_audio_url": playback.get("playback_url"),
             "cover_url": (_cover_url_for(getattr(ep, 'remote_cover_url', None)) or _cover_url_for(ep.cover_path)),
             "status": _status_value(ep.status),
+            "using_spreaker_audio": bool(playback.get("prefer_remote_audio")),
         }
         base_resp = {"job_id": job_id, "status": "processed", "episode": assembled, "message": (result.get("message") if isinstance(result, dict) else None)}
         if cleanup_stats:
@@ -137,6 +139,7 @@ def get_job_status(job_id: str, session: Session = Depends(get_session)):
                         break
 
             if target is not None and getattr(target, 'final_audio_path', None):
+                playback = compute_playback_info(target)
                 return {
                     "job_id": job_id,
                     "status": "processed",
@@ -144,9 +147,10 @@ def get_job_status(job_id: str, session: Session = Depends(get_session)):
                         "id": str(target.id),
                         "title": target.title,
                         "description": target.show_notes or "",
-                        "final_audio_url": _final_url_for(target.final_audio_path),
+                        "final_audio_url": playback.get("playback_url"),
                         "cover_url": (_cover_url_for(getattr(target, 'remote_cover_url', None)) or _cover_url_for(target.cover_path)),
                         "status": _status_value(target.status),
+                        "using_spreaker_audio": bool(playback.get("prefer_remote_audio")),
                     },
                 }
         except Exception:

@@ -24,7 +24,7 @@ router = APIRouter(tags=["episodes"])  # parent provides prefix '/episodes'
 PROJECT_ROOT = APP_ROOT
 
 
-from .common import _final_url_for, _cover_url_for, _status_value
+from .common import _cover_url_for, _status_value, compute_playback_info
 
 
 @router.patch("/{episode_id}", status_code=200)
@@ -141,43 +141,30 @@ def update_episode_metadata(
 		except Exception:
 			logger.exception("uniqueness check on update failed; proceeding")
 
-	def _serialize_single(ep_obj: Episode) -> Dict[str, Any]:
-		final_exists = False
-		cover_exists = False
-		try:
-			if ep_obj.final_audio_path:
-				base = os.path.basename(str(ep_obj.final_audio_path))
-				final_candidates = []
-				try:
-					final_candidates.append((FINAL_DIR / base).resolve())
-				except Exception:
-					final_candidates.append(FINAL_DIR / base)
-				final_candidates.append(MEDIA_DIR / base)
-				final_exists = any(c.is_file() for c in final_candidates)
-			if getattr(ep_obj, 'remote_cover_url', None):
-				cover_exists = True
-			else:
-				if ep_obj.cover_path and not str(ep_obj.cover_path).lower().startswith(('http://','https://')):
-					try:
-						cand = (MEDIA_DIR / os.path.basename(str(ep_obj.cover_path))).resolve()
-					except Exception:
-						cand = MEDIA_DIR / os.path.basename(str(ep_obj.cover_path))
-					cover_exists = cand.is_file()
-				elif ep_obj.cover_path:
-					cover_exists = True
-		except Exception:
-			pass
+        def _serialize_single(ep_obj: Episode) -> Dict[str, Any]:
+                cover_exists = False
+                playback = compute_playback_info(ep_obj)
+                final_exists = bool(playback.get("final_audio_exists"))
+                local_final_exists = bool(playback.get("local_final_exists"))
+                try:
+                        if getattr(ep_obj, 'remote_cover_url', None):
+                                cover_exists = True
+                        else:
+                                if ep_obj.cover_path and not str(ep_obj.cover_path).lower().startswith(('http://','https://')):
+                                        try:
+                                                cand = (MEDIA_DIR / os.path.basename(str(ep_obj.cover_path))).resolve()
+                                        except Exception:
+                                                cand = MEDIA_DIR / os.path.basename(str(ep_obj.cover_path))
+                                        cover_exists = cand.is_file()
+                                elif ep_obj.cover_path:
+                                        cover_exists = True
+                except Exception:
+                        pass
 		preferred_cover = getattr(ep_obj, 'remote_cover_url', None) or ep_obj.cover_path
-		stream_url = None
-		try:
-			spk_id = getattr(ep_obj, 'spreaker_episode_id', None)
-			if spk_id:
-				stream_url = f"https://api.spreaker.com/v2/episodes/{spk_id}/play"
-		except Exception:
-			stream_url = None
-		final_audio_url = _final_url_for(ep_obj.final_audio_path)
-		playback_url = stream_url or final_audio_url
-		playback_type = 'stream' if stream_url else ('local' if final_audio_url else 'none')
+                stream_url = playback.get("stream_url")
+                final_audio_url = playback.get("final_audio_url")
+                playback_url = playback.get("playback_url")
+                playback_type = playback.get("playback_type") or 'none'
 		pub_at_iso = None
 		try:
 			pub_dt = getattr(ep_obj, 'publish_at', None)
@@ -213,8 +200,9 @@ def update_episode_metadata(
 			"episode_number": getattr(ep_obj, 'episode_number', None),
 			"spreaker_episode_id": getattr(ep_obj, 'spreaker_episode_id', None),
 			"is_published_to_spreaker": bool(getattr(ep_obj, 'is_published_to_spreaker', False)),
-			"final_audio_exists": final_exists,
-			"cover_exists": cover_exists,
+                        "final_audio_exists": final_exists,
+                        "final_audio_local_exists": local_final_exists,
+                        "cover_exists": cover_exists,
 			"cover_path": preferred_cover,
 			"final_audio_basename": os.path.basename(ep_obj.final_audio_path) if ep_obj.final_audio_path else None,
 			"publish_error": getattr(ep_obj, 'spreaker_publish_error', None),
@@ -224,9 +212,10 @@ def update_episode_metadata(
 			"publish_at_local": getattr(ep_obj, 'publish_at_local', None),
 			"is_scheduled": is_scheduled,
 			"plays_total": None,
-			"stream_url": stream_url,
-			"playback_url": playback_url,
-			"playback_type": playback_type,
+                        "stream_url": stream_url,
+                        "playback_url": playback_url,
+                        "playback_type": playback_type,
+                        "using_spreaker_audio": bool(playback.get("prefer_remote_audio")),
 		}
 
 	if not changed:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 from typing import Optional
@@ -182,8 +183,6 @@ def publish_episode_to_spreaker_task(
         parsed_auto_str: Optional[str] = None
         if auto_published_at:
             try:
-                from datetime import datetime, timezone
-
                 dt = datetime.fromisoformat(auto_published_at.replace("Z", "+00:00"))
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=timezone.utc)
@@ -340,21 +339,6 @@ def publish_episode_to_spreaker_task(
                 if remote_url:
                     if remote_url != getattr(episode, "remote_cover_url", None):
                         setattr(episode, "remote_cover_url", remote_url)
-                    if episode.cover_path and not str(episode.cover_path).lower().startswith(
-                        ("http://", "https://")
-                    ):
-                        local_path = (
-                            PROJECT_ROOT / "media_uploads" / Path(episode.cover_path).name
-                        )
-                        if local_path.is_file():
-                            try:
-                                local_path.unlink()
-                                episode.cover_path = remote_url
-                            except Exception:
-                                logging.warning(
-                                    "[publish] Failed to delete local cover %s",
-                                    local_path,
-                                )
         except Exception:
             logging.warning("[publish] cover sync error", exc_info=True)
 
@@ -369,10 +353,27 @@ def publish_episode_to_spreaker_task(
                 spreaker_meta = {}
             if remote_stream_url:
                 spreaker_meta["remote_audio_url"] = remote_stream_url
+                spreaker_meta.setdefault(
+                    "remote_audio_first_seen",
+                    datetime.now(timezone.utc).isoformat(),
+                )
+
             if transcript_url:
                 spreaker_meta["transcript_url"] = transcript_url
                 spreaker_meta["transcript_available"] = bool(transcript_info.get("available"))
             meta["spreaker"] = spreaker_meta
+            transcripts_meta = meta.get("transcripts")
+            if not isinstance(transcripts_meta, dict):
+                transcripts_meta = {}
+            if transcript_info.get("text"):
+                transcripts_meta.setdefault("primary", transcript_info.get("text"))
+                transcripts_meta.setdefault("text", transcript_info.get("text"))
+            if transcript_info.get("json"):
+                transcripts_meta.setdefault("json", transcript_info.get("json"))
+            if transcript_info.get("absolute_text"):
+                transcripts_meta.setdefault("absolute_text", transcript_info.get("absolute_text"))
+            transcripts_meta["available"] = bool(transcript_info.get("available"))
+            meta["transcripts"] = transcripts_meta
             try:
                 episode.meta_json = json.dumps(meta)
             except Exception:
