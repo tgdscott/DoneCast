@@ -28,9 +28,10 @@ import {
   AlertTriangle,
   Settings as SettingsIcon,
   DollarSign,
+  Globe2,
 } from "lucide-react";
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { makeApi } from "@/lib/apiClient";
+import { makeApi, coerceArray } from "@/lib/apiClient";
 import { useAuth } from "@/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import Logo from "@/components/Logo.jsx";
@@ -205,7 +206,8 @@ export default function PodcastPlusDashboard() {
 
       // Templates
       if (templatesRes.status === 'fulfilled') {
-        setTemplates(templatesRes.value);
+        const templatesList = coerceArray(templatesRes.value);
+        setTemplates(templatesList);
       } else {
         const reason = templatesRes.reason || {};
         if (reason.status === 401) {
@@ -220,7 +222,8 @@ export default function PodcastPlusDashboard() {
 
       // Podcasts
       if (podcastsRes.status === 'fulfilled') {
-        setPodcasts(podcastsRes.value);
+        const podcastList = coerceArray(podcastsRes.value);
+        setPodcasts(podcastList);
       } else {
         const reason = podcastsRes.reason || {};
         if (reason.status === 401) {
@@ -269,7 +272,12 @@ export default function PodcastPlusDashboard() {
   }, [token, currentView, refreshPreuploads]);
   useEffect(() => {
     if (!token) return;
-    if (currentView === 'createEpisode' && creatorMode === 'preuploaded' && !preuploadLoading && preuploadItems.length === 0) {
+    if (
+      currentView === 'createEpisode' &&
+      creatorMode === 'preuploaded' &&
+      !preuploadLoading &&
+      preuploadItems.length === 0
+    ) {
       refreshPreuploads();
     }
   }, [token, currentView, creatorMode, preuploadLoading, preuploadItems.length, refreshPreuploads]);
@@ -393,11 +401,11 @@ export default function PodcastPlusDashboard() {
   const renderCurrentView = () => {
     switch (currentView) {
       case 'recorder':
-  return (
+        return (
           <Recorder
             onBack={handleBackToDashboard}
             token={token}
-            onFinish={({ filename, hint, transcriptReady, startStep }) => {
+            onFinish={({ filename, hint, transcriptReady }) => {
               try {
                 setPreselectedMainFilename(filename || hint || null);
                 setPreselectedTranscriptReady(!!transcriptReady);
@@ -405,26 +413,6 @@ export default function PodcastPlusDashboard() {
               setCreatorMode('standard');
               setCurrentView('createEpisode');
             }}
-          />
-        );
-      case 'templateManager':
-        return <TemplateManager onBack={handleBackToDashboard} token={token} setCurrentView={setCurrentView} />;
-      case 'editTemplate':
-        return <TemplateEditor templateId={selectedTemplateId} onBack={handleBackToTemplateManager} token={token} onTemplateSaved={fetchData} />;
-      case 'createEpisode':
-        return (
-          <PodcastCreator
-            onBack={handleBackToDashboard}
-            token={token}
-            templates={templates}
-            podcasts={podcasts}
-            preselectedMainFilename={preselectedMainFilename}
-            preselectedTranscriptReady={preselectedTranscriptReady}
-            creatorMode={creatorMode}
-            preuploadedItems={preuploadItems}
-            preuploadedLoading={preuploadLoading}
-            onRefreshPreuploaded={refreshPreuploads}
-            preselectedStartStep={creatorMode === 'preuploaded' ? 1 : undefined}
           />
         );
       case 'episodeStart': {
@@ -465,6 +453,26 @@ export default function PodcastPlusDashboard() {
             onUploaded={refreshPreuploads}
           />
         );
+      case 'templateManager':
+        return <TemplateManager onBack={handleBackToDashboard} token={token} setCurrentView={setCurrentView} />;
+      case 'editTemplate':
+        return <TemplateEditor templateId={selectedTemplateId} onBack={handleBackToTemplateManager} token={token} onTemplateSaved={fetchData} />;
+      case 'createEpisode':
+        return (
+          <PodcastCreator
+            onBack={handleBackToDashboard}
+            token={token}
+            templates={templates}
+            podcasts={podcasts}
+            preselectedMainFilename={preselectedMainFilename}
+            preselectedTranscriptReady={preselectedTranscriptReady}
+            creatorMode={creatorMode}
+            preuploadedItems={preuploadItems}
+            preuploadedLoading={preuploadLoading}
+            onRefreshPreuploaded={refreshPreuploads}
+            preselectedStartStep={creatorMode === 'preuploaded' ? 1 : undefined}
+          />
+        );
       case 'mediaLibrary':
         return <MediaLibrary onBack={handleBackToDashboard} token={token} />;
       case 'episodeHistory':
@@ -474,7 +482,9 @@ export default function PodcastPlusDashboard() {
       case 'rssImporter':
         return <RssImporter onBack={handleBackToDashboard} token={token} />;
       case 'devTools':
-  return isAdmin(authUser) ? <DevTools token={token} /> : <div className="p-6 text-sm text-red-600">Not authorized.</div>;
+        return isAdmin(authUser)
+          ? <DevTools token={token} />
+          : <div className="p-6 text-sm text-red-600">Not authorized.</div>;
       case 'settings':
         return <Settings token={token} />;
       case 'templateWizard':
@@ -483,6 +493,9 @@ export default function PodcastPlusDashboard() {
         return <BillingPage token={token} onBack={() => setCurrentView('dashboard')} />;
       case 'dashboard':
       default: {
+        const normalizedTier = (user?.tier || '').toLowerCase();
+        const proEligibleTiers = new Set(['pro', 'enterprise', 'business', 'team', 'agency']);
+        const canViewWebsiteBuilderDocs = proEligibleTiers.has(normalizedTier);
         const canCreateEpisode = podcasts.length > 0 && templates.length > 0;
         return (
           <div className="space-y-8">
@@ -526,24 +539,24 @@ export default function PodcastPlusDashboard() {
                         <div className={`font-semibold mt-0.5 ${canCreateEpisode ? 'text-green-600' : 'text-amber-600'}`}>{canCreateEpisode ? 'Yes' : 'Setup needed'}</div>
                       </div>
                     </div>
-                    <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-                      {canCreateEpisode ? (
-                        <Button
-                          className="flex-1 md:flex-none"
-                          title="Start a new episode"
-                          data-tour-id="dashboard-new-episode"
-                          onClick={() => {
-                            setCreatorMode('standard');
-                            setPreselectedMainFilename(null);
-                            setPreselectedTranscriptReady(false);
-                            setCurrentView('episodeStart');
-                            refreshPreuploads();
-                          }}
-                        >
-                          <Plus className="w-4 h-4 mr-2" />
-                          Start New Episode
-                        </Button>
-                      ) : (
+                      <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+                        {canCreateEpisode ? (
+                          <Button
+                            className="flex-1 md:flex-none"
+                            title="Start a new episode"
+                            data-tour-id="dashboard-new-episode"
+                            onClick={() => {
+                              setCreatorMode('standard');
+                              setPreselectedMainFilename(null);
+                              setPreselectedTranscriptReady(false);
+                              setCurrentView('episodeStart');
+                              refreshPreuploads();
+                            }}
+                          >
+                            <Plus className="w-4 h-4 mr-2" />
+                            Start New Episode
+                          </Button>
+                        ) : (
                         <div className="flex gap-2 flex-wrap">
                           {templates.length === 0 && (
                             <Button
@@ -633,6 +646,21 @@ export default function PodcastPlusDashboard() {
           <Button onClick={() => setCurrentView('episodeHistory')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-episodes"><BarChart3 className="w-4 h-4 mr-2" />Episodes</Button>
           {/* Import moved under Podcasts */}
           <Button onClick={() => setCurrentView('billing')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-subscription"><DollarSign className="w-4 h-4 mr-2" />Subscription</Button>
+                      {canViewWebsiteBuilderDocs && (
+                        <Button
+                          asChild
+                          variant="outline"
+                          className="justify-start text-sm h-10"
+                        >
+                          <a
+                            href="/docs/podcast-website-builder"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <Globe2 className="w-4 h-4 mr-2" />Website Builder Guide
+                          </a>
+                        </Button>
+                      )}
                       <Button onClick={() => setCurrentView('settings')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-settings"><SettingsIcon className="w-4 h-4 mr-2" />Settings</Button>
                       {isAdmin(authUser) && (
                         <Button onClick={() => setCurrentView('devTools')} variant="destructive" className="justify-start text-sm h-10"><AlertTriangle className="w-4 h-4 mr-2" />Dev</Button>
@@ -767,3 +795,4 @@ export default function PodcastPlusDashboard() {
     </div>
   );
 }
+
