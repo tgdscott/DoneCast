@@ -217,7 +217,11 @@ def execute_intern_commands(
         log.append(f"[INTERN_QUERY] action='{action}' topic='{query_text[:200]}'")
         if action == "add_to_shownotes":
             try:
-                note = ai_enhancer.get_answer_for_topic(query_text)
+                note = ai_enhancer.get_answer_for_topic(
+                    query_text,
+                    context=(cmd.get("local_context") or ""),
+                    mode="shownote",
+                )
                 if note:
                     cmd["note"] = note.strip()
                     log.append(f"[INTERN_NOTE] added len={len(cmd['note'])}")
@@ -233,7 +237,11 @@ def execute_intern_commands(
                     except Exception:
                         pass
                 else:
-                    answer = ai_enhancer.get_answer_for_topic(query_text)
+                    answer = ai_enhancer.get_answer_for_topic(
+                        query_text,
+                        context=(cmd.get("local_context") or ""),
+                        mode="audio",
+                    )
                 try:
                     spoken_prompt = (cmd.get("local_context") or "").strip()
                     prompts = [spoken_prompt, (query_text or "").strip()]

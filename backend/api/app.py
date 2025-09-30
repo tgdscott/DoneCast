@@ -17,7 +17,7 @@ from starlette.staticfiles import StaticFiles
 # Load settings early
 from api.core.config import settings
 # Import paths *after* settings are loaded, as paths might use env vars
-from api.core.paths import FINAL_DIR, MEDIA_DIR, FLUBBER_CTX_DIR
+from api.core.paths import FINAL_DIR, MEDIA_DIR, FLUBBER_CTX_DIR, INTERN_CTX_DIR
 
 # Now, other modules can be imported that might use settings
 import api.db_listeners  # registers SQLAlchemy listeners
@@ -205,6 +205,7 @@ STATIC_UI_DIR = Path(os.getenv("STATIC_UI_DIR", "/app/static_ui"))
 app.mount("/static/final",   StaticFiles(directory=str(FINAL_DIR),   check_dir=False), name="final")
 app.mount("/static/media",   StaticFiles(directory=str(MEDIA_DIR),   check_dir=False), name="media")
 app.mount("/static/flubber", StaticFiles(directory=str(FLUBBER_CTX_DIR), check_dir=False), name="flubber")
+app.mount("/static/intern",  StaticFiles(directory=str(INTERN_CTX_DIR),  check_dir=False), name="intern")
 
 @app.get("/{full_path:path}")
 async def spa_catch_all(full_path: str):

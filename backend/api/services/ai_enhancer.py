@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import io
-from typing import Optional
+import logging
+import re
+from textwrap import dedent
+from typing import Dict, Optional
 
 from pydub import AudioSegment
 
@@ -14,10 +17,14 @@ except ImportError:  # pragma: no cover - optional dependency at runtime
 
 from api.core.config import settings
 from api.models.user import User
+from api.services.ai_content import client_gemini
 
 
 _DEFAULT_ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # Rachel
 _ELEVENLABS_MODEL_ID = "eleven_multilingual_v2"
+
+
+_LOG = logging.getLogger(__name__)
 
 
 class AIEnhancerError(Exception):
@@ -129,3 +136,102 @@ def _translate_elevenlabs_error(exc: Exception, voice_id: str) -> AIEnhancerErro
         return AIEnhancerError(f"The voice ID '{voice_id}' could not be found.")
 
     return AIEnhancerError(f"ElevenLabs API error: {exc}")
+
+
+def interpret_intern_command(prompt_text: str) -> Dict[str, str]:
+    """Lightweight interpretation for Intern commands.
+
+    Determines whether the caller is requesting spoken audio or show-note style
+    output and returns a normalized topic string for downstream AI prompts.
+    """
+
+    text = (prompt_text or "").strip()
+    if not text:
+        return {"action": "generate_audio", "topic": ""}
+
+    lowered = text.lower()
+    # Remove common lead-in phrases like "Hey intern," to keep the topic clean
+    stripped = re.sub(r"^(?:hey\s+)?intern[:,\s]*", "", text, flags=re.IGNORECASE).strip()
+    if not stripped:
+        stripped = text
+
+    shownote_keywords = {
+        "show notes",
+        "shownotes",
+        "show-note",
+        "note",
+        "notes",
+        "summary",
+        "summarize",
+        "recap",
+        "bullet",
+    }
+    action = "generate_audio"
+    if any(keyword in lowered for keyword in shownote_keywords):
+        action = "add_to_shownotes"
+
+    return {"action": action, "topic": stripped}
+
+
+def get_answer_for_topic(
+    topic: str,
+    *,
+    context: Optional[str] = None,
+    mode: str = "audio",
+) -> str:
+    """Generate an intern answer using Gemini with graceful fallbacks."""
+
+    topic_text = (topic or "").strip()
+    context_text = (context or "").strip()
+    if mode not in {"audio", "shownote"}:
+        mode = "audio"
+
+    if not topic_text and context_text:
+        topic_text = context_text.splitlines()[0][:160]
+
+    if mode == "shownote":
+        guidance = "Produce concise bullet point show notes summarizing the key takeaways."
+    else:
+        guidance = "Draft a friendly spoken reply (2-3 sentences) the host can play in their show."
+
+    prompt = dedent(
+        f"""
+        You are Podcast Pro Plus's helpful intern. {guidance}
+        Topic: {topic_text or 'General request'}
+        """
+    ).strip()
+    if context_text:
+        prompt += "\nTranscript excerpt:\n" + context_text
+    prompt += "\nResponse:"
+
+    try:
+        generated = client_gemini.generate(prompt, max_output_tokens=512, temperature=0.6)
+    except Exception as exc:  # pragma: no cover - network/SDK issues downgraded to fallback
+        _LOG.warning("[intern-ai] generation failed: %s", exc)
+        generated = ""
+
+    cleaned = (generated or "").strip()
+
+    if mode == "shownote":
+        if not cleaned:
+            base = topic_text or context_text or "this segment"
+            return f"- {base}"
+        bullets = [re.sub(r"^[\s\-•]+", "", line).strip() for line in cleaned.splitlines() if line.strip()]
+        if not bullets:
+            bullets = [cleaned]
+        return "\n".join(f"- {b}" for b in bullets[:6])
+
+    if not cleaned:
+        base = topic_text or context_text or "that topic"
+        return f"Here's the update you requested about {base}."
+
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+__all__ = [
+    "AIEnhancerError",
+    "generate_speech_from_text",
+    "interpret_intern_command",
+    "get_answer_for_topic",
+]
