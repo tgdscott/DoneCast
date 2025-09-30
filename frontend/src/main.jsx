@@ -21,9 +21,15 @@ import { LayoutProvider } from './layout/LayoutContext.jsx';
 import './index.css' // <-- This line imports all the styles
 import { assetUrl } from './lib/apiClient';
 
-// In development, tag the root element so CSS can show a clear DEV theme/badge
+// Always show DEV background when running on localhost:5173 or 127.0.0.1:5173
 try {
-  if (import.meta?.env?.DEV && typeof document !== 'undefined') {
+  if (
+    typeof document !== 'undefined' &&
+    (
+      import.meta?.env?.DEV ||
+      (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost') && window.location.port === '5173'
+    )
+  ) {
     document.documentElement.classList.add('env-dev');
   }
 } catch {}
