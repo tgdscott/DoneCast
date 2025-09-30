@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy.exc import OperationalError, ProgrammingError
-from pydantic import BaseModel
+from pydantic import BaseModel, Field as PydanticField
 from sqlmodel import Field, Session, SQLModel
 
 
@@ -121,3 +121,164 @@ def save_admin_settings(session: Session, settings: AdminSettings) -> AdminSetti
         session.rollback()
         raise
     return load_admin_settings(session)
+
+
+class LandingReview(BaseModel):
+    quote: str
+    author: str
+    role: Optional[str] = None
+    avatar_url: Optional[str] = None
+    rating: Optional[float] = None
+
+
+class LandingFAQ(BaseModel):
+    question: str
+    answer: str
+
+
+_DEFAULT_HERO_HTML = (
+    "<p>Join thousands of creators who've discovered the joy of effortless podcasting."
+    " <strong>Average setup time: Under 5 minutes.</strong></p>"
+)
+
+
+def _default_reviews() -> list[LandingReview]:
+    return [
+        LandingReview(
+            quote=(
+                "I was terrified of the technical side of podcasting. Podcast Plus Plus made it so simple that I "
+                "launched my first episode in under 30 minutes! Now I have 50+ episodes and growing."
+            ),
+            author="Sarah Johnson",
+            role="Wellness Coach • 12 months on Plus Plus",
+            avatar_url="https://placehold.co/60x60/E2E8F0/A0AEC0?text=SJ",
+            rating=5.0,
+        ),
+        LandingReview(
+            quote=(
+                "My podcast now reaches 10,000+ listeners monthly. The automatic distribution to all platforms was a "
+                "game-changer for my reach!"
+            ),
+            author="Maria Rodriguez",
+            role="Community Leader • 8 months on Plus Plus",
+            avatar_url="https://placehold.co/60x60/E2E8F0/A0AEC0?text=MR",
+            rating=5.0,
+        ),
+        LandingReview(
+            quote=(
+                "The AI editing tools are unbelievable. I cut my production time by 80% and the quality actually went up."
+            ),
+            author="Dev Patel",
+            role="Startup Founder • 6 months on Plus Plus",
+            avatar_url="https://placehold.co/60x60/E2E8F0/A0AEC0?text=DP",
+            rating=5.0,
+        ),
+    ]
+
+
+def _default_faqs() -> list[LandingFAQ]:
+    return [
+        LandingFAQ(
+            question="Do I need any technical experience to use Podcast Plus Plus?",
+            answer=(
+                "Absolutely not! Plus Plus is designed for complete beginners. If you can use email, you can create "
+                "professional podcasts with our platform."
+            ),
+        ),
+        LandingFAQ(
+            question="How long does it take to publish my first episode?",
+            answer=(
+                "Most users publish their first episode within 30 minutes of signing up. Our average setup time is under "
+                "5 minutes, and episode creation takes just a few more minutes."
+            ),
+        ),
+        LandingFAQ(
+            question="What platforms will my podcast be available on?",
+            answer=(
+                "Your podcast will automatically be distributed to 20+ major platforms including Spotify, Apple Podcasts, "
+                "Google Podcasts, and many more with just one click."
+            ),
+        ),
+        LandingFAQ(
+            question="Is there really a free trial with no credit card required?",
+            answer=(
+                "Yes! You get full access to all features for 14 days completely free. No credit card required, no hidden fees, "
+                "and you can cancel anytime."
+            ),
+        ),
+        LandingFAQ(
+            question="What if I'm not satisfied with the service?",
+            answer="We offer a 30-day money-back guarantee. If you're not completely satisfied, we'll refund your payment, no questions asked.",
+        ),
+    ]
+
+
+class LandingPageContent(BaseModel):
+    hero_html: str = _DEFAULT_HERO_HTML
+    reviews_heading: str = "Real Stories from Real Podcasters"
+    reviews_summary: str = "4.9/5 from 2,847 reviews"
+    reviews: list[LandingReview] = PydanticField(default_factory=_default_reviews)
+    faq_heading: str = "Frequently Asked Questions"
+    faq_subheading: str = "Everything you need to know about getting started with Podcast Plus Plus"
+    faqs: list[LandingFAQ] = PydanticField(default_factory=_default_faqs)
+    updated_at: Optional[datetime] = None
+
+
+def load_landing_content(session: Session) -> LandingPageContent:
+    try:
+        rec = session.get(AppSetting, "landing_page_content")
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        logger.warning("Failed loading landing content, using defaults: %s", exc)
+        return LandingPageContent()
+    if not rec or not (rec.value_json or "").strip():
+        return LandingPageContent()
+    try:
+        data = json.loads(rec.value_json)
+        content = LandingPageContent(**data)
+    except Exception as exc:  # pragma: no cover - invalid JSON falls back
+        logger.warning("Invalid landing content payload, using defaults: %s", exc)
+        return LandingPageContent()
+    if content.updated_at is None and getattr(rec, "updated_at", None):
+        try:
+            content.updated_at = rec.updated_at
+        except Exception:
+            pass
+    return content
+
+
+def save_landing_content(session: Session, content: LandingPageContent) -> LandingPageContent:
+    payload = content.model_copy(update={"updated_at": datetime.utcnow()})
+
+    def _load_or_create() -> AppSetting:
+        rec = session.get(AppSetting, "landing_page_content")
+        data = payload.model_dump_json()
+        if not rec:
+            rec = AppSetting(key="landing_page_content", value_json=data)
+        else:
+            rec.value_json = data
+        try:
+            rec.updated_at = datetime.utcnow()
+        except Exception:  # pragma: no cover
+            pass
+        session.add(rec)
+        return rec
+
+    try:
+        rec = _load_or_create()
+        session.commit()
+    except (ProgrammingError, OperationalError) as exc:
+        if not _is_missing_table_error(exc):
+            session.rollback()
+            raise
+        session.rollback()
+        _ensure_appsetting_table(session)
+        rec = _load_or_create()
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    try:
+        data = json.loads(rec.value_json or "{}")
+        return LandingPageContent(**data)
+    except Exception:  # pragma: no cover - fallback to defaults if corrupted immediately after save
+        return LandingPageContent()

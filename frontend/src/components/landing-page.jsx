@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   Mic,
   Settings,
@@ -24,6 +25,8 @@ import { useAuth } from "@/AuthContext.jsx"
 import { makeApi, buildApiUrl } from "@/lib/apiClient";
 import { useBrand } from "@/brand/BrandContext.jsx";
 import Logo from "@/components/Logo.jsx";
+import DOMPurify from "dompurify";
+import { defaultLandingContent, normalizeLandingContent } from "@/lib/landingDefaults";
 
 const apiUrl = (path) => buildApiUrl(path);
 
@@ -502,6 +505,7 @@ export default function PodcastPlusLanding() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [publicEpisodes, setPublicEpisodes] = useState([]);
+  const [landingContent, setLandingContent] = useState(defaultLandingContent);
   const { brand } = useBrand();
 
   // Auto-open login if ?login=1 present
@@ -520,6 +524,44 @@ export default function PodcastPlusLanding() {
       } catch {}
     })();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(apiUrl("/api/public/landing"));
+        if (!res.ok) {
+          throw new Error("landing_fetch_failed");
+        }
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled) {
+          setLandingContent(normalizeLandingContent(data));
+        }
+      } catch (_err) {
+        if (!cancelled) {
+          setLandingContent(defaultLandingContent);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const sanitizedHeroHtml = useMemo(
+    () => DOMPurify.sanitize(landingContent.hero_html || defaultLandingContent.hero_html),
+    [landingContent.hero_html]
+  );
+
+  const landingReviews = useMemo(
+    () => (landingContent.reviews?.length ? landingContent.reviews : defaultLandingContent.reviews),
+    [landingContent.reviews]
+  );
+
+  const landingFaqs = useMemo(
+    () => (landingContent.faqs?.length ? landingContent.faqs : defaultLandingContent.faqs),
+    [landingContent.faqs]
+  );
 
   const handlePlayDemo = () => {
     setIsPlaying(!isPlaying);
@@ -572,10 +614,10 @@ export default function PodcastPlusLanding() {
           <p className="text-xl md:text-2xl lg:text-3xl mb-8 text-gray-600 max-w-4xl mx-auto leading-relaxed">
             {brand.heroSub}
           </p>
-          <p className="text-lg md:text-xl mb-12 text-gray-500 max-w-3xl mx-auto">
-            Join thousands of creators who've discovered the joy of effortless podcasting.
-            <strong className="text-gray-700"> Average setup time: Under 5 minutes.</strong>
-          </p>
+          <div
+            className="text-lg md:text-xl mb-12 text-gray-500 max-w-3xl mx-auto leading-relaxed text-center space-y-4"
+            dangerouslySetInnerHTML={{ __html: sanitizedHeroHtml }}
+          />
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-12">
             <Button
@@ -806,105 +848,61 @@ export default function PodcastPlusLanding() {
           )}
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-6" style={{ color: "#2C3E50" }}>
-              Real Stories from Real Podcasters
+              {landingContent.reviews_heading || defaultLandingContent.reviews_heading}
             </h2>
-            <div className="flex justify-center items-center mb-8">
-              <div className="flex">
-                {[...Array(5)].map((_, i) => (
-                  <Star key={i} className="w-6 h-6 fill-yellow-400 text-yellow-400" />
-                ))}
+            { (landingContent.reviews_summary || defaultLandingContent.reviews_summary) && (
+              <div className="flex justify-center items-center mb-8">
+                <div className="flex">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <Star key={i} className="w-6 h-6 fill-yellow-400 text-yellow-400" />
+                  ))}
+                </div>
+                <span className="ml-2 text-lg text-gray-600">
+                  {landingContent.reviews_summary || defaultLandingContent.reviews_summary}
+                </span>
               </div>
-              <span className="ml-2 text-lg text-gray-600">4.9/5 from 2,847 reviews</span>
-            </div>
+            )}
           </div>
 
           <div className="grid md:grid-cols-3 gap-8">
-            <Card className="border-0 shadow-lg hover:shadow-xl transition-all bg-white">
-              <CardContent className="p-8">
-                <div className="flex mb-4">
-                  {[...Array(5)].map((_, i) => (
-                    <Star key={i} className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                  ))}
-                </div>
-                <p className="text-gray-700 leading-relaxed mb-6 text-lg">
-                  "I was terrified of the technical side of podcasting. Podcast Plus Plus made it so simple that I launched
-                  my first episode in under 30 minutes! Now I have 50+ episodes and growing."
-                </p>
-                <div className="flex items-center">
-                  <img
-                    src="https://placehold.co/60x60/E2E8F0/A0AEC0?text=Avatar"
-                    alt="Sarah Johnson"
-                    width={60}
-                    height={60}
-                    className="rounded-full mr-4"
-                  />
-                  <div>
-                    <h4 className="font-semibold text-lg" style={{ color: "#2C3E50" }}>
-                      Sarah Johnson
-                    </h4>
-                    <p className="text-gray-600">Small Business Owner • 6 months on Plus Plus</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-0 shadow-lg hover:shadow-xl transition-all bg-white">
-              <CardContent className="p-8">
-                <div className="flex mb-4">
-                  {[...Array(5)].map((_, i) => (
-                    <Star key={i} className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                  ))}
-                </div>
-                <p className="text-gray-700 leading-relaxed mb-6 text-lg">
-                  "I've saved 15+ hours every week since switching to Podcast Plus Plus. The AI editing is incredible - it
-                  sounds better than when I did it manually!"
-                </p>
-                <div className="flex items-center">
-                  <img
-                    src="https://placehold.co/60x60/E2E8F0/A0AEC0?text=Avatar"
-                    alt="Robert Chen"
-                    width={60}
-                    height={60}
-                    className="rounded-full mr-4"
-                  />
-                  <div>
-                    <h4 className="font-semibold text-lg" style={{ color: "#2C3E50" }}>
-                      Robert Chen
-                    </h4>
-                    <p className="text-gray-600">Retired Teacher • 1 year on Plus Plus</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-0 shadow-lg hover:shadow-xl transition-all bg-white">
-              <CardContent className="p-8">
-                <div className="flex mb-4">
-                  {[...Array(5)].map((_, i) => (
-                    <Star key={i} className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                  ))}
-                </div>
-                <p className="text-gray-700 leading-relaxed mb-6 text-lg">
-                  "My podcast now reaches 10,000+ listeners monthly. The automatic distribution to all platforms was a
-                  game-changer for my reach!"
-                </p>
-                <div className="flex items-center">
-                  <img
-                    src="https://placehold.co/60x60/E2E8F0/A0AEC0?text=Avatar"
-                    alt="Maria Rodriguez"
-                    width={60}
-                    height={60}
-                    className="rounded-full mr-4"
-                  />
-                  <div>
-                    <h4 className="font-semibold text-lg" style={{ color: "#2C3E50" }}>
-                      Maria Rodriguez
-                    </h4>
-                    <p className="text-gray-600">Community Leader • 8 months on Plus Plus</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            {landingReviews.map((review, index) => {
+              const stars = Math.max(0, Math.min(5, Math.round((review?.rating ?? 5))));
+              const initials = (review?.author || "??")
+                .split(/\s+/)
+                .map((part) => part.charAt(0))
+                .join("")
+                .slice(0, 2)
+                .toUpperCase();
+              return (
+                <Card key={`${review.author || "review"}-${index}`} className="border-0 shadow-lg hover:shadow-xl transition-all bg-white">
+                  <CardContent className="p-8">
+                    <div className="flex mb-4">
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <Star
+                          key={i}
+                          className={`w-4 h-4 ${i < stars ? "fill-yellow-400 text-yellow-400" : "text-gray-300"}`}
+                        />
+                      ))}
+                    </div>
+                    <p className="text-gray-700 leading-relaxed mb-6 text-lg">“{review.quote}”</p>
+                    <div className="flex items-center">
+                      <Avatar className="w-14 h-14 mr-4">
+                        {review.avatar_url ? (
+                          <AvatarImage src={review.avatar_url} alt={review.author || "Reviewer"} />
+                        ) : null}
+                        <AvatarFallback>{initials || "?"}</AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <h4 className="font-semibold text-lg" style={{ color: "#2C3E50" }}>
+                          {review.author || "Happy Podcaster"}
+                        </h4>
+                        {review.role && <p className="text-gray-600">{review.role}</p>}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         </div>
       </section>
@@ -914,40 +912,23 @@ export default function PodcastPlusLanding() {
         <div className="container mx-auto max-w-4xl">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-6" style={{ color: "#2C3E50" }}>
-              Frequently Asked Questions
+              {landingContent.faq_heading || defaultLandingContent.faq_heading}
             </h2>
-            <p className="text-xl text-gray-600">Everything you need to know about getting started with Podcast Plus Plus</p>
+            {(landingContent.faq_subheading || defaultLandingContent.faq_subheading) && (
+              <p className="text-xl text-gray-600">
+                {landingContent.faq_subheading || defaultLandingContent.faq_subheading}
+              </p>
+            )}
           </div>
 
           <div className="space-y-6">
-            {[
-              {
-                q: "Do I need any technical experience to use Podcast Plus Plus?",
-                a: "Absolutely not! Plus Plus is designed for complete beginners. If you can use email, you can create professional podcasts with our platform.",
-              },
-              {
-                q: "How long does it take to publish my first episode?",
-                a: "Most users publish their first episode within 30 minutes of signing up. Our average setup time is under 5 minutes, and episode creation takes just a few more minutes.",
-              },
-              {
-                q: "What platforms will my podcast be available on?",
-                a: "Your podcast will automatically be distributed to 20+ major platforms including Spotify, Apple Podcasts, Google Podcasts, and many more with just one click.",
-              },
-              {
-                q: "Is there really a free trial with no credit card required?",
-                a: "Yes! You get full access to all features for 14 days completely free. No credit card required, no hidden fees, and you can cancel anytime.",
-              },
-              {
-                q: "What if I'm not satisfied with the service?",
-                a: "We offer a 30-day money-back guarantee. If you're not completely satisfied, we'll refund your payment, no questions asked.",
-              },
-            ].map((faq, index) => (
-              <Card key={index} className="border-0 shadow-md bg-white">
+            {landingFaqs.map((faq, index) => (
+              <Card key={`${faq.question || "faq"}-${index}`} className="border-0 shadow-md bg-white">
                 <CardContent className="p-6">
                   <h3 className="text-lg font-semibold mb-3" style={{ color: "#2C3E50" }}>
-                    {faq.q}
+                    {faq.question}
                   </h3>
-                  <p className="text-gray-600 leading-relaxed">{faq.a}</p>
+                  <p className="text-gray-600 leading-relaxed">{faq.answer}</p>
                 </CardContent>
               </Card>
             ))}
