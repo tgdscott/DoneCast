@@ -16,6 +16,7 @@ from api.models.user import User
 from api.services.transcription import transcribe_media_file
 
 
+
 def _create_user(session) -> Tuple[User, str]:
     password = "notify-me!123"
     user = User(
@@ -125,7 +126,6 @@ def test_main_content_upload_records_email_target(session, client, monkeypatch):
     assert watch is not None
     assert watch.notify_email == notify_email
     assert watch.last_status == "queued"
-
 
 @pytest.mark.usefixtures("db_engine")
 def test_transcribe_media_file_notifies_watchers_with_email(session, monkeypatch):
@@ -241,3 +241,4 @@ def test_transcribe_media_file_notifies_without_email(session, monkeypatch):
     assert len(notes) == 1
     assert friendly in notes[0].body
     assert sent == []
+
