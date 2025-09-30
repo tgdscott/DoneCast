@@ -27,26 +27,52 @@ def _candidate_filenames(filename: str) -> list[str]:
 
     variants: set[str] = set()
 
-    # Normalize path separators and whitespace
-    normalized = raw.replace("\\", "/")
-    variants.add(raw)
-    variants.add(normalized)
+    def _record(value: str) -> None:
+        if not value:
+            return
+        trimmed = value.strip()
+        if not trimmed:
+            return
+        variants.add(trimmed)
+        normalized = trimmed.replace("\\", "/")
+        variants.add(normalized)
 
-    # gs://bucket/key -> add key and bucket/key variants
-    if normalized.startswith("gs://"):
-        without_scheme = normalized[len("gs://") :]
-        if without_scheme:
-            variants.add(without_scheme)
-            bucket_split = without_scheme.split("/", 1)
-            if len(bucket_split) == 2 and bucket_split[1]:
-                variants.add(bucket_split[1])
+        # Remove scheme-specific prefixes and accumulate sub-paths.
+        lowered = normalized.lower()
+        remainder = normalized
+        if "://" in normalized:
+            remainder = normalized.split("://", 1)[1]
+        elif lowered.startswith("//"):
+            remainder = normalized[2:]
 
-    # Basename without path components
-    base = Path(normalized).name
-    if base:
-        variants.add(base)
+        if remainder and remainder != normalized:
+            variants.add(remainder)
 
-    # Drop empties and preserve insertion order roughly by sorting on length then value
+        # Split host/path style strings into bucket + key pieces.
+        path_part = remainder
+        if remainder.startswith("storage.googleapis.com/"):
+            path_part = remainder[len("storage.googleapis.com/") :]
+            if path_part:
+                variants.add(path_part)
+        if "/" in path_part:
+            bucket_part, after = path_part.split("/", 1)
+            if bucket_part and after:
+                variants.add(f"{bucket_part}/{after}")
+                variants.add(after)
+                variants.add(f"gs://{bucket_part}/{after}")
+            elif after:
+                variants.add(after)
+
+        base = Path(normalized).name
+        if base:
+            variants.add(base)
+
+    # Strip query string / fragment but keep the original for completeness.
+    no_query = raw.split("?", 1)[0].split("#", 1)[0]
+    _record(raw)
+    _record(no_query)
+
+    # Drop empties and preserve insertion order roughly by sorting on length then value.
     cleaned = [v for v in variants if v]
     cleaned.sort(key=lambda v: (len(v), v))
     return cleaned
