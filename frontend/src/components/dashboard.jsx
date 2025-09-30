@@ -30,6 +30,7 @@ import {
   AlertTriangle,
   Settings as SettingsIcon,
   DollarSign,
+  Globe2,
   ChevronDown,
 } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
@@ -402,6 +403,9 @@ export default function PodcastPlusDashboard() {
         return <BillingPage token={token} onBack={() => setCurrentView('dashboard')} />;
       case 'dashboard':
       default: {
+        const normalizedTier = (user?.tier || '').toLowerCase();
+        const proEligibleTiers = new Set(['pro', 'enterprise', 'business', 'team', 'agency']);
+        const canViewWebsiteBuilderDocs = proEligibleTiers.has(normalizedTier);
         const canCreateEpisode = podcasts.length > 0 && templates.length > 0;
         return (
           <div className="space-y-8">
@@ -554,6 +558,21 @@ export default function PodcastPlusDashboard() {
           <Button onClick={() => setCurrentView('episodeHistory')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-episodes"><BarChart3 className="w-4 h-4 mr-2" />Episodes</Button>
           {/* Import moved under Podcasts */}
           <Button onClick={() => setCurrentView('billing')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-subscription"><DollarSign className="w-4 h-4 mr-2" />Subscription</Button>
+                      {canViewWebsiteBuilderDocs && (
+                        <Button
+                          asChild
+                          variant="outline"
+                          className="justify-start text-sm h-10"
+                        >
+                          <a
+                            href="/docs/podcast-website-builder"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <Globe2 className="w-4 h-4 mr-2" />Website Builder Guide
+                          </a>
+                        </Button>
+                      )}
                       <Button onClick={() => setCurrentView('settings')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-settings"><SettingsIcon className="w-4 h-4 mr-2" />Settings</Button>
                       {isAdmin(authUser) && (
                         <Button onClick={() => setCurrentView('devTools')} variant="destructive" className="justify-start text-sm h-10"><AlertTriangle className="w-4 h-4 mr-2" />Dev</Button>
