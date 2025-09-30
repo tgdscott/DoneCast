@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Optional
 from uuid import UUID
 
@@ -57,13 +60,59 @@ def publish_episode_to_spreaker_task(
 
         image_file_path: Optional[str] = None
         if isinstance(cover_candidate, str) and cover_candidate:
-            path = Path(cover_candidate)
-            if not path.is_file():
-                candidate = (PROJECT_ROOT / "media_uploads" / cover_candidate).resolve()
-                if candidate.is_file():
-                    path = candidate
-            if path.is_file():
-                image_file_path = ensure_cover_image_constraints(str(path))
+            cover_candidate = cover_candidate.strip()
+            if cover_candidate:
+                lower = cover_candidate.lower()
+                if lower.startswith(("http://", "https://")):
+                    # Already remote; nothing to upload but keep existing metadata
+                    image_file_path = None
+                else:
+                    candidates: list[Path] = []
+                    raw_path = Path(cover_candidate)
+                    if raw_path.is_file():
+                        candidates.append(raw_path)
+                    else:
+                        base_name = raw_path.name
+                        candidate_strings = [
+                            cover_candidate,
+                            str(raw_path),
+                            base_name,
+                            f"media_uploads/{cover_candidate}",
+                            f"media_uploads/{base_name}",
+                        ]
+                        unique_strings = []
+                        for item in candidate_strings:
+                            if item and item not in unique_strings:
+                                unique_strings.append(item)
+                        for rel in unique_strings:
+                            try:
+                                candidates.extend(
+                                    [
+                                        (PROJECT_ROOT / rel).resolve(),
+                                        (MEDIA_DIR / rel).resolve(),
+                                    ]
+                                )
+                            except Exception:
+                                candidates.append(PROJECT_ROOT / rel)
+                                candidates.append(MEDIA_DIR / rel)
+                        if base_name:
+                            candidates.extend(
+                                [
+                                    (MEDIA_DIR / base_name).resolve(),
+                                    (FINAL_DIR / base_name).resolve(),
+                                    (PROJECT_ROOT / "media_uploads" / base_name).resolve(),
+                                ]
+                            )
+                    resolved_cover: Optional[Path] = None
+                    for cand in candidates:
+                        try:
+                            if cand.is_file():
+                                resolved_cover = cand
+                                break
+                        except Exception:
+                            continue
+                    if resolved_cover:
+                        image_file_path = ensure_cover_image_constraints(str(resolved_cover))
 
         desc = (
             description
@@ -89,6 +138,14 @@ def publish_episode_to_spreaker_task(
             else:
                 raise RuntimeError(f"Final audio file not found for publishing: {audio_path}")
 
+        # Ensure the episode keeps a stable basename so downstream tooling finds the asset
+        try:
+            final_basename = os.path.basename(audio_path)
+            if final_basename and final_basename != os.path.basename(str(episode.final_audio_path)):
+                episode.final_audio_path = final_basename
+        except Exception:
+            pass
+
         api_base_url = None
         for candidate in [
             os.getenv("PUBLIC_API_BASE"),
@@ -96,10 +153,26 @@ def publish_episode_to_spreaker_task(
             os.getenv("OAUTH_BACKEND_BASE"),
             getattr(settings, "OAUTH_BACKEND_BASE", None),
             getattr(settings, "APP_BASE_URL", None),
+            getattr(settings, "SPREAKER_REDIRECT_URI", None),
         ]:
             cand = (candidate or "").strip() if candidate else ""
-            if cand:
-                api_base_url = cand.rstrip("/")
+            if not cand:
+                continue
+            parsed = urlparse(cand)
+            if not (parsed.scheme and parsed.netloc):
+                continue
+            host_lower = parsed.netloc.lower()
+            path_lower = (parsed.path or "").lower()
+            computed: Optional[str] = None
+            if "api" in host_lower.split(".") or path_lower.startswith("/api"):
+                computed = f"{parsed.scheme}://{parsed.netloc}"
+            elif host_lower.startswith("app."):
+                swapped = host_lower.replace("app.", "api.", 1)
+                computed = f"{parsed.scheme}://{swapped}"
+            elif path_lower and "/api/" in path_lower:
+                computed = f"{parsed.scheme}://{parsed.netloc}"
+            if computed:
+                api_base_url = computed.rstrip("/")
                 break
 
         transcript_info = transcript_endpoints_for_episode(episode, api_base_url=api_base_url)
@@ -110,8 +183,6 @@ def publish_episode_to_spreaker_task(
         parsed_auto_str: Optional[str] = None
         if auto_published_at:
             try:
-                from datetime import datetime, timezone
-
                 dt = datetime.fromisoformat(auto_published_at.replace("Z", "+00:00"))
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=timezone.utc)
@@ -268,28 +339,44 @@ def publish_episode_to_spreaker_task(
                 if remote_url:
                     if remote_url != getattr(episode, "remote_cover_url", None):
                         setattr(episode, "remote_cover_url", remote_url)
-                    if episode.cover_path and not str(episode.cover_path).lower().startswith(
-                        ("http://", "https://")
-                    ):
-                        local_path = (
-                            PROJECT_ROOT / "media_uploads" / Path(episode.cover_path).name
-                        )
-                        if local_path.is_file():
-                            try:
-                                local_path.unlink()
-                                episode.cover_path = remote_url
-                            except Exception:
-                                logging.warning(
-                                    "[publish] Failed to delete local cover %s",
-                                    local_path,
-                                )
         except Exception:
             logging.warning("[publish] cover sync error", exc_info=True)
 
         if isinstance(result, dict) and result.get("episode_id"):
             episode.spreaker_episode_id = str(result["episode_id"])
+            try:
+                meta = json.loads(getattr(episode, "meta_json", "{}") or "{}")
+            except Exception:
+                meta = {}
+            spreaker_meta = meta.get("spreaker")
+            if not isinstance(spreaker_meta, dict):
+                spreaker_meta = {}
             if remote_stream_url:
-                episode.final_audio_path = remote_stream_url
+                spreaker_meta["remote_audio_url"] = remote_stream_url
+                spreaker_meta.setdefault(
+                    "remote_audio_first_seen",
+                    datetime.now(timezone.utc).isoformat(),
+                )
+            if transcript_url:
+                spreaker_meta["transcript_url"] = transcript_url
+                spreaker_meta["transcript_available"] = bool(transcript_info.get("available"))
+            meta["spreaker"] = spreaker_meta
+            transcripts_meta = meta.get("transcripts")
+            if not isinstance(transcripts_meta, dict):
+                transcripts_meta = {}
+            if transcript_info.get("text"):
+                transcripts_meta.setdefault("primary", transcript_info.get("text"))
+                transcripts_meta.setdefault("text", transcript_info.get("text"))
+            if transcript_info.get("json"):
+                transcripts_meta.setdefault("json", transcript_info.get("json"))
+            if transcript_info.get("absolute_text"):
+                transcripts_meta.setdefault("absolute_text", transcript_info.get("absolute_text"))
+            transcripts_meta["available"] = bool(transcript_info.get("available"))
+            meta["transcripts"] = transcripts_meta
+            try:
+                episode.meta_json = json.dumps(meta)
+            except Exception:
+                logging.warning("[publish] Failed to encode spreaker metadata", exc_info=True)
 
         episode.spreaker_publish_error = None
         episode.spreaker_publish_error_detail = None

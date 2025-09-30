@@ -14,7 +14,7 @@ from api.models.user import User
 from api.models.podcast import Episode, Podcast, EpisodeStatus
 
 from api.services.episodes import jobs as _svc_jobs
-from .common import _final_url_for, _cover_url_for, _status_value
+from .common import _cover_url_for, _status_value, compute_playback_info
 from api.services.episodes import repo as _svc_repo
 from api.services.episodes.transcripts import transcript_endpoints_for_episode
 from uuid import UUID as _UUID
@@ -306,34 +306,28 @@ def list_episodes(
 			.offset(offset)
 			.limit(limit)
 		).scalars().all()
-	items = []
-	now_utc = datetime.utcnow()
+        items = []
+        now_utc = datetime.utcnow()
 	for e in eps:
-		final_exists = False
-		cover_exists = False
-		try:
-			if e.final_audio_path:
-				base = os.path.basename(str(e.final_audio_path))
-				cands = []
-				try:
-					cands.append((FINAL_DIR / base).resolve())
-				except Exception:
-					cands.append(FINAL_DIR / base)
-				cands.append(MEDIA_DIR / base)
-				final_exists = any(c.is_file() for c in cands)
-			if getattr(e, 'remote_cover_url', None):
-				cover_exists = True
-			else:
-				if e.cover_path and not str(e.cover_path).lower().startswith(('http://', 'https://')):
-					try:
-						candidate = (MEDIA_DIR / os.path.basename(str(e.cover_path))).resolve()
-					except Exception:
-						candidate = MEDIA_DIR / os.path.basename(str(e.cover_path))
-					cover_exists = candidate.is_file()
-				elif e.cover_path:
-					cover_exists = True
-		except Exception:
-			pass
+                final_exists = False
+                cover_exists = False
+                playback = compute_playback_info(e, now=now_utc)
+                final_exists = bool(playback.get("final_audio_exists"))
+                local_final_exists = bool(playback.get("local_final_exists"))
+                try:
+                        if getattr(e, 'remote_cover_url', None):
+                                cover_exists = True
+                        else:
+                                if e.cover_path and not str(e.cover_path).lower().startswith(('http://', 'https://')):
+                                        try:
+                                                candidate = (MEDIA_DIR / os.path.basename(str(e.cover_path))).resolve()
+                                        except Exception:
+                                                candidate = MEDIA_DIR / os.path.basename(str(e.cover_path))
+                                        cover_exists = candidate.is_file()
+                                elif e.cover_path:
+                                        cover_exists = True
+                except Exception:
+                        pass
 
 		base_status = _status_value(e.status)
 		is_scheduled = False
@@ -354,21 +348,13 @@ def list_episodes(
 
 		# Prefer local cover_path first so newly uploaded covers display immediately;
 		# remote_cover_url will override later once publish sync updates it.
-		preferred_cover = e.cover_path or getattr(e, 'remote_cover_url', None)
-		stream_url = None
-		try:
-			spk_id = getattr(e, 'spreaker_episode_id', None)
-			if spk_id:
-				stream_url = f"https://api.spreaker.com/v2/episodes/{spk_id}/play"
-		except Exception:
-			stream_url = None
-		final_audio_url = _final_url_for(e.final_audio_path)
-		if not final_exists:
-			final_audio_url = None
-		playback_url = stream_url or final_audio_url
-		playback_type = 'stream' if stream_url else ('local' if final_audio_url else 'none')
-		if playback_type == 'stream':
-			final_exists = True
+                preferred_cover = e.cover_path or getattr(e, 'remote_cover_url', None)
+                stream_url = playback.get("stream_url")
+                final_audio_url = playback.get("final_audio_url")
+                playback_url = playback.get("playback_url")
+                playback_type = playback.get("playback_type") or 'none'
+                if playback_type == 'stream':
+                        final_exists = True
 
 		pub_at_iso = None
 		pub_local_raw = getattr(e, 'publish_at_local', None)
@@ -408,9 +394,10 @@ def list_episodes(
 			"episode_number": getattr(e, 'episode_number', None),
 			"spreaker_episode_id": getattr(e, "spreaker_episode_id", None),
 			"is_published_to_spreaker": bool(getattr(e, "is_published_to_spreaker", False)),
-			"final_audio_exists": final_exists,
-			"cover_exists": cover_exists,
-			"cover_path": preferred_cover,
+                        "final_audio_exists": final_exists,
+                        "final_audio_local_exists": local_final_exists,
+                        "cover_exists": cover_exists,
+                        "cover_path": preferred_cover,
 			"final_audio_basename": os.path.basename(e.final_audio_path) if e.final_audio_path else None,
 			"publish_error": getattr(e, 'spreaker_publish_error', None),
 			"publish_error_detail": getattr(e, 'spreaker_publish_error_detail', None),
@@ -419,9 +406,10 @@ def list_episodes(
 			"publish_at_local": pub_local_raw,
 			"is_scheduled": is_scheduled,
 			"plays_total": None,
-			"stream_url": stream_url,
-			"playback_url": playback_url,
-			"playback_type": playback_type,
+                        "stream_url": stream_url,
+                        "playback_url": playback_url,
+                        "playback_type": playback_type,
+                        "using_spreaker_audio": bool(playback.get("prefer_remote_audio")),
 			"has_transcript": bool(transcript_info.get("available", False)),
 			"transcript_url": transcript_info.get("text"),
 			"transcript_json_url": transcript_info.get("json"),
