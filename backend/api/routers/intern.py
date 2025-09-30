@@ -5,19 +5,51 @@ import logging
 import math
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydub import AudioSegment
 
 from api.core.paths import INTERN_CTX_DIR, MEDIA_DIR, TRANSCRIPTS_DIR
 from api.routers.auth import get_current_user
 from api.models.user import User
-from api.services import transcription, ai_enhancer
+from api.services import transcription
+
+try:
+    from api.services import ai_enhancer as _ai_enhancer
+except Exception as _exc:  # pragma: no cover - best effort import guard
+    ai_enhancer = None  # type: ignore[assignment]
+    _AI_IMPORT_ERROR = _exc
+else:
+    ai_enhancer = _ai_enhancer  # type: ignore[assignment]
+    _AI_IMPORT_ERROR = None
 from api.services.audio.orchestrator_steps import detect_and_prepare_ai_commands
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from api.services import ai_enhancer as _ai_enhancer_typing
+
 
 router = APIRouter(prefix="/intern", tags=["intern"], responses={404: {"description": "Not found"}})
 
 _LOG = logging.getLogger(__name__)
+
+_AI_IMPORT_LOGGED = False
+_AIEnhancerError = getattr(ai_enhancer, "AIEnhancerError", Exception)
+
+
+def _require_ai_enhancer():
+    global _AI_IMPORT_LOGGED
+    if ai_enhancer is None:
+        if not _AI_IMPORT_LOGGED:
+            if _AI_IMPORT_ERROR:
+                _LOG.error("[intern] ai_enhancer unavailable: %s", _AI_IMPORT_ERROR)
+            else:
+                _LOG.error("[intern] ai_enhancer module missing")
+            _AI_IMPORT_LOGGED = True
+        raise HTTPException(
+            status_code=503,
+            detail="Intern AI processing is not available right now. Please check your AI configuration and try again.",
+        )
+    return ai_enhancer
 
 
 def _resolve_media_path(filename: str) -> Path:
@@ -295,7 +327,9 @@ def execute_intern_command(
     transcript_excerpt = _collect_transcript_preview(words, resolved_start, resolved_end)
     prompt_text = str(target_cmd.get("local_context") or transcript_excerpt or "").strip()
 
-    interpretation = ai_enhancer.interpret_intern_command(prompt_text)
+    enhancer = _require_ai_enhancer()
+
+    interpretation = enhancer.interpret_intern_command(prompt_text)
     action = (interpretation or {}).get("action") or (
         "add_to_shownotes" if (target_cmd.get("mode") == "shownote") else "generate_audio"
     )
@@ -306,10 +340,10 @@ def execute_intern_command(
     else:
         mode = "shownote" if action == "add_to_shownotes" else "audio"
         try:
-            answer = ai_enhancer.get_answer_for_topic(topic, context=transcript_excerpt or prompt_text, mode=mode)
+            answer = enhancer.get_answer_for_topic(topic, context=transcript_excerpt or prompt_text, mode=mode)
         except Exception as exc:
             _LOG.warning("[intern] AI response failed: %s", exc)
-            answer = ai_enhancer.get_answer_for_topic(topic, context=transcript_excerpt or prompt_text, mode=mode)
+            answer = enhancer.get_answer_for_topic(topic, context=transcript_excerpt or prompt_text, mode=mode)
 
     answer = (answer or "").strip()
     if not answer:
@@ -319,10 +353,10 @@ def execute_intern_command(
     audio_url = None
     if answer and voice_id is not None:
         try:
-            speech = ai_enhancer.generate_speech_from_text(answer, voice_id=voice_id, user=current_user)
+            speech = enhancer.generate_speech_from_text(answer, voice_id=voice_id, user=current_user)
             slug, path = _export_snippet(speech, filename, 0.0, len(speech) / 1000.0, suffix="intern-response")
             audio_url = f"/static/intern/{slug}"
-        except ai_enhancer.AIEnhancerError as exc:
+        except _AIEnhancerError as exc:
             _LOG.warning("[intern] TTS generation failed: %s", exc)
         except Exception as exc:  # pragma: no cover - defensive guard
             _LOG.warning("[intern] unexpected TTS error: %s", exc)
