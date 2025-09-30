@@ -17,6 +17,7 @@ import logging
 import os
 
 from ...core.paths import MEDIA_DIR, TRANSCRIPTS_DIR
+from .watchers import notify_watchers_processed, mark_watchers_failed
 
 
 class TranscriptionError(Exception):
@@ -88,15 +89,15 @@ def transcribe_media_file(filename: str) -> List[Dict[str, Any]]:
 
     local_name = filename
     delete_after = False
-    if _is_gcs_path(filename):
-        try:
-            local_name = _download_gcs_to_media(filename)
-            delete_after = True
-        except Exception as exc:  # pragma: no cover - network dependent
-            logging.error("[transcription] GCS download failed for %s: %s", filename, exc)
-            raise
-
     try:
+        if _is_gcs_path(filename):
+            try:
+                local_name = _download_gcs_to_media(filename)
+                delete_after = True
+            except Exception as exc:  # pragma: no cover - network dependent
+                logging.error("[transcription] GCS download failed for %s: %s", filename, exc)
+                raise
+
         words = get_word_timestamps(local_name)
         try:
             TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -145,7 +146,12 @@ def transcribe_media_file(filename: str) -> List[Dict[str, Any]]:
                     logging.warning(f"Failed to associate transcript with episode: {e}")
         except Exception:  # pragma: no cover - best effort persistence
             pass
+
+        notify_watchers_processed(filename)
         return words
+    except Exception as exc:
+        mark_watchers_failed(filename, str(exc))
+        raise
     finally:
         if delete_after:
             try:
