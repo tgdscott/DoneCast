@@ -47,6 +47,7 @@ import AdminFeatureToggles from '@/components/admin/AdminFeatureToggles.jsx';
 import AdminLayoutToggle from '@/components/admin/AdminLayoutToggle.jsx';
 import AdminTierEditor from '@/components/admin/AdminTierEditor.jsx';
 import AdminMusicLibrary from '@/components/admin/AdminMusicLibrary.jsx';
+import AdminLandingEditor from '@/components/admin/AdminLandingEditor.jsx';
 
 export default function AdminDashboard() {
   const { token, logout } = useAuth();
@@ -180,7 +181,8 @@ export default function AdminDashboard() {
   { id: "podcasts", label: "Podcasts", icon: Play },
     { id: "analytics", label: "Analytics", icon: TrendingUp },
   { id: "tiers", label: "Tier Editor", icon: SettingsIcon },
-  { id: "music", label: "Music Library", icon: Headphones },
+    { id: "music", label: "Music Library", icon: Headphones },
+    { id: "landing", label: "Front Page Content", icon: MessageSquare },
     { id: "db", label: "DB Explorer", icon: Database },
     { id: "settings", label: "Settings", icon: SettingsIcon },
     { id: "billing", label: "Billing", icon: CreditCard },
@@ -376,6 +378,7 @@ export default function AdminDashboard() {
                 {activeTab === "music" && "Curate previewable background tracks for onboarding/templates"}
                 {activeTab === "settings" && "Configure platform settings and features"}
                 {activeTab === "dashboard" && "Overview of platform metrics and activity"}
+                {activeTab === "landing" && "Customize landing page reviews, FAQs, and hero messaging"}
                 {activeTab === "billing" && "View and manage billing details and subscriptions"}
               </p>
             </div>
@@ -703,6 +706,12 @@ export default function AdminDashboard() {
           {activeTab === 'music' && (
             <div className="space-y-4">
               <AdminMusicLibrary />
+            </div>
+          )}
+
+          {activeTab === 'landing' && (
+            <div className="space-y-4">
+              <AdminLandingEditor token={token} />
             </div>
           )}
 

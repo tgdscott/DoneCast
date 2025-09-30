@@ -12,8 +12,11 @@ from api.models.user import User
 from api.models.settings import (
     AdminSettings,
     AppSetting,
+    LandingPageContent,
     load_admin_settings,
+    load_landing_content,
     save_admin_settings,
+    save_landing_content,
 )
 
 from .deps import get_current_admin_user
@@ -124,6 +127,25 @@ def update_admin_settings(
 ) -> AdminSettings:
     del admin_user
     return save_admin_settings(session, payload)
+
+
+@router.get("/landing", response_model=LandingPageContent)
+def get_landing_page_content(
+    session: Session = Depends(get_session),
+    admin_user: User = Depends(get_current_admin_user),
+) -> LandingPageContent:
+    del admin_user
+    return load_landing_content(session)
+
+
+@router.put("/landing", response_model=LandingPageContent)
+def update_landing_page_content(
+    payload: LandingPageContent,
+    session: Session = Depends(get_session),
+    admin_user: User = Depends(get_current_admin_user),
+) -> LandingPageContent:
+    del admin_user
+    return save_landing_content(session, payload)
 
 
 __all__ = ["router"]

@@ -3,6 +3,7 @@ from sqlmodel import Session, select
 from sqlalchemy import text
 from api.core.database import get_session
 from api.models.podcast import Episode
+from api.models.settings import load_landing_content, LandingPageContent
 import os
 from pathlib import Path
 from api.core.paths import FINAL_DIR, MEDIA_DIR
@@ -64,10 +65,15 @@ def public_config():
     return {
         "terms_version": getattr(settings, "TERMS_VERSION", ""),
     # Rebrand: expose new API base (frontend should prefer dynamic origin in prod)
-    "api_base": "https://api.podcastplusplus.com",
+        "api_base": "https://api.podcastplusplus.com",
         # Include dynamic admin-exposed limits for client UX (non-sensitive)
         "max_upload_mb": _get_max_upload_mb(),
     }
+
+
+@router.get("/landing", response_model=LandingPageContent)
+def public_landing_content(session: Session = Depends(get_session)) -> LandingPageContent:
+    return load_landing_content(session)
 
 # Pull current admin setting from DB if available; default to 500 on error
 def _get_max_upload_mb() -> int:
