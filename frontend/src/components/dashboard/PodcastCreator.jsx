@@ -11,6 +11,7 @@ import PodcastCreatorScaffold from './podcastCreator/PodcastCreatorScaffold';
 import FlubberScanOverlay from './podcastCreator/FlubberScanOverlay';
 import FlubberRetryModal from './podcastCreator/FlubberRetryModal';
 import FlubberQuickReview from './FlubberQuickReview';
+import InternCommandReview from './podcastCreator/InternCommandReview';
 import IntentQuestions from './IntentQuestions';
 import VoicePicker from '@/components/VoicePicker';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -101,8 +102,13 @@ export default function PodcastCreator({
     setShowFlubberScan,
     showFlubberReview,
     flubberContexts,
+    showInternReview,
+    internReviewContexts,
+    internResponses,
     handleFlubberConfirm,
     handleFlubberCancel,
+    handleInternComplete,
+    handleInternCancel,
     showIntentQuestions,
     handleIntentSubmit,
     intents,
@@ -126,6 +132,7 @@ export default function PodcastCreator({
     activeSegment,
     showVoicePicker,
     handleVoiceChange,
+    processInternCommand,
     setPublishMode,
     setPublishVisibility,
     setScheduleDate,
@@ -133,6 +140,7 @@ export default function PodcastCreator({
     setShowIntentQuestions,
     cancelBuild,
     buildActive,
+    resolveInternVoiceId,
   } = controller;
 
   const { toast } = useToast();
@@ -179,6 +187,9 @@ export default function PodcastCreator({
     intern: Number((intentDetections?.intern?.count) ?? 0),
     sfx: Number((intentDetections?.sfx?.count) ?? 0),
   };
+
+  const internVoiceId = typeof resolveInternVoiceId === 'function' ? resolveInternVoiceId() : null;
+  const internVoiceName = internVoiceId ? (voiceNameById?.[internVoiceId] || internVoiceId) : null;
 
   const baseIntentHide = {
     flubber: false,
@@ -400,6 +411,18 @@ export default function PodcastCreator({
           open={showFlubberReview}
           onConfirm={handleFlubberConfirm}
           onCancel={handleFlubberCancel}
+        />
+      )}
+
+      {showInternReview && (
+        <InternCommandReview
+          open={showInternReview}
+          contexts={internReviewContexts || []}
+          onComplete={handleInternComplete}
+          onCancel={handleInternCancel}
+          onProcess={processInternCommand}
+          voiceName={internVoiceName}
+          initialResults={internResponses}
         />
       )}
 
