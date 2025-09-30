@@ -53,6 +53,25 @@ const formatPublishAt = (iso) => {
     return `${datePart} ${timePart}${rel ? " - " + rel : ""}`;
   } catch { return iso; }
 };
+
+
+const deriveEpisodeHint = (episode) => {
+  if (!episode) return null;
+  const meta = safeJsonParse(episode.meta_json);
+  const candidates = [
+    episode.working_audio_name,
+    meta?.working_audio_name,
+    meta?.cleaned_filename,
+    meta?.main_content_filename,
+    episode.final_audio_path,
+    meta?.uploaded_filename,
+  ];
+  for (const cand of candidates) {
+    if (cand && typeof cand === 'string') return cand;
+  }
+  return null;
+};
+
 export default function EpisodeHistory({ token, onBack }) {
   // Core lists & fetch state
   const [episodes, setEpisodes] = useState([]);
