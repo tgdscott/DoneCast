@@ -17,6 +17,7 @@ from api.services.mailer import mailer
 log = logging.getLogger("transcription.watchers")
 
 
+
 def _candidate_filenames(filename: str) -> list[str]:
     """Return potential stored filename variants for a processed upload."""
 
@@ -52,11 +53,13 @@ def _candidate_filenames(filename: str) -> list[str]:
 
 
 def _friendly_name(session: Session, filename: str, *, fallback: str | None = None) -> str:
+
     media = session.exec(
         select(MediaItem).where(MediaItem.filename == filename)
     ).first()
     if media and getattr(media, "friendly_name", None):
         return str(media.friendly_name)
+
     if fallback:
         return fallback
     return Path(filename).stem or filename
@@ -84,12 +87,12 @@ def _load_outstanding_watches(session: Session, filename: str) -> list[Transcrip
         ordered.append(watch)
     return ordered
 
-
 def notify_watchers_processed(filename: str) -> None:
     """Create in-app/email notifications for watchers after transcription."""
 
     try:
         with Session(db.engine) as session:
+
             watches = _load_outstanding_watches(session, filename)
             if not watches:
                 return
@@ -100,9 +103,11 @@ def notify_watchers_processed(filename: str) -> None:
                 fallback=(watches[0].friendly_name if watches and watches[0].friendly_name else None),
             )
 
+
             for watch in watches:
                 email = (watch.notify_email or "").strip()
                 status = "pending"
+
 
                 # Normalize stored filename so future lookups succeed even if the
                 # original watch used a shorthand variant.
@@ -115,6 +120,7 @@ def notify_watchers_processed(filename: str) -> None:
                     subject = "Your upload is ready to edit"
                     body = (
                         f"Good news! The audio file '{friendly_text}' has finished processing and is ready in Podcast Plus Plus.\n\n"
+
                         "You can return to the dashboard to continue building your episode."
                     )
                     try:
@@ -130,7 +136,9 @@ def notify_watchers_processed(filename: str) -> None:
                     user_id=watch.user_id,
                     type="transcription",
                     title="Upload processed",
+
                     body=f"{friendly_text} is fully transcribed and ready to use.",
+
                 )
                 session.add(note)
 
@@ -148,13 +156,17 @@ def mark_watchers_failed(filename: str, detail: str) -> None:
 
     try:
         with Session(db.engine) as session:
+
             watches = _load_outstanding_watches(session, filename)
+
             if not watches:
                 return
 
             for watch in watches:
+
                 if (watch.filename or "").strip() != filename:
                     watch.filename = filename
+
                 watch.last_status = f"error:{detail[:120]}"
                 session.add(watch)
 

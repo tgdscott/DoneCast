@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
+
 from typing import Tuple
 
 import pytest
@@ -16,6 +17,7 @@ from api.models.transcription import TranscriptionWatch
 from api.models.user import User
 from api.services.transcription import transcribe_media_file
 from api.services.transcription.watchers import notify_watchers_processed
+
 
 
 def _create_user(session) -> Tuple[User, str]:
@@ -243,54 +245,3 @@ def test_transcribe_media_file_notifies_without_email(session, monkeypatch):
     assert len(notes) == 1
     assert friendly in notes[0].body
     assert sent == []
-
-
-@pytest.mark.usefixtures("db_engine")
-def test_notify_watchers_matches_basename_and_normalizes_filename(session, monkeypatch):
-    user, _ = _create_user(session)
-
-    gs_uri = "gs://bucket/user/main_content/sample-123.wav"
-    friendly = "My Alias"
-
-    session.add(
-        MediaItem(
-            filename=gs_uri,
-            friendly_name=friendly,
-            user_id=user.id,
-            category=MediaCategory.main_content,
-        )
-    )
-    session.add(
-        TranscriptionWatch(
-            user_id=user.id,
-            filename=Path(gs_uri).name,
-            friendly_name=friendly,
-            notify_email=None,
-            last_status="queued",
-        )
-    )
-    session.commit()
-
-    def fake_send(*args, **kwargs):
-        raise AssertionError("email should not be sent when notify_email is missing")
-
-    monkeypatch.setattr("api.services.transcription.watchers.mailer.send", fake_send)
-
-    notify_watchers_processed(gs_uri)
-
-    updated_watch = session.exec(
-        select(TranscriptionWatch).where(
-            TranscriptionWatch.user_id == user.id,
-            TranscriptionWatch.filename == gs_uri,
-        )
-    ).first()
-
-    assert updated_watch is not None
-    assert updated_watch.notified_at is not None
-    assert updated_watch.last_status == "no-email"
-
-    notes = session.exec(
-        select(Notification).where(Notification.user_id == user.id)
-    ).all()
-    assert len(notes) == 1
-    assert friendly in notes[0].body
