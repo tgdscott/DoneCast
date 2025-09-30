@@ -54,19 +54,69 @@ def _cleanup_main_content(*, session, episode, main_content_filename: str) -> No
             MediaItem.filename == main_fn, MediaItem.user_id == episode.user_id
         )
         media_item = session.exec(query).first()
-        if media_item and media_item.category == MediaCategory.main_content:
-            media_path = Path("media_uploads") / media_item.filename
-            if media_path.is_file():
+        if not media_item or media_item.category != MediaCategory.main_content:
+            return
+
+        filename = str(media_item.filename or "").strip()
+        removed_file = False
+
+        if filename.startswith("gs://"):
+            try:
+                without_scheme = filename[len("gs://") :]
+                bucket_name, key = without_scheme.split("/", 1)
+                if bucket_name and key:
+                    from google.cloud import storage  # type: ignore
+
+                    client = storage.Client()
+                    client.bucket(bucket_name).blob(key).delete()
+                    removed_file = True
+            except Exception:
+                logging.warning(
+                    "[cleanup] Failed to delete gs object %s", filename, exc_info=True
+                )
+        else:
+            try:
+                base_name = Path(filename).name
+            except Exception:
+                base_name = filename
+
+            candidates = []
+            for root in {MEDIA_DIR, PROJECT_ROOT / "media_uploads", Path("media_uploads")}:
                 try:
-                    media_path.unlink()
+                    candidates.append((root / base_name).resolve(strict=False))
                 except Exception:
-                    logging.warning("[cleanup] Unable to unlink file %s", media_path)
+                    continue
+
+            seen: set[str] = set()
+            for candidate in candidates:
+                try:
+                    key = str(candidate)
+                except Exception:
+                    key = repr(candidate)
+                if key in seen:
+                    continue
+                seen.add(key)
+                if candidate.exists():
+                    try:
+                        candidate.unlink()
+                        removed_file = True
+                    except Exception:
+                        logging.warning(
+                            "[cleanup] Unable to unlink file %s", candidate, exc_info=True
+                        )
+
+        try:
             session.delete(media_item)
             session.commit()
-            logging.info(
-                "[cleanup] Removed main content source %s after assembly",
-                media_item.filename,
-            )
+        except Exception:
+            session.rollback()
+            raise
+
+        logging.info(
+            "[cleanup] Removed main content source %s after assembly (file_removed=%s)",
+            media_item.filename,
+            removed_file,
+        )
     except Exception:
         logging.warning("[cleanup] Failed to remove main content media item", exc_info=True)
 
