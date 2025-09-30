@@ -1,25 +1,15 @@
-from datetime import datetime
-from typing import Any, Dict, Optional
-from uuid import UUID
+"""Compatibility layer re-exporting media schema definitions.
 
-from pydantic import BaseModel, Field
+Historically the media endpoints lived in modules such as
+``api.routers.media_read`` which imported ``MediaItemUpdate`` and
+``MainContentItem`` from ``api.routers.media_schemas``.  The media router has
+since been reorganized into the ``api.routers.media`` package where the shared
+schemas now live in ``api.routers.media.schemas``.  To avoid breaking any
+legacy imports that still reference the old module path we re-export the
+definitions from their new location.
+"""
 
-
-class MediaItemUpdate(BaseModel):
-    friendly_name: Optional[str] = None
-    trigger_keyword: Optional[str] = None
-
-
-class MainContentItem(BaseModel):
-    id: UUID
-    filename: str
-    friendly_name: Optional[str] = None
-    created_at: datetime
-    expires_at: Optional[datetime] = None
-    transcript_ready: bool = False
-    intents: Dict[str, Any] = Field(default_factory=dict)
-    notify_pending: bool = False
-    duration_seconds: Optional[float] = None
-
+from .media.schemas import MainContentItem, MediaItemUpdate
 
 __all__ = ["MediaItemUpdate", "MainContentItem"]
+
