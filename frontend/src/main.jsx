@@ -13,6 +13,7 @@ import PrivacyPolicy from '@/pages/PrivacyPolicy.jsx';
 import TermsOfUse from '@/pages/TermsOfUse.jsx';
 import Verify from '@/pages/Verify.jsx';
 import Pricing from '@/pages/Pricing.jsx';
+import PodcastWebsiteBuilder from '@/pages/PodcastWebsiteBuilder.jsx';
 import { AuthProvider } from './AuthContext.jsx';
 import { BrandProvider } from './brand/BrandContext.jsx';
 import { ComfortProvider } from './ComfortContext.jsx';
@@ -96,6 +97,7 @@ const router = createBrowserRouter([
   { path: '/verify', element: <Verify /> },
   { path: '/pricing', element: <Pricing /> },
   { path: '/subscriptions', element: <Pricing /> },
+  { path: '/docs/podcast-website-builder', element: <PodcastWebsiteBuilder /> },
   // Fallback 404 for any unknown route
   { path: '*', element: <NotFound /> },
 ]);
