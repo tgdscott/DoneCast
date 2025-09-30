@@ -617,16 +617,32 @@ export default function EpisodeHistory({ token, onBack }) {
                 <div className="text-gray-500 text-xs flex items-center"><Play className="w-3 h-3 mr-1"/>No audio</div>
               )}
               {missingAudio && <div className="text-[10px] text-red-600">File missing on server</div>}
-              {ep.has_transcript && ep.transcript_url && (
-                <a
-                  href={ep.transcript_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 underline"
-                >
-                  <FileText className="w-3 h-3" />View transcript
-                </a>
-              )}
+              {/* Show transcript scroll icon if GCS transcript is available */}
+              {(() => {
+                let transcriptUrl = null;
+                if (ep.meta_json) {
+                  try {
+                    const meta = typeof ep.meta_json === 'string' ? JSON.parse(ep.meta_json) : ep.meta_json;
+                    transcriptUrl = meta?.transcripts?.gcs_json || null;
+                  } catch {}
+                }
+                if (transcriptUrl) {
+                  return (
+                    <a
+                      href={transcriptUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 underline"
+                      title="View transcript"
+                    >
+                      {/* Simple scroll icon for now */}
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M4 2a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H4zm0 1h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm2 2v6h4V4H6zm1 1h2v4H7V5z"/></svg>
+                      Transcript
+                    </a>
+                  );
+                }
+                return null;
+              })()}
             </CardContent>
             </Card>
             {manualEpId === ep.id && (

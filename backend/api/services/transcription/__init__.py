@@ -83,6 +83,7 @@ def _download_gcs_to_media(gcs_uri: str) -> str:
 
 
 def transcribe_media_file(filename: str) -> List[Dict[str, Any]]:
+
     """Synchronously transcribe a media file and persist transcript artifacts."""
 
     local_name = filename
@@ -104,19 +105,44 @@ def transcribe_media_file(filename: str) -> List[Dict[str, Any]]:
             if not out_path.exists():
                 payload = json.dumps(words, ensure_ascii=False, indent=2)
                 out_path.write_text(payload, encoding="utf-8")
+                gcs_url = None
                 try:
                     bucket = (os.getenv("TRANSCRIPTS_BUCKET") or os.getenv("MEDIA_BUCKET") or "").strip()
                     if bucket:
                         from ...infrastructure.gcs import upload_bytes  # type: ignore
-
                         upload_bytes(
                             bucket,
                             f"transcripts/{stem}.json",
                             payload.encode("utf-8"),
                             content_type="application/json; charset=utf-8",
                         )
+                        gcs_url = f"https://storage.googleapis.com/{bucket}/transcripts/{stem}.json"
                 except Exception:  # pragma: no cover - GCS optional
                     pass
+                # Associate transcript with episode
+                try:
+                    from api.services.episodes.repo import get_episode_by_id, update_episode
+                    from uuid import UUID
+                    # Try to extract episode_id from stem (assumes stem is episode UUID or contains it)
+                    episode_id = None
+                    try:
+                        episode_id = UUID(stem)
+                    except Exception:
+                        pass
+                    if episode_id:
+                        from api.core.database import get_session
+                        session_gen = get_session()
+                        session = next(session_gen)
+                        ep = get_episode_by_id(session, episode_id)
+                        if ep:
+                            meta = json.loads(ep.meta_json or "{}")
+                            transcripts = meta.get("transcripts", {})
+                            transcripts["gcs_json"] = gcs_url
+                            meta["transcripts"] = transcripts
+                            ep.meta_json = json.dumps(meta)
+                            update_episode(session, ep, {"meta_json": ep.meta_json})
+                except Exception as e:
+                    logging.warning(f"Failed to associate transcript with episode: {e}")
         except Exception:  # pragma: no cover - best effort persistence
             pass
         return words

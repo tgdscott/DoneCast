@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Mapping, Tuple
+from typing import Any, Dict, List, Mapping, Tuple, Optional, Set
 
 import json
 import re
@@ -162,6 +162,7 @@ def merge_into_episode(
     incoming: Mapping[str, Any],
     *,
     source: str,
+    overwrite_fields: Optional[Set[str]] = None,
 ) -> Dict[str, Any]:
     """Merge incoming values into an existing episode, recording conflicts."""
 
@@ -179,7 +180,11 @@ def merge_into_episode(
         if new_val is None:
             return
         current_val = getattr(episode, field)
-        if not _text(current_val):
+        # If caller prefers remote for this field, overwrite regardless
+        if overwrite_fields and field in overwrite_fields:
+            setattr(episode, field, new_val)
+            applied_fields.append(field)
+        elif not _text(current_val):
             setattr(episode, field, new_val)
             applied_fields.append(field)
         elif _text(current_val) != _text(new_val):
@@ -286,26 +291,39 @@ def merge_into_episode(
     # Tags – union of sets
     incoming_tags = incoming.get("tags") or []
     if incoming_tags:
-        try:
-            existing_tags = set(episode.tags())
-        except Exception:
-            existing_tags = set()
-        merged = list(existing_tags)
-        changed = False
-        for tag in incoming_tags:
-            norm = str(tag).strip()
-            if not norm:
-                continue
-            if norm not in existing_tags:
-                existing_tags.add(norm)
-                merged.append(norm)
-                changed = True
-        if changed:
+        if overwrite_fields and "tags" in overwrite_fields:
+            # Replace with remote tags
+            normalized = []
+            for tag in incoming_tags:
+                norm = str(tag).strip()
+                if norm and norm not in normalized:
+                    normalized.append(norm)
             try:
-                episode.set_tags(merged)
+                episode.set_tags(normalized)
             except Exception:
                 pass
             applied_fields.append("tags")
+        else:
+            try:
+                existing_tags = set(episode.tags())
+            except Exception:
+                existing_tags = set()
+            merged = list(existing_tags)
+            changed = False
+            for tag in incoming_tags:
+                norm = str(tag).strip()
+                if not norm:
+                    continue
+                if norm not in existing_tags:
+                    existing_tags.add(norm)
+                    merged.append(norm)
+                    changed = True
+            if changed:
+                try:
+                    episode.set_tags(merged)
+                except Exception:
+                    pass
+                applied_fields.append("tags")
 
     # Meta merge (shallow)
     incoming_meta = incoming.get("meta")

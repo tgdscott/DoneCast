@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import html
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Iterable, Set
 
 import json
 import logging
@@ -158,6 +158,7 @@ def sync_spreaker_episodes(
     user: User,
     *,
     client: SpreakerClient | None = None,
+    overwrite_fields: Optional[Iterable[str]] = None,
 ) -> Dict[str, Any]:
     """Fetch episodes from Spreaker and merge them with local records."""
 
@@ -190,6 +191,8 @@ def sync_spreaker_episodes(
     updated = 0
     conflicts: List[Dict[str, Any]] = []
 
+    overwrite_set: Set[str] = set(overwrite_fields or [])
+
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -199,12 +202,20 @@ def sync_spreaker_episodes(
             continue
         existing = title_index.get(title_key)
         if existing:
-            merge_result = merge_into_episode(existing, payload_dict, source="spreaker")
+            merge_result = merge_into_episode(
+                existing,
+                payload_dict,
+                source="spreaker",
+                overwrite_fields=overwrite_set if overwrite_set else None,
+            )
             conflicts.extend(merge_result["conflicts"])
             if merge_result["changed"]:
                 session.add(existing)
                 updated += 1
         else:
+            # Ensure required datetime fields are concrete datetimes
+            _processed_at: datetime = payload_dict.get("processed_at") or datetime.utcnow()
+            _created_at: datetime = payload_dict.get("created_at") or datetime.utcnow()
             new_ep = Episode(
                 user_id=user.id,
                 podcast_id=podcast.id,
@@ -220,8 +231,8 @@ def sync_spreaker_episodes(
                 is_explicit=payload_dict.get("is_explicit", False),
                 spreaker_episode_id=payload_dict.get("spreaker_episode_id"),
                 is_published_to_spreaker=True,
-                processed_at=payload_dict.get("processed_at"),
-                created_at=payload_dict.get("created_at"),
+                processed_at=_processed_at,
+                created_at=_created_at,
                 publish_at_local=payload_dict.get("publish_at_local"),
                 source_media_url=payload_dict.get("source_media_url"),
                 source_published_at=payload_dict.get("source_published_at"),

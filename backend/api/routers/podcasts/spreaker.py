@@ -168,6 +168,8 @@ async def publish_all_to_spreaker(
 @router.post("/{podcast_id}/recover-from-spreaker", status_code=200)
 async def recover_spreaker_episodes(
     podcast_id: UUID,
+    prefer_remote: bool = Body(False, embed=True, description="If true, prefer remote values for common fields like description and tags."),
+    overwrite: list[str] | None = Body(None, embed=True, description="Explicit list of fields to overwrite from Spreaker (e.g., ['show_notes','tags'])."),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
@@ -182,7 +184,17 @@ async def recover_spreaker_episodes(
 
     client = SpreakerClient(api_token=current_user.spreaker_access_token)
     try:
-        summary = sync_spreaker_episodes(session, podcast, current_user, client=client)
+        overwrite_fields = set(overwrite or [])
+        if prefer_remote and not overwrite_fields:
+            # By default, favour remote description & tags if requested
+            overwrite_fields = {"show_notes", "tags"}
+        summary = sync_spreaker_episodes(
+            session,
+            podcast,
+            current_user,
+            client=client,
+            overwrite_fields=overwrite_fields if overwrite_fields else None,
+        )
         session.commit()
     except RuntimeError as exc:
         log.error("Failed to sync Spreaker episodes for show %s: %s", podcast.spreaker_show_id, exc)
