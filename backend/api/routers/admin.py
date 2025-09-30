@@ -288,7 +288,7 @@ def admin_list_music_assets(
             "id": str(a.id),
             "display_name": a.display_name,
             "filename": a.filename,
-            "url": a.filename,
+            "url": a.public_url(),
             "duration_s": a.duration_s,
             "mood_tags": tags,
             "source_type": a.source_type,
