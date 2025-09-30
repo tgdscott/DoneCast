@@ -357,6 +357,7 @@ def publish_episode_to_spreaker_task(
                     "remote_audio_first_seen",
                     datetime.now(timezone.utc).isoformat(),
                 )
+
             if transcript_url:
                 spreaker_meta["transcript_url"] = transcript_url
                 spreaker_meta["transcript_available"] = bool(transcript_info.get("available"))

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import json
+from pathlib import Path
+
 from typing import Tuple
 
 import pytest
@@ -14,6 +16,7 @@ from api.models.podcast import MediaCategory, MediaItem
 from api.models.transcription import TranscriptionWatch
 from api.models.user import User
 from api.services.transcription import transcribe_media_file
+from api.services.transcription.watchers import notify_watchers_processed
 
 
 
@@ -126,6 +129,7 @@ def test_main_content_upload_records_email_target(session, client, monkeypatch):
     assert watch is not None
     assert watch.notify_email == notify_email
     assert watch.last_status == "queued"
+
 
 @pytest.mark.usefixtures("db_engine")
 def test_transcribe_media_file_notifies_watchers_with_email(session, monkeypatch):
@@ -241,4 +245,3 @@ def test_transcribe_media_file_notifies_without_email(session, monkeypatch):
     assert len(notes) == 1
     assert friendly in notes[0].body
     assert sent == []
-
