@@ -381,6 +381,16 @@ def list_episodes(
 		except Exception:
 			pub_at_iso = None
 
+		try:
+			transcript_info = transcript_endpoints_for_episode(e)
+		except Exception:
+			transcript_info = {
+				"available": False,
+				"json": None,
+				"text": None,
+				"absolute_json": None,
+				"absolute_text": None,
+			}
 		items.append({
 			"id": str(e.id),
 			"podcast_id": getattr(e, 'podcast_id', None),
