@@ -334,31 +334,31 @@ export default function PodcastPlusDashboard() {
   };
   
   const handleBackToTemplateManager = () => {
-      setSelectedTemplateId(null);
-      setCurrentView('templateManager');
-  }
+    setSelectedTemplateId(null);
+    setCurrentView('templateManager');
+  };
 
   const handleDeleteTemplate = async (templateId) => {
     if (!window.confirm("Are you sure you want to delete this template? This cannot be undone.")) return;
-  try {
-    const api = makeApi(token);
-    await api.del(`/api/templates/${templateId}`);
-    toast({ title: "Success", description: "Template deleted." });
-    fetchData(); 
-  } catch (err) {
-    const msg = (err && err.message) || '';
-    if (msg.toLowerCase().includes('at least one template')){
-      toast({ title: "Action needed", description: "Create another template before deleting your last one.", variant: "destructive" });
-    } else {
-      toast({ title: "Error", description: msg || 'Delete failed', variant: "destructive" });
+    try {
+      const api = makeApi(token);
+      await api.del(`/api/templates/${templateId}`);
+      toast({ title: "Success", description: "Template deleted." });
+      fetchData();
+    } catch (err) {
+      const msg = (err && err.message) || '';
+      if (msg.toLowerCase().includes('at least one template')) {
+        toast({ title: "Action needed", description: "Create another template before deleting your last one.", variant: "destructive" });
+      } else {
+        toast({ title: "Error", description: msg || 'Delete failed', variant: "destructive" });
+      }
     }
-  }
   };
 
   const renderCurrentView = () => {
     switch (currentView) {
       case 'recorder':
-  return (
+        return (
           <Recorder
             onBack={handleBackToDashboard}
             token={token}
@@ -404,11 +404,23 @@ export default function PodcastPlusDashboard() {
       case 'rssImporter':
         return <RssImporter onBack={handleBackToDashboard} token={token} />;
       case 'devTools':
-  return isAdmin(authUser) ? <DevTools token={token} /> : <div className="p-6 text-sm text-red-600">Not authorized.</div>;
+        return isAdmin(authUser)
+          ? <DevTools token={token} />
+          : <div className="p-6 text-sm text-red-600">Not authorized.</div>;
       case 'settings':
         return <Settings token={token} />;
       case 'templateWizard':
-        return <TemplateWizard user={user} token={token} onBack={() => setCurrentView('templateManager')} onTemplateCreated={() => { fetchData(); setCurrentView('templateManager'); }} />;
+        return (
+          <TemplateWizard
+            user={user}
+            token={token}
+            onBack={() => setCurrentView('templateManager')}
+            onTemplateCreated={() => {
+              fetchData();
+              setCurrentView('templateManager');
+            }}
+          />
+        );
       case 'billing':
         return <BillingPage token={token} onBack={() => setCurrentView('dashboard')} />;
       case 'dashboard':

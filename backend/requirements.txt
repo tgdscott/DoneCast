@@ -12,6 +12,7 @@ email-validator
 itsdangerous
 pydantic-settings
 requests
+requests-mock
 google-cloud-speech
 pydub
 
