@@ -34,9 +34,13 @@ export default function usePodcastCreator({
   const [showFlubberReview, setShowFlubberReview] = useState(false);
   const [flubberContexts, setFlubberContexts] = useState(null);
   const [flubberCutsMs, setFlubberCutsMs] = useState(null);
+  const [internPendingContexts, setInternPendingContexts] = useState(null);
+  const [internReviewContexts, setInternReviewContexts] = useState([]);
+  const [showInternReview, setShowInternReview] = useState(false);
+  const [internResponses, setInternResponses] = useState([]);
   const [showIntentQuestions, setShowIntentQuestions] = useState(false);
   const intentsPromptedRef = useRef(false);
-  const [intents, setIntents] = useState({ flubber: null, intern: null, sfx: null });
+  const [intents, setIntents] = useState({ flubber: null, intern: null, sfx: null, intern_overrides: [] });
   const [intentDetections, setIntentDetections] = useState({ flubber: null, intern: null, sfx: null });
   const [intentDetectionReady, setIntentDetectionReady] = useState(true);
   const [showFlubberScan, setShowFlubberScan] = useState(false);
@@ -288,6 +292,39 @@ export default function usePodcastCreator({
     intern: requireIntern,
     sfx: requireSfx,
   };
+
+  const resolveInternVoiceId = useCallback(() => {
+    if (ttsValues?.intern_voice_id) return ttsValues.intern_voice_id;
+    const segments = Array.isArray(selectedTemplate?.segments) ? selectedTemplate.segments : [];
+    for (const seg of segments) {
+      const segType = String(seg?.segment_type || seg?.slug || seg?.name || '').toLowerCase();
+      const action = String(seg?.source?.action || '').toLowerCase();
+      if (segType.includes('intern') || action === 'intern' || action === 'ai_command') {
+        if (seg?.source?.voice_id) return seg.source.voice_id;
+      }
+    }
+    if (selectedTemplate?.automation_settings?.intern_voice_id) return selectedTemplate.automation_settings.intern_voice_id;
+    if (selectedTemplate?.ai_settings?.intern_voice_id) return selectedTemplate.ai_settings.intern_voice_id;
+    if (selectedTemplate?.default_intern_voice_id) return selectedTemplate.default_intern_voice_id;
+    if (selectedTemplate?.default_elevenlabs_voice_id) return selectedTemplate.default_elevenlabs_voice_id;
+    return null;
+  }, [
+    ttsValues?.intern_voice_id,
+    selectedTemplate?.segments,
+    selectedTemplate?.automation_settings,
+    selectedTemplate?.ai_settings,
+    selectedTemplate?.default_intern_voice_id,
+    selectedTemplate?.default_elevenlabs_voice_id,
+  ]);
+
+  useEffect(() => {
+    const voice = resolveInternVoiceId();
+    if (!voice) return;
+    setTtsValues((prev) => {
+      if (prev && prev.intern_voice_id) return prev;
+      return { ...prev, intern_voice_id: voice };
+    });
+  }, [resolveInternVoiceId]);
 
   const normalizeIntentValue = (value) => {
     if (value === 'yes' || value === 'no' || value === 'unknown') return value;
@@ -765,7 +802,11 @@ export default function usePodcastCreator({
       return;
     }
     setUploadedFile(file);
-    setIntents({ flubber: null, intern: null, sfx: null });
+    setIntents({ flubber: null, intern: null, sfx: null, intern_overrides: [] });
+    setInternResponses([]);
+    setInternPendingContexts(null);
+    setInternReviewContexts([]);
+    setShowInternReview(false);
     setIntentDetections({ flubber: null, intern: null, sfx: null });
     setIntentDetectionReady(false);
     setShowIntentQuestions(false);
@@ -864,15 +905,23 @@ export default function usePodcastCreator({
       setUploadedFilename(null);
       setTranscriptReady(false);
       transcriptReadyRef.current = false;
+      setInternResponses([]);
+      setInternPendingContexts(null);
+      setInternReviewContexts([]);
+      setShowInternReview(false);
       setIntentDetections({ flubber: null, intern: null, sfx: null });
       setIntentDetectionReady(false);
-      setIntents({ flubber: null, intern: null, sfx: null });
+      setIntents({ flubber: null, intern: null, sfx: null, intern_overrides: [] });
       return;
     }
 
     const filename = item.filename || null;
     setSelectedPreupload(filename);
     setUploadedFile(null);
+    setInternResponses([]);
+    setInternPendingContexts(null);
+    setInternReviewContexts([]);
+    setShowInternReview(false);
     if (filename) {
       setUploadedFilename(filename);
       try { localStorage.setItem('ppp_uploaded_filename', filename); } catch {}
@@ -916,9 +965,13 @@ export default function usePodcastCreator({
     setUploadProgress(null);
     setTranscriptReady(false);
     transcriptReadyRef.current = false;
-    setIntents({ flubber: null, intern: null, sfx: null });
+    setIntents({ flubber: null, intern: null, sfx: null, intern_overrides: [] });
     setIntentDetections({ flubber: null, intern: null, sfx: null });
     setIntentDetectionReady(true);
+    setInternResponses([]);
+    setInternPendingContexts(null);
+    setInternReviewContexts([]);
+    setShowInternReview(false);
     setShowIntentQuestions(false);
     setStatusMessage('');
     setError('');
@@ -1253,17 +1306,85 @@ export default function usePodcastCreator({
     }
   };
 
+  const queueInternReview = (contexts) => {
+    if (!Array.isArray(contexts) || contexts.length === 0) return false;
+    if (showFlubberReview) {
+      setInternPendingContexts(contexts);
+    } else {
+      setInternPendingContexts(null);
+      setInternReviewContexts(contexts);
+      setShowInternReview(true);
+    }
+    return true;
+  };
+
+  const proceedAfterFlubber = () => {
+    if (internPendingContexts && internPendingContexts.length) {
+      setInternReviewContexts(internPendingContexts);
+      setInternPendingContexts(null);
+      setShowInternReview(true);
+    } else {
+      setCurrentStep(3);
+    }
+  };
+
   const handleFlubberConfirm = (cuts) => {
     setFlubberCutsMs(cuts || []);
     setShowFlubberReview(false);
-    setCurrentStep(3);
+    proceedAfterFlubber();
   };
 
   const handleFlubberCancel = () => {
     setFlubberCutsMs([]);
     setShowFlubberReview(false);
+    proceedAfterFlubber();
+  };
+
+  const handleInternComplete = (results) => {
+    const safe = Array.isArray(results) ? results : [];
+    setInternResponses(safe);
+    setIntents((prev) => ({ ...prev, intern_overrides: safe }));
+    setShowInternReview(false);
+    setInternReviewContexts([]);
+    setInternPendingContexts(null);
     setCurrentStep(3);
   };
+
+  const handleInternCancel = () => {
+    setInternResponses([]);
+    setIntents((prev) => ({ ...prev, intern_overrides: [] }));
+    setShowInternReview(false);
+    setInternReviewContexts([]);
+    setInternPendingContexts(null);
+    setCurrentStep(3);
+  };
+
+  const processInternCommand = useCallback(
+    async ({ context, startSeconds, endSeconds, regenerate = false, overrideText = null }) => {
+      const filename = uploadedFilename || selectedPreupload;
+      if (!filename) throw new Error('No audio selected for intern processing.');
+      if (typeof endSeconds !== 'number' || !isFinite(endSeconds)) {
+        throw new Error('Select an end point for the intern command.');
+      }
+      const api = makeApi(token);
+      const payload = {
+        filename,
+        end_s: endSeconds,
+        voice_id: resolveInternVoiceId() || undefined,
+      };
+      const commandId = context?.command_id ?? context?.intern_index ?? context?.id ?? context?.index ?? (typeof context?.__index === 'number' ? context.__index : null);
+      if (commandId != null) payload.command_id = commandId;
+      const start = typeof startSeconds === 'number' && isFinite(startSeconds)
+        ? startSeconds
+        : (typeof context?.start_s === 'number' ? context.start_s : null);
+      if (start != null) payload.start_s = start;
+      if (overrideText != null) payload.override_text = overrideText;
+      if (regenerate) payload.regenerate = true;
+      const res = await api.post('/api/intern/execute', payload);
+      return res || {};
+    },
+    [uploadedFilename, selectedPreupload, token, resolveInternVoiceId],
+  );
 
   const handleIntentSubmit = async (answers = intents) => {
     const normalized = {
@@ -1272,12 +1393,26 @@ export default function usePodcastCreator({
       sfx: requireSfx ? (normalizeIntentValue(answers?.sfx ?? intents.sfx) ?? 'no') : 'no',
     };
 
-    setIntents(normalized);
+    setIntents((prev) => {
+      const next = { ...prev, ...normalized };
+      if (normalized.intern !== 'yes') {
+        next.intern_overrides = [];
+      }
+      return next;
+    });
+    if (normalized.intern !== 'yes') {
+      setInternResponses([]);
+      setInternPendingContexts(null);
+      setInternReviewContexts([]);
+      setShowInternReview(false);
+    }
     intentsPromptedRef.current = true;
     setShowIntentQuestions(false);
 
-    const shouldScan = uploadedFilename && (normalized.flubber === 'yes' || normalized.flubber === 'unknown');
-    if (shouldScan) {
+    let paused = false;
+
+    const shouldScanFlubber = uploadedFilename && (normalized.flubber === 'yes' || normalized.flubber === 'unknown');
+    if (shouldScanFlubber) {
       setStatusMessage('Scanning for retakes (flubber)...');
       setShowFlubberScan(true);
       const api = makeApi(token);
@@ -1300,21 +1435,49 @@ export default function usePodcastCreator({
       } catch (_) {
       } finally {
         setShowFlubberScan(false);
+        setStatusMessage('');
       }
 
       if (contexts.length > 0) {
         setFlubberContexts(contexts);
         setShowFlubberReview(true);
-        return false;
-      }
-      if (normalized.flubber === 'yes') {
+        paused = true;
+      } else if (normalized.flubber === 'yes') {
         setFlubberNotFound(true);
-        return false;
+        paused = true;
       }
     }
 
-    setCurrentStep(3);
-    return true;
+    const shouldProcessIntern = normalized.intern === 'yes' && requireIntern && (uploadedFilename || selectedPreupload);
+    if (shouldProcessIntern) {
+      try {
+        setStatusMessage('Preparing intern commands...');
+        const api = makeApi(token);
+        const payload = { filename: uploadedFilename || selectedPreupload };
+        const voiceId = resolveInternVoiceId();
+        if (voiceId) payload.voice_id = voiceId;
+        const data = await api.post('/api/intern/prepare-by-file', payload);
+        const contexts = Array.isArray(data?.contexts)
+          ? data.contexts
+          : Array.isArray(data?.commands)
+            ? data.commands
+            : [];
+        if (queueInternReview(contexts)) {
+          paused = true;
+        }
+      } catch (err) {
+        const description = err?.detail?.message || err?.message || 'Unable to prepare intern commands right now.';
+        toast({ variant: 'destructive', title: 'Intern review unavailable', description });
+      } finally {
+        setStatusMessage('');
+      }
+    }
+
+    if (!paused) {
+      setCurrentStep(3);
+      return true;
+    }
+    return false;
   };
 
   const handlePublish = async () => {
@@ -1655,6 +1818,9 @@ export default function usePodcastCreator({
     mediaLibrary,
     showFlubberReview,
     flubberContexts,
+    showInternReview,
+    internReviewContexts,
+    internResponses,
     showIntentQuestions,
     intents,
     intentDetections,
@@ -1715,11 +1881,14 @@ export default function usePodcastCreator({
     handleAssemble,
     handleFlubberConfirm,
     handleFlubberCancel,
+    handleInternComplete,
+    handleInternCancel,
     handleIntentSubmit,
     handleIntentAnswerChange,
     handlePublish,
     handleVoiceChange,
     handleAISuggest,
+    processInternCommand,
     retryFlubberSearch,
     skipFlubberRetry,
     setShowVoicePicker,
@@ -1741,5 +1910,6 @@ export default function usePodcastCreator({
     setError,
     clearCover,
     updateCoverCrop,
+    resolveInternVoiceId,
   };
 }
