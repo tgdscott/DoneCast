@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
-import { AlertTriangle, ArrowLeft, Library, Upload } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Library, Mic } from 'lucide-react';
 import styles from './EpisodeStartOptions.module.css';
 
 export default function EpisodeStartOptions({
@@ -10,7 +10,7 @@ export default function EpisodeStartOptions({
   errorMessage = '',
   onRetry,
   onBack,
-  onChooseUpload,
+  onChooseRecord,
   onChooseLibrary,
 }) {
   return (
@@ -27,19 +27,19 @@ export default function EpisodeStartOptions({
         <CardHeader>
           <CardTitle className="text-2xl" style={{ color: '#2C3E50' }}>How do you want to start?</CardTitle>
           <CardDescription className="text-slate-600 text-sm">
-            Upload fresh audio or jump straight into picking a processed file that’s ready to edit.
+            Record something new or jump straight into picking a processed file that’s ready to edit.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
           <button
             type="button"
-            onClick={onChooseUpload}
+            onClick={onChooseRecord}
             className={`border border-slate-200 rounded-xl text-left hover:border-blue-400 hover:shadow-sm transition ${styles['uniform-card']}`}
           >
-            <Upload className="w-6 h-6 text-blue-500 mb-4" />
-            <div className="font-semibold text-slate-800 mb-1">Upload new audio</div>
+            <Mic className="w-6 h-6 text-blue-500 mb-4" />
+            <div className="font-semibold text-slate-800 mb-1">Record Your Podcast Now</div>
             <p className="text-sm text-slate-600">
-              Send us your raw mix. We’ll process and transcribe it automatically, then notify you when it’s ready.
+              Capture your next episode right in the browser. We’ll save it here so you can edit and publish without leaving CloudPod.
             </p>
           </button>
 
