@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 
 // props: open, onSubmit({ flubber, intern, sfx }), onCancel, hide={{flubber:bool,intern:bool,sfx:bool}}
 const normalize = (value) => {
-  if (value === 'yes' || value === 'no' || value === 'unknown') return value;
+  if (value === 'yes') return 'yes';
   return 'no';
 };
 
@@ -25,9 +25,10 @@ export default function IntentQuestions({ open, onSubmit, onCancel, hide, initia
   }, [open, initialAnswers]);
   if(!open) return null;
   const h = hide || {};
+  const options = ['yes', 'no'];
   const allAnswered = ['flubber','intern','sfx']
     .filter(k => !h[k])
-    .every(k => ['yes','no','unknown'].includes(answers[k]));
+    .every(k => options.includes(answers[k]));
 
   const detection = detectedIntents || {};
 
@@ -103,7 +104,7 @@ export default function IntentQuestions({ open, onSubmit, onCancel, hide, initia
             </span>
           )}
         </div>
-        {['yes','no','unknown'].map(v => (
+        {options.map(v => (
           <label key={v} className="flex items-center gap-1 cursor-pointer">
             <input
               type="radio"
@@ -112,7 +113,7 @@ export default function IntentQuestions({ open, onSubmit, onCancel, hide, initia
               checked={answers[name]===v}
               onChange={()=> setAnswers(a=>({...a,[name]:v}))}
             />
-            <span className="capitalize">{v==='unknown' ? "I Don't Remember" : v}</span>
+            <span className="capitalize">{v}</span>
           </label>
         ))}
       </div>

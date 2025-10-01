@@ -38,6 +38,7 @@ export default function usePodcastCreator({
   const [internReviewContexts, setInternReviewContexts] = useState([]);
   const [showInternReview, setShowInternReview] = useState(false);
   const [internResponses, setInternResponses] = useState([]);
+  const [internPrefetch, setInternPrefetch] = useState({ status: 'idle', filename: null, contexts: [], log: null, error: null });
   const [showIntentQuestions, setShowIntentQuestions] = useState(false);
   const intentsPromptedRef = useRef(false);
   const [intents, setIntents] = useState({ flubber: null, intern: null, sfx: null, intern_overrides: [] });
@@ -91,6 +92,12 @@ export default function usePodcastCreator({
   const [isUploadingCover, setIsUploadingCover] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null);
   const [audioDurationSec, setAudioDurationSec] = useState(null);
+
+  useEffect(() => {
+    setInternPrefetch({ status: 'idle', filename: null, contexts: [], log: null, error: null });
+  }, [uploadedFilename, selectedPreupload]);
+
+  const internDetectionCount = Number((intentDetections?.intern?.count) ?? 0);
 
   // Consider a build "active" when something non-trivial is in-flight or staged
   const buildActive = useMemo(() => {
@@ -699,6 +706,71 @@ export default function usePodcastCreator({
 
     return () => { canceled = true; };
   }, [transcriptReady, uploadedFilename, expectedEpisodeId, token]);
+
+  useEffect(() => {
+    if (!requireIntern) return;
+    if (!transcriptReady) return;
+    if (!intentDetectionReady) return;
+    const sourceFilename = uploadedFilename || selectedPreupload;
+    if (!sourceFilename) return;
+    if (internDetectionCount <= 0) return;
+
+    let shouldFetch = false;
+    setInternPrefetch((prev) => {
+      if (prev && prev.filename === sourceFilename) {
+        if (prev.status === 'ready' || prev.status === 'loading') {
+          return prev;
+        }
+      }
+      shouldFetch = true;
+      return { status: 'loading', filename: sourceFilename, contexts: [], log: null, error: null };
+    });
+    if (!shouldFetch) return;
+
+    let canceled = false;
+    const api = makeApi(token);
+    const payload = { filename: sourceFilename };
+    try {
+      const voiceId = resolveInternVoiceId();
+      if (voiceId) payload.voice_id = voiceId;
+    } catch (_) {}
+
+    (async () => {
+      try {
+        const data = await api.post('/api/intern/prepare-by-file', payload);
+        if (canceled) return;
+        const contexts = Array.isArray(data?.contexts) ? data.contexts : [];
+        setInternPrefetch({
+          status: 'ready',
+          filename: sourceFilename,
+          contexts,
+          log: data?.log || null,
+          error: null,
+        });
+      } catch (error) {
+        if (canceled) return;
+        setInternPrefetch((prev) => {
+          if (prev && prev.filename === sourceFilename) {
+            return { status: 'error', filename: sourceFilename, contexts: [], log: null, error };
+          }
+          return prev;
+        });
+      }
+    })();
+
+    return () => {
+      canceled = true;
+    };
+  }, [
+    requireIntern,
+    transcriptReady,
+    intentDetectionReady,
+    internDetectionCount,
+    uploadedFilename,
+    selectedPreupload,
+    token,
+    resolveInternVoiceId,
+  ]);
 
   useEffect(() => {
     if (selectedTemplate) return;
@@ -1533,26 +1605,38 @@ export default function usePodcastCreator({
 
     const shouldProcessIntern = normalized.intern === 'yes' && requireIntern && (uploadedFilename || selectedPreupload);
     if (shouldProcessIntern) {
-      try {
-        setStatusMessage('Preparing intern commands...');
-        const api = makeApi(token);
-        const payload = { filename: uploadedFilename || selectedPreupload };
-        const voiceId = resolveInternVoiceId();
-        if (voiceId) payload.voice_id = voiceId;
-        const data = await api.post('/api/intern/prepare-by-file', payload);
-        const contexts = Array.isArray(data?.contexts)
-          ? data.contexts
-          : Array.isArray(data?.commands)
-            ? data.commands
-            : [];
-        if (queueInternReview(contexts)) {
+      const sourceFilename = uploadedFilename || selectedPreupload;
+      const prefetched =
+        internPrefetch && internPrefetch.status === 'ready' && internPrefetch.filename === sourceFilename
+          ? internPrefetch.contexts
+          : null;
+      const usePrefetched = Array.isArray(prefetched) && prefetched.length > 0;
+      if (usePrefetched) {
+        if (queueInternReview(prefetched)) {
           paused = true;
         }
-      } catch (err) {
-        const description = err?.detail?.message || err?.message || 'Unable to prepare intern commands right now.';
-        toast({ variant: 'destructive', title: 'Intern review unavailable', description });
-      } finally {
-        setStatusMessage('');
+      } else {
+        try {
+          setStatusMessage('Preparing intern commands...');
+          const api = makeApi(token);
+          const payload = { filename: sourceFilename };
+          const voiceId = resolveInternVoiceId();
+          if (voiceId) payload.voice_id = voiceId;
+          const data = await api.post('/api/intern/prepare-by-file', payload);
+          const contexts = Array.isArray(data?.contexts)
+            ? data.contexts
+            : Array.isArray(data?.commands)
+              ? data.commands
+              : [];
+          if (queueInternReview(contexts)) {
+            paused = true;
+          }
+        } catch (err) {
+          const description = err?.detail?.message || err?.message || 'Unable to prepare intern commands right now.';
+          toast({ variant: 'destructive', title: 'Intern review unavailable', description });
+        } finally {
+          setStatusMessage('');
+        }
       }
     }
 
