@@ -1,4 +1,28 @@
 import lamejs from 'lamejs';
+import LameModule from 'lamejs/src/js/Lame.js';
+import MPEGModeModule from 'lamejs/src/js/MPEGMode.js';
+import BitStreamModule from 'lamejs/src/js/BitStream.js';
+
+const MPEGMode = MPEGModeModule?.default || MPEGModeModule;
+const Lame = LameModule?.default || LameModule;
+const BitStream = BitStreamModule?.default || BitStreamModule;
+
+if (typeof globalThis !== 'undefined') {
+  const globalScope = globalThis;
+  if (globalScope) {
+    const lameGlobals = [
+      ['MPEGMode', MPEGMode],
+      ['Lame', Lame],
+      ['BitStream', BitStream],
+    ];
+
+    for (const [name, value] of lameGlobals) {
+      if (value && !globalScope[name]) {
+        globalScope[name] = value;
+      }
+    }
+  }
+}
 
 const hasWindow = typeof window !== 'undefined';
 const AudioContextCtor = hasWindow ? window.AudioContext || window.webkitAudioContext : null;
@@ -19,6 +43,139 @@ const floatTo16BitPCM = (float32) => {
 const defaultOptions = {
   bitrate: 128,
   minImprovementRatio: 2,
+};
+
+const SUPPORTED_MP3_SAMPLE_RATES = [48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000];
+
+const clampSampleRateForMp3 = (sampleRate) => {
+  if (!Number.isFinite(sampleRate) || sampleRate <= 0) {
+    return 44100;
+  }
+  for (let i = 0; i < SUPPORTED_MP3_SAMPLE_RATES.length; i += 1) {
+    const allowed = SUPPORTED_MP3_SAMPLE_RATES[i];
+    if (sampleRate >= allowed) {
+      return allowed;
+    }
+  }
+  return SUPPORTED_MP3_SAMPLE_RATES[SUPPORTED_MP3_SAMPLE_RATES.length - 1];
+};
+
+const resampleFloat32Channel = (input, sourceRate, targetRate) => {
+  if (!input || sourceRate === targetRate) {
+    return input;
+  }
+  if (!Number.isFinite(sourceRate) || !Number.isFinite(targetRate) || sourceRate <= 0 || targetRate <= 0) {
+    return input;
+  }
+
+  const ratio = sourceRate / targetRate;
+  const sourceLength = input.length;
+  if (!sourceLength) {
+    return input;
+  }
+
+  const outputLength = Math.max(1, Math.floor((sourceLength - 1) / ratio) + 1);
+  const output = new Float32Array(outputLength);
+  for (let i = 0; i < outputLength; i += 1) {
+    const sourceIndex = i * ratio;
+    const index0 = Math.min(sourceLength - 1, Math.max(0, Math.floor(sourceIndex)));
+    const index1 = Math.min(sourceLength - 1, index0 + 1);
+    const frac = sourceIndex - index0;
+    const sample0 = input[index0] ?? 0;
+    const sample1 = input[index1] ?? sample0;
+    output[i] = sample0 + (sample1 - sample0) * frac;
+  }
+  return output;
+};
+
+const resampleFloat32ChannelData = (channelData, sourceRate, targetRate) => {
+  if (!channelData || !channelData.length || sourceRate === targetRate) {
+    return channelData;
+  }
+  return channelData.map((channel) => resampleFloat32Channel(channel, sourceRate, targetRate));
+};
+
+const createStreamingResampler = (sourceRate, targetRate, channelCount) => {
+  if (!Number.isFinite(sourceRate) || sourceRate <= 0 || !Number.isFinite(targetRate) || targetRate <= 0) {
+    return {
+      processSample(sample, _index, emit) {
+        const out = new Array(channelCount);
+        for (let i = 0; i < channelCount; i += 1) {
+          out[i] = sample[i] ?? sample[sample.length - 1] ?? 0;
+        }
+        emit(out);
+      },
+      finalize() {},
+    };
+  }
+
+  if (Math.abs(sourceRate - targetRate) < 1e-6) {
+    return {
+      processSample(sample, _index, emit) {
+        const out = new Array(channelCount);
+        for (let i = 0; i < channelCount; i += 1) {
+          out[i] = sample[i] ?? sample[sample.length - 1] ?? 0;
+        }
+        emit(out);
+      },
+      finalize() {},
+    };
+  }
+
+  const ratio = sourceRate / targetRate;
+  let nextOutputPosition = 0;
+  let prevSamples = new Array(channelCount).fill(0);
+  let prevIndex = 0;
+  let hasPrev = false;
+
+  return {
+    processSample(sample, absoluteIndex, emit) {
+      const currentSamples = new Array(channelCount);
+      for (let i = 0; i < channelCount; i += 1) {
+        currentSamples[i] = sample[i] ?? sample[sample.length - 1] ?? 0;
+      }
+
+      if (!hasPrev) {
+        prevSamples = currentSamples.slice();
+        prevIndex = absoluteIndex;
+        hasPrev = true;
+      }
+
+      const span = absoluteIndex - prevIndex;
+      const epsilon = 1e-7;
+      while (nextOutputPosition <= absoluteIndex + epsilon) {
+        let output;
+        if (!hasPrev || span <= 0) {
+          output = currentSamples.slice();
+        } else {
+          const rawPosition = (nextOutputPosition - prevIndex) / span;
+          const position = Math.max(0, Math.min(1, rawPosition));
+          output = new Array(channelCount);
+          for (let i = 0; i < channelCount; i += 1) {
+            const prevValue = prevSamples[i];
+            const currValue = currentSamples[i];
+            output[i] = prevValue + (currValue - prevValue) * position;
+          }
+        }
+        emit(output);
+        nextOutputPosition += ratio;
+      }
+
+      prevSamples = currentSamples.slice();
+      prevIndex = absoluteIndex;
+    },
+    finalize(totalFrames, emit) {
+      if (!hasPrev) {
+        return;
+      }
+      const lastIndex = Math.max(0, totalFrames - 1);
+      const epsilon = 1e-7;
+      while (nextOutputPosition <= lastIndex + epsilon) {
+        emit(prevSamples.slice());
+        nextOutputPosition += ratio;
+      }
+    },
+  };
 };
 
 const readFourCC = (view, offset) =>
@@ -215,12 +372,22 @@ const finalizeMp3Encoding = (mp3Chunks, opts, originalFile) => {
   };
 };
 
-const encodeMp3 = (channelData, sampleRate, opts, originalFile) => {
-  const channelCount = Math.max(1, channelData.length || 1);
-  const left = floatTo16BitPCM(channelData[0]);
-  const right = channelCount > 1 ? floatTo16BitPCM(channelData[1]) : null;
+const encodeMp3 = (channelData, inputSampleRate, opts, originalFile) => {
+  const hasStereoInput = Array.isArray(channelData) && channelData.length > 1 && channelData[1];
+  const targetSampleRate = clampSampleRateForMp3(inputSampleRate || 44100);
+  const effectiveData =
+    targetSampleRate === inputSampleRate
+      ? channelData
+      : resampleFloat32ChannelData(channelData, inputSampleRate || 44100, targetSampleRate);
+  const leftSource = effectiveData?.[0];
+  if (!leftSource) {
+    return { file: originalFile, converted: false, reason: 'decode-failed' };
+  }
+  const left = floatTo16BitPCM(leftSource);
+  const hasStereoOutput = hasStereoInput && effectiveData?.[1];
+  const right = hasStereoOutput ? floatTo16BitPCM(effectiveData[1]) : null;
 
-  const encoder = new lamejs.Mp3Encoder(channelCount > 1 ? 2 : 1, sampleRate, opts.bitrate);
+  const encoder = new lamejs.Mp3Encoder(hasStereoOutput ? 2 : 1, targetSampleRate, opts.bitrate);
   const blockSize = 1152;
   const mp3Chunks = [];
 
@@ -258,7 +425,8 @@ const convertWavPcmToMp3 = (arrayBuffer, opts, originalFile) => {
   } = header;
 
   const encodeChannels = numberOfChannels > 1 ? 2 : 1;
-  const encoder = new lamejs.Mp3Encoder(encodeChannels, sampleRate, opts.bitrate);
+  const targetSampleRate = clampSampleRateForMp3(sampleRate);
+  const encoder = new lamejs.Mp3Encoder(encodeChannels, targetSampleRate, opts.bitrate);
   const mp3Chunks = [];
   const view = new DataView(arrayBuffer);
   const framesPerChunk = 1152 * 20;
@@ -266,14 +434,27 @@ const convertWavPcmToMp3 = (arrayBuffer, opts, originalFile) => {
   let framesProcessed = 0;
   let offset = dataOffset;
 
+  const resampler = createStreamingResampler(sampleRate, targetSampleRate, encodeChannels);
+
   while (framesProcessed < totalFrames && offset + blockAlign <= view.byteLength) {
     const remainingFrames = totalFrames - framesProcessed;
     const framesThisChunk = Math.max(1, Math.min(framesPerChunk, remainingFrames));
-    const left = new Int16Array(framesThisChunk);
-    const right = encodeChannels === 2 ? new Int16Array(framesThisChunk) : null;
+    let chunkLeft = [];
+    let chunkRight = encodeChannels === 2 ? [] : null;
+    const emitSample = (values) => {
+      if (!values || !values.length) {
+        return;
+      }
+      chunkLeft.push(clampAndScaleToInt16(values[0]));
+      if (chunkRight) {
+        const rightValue = values[1] ?? values[0];
+        chunkRight.push(clampAndScaleToInt16(rightValue));
+      }
+    };
 
     for (let frame = 0; frame < framesThisChunk; frame += 1) {
       const frameOffset = offset + frame * blockAlign;
+      let aggregated;
       if (encodeChannels === 1) {
         let sum = 0;
         for (let channelIndex = 0; channelIndex < numberOfChannels; channelIndex += 1) {
@@ -281,8 +462,7 @@ const convertWavPcmToMp3 = (arrayBuffer, opts, originalFile) => {
           const pcm = decodePcmSample(view, sampleOffset, bytesPerSample, audioFormat);
           sum += pcm;
         }
-        const averaged = sum / numberOfChannels;
-        left[frame] = clampAndScaleToInt16(averaged);
+        aggregated = [sum / numberOfChannels];
       } else {
         let sumLeft = 0;
         let sumRight = 0;
@@ -301,18 +481,45 @@ const convertWavPcmToMp3 = (arrayBuffer, opts, originalFile) => {
         }
         const leftAvg = sumLeft / (countLeft || numberOfChannels);
         const rightAvg = countRight ? sumRight / countRight : leftAvg;
-        left[frame] = clampAndScaleToInt16(leftAvg);
-        right[frame] = clampAndScaleToInt16(rightAvg);
+        aggregated = [leftAvg, rightAvg];
       }
+      resampler.processSample(aggregated, framesProcessed + frame, emitSample);
     }
 
-    const encoded = right ? encoder.encodeBuffer(left, right) : encoder.encodeBuffer(left);
-    if (encoded && encoded.length) {
-      mp3Chunks.push(encoded);
+    if (chunkLeft.length) {
+      const leftChunk = Int16Array.from(chunkLeft);
+      const rightChunk = chunkRight ? Int16Array.from(chunkRight) : null;
+      const encoded = rightChunk ? encoder.encodeBuffer(leftChunk, rightChunk) : encoder.encodeBuffer(leftChunk);
+      if (encoded && encoded.length) {
+        mp3Chunks.push(encoded);
+      }
     }
 
     framesProcessed += framesThisChunk;
     offset += framesThisChunk * blockAlign;
+  }
+
+  let remainingLeft = [];
+  let remainingRight = encodeChannels === 2 ? [] : null;
+  const emitRemaining = (values) => {
+    if (!values || !values.length) {
+      return;
+    }
+    remainingLeft.push(clampAndScaleToInt16(values[0]));
+    if (remainingRight) {
+      const rightValue = values[1] ?? values[0];
+      remainingRight.push(clampAndScaleToInt16(rightValue));
+    }
+  };
+
+  resampler.finalize(totalFrames, emitRemaining);
+  if (remainingLeft.length) {
+    const leftChunk = Int16Array.from(remainingLeft);
+    const rightChunk = remainingRight ? Int16Array.from(remainingRight) : null;
+    const encoded = rightChunk ? encoder.encodeBuffer(leftChunk, rightChunk) : encoder.encodeBuffer(leftChunk);
+    if (encoded && encoded.length) {
+      mp3Chunks.push(encoded);
+    }
   }
 
   const end = encoder.flush();
