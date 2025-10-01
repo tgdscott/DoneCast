@@ -91,13 +91,48 @@ const decodeWavPcm = (arrayBuffer) => {
     const chunkSize = view.getUint32(offset + 4, true);
     const chunkDataOffset = offset + 8;
     if (chunkId === 'fmt ') {
+      const audioFormat = view.getUint16(chunkDataOffset, true);
+      const numberOfChannels = view.getUint16(chunkDataOffset + 2, true);
+      const sampleRate = view.getUint32(chunkDataOffset + 4, true);
+      const byteRate = view.getUint32(chunkDataOffset + 8, true);
+      const blockAlign = view.getUint16(chunkDataOffset + 12, true);
+      const bitsPerSample = view.getUint16(chunkDataOffset + 14, true);
+      let effectiveFormat = audioFormat;
+      let effectiveBitsPerSample = bitsPerSample;
+
+      if (chunkSize >= 18) {
+        const extensionSize = view.getUint16(chunkDataOffset + 16, true);
+        // Guard against truncated fmt chunks
+        const availableExtensionBytes = Math.max(0, Math.min(extensionSize, chunkSize - 18));
+        if (audioFormat === 0xfffe /* WAVE_FORMAT_EXTENSIBLE */ && availableExtensionBytes >= 22) {
+          try {
+            const validBits = view.getUint16(chunkDataOffset + 18, true);
+            if (validBits) {
+              effectiveBitsPerSample = validBits;
+            }
+          } catch {
+            /* no-op */
+          }
+          try {
+            const subFormat = view.getUint32(chunkDataOffset + 24, true);
+            if (subFormat === 0x00000001) {
+              effectiveFormat = 1; // PCM
+            } else if (subFormat === 0x00000003) {
+              effectiveFormat = 3; // IEEE float
+            }
+          } catch {
+            /* no-op */
+          }
+        }
+      }
+
       fmt = {
-        audioFormat: view.getUint16(chunkDataOffset, true),
-        numberOfChannels: view.getUint16(chunkDataOffset + 2, true),
-        sampleRate: view.getUint32(chunkDataOffset + 4, true),
-        byteRate: view.getUint32(chunkDataOffset + 8, true),
-        blockAlign: view.getUint16(chunkDataOffset + 12, true),
-        bitsPerSample: view.getUint16(chunkDataOffset + 14, true),
+        audioFormat: effectiveFormat,
+        numberOfChannels,
+        sampleRate,
+        byteRate,
+        blockAlign,
+        bitsPerSample: effectiveBitsPerSample,
       };
     } else if (chunkId === 'data') {
       data = {
@@ -259,7 +294,6 @@ export async function convertAudioFileToMp3IfBeneficial(file, options = {}) {
       } catch (closeError) {
         console.warn('Failed to close audio context after conversion', closeError);
       }
-
     }
   }
 }
