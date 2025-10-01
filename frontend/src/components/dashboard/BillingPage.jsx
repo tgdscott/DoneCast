@@ -234,7 +234,7 @@ export default function BillingPage({ token, onBack }) {
     { key: 'flubber', label: 'Flubber (filler removal)' },
     { key: 'intern', label: 'Intern (spoken edits)' },
     { key: 'advancedIntern', label: 'Advanced Intern (multi-step edits)' },
-    { key: 'sfxTemplates', label: 'SFX & templates' },
+    { key: 'sfxTemplates', label: 'Sound Effects & templates' },
     { key: 'analytics', label: 'Analytics (via Spreaker API)' },
     { key: 'multiUser', label: 'Multi-user accounts' },
     { key: 'priorityQueue', label: 'Priority processing queue' },

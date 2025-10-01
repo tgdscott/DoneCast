@@ -38,11 +38,11 @@ export default function MagicWords() {
       <div className="rounded-xl border p-4">
         <div className="flex items-center justify-between">
           <div>
-            <div className="font-medium">SFX on magic phrase</div>
+            <div className="font-medium">Sound effects on magic phrase</div>
             <div className="text-sm text-muted-foreground">Play a sound effect when your phrase is heard</div>
           </div>
           <label className="inline-flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={useSfxAuto} onChange={()=>setUseSfxAuto(v=>!v)} /> Use SFX if detected?
+            <input type="checkbox" checked={useSfxAuto} onChange={()=>setUseSfxAuto(v=>!v)} /> Use sound effects if detected?
           </label>
         </div>
         <div className="mt-3 text-xs text-muted-foreground">Tip: Choose unique phrases to avoid false triggers.</div>
