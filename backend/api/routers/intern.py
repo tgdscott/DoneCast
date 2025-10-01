@@ -7,7 +7,13 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 from fastapi import APIRouter, Body, Depends, HTTPException, status
-from pydub import AudioSegment
+try:
+    from pydub import AudioSegment  # type: ignore[import]
+except Exception as _audio_exc:  # pragma: no cover - optional dependency guard
+    AudioSegment = None  # type: ignore[assignment]
+    _AUDIO_IMPORT_ERROR = _audio_exc
+else:
+    _AUDIO_IMPORT_ERROR = None
 
 from api.core.paths import INTERN_CTX_DIR, MEDIA_DIR, TRANSCRIPTS_DIR
 from api.routers.auth import get_current_user
@@ -34,6 +40,7 @@ _LOG = logging.getLogger(__name__)
 
 _AI_IMPORT_LOGGED = False
 _AIEnhancerError = getattr(ai_enhancer, "AIEnhancerError", Exception)
+_AUDIO_IMPORT_LOGGED = False
 
 
 def _require_ai_enhancer():
@@ -50,6 +57,22 @@ def _require_ai_enhancer():
             detail="Intern AI processing is not available right now. Please check your AI configuration and try again.",
         )
     return ai_enhancer
+
+
+def _require_audio_segment() -> "AudioSegment":
+    global _AUDIO_IMPORT_LOGGED
+    if AudioSegment is None:
+        if not _AUDIO_IMPORT_LOGGED:
+            if _AUDIO_IMPORT_ERROR:
+                _LOG.error("[intern] pydub unavailable: %s", _AUDIO_IMPORT_ERROR)
+            else:
+                _LOG.error("[intern] pydub module missing")
+            _AUDIO_IMPORT_LOGGED = True
+        raise HTTPException(
+            status_code=503,
+            detail="Intern audio processing is not available right now. Please install pydub/ffmpeg.",
+        )
+    return AudioSegment
 
 
 def _resolve_media_path(filename: str) -> Path:
@@ -175,7 +198,7 @@ def _collect_transcript_preview(
     return text
 
 
-def _export_snippet(audio: AudioSegment, filename: str, start_s: float, end_s: float, *, suffix: str) -> Tuple[str, Path]:
+def _export_snippet(audio: "AudioSegment", filename: str, start_s: float, end_s: float, *, suffix: str) -> Tuple[str, Path]:
     safe_stem = re.sub(r"[^a-zA-Z0-9]+", "-", Path(filename).stem.lower()).strip("-") or "audio"
     start_ms = max(0, int(start_s * 1000))
     end_ms = max(start_ms + 1, int(end_s * 1000))
@@ -206,8 +229,9 @@ def prepare_intern_by_file(
         raise HTTPException(status_code=400, detail="filename is required")
 
     audio_path = _resolve_media_path(filename)
+    AudioSegmentCls = _require_audio_segment()
     try:
-        audio = AudioSegment.from_file(audio_path)
+        audio = AudioSegmentCls.from_file(audio_path)
     except Exception:
         raise HTTPException(status_code=500, detail="Unable to open audio for intern review")
 
