@@ -12,7 +12,7 @@ from api.core.database import get_session
 from api.core.paths import MEDIA_DIR
 from api.models.podcast import MusicAsset
 from api.models.user import User
-from infrastructure.gcs import download_gcs_bytes as download_bytes, make_signed_url
+from infrastructure.gcs import download_gcs_bytes as download_bytes, get_signed_url as make_signed_url
 
 router = APIRouter(prefix="/music", tags=["music"])
 
