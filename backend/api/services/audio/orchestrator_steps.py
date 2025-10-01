@@ -11,7 +11,7 @@ for a later wiring step and can be used by other callers for granular ops.
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, cast
+from typing import Any, Dict, List, Optional, Tuple, cast, Set
 import json
 import re
 
@@ -24,6 +24,7 @@ from api.core.paths import (
     CLEANED_DIR as _CLEANED_DIR,
     TRANSCRIPTS_DIR as _TRANSCRIPTS_DIR,
     AI_SEGMENTS_DIR as _AI_SEGMENTS_DIR,
+    WS_ROOT as _WS_ROOT,
 )
 from api.services.audio.commands import execute_intern_commands, handle_flubber
 from api.services.audio.flubber_pipeline import (
@@ -62,6 +63,7 @@ OUTPUT_DIR = _FINAL_DIR
 AI_SEGMENTS_DIR = _AI_SEGMENTS_DIR
 CLEANED_DIR = _CLEANED_DIR
 TRANSCRIPTS_DIR = _TRANSCRIPTS_DIR
+WS_ROOT = _WS_ROOT
 
 
 # --- Shared small helpers (kept local to match orchestrator behavior) ---
@@ -171,16 +173,52 @@ def load_content_and_init_transcripts(
     Returns: (content_path, main_content_audio, words, sanitized_output_filename)
     """
     # Load content
-    candidates = [
-        MEDIA_DIR / main_content_filename,
-        MEDIA_DIR / "media_uploads" / main_content_filename,
-        CLEANED_DIR / main_content_filename,
+    requested = Path(str(main_content_filename))
+    candidates: List[Path] = []
+    seen: Set[str] = set()
+
+    def _push(path_like: Path) -> None:
+        try:
+            resolved = Path(path_like)
+        except Exception:
+            return
+        key = str(resolved)
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append(resolved)
+
+    if str(main_content_filename).strip():
+        if requested.is_absolute():
+            _push(requested)
+        else:
+            # Keep the relative path exactly as provided first for callers already pointing at MEDIA_DIR
+            _push(requested)
+
+    name_only = Path(requested.name) if requested.name else requested
+    base_roots: List[Optional[Path]] = [
+        MEDIA_DIR,
+        MEDIA_DIR / "media_uploads",
+        CLEANED_DIR,
+        WS_ROOT,
+        WS_ROOT / "media_uploads",
     ]
+
     try:
-        cwd_media = Path.cwd() / "media_uploads" / main_content_filename
-        candidates.append(cwd_media)
+        base_roots.append(Path.cwd() / "media_uploads")
     except Exception:
         pass
+
+    for root in base_roots:
+        try:
+            if requested.is_absolute():
+                _push(requested)
+            if root is not None:
+                if not requested.is_absolute() and str(requested):
+                    _push(root / requested)
+                _push(root / name_only)
+        except Exception:
+            continue
 
     content_path: Optional[Path] = None
     for cand in candidates:
