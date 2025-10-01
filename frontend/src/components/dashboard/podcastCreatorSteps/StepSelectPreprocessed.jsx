@@ -46,8 +46,9 @@ export default function StepSelectPreprocessed({
   minutesRequired = null,
   minutesRemaining = null,
   formatDuration = () => null,
-  audioDurationSec = null,
+  audioDurationSec: audioDurationSecProp = null,
 }) {
+  const audioDurationSec = audioDurationSecProp;
   const hasPendingIntents = Array.isArray(pendingIntentLabels) && pendingIntentLabels.length > 0;
 
   const selected = useMemo(
