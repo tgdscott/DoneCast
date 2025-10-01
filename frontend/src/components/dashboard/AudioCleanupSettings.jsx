@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { SectionCard, SectionItem } from "@/components/dashboard/SettingsSections";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { formatDisplayName } from "@/lib/displayNames";
 
 const DEFAULT_SETTINGS = {
   removeFillers: true,
@@ -84,7 +85,7 @@ export default function AudioCleanupSettings({ className }) {
         const sfx = files.filter((f) => f.category === "sfx");
         const opts = sfx.map((f) => ({
           id: f.id,
-          label: f.friendly_name || (f.filename?.split("_").slice(1).join("_") || f.filename),
+          label: formatDisplayName(f, { fallback: 'Audio clip' }) || 'Audio clip',
           value: `media_uploads/${f.filename}`,
         }));
         setSfxOptions(opts);

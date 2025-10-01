@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
+import { formatDisplayName } from '@/lib/displayNames';
 
 import { AlertTriangle, FileAudio, Loader2, RefreshCcw, Sparkles, Trash2 } from 'lucide-react';
 
@@ -44,6 +45,10 @@ export default function StepSelectPreprocessed({
     () => items.find((item) => item.filename === selectedFilename) || null,
     [items, selectedFilename]
   );
+
+  const selectedDisplayName = selected
+    ? formatDisplayName(selected, { fallback: 'your upload' }) || 'your upload'
+    : 'your upload';
 
   const counts = selected?.intents || {};
   const flubberCount = Number((counts?.flubber?.count) ?? 0);
@@ -114,6 +119,7 @@ export default function StepSelectPreprocessed({
                   const canInteract = ready && typeof onSelect === 'function';
                   const deleteHintReady = 'Deleting a ready upload will not refund processing minutes already used.';
                   const deleteHintPending = 'Delete this upload while it is still processing? No processing minutes have been deducted yet.';
+                  const displayName = formatDisplayName(item, { fallback: 'Audio file' }) || 'Audio file';
                   return (
                     <div
                       key={item.id || item.filename}
@@ -140,7 +146,7 @@ export default function StepSelectPreprocessed({
                         <div className="flex-1 space-y-1">
                           <div className="flex items-start justify-between gap-2">
                             <div className="flex items-center gap-2">
-                              <span className="font-medium text-slate-800">{item.friendly_name || item.filename}</span>
+                              <span className="font-medium text-slate-800">{displayName}</span>
                               {ready ? (
                                 <Badge variant={isSelected ? 'default' : 'outline'} className="bg-emerald-100 text-emerald-700 border-emerald-200">
                                   Ready
@@ -161,7 +167,7 @@ export default function StepSelectPreprocessed({
                                 }}
                                 onKeyDown={(event) => event.stopPropagation()}
                                 title={ready ? deleteHintReady : deleteHintPending}
-                                aria-label={`Delete ${item.friendly_name || item.filename}`}
+                                aria-label={`Delete ${displayName}`}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </button>
@@ -204,7 +210,7 @@ export default function StepSelectPreprocessed({
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-base text-slate-800">
               <Sparkles className="w-4 h-4 text-amber-500" />
-              Automations ready for {selected.friendly_name || selected.filename}
+              Automations ready for {selectedDisplayName}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm text-slate-700">

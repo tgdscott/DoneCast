@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { makeApi } from '@/lib/apiClient';
+import { formatDisplayName, isUuidLike } from '@/lib/displayNames';
 
 export default function PodcastCreator({
   onBack,
@@ -154,10 +155,15 @@ export default function PodcastCreator({
   );
 
   const uploadedAudioLabel = React.useMemo(() => {
-    if (uploadedFile && uploadedFile.name) return uploadedFile.name;
-    if (selectedPreuploadItem?.friendly_name) return selectedPreuploadItem.friendly_name;
-    if (selectedPreuploadItem?.filename) return selectedPreuploadItem.filename;
-    if (uploadedFilename) return uploadedFilename;
+    if (uploadedFile) {
+      return formatDisplayName(uploadedFile, { fallback: uploadedFile.name || '' });
+    }
+    if (selectedPreuploadItem) {
+      return formatDisplayName(selectedPreuploadItem, { fallback: '' });
+    }
+    if (uploadedFilename) {
+      return formatDisplayName(uploadedFilename, { fallback: '' });
+    }
     return '';
   }, [uploadedFile, selectedPreuploadItem, uploadedFilename]);
 
@@ -175,9 +181,10 @@ export default function PodcastCreator({
     try {
       const api = makeApi(token);
       await api.del(`/api/media/${item.id}`);
+      const deletedName = formatDisplayName(item, { fallback: 'audio file' }) || 'audio file';
       toast({
         title: 'Upload deleted',
-        description: `${item.friendly_name || item.filename} was removed from your library.`,
+        description: `${deletedName} was removed from your library.`,
       });
 
       try {
@@ -205,7 +212,13 @@ export default function PodcastCreator({
   };
 
   const internVoiceId = typeof resolveInternVoiceId === 'function' ? resolveInternVoiceId() : null;
-  const internVoiceName = internVoiceId ? (voiceNameById?.[internVoiceId] || internVoiceId) : null;
+  const internVoiceName = React.useMemo(() => {
+    if (!internVoiceId) return null;
+    if (internVoiceId === 'default') return 'Default voice';
+    const mapped = voiceNameById?.[internVoiceId];
+    if (mapped && !isUuidLike(mapped)) return mapped;
+    return formatDisplayName(internVoiceId, { fallback: 'Custom voice' }) || 'Custom voice';
+  }, [internVoiceId, voiceNameById]);
 
   const baseIntentHide = {
     flubber: false,

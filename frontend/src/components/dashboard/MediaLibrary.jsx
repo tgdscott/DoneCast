@@ -7,6 +7,7 @@ import { ArrowLeft, Loader2, Music, Trash2, Upload, Edit, Save, XCircle, Play, P
 import { useState, useEffect, useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { makeApi, buildApiUrl, coerceArray } from "@/lib/apiClient";
+import { formatDisplayName } from "@/lib/displayNames";
 
 export default function MediaLibrary({ onBack, token }) {
   const [mediaFiles, setMediaFiles] = useState([]);
@@ -78,7 +79,7 @@ export default function MediaLibrary({ onBack, token }) {
         toast({ variant: 'destructive', title: 'File too large', description: `${file.name}: exceeds ${lim}MB limit for ${selectedLabel}.` });
         continue;
       }
-      accepted.push({ file, friendly_name: file.name.split('.').slice(0, -1).join('.') });
+      accepted.push({ file, friendly_name: formatDisplayName(file, { fallback: file.name.split('.').slice(0, -1).join('.') }) });
     }
     setUploadFiles(accepted);
   };
@@ -119,7 +120,7 @@ export default function MediaLibrary({ onBack, token }) {
 
   const startEditing = (file) => {
     setEditingId(file.id);
-    setEditingName(file.friendly_name || file.filename.split('_').slice(1).join('_'));
+    setEditingName(formatDisplayName(file, { fallback: file.friendly_name || '' }));
     setEditingTrigger(file.trigger_keyword || "");
   };
 
@@ -290,7 +291,7 @@ export default function MediaLibrary({ onBack, token }) {
           const isCommercial = category === 'commercial';
           const categoryLabel = categoryLabels[category] || category.replace("_", " ");
           return (
-          <Card key={category}>
+            <Card key={category}>
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle className="flex items-center gap-2">
@@ -309,8 +310,10 @@ export default function MediaLibrary({ onBack, token }) {
             </CardHeader>
             <CardContent>
               <div className={`space-y-2 ${isCommercial ? 'opacity-60 pointer-events-none' : ''}`}>
-                {files.map(file => (
-                  <div key={file.id} className="flex items-center justify-between p-2 rounded-md hover:bg-gray-50">
+                {files.map((file) => {
+                  const displayName = formatDisplayName(file, { fallback: file.friendly_name || 'Audio file' }) || 'Audio file';
+                  return (
+                    <div key={file.id} className="flex items-center justify-between p-2 rounded-md hover:bg-gray-50">
                     <div className="flex items-center gap-3">
                         <button
                           type="button"
@@ -332,7 +335,7 @@ export default function MediaLibrary({ onBack, token }) {
                           ) : (
                             <div className="flex items-start gap-2 flex-col">
                               <div className="flex items-center gap-2">
-                                <span className="text-sm">{file.friendly_name || file.filename.split('_').slice(1).join('_')}</span>
+                                <span className="text-sm">{displayName}</span>
                                 {file.trigger_keyword && (category==='sfx' || category==='commercial') && <span className="text-[10px] uppercase tracking-wide bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{file.trigger_keyword}</span>}
                               </div>
                               {(category==='intro' || category==='outro') && (file.transcript_text || file.transcript || file.subtitle) && (
@@ -364,11 +367,13 @@ export default function MediaLibrary({ onBack, token }) {
                         <Button onClick={() => handleDelete(file.id)} variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-700" disabled={isCommercial}><Trash2 className="w-4 h-4" /></Button>
                     </div>
                   </div>
-                ))}
+                );
+              })}
               </div>
             </CardContent>
           </Card>
-        );})}
+        );
+      })}
       </div>
     </div>
   );
