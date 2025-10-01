@@ -72,9 +72,21 @@ def _resolve_media_file(name: str) -> Optional[Path]:
         APP_ROOT_DIR / "media_uploads" / base,
         APP_ROOT_DIR.parent / "media_uploads" / base,
         MEDIA_DIR / base,
+        MEDIA_DIR / "media_uploads" / base,
     ]
+
+    try:
+        cwd_media = Path.cwd() / "media_uploads" / base
+        candidates.append(cwd_media)
+    except Exception:
+        pass
+
+    seen: set[Path] = set()
     for candidate in candidates:
         try:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
             if candidate.exists():
                 return candidate
         except Exception:
