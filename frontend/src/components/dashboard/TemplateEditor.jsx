@@ -19,12 +19,12 @@ import {
   Mic,
   Upload,
   Music,
-  Bot,
   Settings2,
   HelpCircle,
   Lightbulb,
   ListChecks,
   Compass,
+  ChevronDown,
 } from "lucide-react";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { makeApi } from "@/lib/apiClient";
@@ -32,6 +32,7 @@ import { createTTS } from "@/api/media";
 import { toast } from "@/hooks/use-toast";
 import VoicePicker from "@/components/VoicePicker";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/AuthContext.jsx";
 
 const AI_DEFAULT = {
@@ -110,9 +111,9 @@ const describeVolumeLevel = (level) => {
 };
 
 const AddSegmentButton = ({ type, onClick, disabled }) => (
-    <Button 
-        variant="outline" 
-        className="flex flex-col h-24 justify-center items-center gap-2 text-gray-700 hover:bg-gray-100 hover:text-blue-600 transition-colors disabled:opacity-50"
+    <Button
+        variant="outline"
+        className="flex flex-col h-20 justify-center items-center gap-2 text-gray-700 hover:bg-gray-100 hover:text-blue-600 transition-colors disabled:opacity-50"
         onClick={() => onClick(type)}
         disabled={disabled}
     >
@@ -149,7 +150,9 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     const [ttsVoices, setTtsVoices] = useState([]);
     const [ttsLoading, setTtsLoading] = useState(false);
     const [createdFromTTS, setCreatedFromTTS] = useState({}); // { segmentId: timestampMs }
-    const [showAdvanced, setShowAdvanced] = useState(false);
+    const [showMusicOptions, setShowMusicOptions] = useState(false);
+    const [showAiSection, setShowAiSection] = useState(true);
+    const [showEpisodeStructure, setShowEpisodeStructure] = useState(true);
     const [runTemplateTour, setRunTemplateTour] = useState(false);
     const [scheduleDirty, setScheduleDirty] = useState(false);
 
@@ -267,15 +270,15 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
 
     fetchInitialData();
   }, [templateId, token, isNewTemplate]);
-  useEffect(() => {
-    if (!template || showAdvanced) return;
-    const hasAdvanced = Boolean(
-      (Array.isArray(template.background_music_rules) && template.background_music_rules.length > 0) ||
-      (template.timing && ((template.timing.content_start_offset_s || 0) !== 0 || (template.timing.outro_start_offset_s || 0) !== 0)) ||
-      (template.ai_settings && Object.keys(template.ai_settings).length > 0)
-    );
-    if (hasAdvanced) setShowAdvanced(true);
-  }, [template, showAdvanced]);
+    useEffect(() => {
+      if (!template || showMusicOptions) return;
+      const hasAdvanced = Boolean(
+        (Array.isArray(template.background_music_rules) && template.background_music_rules.length > 0) ||
+        (template.timing && ((template.timing.content_start_offset_s || 0) !== 0 || (template.timing.outro_start_offset_s || 0) !== 0)) ||
+        (template.ai_settings && Object.keys(template.ai_settings).length > 0)
+      );
+      if (hasAdvanced) setShowMusicOptions(true);
+    }, [template, showMusicOptions]);
 
     // Seed local voiceId from template defaults when template changes
     useEffect(() => {
@@ -602,9 +605,9 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
       return;
     }
     if (type === EVENTS.STEP_BEFORE && step?.target === '[data-tour="template-advanced"]') {
-      setShowAdvanced(true);
+      setShowMusicOptions(true);
     }
-  }, [setRunTemplateTour, setShowAdvanced]);
+  }, [setRunTemplateTour, setShowMusicOptions]);
 
     const templateTourSteps = useMemo(() => [
     {
@@ -635,7 +638,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     {
       target: '[data-tour="template-advanced"]',
       title: 'Fine-tune timing & music',
-      content: 'Advanced controls handle crossfades, background music rules, and AI defaults. Open this panel whenever you need detailed tweaks.',
+      content: 'Use Music & Timing Options to set overlaps, fades, and looping beds once you are happy with the structure.',
     },
     {
       target: '[data-tour="template-save"]',
@@ -650,7 +653,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
         if (!template) return null;
 
   return (
-    <div className="p-6 bg-gray-50 min-h-screen space-y-6">
+    <div className="p-6 bg-gray-50 min-h-screen">
         <Joyride
             steps={templateTourSteps}
             run={runTemplateTour}
@@ -662,7 +665,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
             styles={{ options: { zIndex: 10000 } }}
             spotlightClicks
         />
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-center mb-6">
             <Button onClick={handleBackClick} variant="ghost" className="text-gray-700"><ArrowLeft className="w-4 h-4 mr-2" />Back</Button>
             <h1 className="text-2xl font-bold text-gray-800">Template Editor</h1>
             <div className="flex items-center gap-3">
@@ -672,56 +675,8 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
             </Button>
             </div>
         </div>
-
-                <Card className="border border-slate-200 bg-slate-50" data-tour="template-quickstart">
-                    <CardHeader className="flex flex-col gap-1 pb-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex items-center gap-2 text-slate-800">
-                            <Compass className="h-5 w-5 text-primary" aria-hidden="true" />
-                            <CardTitle className="text-base">Template quickstart</CardTitle>
-                        </div>
-                        <CardDescription className="text-sm text-slate-600 sm:text-right">
-                            Three checkpoints to get from blank template to publish-ready episodes.
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-3 text-sm text-slate-700">
-                        <ol className="list-decimal space-y-1 pl-5">
-                            <li>Name the template and attach it to the show it powers.</li>
-                            <li>Add intro, content, and outro segments—drag to match your flow.</li>
-                            <li>Open Advanced options to dial in timing, music, and AI defaults.</li>
-                        </ol>
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                            <span className="text-xs text-slate-500">Prefer a tour? We’ll highlight each area for you.</span>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                    setShowAdvanced(false);
-                                    setRunTemplateTour(true);
-                                }}
-                            >
-                                Start guided tour
-                            </Button>
-                        </div>
-                    </CardContent>
-                </Card>
-
-                <Card className="shadow-sm" data-tour="template-status">
-                    <CardContent className="p-6 flex items-center justify-between">
-                        <div>
-                            <CardTitle className="text-lg">Template status</CardTitle>
-                            <CardDescription>Mark a template inactive to hide it from selection without deleting it.</CardDescription>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <span className={`text-sm px-2 py-1 rounded-full border ${template?.is_active !== false ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-700 border-gray-300'}`}>
-                                {template?.is_active !== false ? 'Active' : 'Inactive'}
-                            </span>
-                            <Button variant="outline" onClick={() => handleTemplateChange('is_active', !(template?.is_active !== false))}>
-                                {template?.is_active !== false ? 'Disable' : 'Enable'}
-                            </Button>
-                        </div>
-                    </CardContent>
-                </Card>
-
+        <div className="grid gap-6 xl:grid-cols-[2fr_1fr] xl:items-start">
+            <div className="space-y-6">
                 <Card className="shadow-sm" data-tour="template-basics"><CardContent className="p-6 space-y-6">
                         <div>
                             <Label htmlFor="template-name" className="text-sm font-medium text-gray-600">Template Name</Label>
@@ -750,11 +705,187 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                     userTimezone={authUser?.timezone || null}
                     isNewTemplate={isNewTemplate}
                     onDirtyChange={setScheduleDirty}
+                    collapsible
+                    defaultOpen
                 />
 
-                {/* Default AI Voice selector */}
                 <Card className="shadow-sm">
-                    <CardContent className="p-6">
+                    <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                            <CardTitle>AI Content guidance</CardTitle>
+                            <CardDescription>Tell the assistant how to write titles, notes, and tags for this template.</CardDescription>
+                        </div>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="mt-2 h-8 px-2 text-slate-600 sm:mt-0"
+                            onClick={() => setShowAiSection((prev) => !prev)}
+                            aria-expanded={showAiSection}
+                        >
+                            <ChevronDown className={`h-4 w-4 transition-transform ${showAiSection ? 'rotate-180' : ''}`} />
+                            <span className="sr-only">Toggle AI content guidance</span>
+                        </Button>
+                    </CardHeader>
+                    {showAiSection && (
+                        <CardContent className="space-y-6">
+                            <TemplateAIContent
+                                value={(template?.ai_settings) || AI_DEFAULT}
+                                onChange={(next) => setTemplate(prev => ({ ...prev, ai_settings: next }))}
+                                className="space-y-5"
+                            />
+                        </CardContent>
+                    )}
+                </Card>
+
+                <Card className="shadow-sm" data-tour="template-structure">
+                    <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                            <CardTitle>Episode Structure</CardTitle>
+                            <CardDescription>Keep your bit segments aligned and drag to fine-tune the running order.</CardDescription>
+                        </div>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="mt-2 h-8 px-2 text-slate-600 sm:mt-0"
+                            onClick={() => setShowEpisodeStructure((prev) => !prev)}
+                            aria-expanded={showEpisodeStructure}
+                        >
+                            <ChevronDown className={`h-4 w-4 transition-transform ${showEpisodeStructure ? 'rotate-180' : ''}`} />
+                            <span className="sr-only">Toggle episode structure</span>
+                        </Button>
+                    </CardHeader>
+                    {showEpisodeStructure && (
+                        <CardContent className="space-y-8">
+                            <div className="grid gap-6 lg:grid-cols-[minmax(220px,1fr)_minmax(320px,1.6fr)]">
+                                <section className="space-y-4" data-tour="template-add">
+                                    <div className="space-y-1">
+                                        <p className="text-xs uppercase tracking-wide text-slate-500">Bit segments</p>
+                                        <h3 className="text-base font-semibold text-slate-800">Add segments</h3>
+                                        <p className="text-sm text-slate-600">Drop in the recurring pieces that make up each episode.</p>
+                                    </div>
+                                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                                        <AddSegmentButton type="intro" onClick={addSegment} />
+                                        <AddSegmentButton type="content" onClick={addSegment} disabled={hasContentSegment} />
+                                        <AddSegmentButton type="outro" onClick={addSegment} />
+                                        <AddSegmentButton type="commercial" onClick={addSegment} />
+                                    </div>
+                                </section>
+                                <section className="space-y-4">
+                                    <div className="space-y-1">
+                                        <p className="text-xs uppercase tracking-wide text-slate-500">Segment order</p>
+                                        <h3 className="text-base font-semibold text-slate-800">Arrange your show flow</h3>
+                                        <p className="text-sm text-slate-600">Drag and drop segments to update the running order.</p>
+                                    </div>
+                                    <DragDropContext onDragEnd={onDragEnd}>
+                                        <Droppable droppableId="segments">
+                                            {(provided) => (
+                                                <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-3">
+                                                    {template.segments.map((segment, index) => (
+                                                        <Draggable
+                                                            key={segment.id}
+                                                            draggableId={segment.id}
+                                                            index={index}
+                                                            isDragDisabled={segment.segment_type === 'content'}
+                                                        >
+                                                            {(provided, snapshot) => (
+                                                                <div ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps}>
+                                                                    <SegmentEditor
+                                                                        segment={segment}
+                                                                        onDelete={() => deleteSegment(segment.id)}
+                                                                        onSourceChange={handleSourceChange}
+                                                                        mediaFiles={{ intro: introFiles, outro: outroFiles, commercial: commercialFiles }}
+                                                                        isDragging={snapshot.isDragging}
+                                                                        onOpenTTS={(prefill) => {
+                                                                            setTtsTargetSegment(segment);
+                                                                            setTtsScript(prefill?.script ?? '');
+                                                                            setTtsVoiceId(prefill?.voice_id ?? voiceId ?? null);
+                                                                            setTtsSpeakingRate(
+                                                                                prefill?.speaking_rate && !Number.isNaN(prefill.speaking_rate)
+                                                                                    ? prefill.speaking_rate
+                                                                                    : 1.0
+                                                                            );
+                                                                            setTtsFriendlyName(prefill?.friendly_name ?? '');
+                                                                            setTtsOpen(true);
+                                                                        }}
+                                                                        justCreatedTs={createdFromTTS[segment.id] || null}
+                                                                        templateVoiceId={voiceId || null}
+                                                                        token={token}
+                                                                        onMediaUploaded={onMediaUploaded}
+                                                                    />
+                                                                </div>
+                                                            )}
+                                                        </Draggable>
+                                                    ))}
+                                                    {provided.placeholder}
+                                                </div>
+                                            )}
+                                        </Droppable>
+                                    </DragDropContext>
+                                </section>
+                            </div>
+                        </CardContent>
+                    )}
+                </Card>
+            </div>
+
+            <aside className="space-y-6 xl:sticky xl:top-24">
+                <Card className="border border-slate-200 bg-slate-50" data-tour="template-quickstart">
+                    <CardHeader className="flex flex-col gap-1 pb-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-2 text-slate-800">
+                            <Compass className="h-5 w-5 text-primary" aria-hidden="true" />
+                            <CardTitle className="text-base">Template quickstart</CardTitle>
+                        </div>
+                        <CardDescription className="text-sm text-slate-600 sm:text-right">
+                            Three checkpoints to get from blank template to publish-ready episodes.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3 text-sm text-slate-700">
+                        <ol className="list-decimal space-y-1 pl-5">
+                            <li>Name the template and attach it to the show it powers.</li>
+                            <li>Add intro, content, and outro segments—drag to match your flow.</li>
+                            <li>Open Music & Timing Options to dial in fades, offsets, and beds.</li>
+                        </ol>
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <span className="text-xs text-slate-500">Prefer a tour? We’ll highlight each area for you.</span>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                    setShowMusicOptions(false);
+                                    setRunTemplateTour(true);
+                                }}
+                            >
+                                Start guided tour
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                <Card className="shadow-sm" data-tour="template-status">
+                    <CardContent className="p-6 flex items-center justify-between">
+                        <div>
+                            <CardTitle className="text-lg">Template status</CardTitle>
+                            <CardDescription>Mark a template inactive to hide it from selection without deleting it.</CardDescription>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <span className={`text-sm px-2 py-1 rounded-full border ${template?.is_active !== false ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-700 border-gray-300'}`}>
+                                {template?.is_active !== false ? 'Active' : 'Inactive'}
+                            </span>
+                            <Button variant="outline" onClick={() => handleTemplateChange('is_active', !(template?.is_active !== false))}>
+                                {template?.is_active !== false ? 'Disable' : 'Enable'}
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                <Card className="shadow-sm">
+                    <CardHeader>
+                        <CardTitle className="text-base">AI voice defaults</CardTitle>
+                        <CardDescription>Choose which voices power automated narration.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-5">
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                             <div>
                                 <Label className="text-sm font-medium text-gray-600 flex items-center gap-1">Default AI Voice<HelpCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" title="Set a default voice for template AI voice prompts." /></Label>
@@ -764,12 +895,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                                 <Button variant="outline" onClick={() => setShowVoicePicker(true)}>Choose voice</Button>
                             </div>
                         </div>
-                    </CardContent>
-                </Card>
-
-                {/* Intern command voice selector */}
-                <Card className="shadow-sm">
-                    <CardContent className="p-6">
+                        <Separator />
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                             <div>
                                 <Label className="text-sm font-medium text-gray-600 flex items-center gap-1">Intern Command Voice<HelpCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" title="Used when the Intern command creates narrated edits." /></Label>
@@ -781,75 +907,25 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                         </div>
                     </CardContent>
                 </Card>
+            </aside>
+        </div>
 
-        <Card data-tour="template-add"><CardHeader><CardTitle>Add Segments</CardTitle><CardDescription>Add the building blocks for your episode.</CardDescription></CardHeader><CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <AddSegmentButton type="intro" onClick={addSegment} />
-            <AddSegmentButton type="content" onClick={addSegment} disabled={hasContentSegment} />
-            <AddSegmentButton type="outro" onClick={addSegment} />
-            <AddSegmentButton type="commercial" onClick={addSegment} />
-        </CardContent></Card>
-
-        <Card data-tour="template-structure"><CardHeader><CardTitle>Episode Structure</CardTitle><CardDescription>Drag and drop segments to reorder them.</CardDescription></CardHeader><CardContent>
-            <DragDropContext onDragEnd={onDragEnd}>
-                <Droppable droppableId="segments">
-                    {(provided) => (
-                        <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-4">
-                        {template.segments.map((segment, index) => (
-                            <Draggable key={segment.id} draggableId={segment.id} index={index} isDragDisabled={segment.segment_type === 'content'}>
-                                {(provided, snapshot) => (
-                                    <div ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps}>
-                                        <SegmentEditor
-                                            segment={segment}
-                                            onDelete={() => deleteSegment(segment.id)}
-                                            onSourceChange={handleSourceChange}
-                                            mediaFiles={{intro: introFiles, outro: outroFiles, commercial: commercialFiles}}
-                                            isDragging={snapshot.isDragging}
-                                            onOpenTTS={(prefill) => {
-                                                setTtsTargetSegment(segment);
-                                                // Prefill values when provided (legacy migration), else defaults
-                                                setTtsScript(prefill?.script ?? '');
-                                                // Prefer legacy voice id, else template-level default
-                                                setTtsVoiceId(prefill?.voice_id ?? voiceId ?? null);
-                                                setTtsSpeakingRate(
-                                                    prefill?.speaking_rate && !Number.isNaN(prefill.speaking_rate)
-                                                        ? prefill.speaking_rate
-                                                        : 1.0
-                                                );
-                                                setTtsFriendlyName(prefill?.friendly_name ?? '');
-                                                setTtsOpen(true);
-                                            }}
-                                            justCreatedTs={createdFromTTS[segment.id] || null}
-                                            templateVoiceId={voiceId || null}
-                                            token={token}
-                                            onMediaUploaded={onMediaUploaded}
-                                        />
-                                    </div>
-                                )}
-                            </Draggable>
-                        ))}
-                        {provided.placeholder}
-                        </div>
-                    )}
-                </Droppable>
-            </DragDropContext>
-        </CardContent></Card>
-
-        <div className="flex items-center justify-between pt-2">
-            <h2 className="text-lg font-semibold">Advanced options</h2>
-            <Button variant="outline" size="sm" onClick={() => setShowAdvanced((prev) => !prev)}>
-                {showAdvanced ? 'Hide advanced' : 'Show advanced'}
+        <div className="mt-10 flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Music &amp; Timing Options</h2>
+            <Button variant="outline" size="sm" onClick={() => setShowMusicOptions((prev) => !prev)}>
+                {showMusicOptions ? 'Hide options' : 'Show options'}
             </Button>
         </div>
-        {showAdvanced && (
+        {showMusicOptions && (
             <div className="grid gap-6 lg:grid-cols-[2fr_1fr]" data-tour="template-advanced">
                 <div className="space-y-6">
                     <Card>
-                        <CardHeader>
-                            <CardTitle className="flex items-center gap-2"><Settings2 className="w-6 h-6 text-gray-600" /> Advanced Settings</CardTitle>
-                            <CardDescription>Fine-tune the timing and background music for your podcast.</CardDescription>
+                        <CardHeader className="flex flex-col gap-2">
+                            <CardTitle className="flex items-center gap-2"><Settings2 className="w-6 h-6 text-gray-600" /> Music &amp; timing controls</CardTitle>
+                            <CardDescription>Fine-tune when segments fire and how the background music behaves.</CardDescription>
                         </CardHeader>
-                        <CardContent className="space-y-6 pt-4">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <CardContent className="space-y-5 pt-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                                 <div>
                                     <Label className="flex items-center gap-1">
                                         Content Start Delay (seconds)
@@ -994,10 +1070,6 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                         </CardContent>
                     </Card>
 
-                    <TemplateAIContent
-                        value={(template?.ai_settings) || AI_DEFAULT}
-                        onChange={(next) => setTemplate(prev => ({ ...prev, ai_settings: next }))}
-                    />
                 </div>
 
                 <Card className="border border-slate-200 bg-slate-50 self-start">
@@ -1269,7 +1341,7 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
     if (segment.segment_type === 'content') {
         return (
             <Card className={`transition-shadow ${isDragging ? 'shadow-2xl scale-105' : 'shadow-md'} border-green-500 border-2`}>
-                <CardHeader className="flex flex-row items-center justify-between p-4 bg-green-100">
+                <CardHeader className="flex flex-row items-center justify-between p-3 bg-green-100">
                     <div className="flex items-center gap-3">
                         <GripVertical className="w-5 h-5 text-gray-400" />
                         {segmentIcons.content}
@@ -1277,7 +1349,7 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
                     </div>
                     <p className="text-sm text-gray-600">Cannot be deleted</p>
                 </CardHeader>
-                <CardContent className="p-6">
+                <CardContent className="p-4">
                     <p className="text-gray-600 italic">The main content for your episode will be added here during episode creation. This block serves as a placeholder for its position in the template.</p>
                 </CardContent>
             </Card>
@@ -1291,7 +1363,7 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
 
     return (
         <Card className={`transition-shadow ${isDragging ? 'shadow-2xl scale-105' : 'shadow-md'}`}>
-            <CardHeader className="flex flex-row items-center justify-between p-4 bg-gray-100 border-b">
+            <CardHeader className="flex flex-row items-center justify-between p-3 bg-gray-100 border-b">
                 <div className="flex items-center gap-3">
                     <GripVertical className="w-5 h-5 text-gray-400" />
                     {segmentIcons[segment.segment_type]}
@@ -1310,7 +1382,7 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
                 </div>
                 <Button variant="ghost" size="icon" onClick={onDelete} className="text-red-500 hover:bg-red-100 hover:text-red-700 w-8 h-8"><Trash2 className="w-4 h-4" /></Button>
             </CardHeader>
-            <CardContent className="p-6 space-y-4">
+            <CardContent className="p-4 space-y-4">
                 {isLegacy && (
                     <div className="p-3 rounded-md border border-yellow-200 bg-yellow-50 text-yellow-800 flex items-center justify-between gap-3">
                         <div className="text-sm">Legacy segment type. Convert to file (recommended).</div>
