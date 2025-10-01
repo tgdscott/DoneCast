@@ -34,6 +34,7 @@ except Exception:  # pragma: no cover
 
 # GCS helpers (dev shim writes to MEDIA_DIR automatically)
 from infrastructure.gcs import upload_fileobj as gcs_upload_fileobj, upload_bytes as gcs_upload_bytes
+from .admin.music import router as music_router
 
 # Whitelisted tables for admin DB explorer (avoid arbitrary SQL injection surface)
 DB_EXPLORER_TABLES = ["user", "podcast", "episode", "podcasttemplate", "podcast_template"]
@@ -53,6 +54,7 @@ router = APIRouter(
     prefix="/admin",
     tags=["Admin"],
 )
+router.include_router(music_router)
 
 # Low-level SQL helper to avoid type issues with session.exec(TextClause)
 def _exec_text(session: Session, sql: str, params: Optional[dict] = None):
@@ -125,7 +127,7 @@ def admin_summary(
 ):
     """Simple platform summary for admin dashboard MVP."""
     user_count = session.exec(select(func.count(User.id))).one()  # type: ignore[arg-type]
-    podcast_count = session.exec(select(func.count(Podcast.id))).one()  # type: ignore[arg-type]
+    podcast_count = session.exec(select(func.count(Podcast.id))).one()  # type: ignore[arg-type] 
     template_count = session.exec(select(func.count(PodcastTemplate.id))).one()  # type: ignore[arg-type]
     episode_count = session.exec(select(func.count(Episode.id))).one()  # type: ignore[arg-type]
     published_count = session.exec(
@@ -288,7 +290,7 @@ def admin_list_music_assets(
             "id": str(a.id),
             "display_name": a.display_name,
             "filename": a.filename,
-            "url": a.public_url(),
+            "url": a.filename,
             "duration_s": a.duration_s,
             "mood_tags": tags,
             "source_type": a.source_type,
@@ -765,7 +767,7 @@ def admin_list_podcasts(
     if owner_email:
         like = f"%{owner_email.strip()}%"
         count_stmt = select(func.count(Podcast.id)).select_from(Podcast).join(User, Podcast.user_id == User.id)  # type: ignore[arg-type]
-    if like:
+    if like: # type: ignore[has-type]
         try:
             from sqlalchemy import or_  # noqa: F401
             count_stmt = count_stmt.where(User.email.ilike(like))
@@ -775,7 +777,7 @@ def admin_list_podcasts(
     total = session.exec(count_stmt).one() or 0
 
     # Page data query
-    data_stmt = select(Podcast, User.email).join(User, Podcast.user_id == User.id)
+    data_stmt = select(Podcast, User.email).join(User, Podcast.user_id == User.id) # type: ignore[arg-type]
     if like:
         data_stmt = data_stmt.where(User.email.ilike(like))
     # Order by created_at desc if available, else id desc
@@ -804,7 +806,7 @@ def admin_list_podcasts(
     count_map: Dict[str, int] = {str(pid): 0 for pid in ids}
     last_map: Dict[str, Optional[datetime]] = {str(pid): None for pid in ids}
     if ids:
-        eps = session.exec(select(Episode).where(Episode.podcast_id.in_(ids))).all()
+        eps = session.exec(select(Episode).where(Episode.podcast_id.in_(ids))).all() # type: ignore[attr-defined]
         for ep in eps:
             pid = str(ep.podcast_id)
             if pid not in count_map:
@@ -865,11 +867,11 @@ def admin_users_full(
 ):
     # Preload episode counts grouped by user
     counts = dict(
-        session.exec(select(Episode.user_id, func.count(Episode.id)).group_by(Episode.user_id)).all()
+        session.exec(select(Episode.user_id, func.count(Episode.id)).group_by(Episode.user_id)).all() # type: ignore[arg-type]
     )
     # Latest activity per user (max processed_at)
     latest = dict(
-        session.exec(select(Episode.user_id, func.max(Episode.processed_at)).group_by(Episode.user_id)).all()
+        session.exec(select(Episode.user_id, func.max(Episode.processed_at)).group_by(Episode.user_id)).all() # type: ignore[arg-type]
     )
     users = crud.get_all_users(session)
     out: List[UserAdminOut] = []
@@ -944,8 +946,8 @@ def admin_update_user(
             # On rare occasions, refresh may race; ignore and proceed with reloaded fields below
             pass
     # compute counts/activity
-    episode_count = session.exec(select(func.count(Episode.id)).where(Episode.user_id==user.id)).scalar_one_or_none() or 0
-    last_activity = session.exec(select(func.max(Episode.processed_at)).where(Episode.user_id==user.id)).scalar_one_or_none() or user.created_at
+    episode_count = session.exec(select(func.count(Episode.id)).where(Episode.user_id==user.id)).scalar_one_or_none() or 0 # type: ignore[arg-type]
+    last_activity = session.exec(select(func.max(Episode.processed_at)).where(Episode.user_id==user.id)).scalar_one_or_none() or user.created_at # type: ignore[arg-type]
     return UserAdminOut(
         id=str(user.id),
         email=user.email,

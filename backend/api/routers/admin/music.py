@@ -24,7 +24,7 @@ from infrastructure.gcs import upload_fileobj as gcs_upload_fileobj
 
 from .deps import get_current_admin_user
 
-router = APIRouter()
+router = APIRouter(prefix="/music/assets", tags=["Admin - Music"])
 
 
 class MusicAssetPayload(BaseModel):

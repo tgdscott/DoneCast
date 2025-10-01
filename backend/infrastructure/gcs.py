@@ -1,150 +1,151 @@
-import os, datetime, pathlib
-from typing import BinaryIO, Optional
-from google.cloud import storage
+import logging
+import os
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import IO, Optional, Union
 
-# --- Local Dev Sandbox Implementation ---
-def _is_dev_env() -> bool:
-    val = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower()
-    return val in {"dev", "development", "local", "test", "testing"}
+try:
+    from google.cloud import storage
+    from google.auth.exceptions import DefaultCredentialsError
+except ImportError:
+    storage = None
+    DefaultCredentialsError = None
 
-IS_DEV_ENV = _is_dev_env()
+logger = logging.getLogger(__name__)
 
-# In dev mode, we don't need a real client.
-_client: Optional[storage.Client] = None
-if not IS_DEV_ENV:
+# --- GCS Client Initialization ---
+
+_gcs_client = None
+_gcs_credentials = None
+_gcs_project = None
+_signer_email = None
+
+def _get_gcs_client():
+    """Initializes and returns a GCS client, handling credentials gracefully."""
+    global _gcs_client, _gcs_credentials, _gcs_project, _signer_email
+    if _gcs_client:
+        return _gcs_client
+
+    if not storage:
+        logger.debug("GCS client requested but google-cloud-storage not installed.")
+        return None
+
     try:
-        _client = storage.Client()
+        # In a GCP environment (Cloud Run, GCE), this will use the attached service account.
+        # Locally, it will use `gcloud auth application-default login` credentials or GOOGLE_APPLICATION_CREDENTIALS.
+        client = storage.Client()
+        _gcs_client = client
+        _gcs_credentials = getattr(client, "_credentials", None)
+        _gcs_project = client.project
+        # This is the crucial part: capture the service account email for signing.
+        if hasattr(_gcs_credentials, "service_account_email"):
+            _signer_email = _gcs_credentials.service_account_email
+        logger.info(f"GCS client initialized for project {_gcs_project}. Signer: {_signer_email or 'N/A (will use key if available)'}")
+        return _gcs_client
+    except DefaultCredentialsError:
+        logger.warning("GCS credentials not found. GCS operations will be disabled.") # type: ignore
+        return None
     except Exception as e:
-        # This will allow the app to start, but GCS calls will fail.
-        # Good for local dev without gcloud auth.
-        print(f"Warning: Failed to initialize Google Cloud Storage client: {e}")
+        logger.error("Failed to initialize GCS client: %s", e, exc_info=True)
+        return None
 
-def _local_upload(key: str, data_or_fileobj: bytes | BinaryIO) -> str:
-    """Helper to write data to the local MEDIA_DIR and return the filename."""
-    from api.core.paths import MEDIA_DIR
-    # The 'key' from GCS corresponds to the object path inside the bucket.
-    # We'll save it directly under MEDIA_DIR, using just the basename.
-    dest_path = MEDIA_DIR / os.path.basename(key)
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
+# Initialize on first import
+_get_gcs_client()
 
-    if isinstance(data_or_fileobj, bytes):
-        dest_path.write_bytes(data_or_fileobj)
-    else: # BinaryIO
-        try:
-            data_or_fileobj.seek(0)
-        except Exception:
-            pass
-        with open(dest_path, "wb") as f:
-            # For local dev, reading the whole thing is fine and simple.
-            f.write(data_or_fileobj.read())
+# --- Public API ---
 
-    # Return the simple filename. The `upload_media_files` function will store this
-    # in the DB. The app serves `/static/media` from MEDIA_DIR, so this works.
-    return dest_path.name
+def get_signed_url(bucket_name: str, key: str, expiration: int = 3600) -> Optional[str]:
+    """Generates a signed URL for a GCS object, handling service account signing correctly."""
+    client = _get_gcs_client()
+    if not client:
+        return None
+
+    try:
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(key)
+        # This is the fix: explicitly provide the service_account_email.
+        # The library will then use the IAM API to sign the URL instead of looking for a private key.
+        url = blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(seconds=expiration),
+            method="GET",
+            service_account_email=_signer_email,
+        )
+        return url
+    except Exception as e:
+        logger.error("Failed to sign URL for gs://%s/%s: %s", bucket_name, key, e, exc_info=True)
+        # Re-raise the original error to be handled by the caller, which produces the 500 error you saw.
+        raise
 
 
-def upload_bytes(bucket: str, key: str, data: bytes, content_type: str) -> str:
-    """Upload an in-memory bytes payload to GCS.
+def upload_fileobj(bucket_name: str, key: str, fileobj: IO, content_type: Optional[str] = None, **kwargs) -> str:
+    """Uploads a file-like object to GCS. Returns gs:// URI."""
+    client = _get_gcs_client()
+    if not client:
+        # Dev/local fallback: write to a local media directory
+        local_path = Path(os.getenv("MEDIA_DIR", "media")) / key
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(local_path, "wb") as f:
+            f.write(fileobj.read())
+        logger.info(f"DEV: Wrote GCS upload for gs://{bucket_name}/{key} to {local_path}") # type: ignore
+        return str(local_path)
 
-    Note: For large files, prefer upload_fileobj() to avoid duplicating data in memory.
-    """
-    if IS_DEV_ENV:
-        return _local_upload(key, data)
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(key)
+    blob.upload_from_file(fileobj, content_type=content_type)
+    logger.info(f"Uploaded to gs://{bucket_name}/{key}")
+    return f"gs://{bucket_name}/{key}"
 
-    if not _client:
-        raise RuntimeError("GCS client not initialized. Is APP_ENV set correctly and are you authenticated?")
 
-    b = _client.bucket(bucket)
-    blob = b.blob(key)
+def upload_bytes(bucket_name: str, key: str, data: bytes, content_type: Optional[str] = None) -> str:
+    """Uploads bytes to GCS. Returns gs:// URI."""
+    client = _get_gcs_client()
+    if not client:
+        local_path = Path(os.getenv("MEDIA_DIR", "media")) / key
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_bytes(data)
+        logger.info(f"DEV: Wrote GCS upload for gs://{bucket_name}/{key} to {local_path}")
+        return str(local_path)
+
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(key)
     blob.upload_from_string(data, content_type=content_type)
-    return f"gs://{bucket}/{key}"
+    logger.info(f"Uploaded to gs://{bucket_name}/{key}")
+    return f"gs://{bucket_name}/{key}"
 
-def upload_fileobj(bucket: str, key: str, fileobj: BinaryIO, *, size: Optional[int] = None, content_type: str = "application/octet-stream", chunk_mb: int | None = None) -> str:
-    """Upload from a file-like object to GCS using a resumable upload.
 
-    - Does not buffer the whole content in memory
-    - Allows setting a larger chunk size for better throughput
-    - If size is provided, passes it to the client for efficiency
-    """
-    if IS_DEV_ENV:
-        return _local_upload(key, fileobj)
+def download_gcs_bytes(bucket_name: str, key: str) -> Optional[bytes]:
+    """Downloads an object from GCS as bytes."""
+    client = _get_gcs_client()
+    if not client:
+        # Dev/local fallback: read from local media directory
+        local_path = Path(os.getenv("MEDIA_DIR", "media")) / key
+        if local_path.exists():
+            logger.info(f"DEV: Reading GCS download for gs://{bucket_name}/{key} from {local_path}")
+            return local_path.read_bytes()
+        return None
 
-    if not _client:
-        raise RuntimeError("GCS client not initialized. Is APP_ENV set correctly and are you authenticated?")
-
-    b = _client.bucket(bucket)
-    blob = b.blob(key)
-    # Use a larger chunk size to improve throughput on large uploads
-    # Must be a multiple of 256KB. Default to env GCS_CHUNK_MB or 32MB.
-    if chunk_mb is None:
-        try:
-            chunk_mb = int(os.getenv("GCS_CHUNK_MB", "32"))
-        except Exception:
-            chunk_mb = 32
     try:
-        blob.chunk_size = max(256 * 1024, int(chunk_mb) * 1024 * 1024)
-    except Exception:
-        blob.chunk_size = 8 * 1024 * 1024
-    # Ensure file pointer is at start
-    try:
-        fileobj.seek(0)
-    except Exception:
-        pass
-    if size is not None and size >= 0:
-        blob.upload_from_file(fileobj, size=size, content_type=content_type)
-    else:
-        blob.upload_from_file(fileobj, content_type=content_type)
-    return f"gs://{bucket}/{key}"
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(key)
+        return blob.download_as_bytes()
+    except Exception as e:
+        logger.error("Failed to download gs://%s/%s: %s", bucket_name, key, e)
+        return None
 
-def make_signed_url(bucket: str, key: str, minutes: int = 60) -> str:
-    if IS_DEV_ENV:
-        # In local dev, assets are served from MEDIA_DIR via /static/media
-        name = os.path.basename(key)
-        return f"/static/media/{name}"
 
-    if not _client:
-        raise RuntimeError("GCS client not initialized.")
-
-    b = _client.bucket(bucket)
-    blob = b.blob(key)
-    return blob.generate_signed_url(
-        version="v4",
-        expiration=datetime.timedelta(minutes=minutes),
-        method="GET",
-    )
-
-def delete_blob(bucket: str, key: str):
-    """Deletes a blob from GCS or the local filesystem for dev."""
-    if IS_DEV_ENV:
-        # The local implementation uses the key as the filename
-        from api.core.paths import MEDIA_DIR
-        try:
-            (MEDIA_DIR / os.path.basename(key)).unlink(missing_ok=True)
-        except Exception as e:
-            print(f"Warning: local file delete failed for {key}: {e}")
+def delete_gcs_blob(bucket_name: str, blob_name: str) -> None:
+    """Deletes a blob from a GCS bucket."""
+    client = _get_gcs_client()
+    if not client:
+        logger.warning("GCS client not available, cannot delete gs://%s/%s", bucket_name, blob_name)
         return
 
-    if not _client:
-        raise RuntimeError("GCS client not initialized.")
-
     try:
-        b = _client.bucket(bucket)
-        blob = b.blob(key)
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_name)
         blob.delete()
+        logger.info("Deleted gs://%s/%s", bucket_name, blob_name)
     except Exception as e:
-        # Log and ignore, as per the pattern in delete_media_item
-        print(f"Warning: Failed to delete GCS blob gs://{bucket}/{key}: {e}")
-
-def download_bytes(bucket: str, key: str) -> bytes:
-    """Download an object and return contents as bytes (dev/prod aware)."""
-    if IS_DEV_ENV:
-        # Read from local MEDIA_DIR mirror in dev
-        from api.core.paths import MEDIA_DIR  # type: ignore
-        path = (MEDIA_DIR / os.path.basename(key)).resolve()
-        with open(path, "rb") as f:
-            return f.read()
-    if not _client:
-        raise RuntimeError("GCS client not initialized.")
-    b = _client.bucket(bucket)
-    blob = b.blob(key)
-    return blob.download_as_bytes()
+        logger.error("Failed to delete gs://%s/%s: %s", bucket_name, blob_name, e)
+        # Do not re-raise, as the caller often wants to continue on failure

@@ -28,7 +28,7 @@ from api.models.user import User
 from api.core.database import get_session
 from api.routers.auth import get_current_user
 from infrastructure.tasks_client import enqueue_http_task
-from infrastructure.gcs import upload_bytes, upload_fileobj, delete_blob
+from infrastructure.gcs import upload_bytes, upload_fileobj, delete_gcs_blob
 
 from .schemas import MediaItemUpdate
 from .common import sanitize_name, copy_with_limit
@@ -274,8 +274,8 @@ async def upload_media_files(
                 t0 = time.time()
                 # Allow tuning via env var GCS_CHUNK_MB
                 chunk_mb_env = os.getenv("GCS_CHUNK_MB")
-                chunk_mb_val = int(chunk_mb_env) if chunk_mb_env and chunk_mb_env.isdigit() else None
-                uri = upload_fileobj(bucket_name, object_key, raw_f, size=file_size, content_type=content_type, chunk_mb=chunk_mb_val)
+                # chunk_mb_val = int(chunk_mb_env) if chunk_mb_env and chunk_mb_env.isdigit() else None
+                uri = upload_fileobj(bucket_name, object_key, raw_f, content_type=content_type)
                 dt = max(0.0001, time.time() - t0)
                 written = file_size if file_size is not None else None
                 try:
@@ -471,7 +471,7 @@ async def upload_media_files(
         try:
             for (b, k) in uploaded_objects:
                 try:
-                    delete_blob(b, k)
+                    delete_gcs_blob(b, k)
                 except Exception:
                     pass
         finally:
@@ -597,7 +597,7 @@ def delete_media_item(
             path_part = media_item.filename[5:]
             bucket_name, _, key = path_part.partition('/')
             if bucket_name and key:
-                delete_blob(bucket_name, key)
+                delete_gcs_blob(bucket_name, key)
         except Exception:
             # don't block DB delete if FS cleanup fails
             pass
