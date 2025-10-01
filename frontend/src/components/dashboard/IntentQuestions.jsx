@@ -89,7 +89,7 @@ export default function IntentQuestions({ open, onSubmit, onCancel, hide, initia
   const sfxCopy = makeCopy(
     'sfx',
     'Are there any word Sound Effects?',
-    'Answer yes if you have cue words that should drop music or SFX during assembly.',
+    'Answer yes if you have cue words that should drop music or sound effects during assembly.',
   );
 
   const Radio = ({name,label,description,detected}) => (

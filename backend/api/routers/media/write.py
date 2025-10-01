@@ -95,6 +95,7 @@ async def upload_media_files(
     - For main_content, assigns expires_at and fires async transcription task
     """
     created_items: List[MediaItem] = []
+    pending_transcriptions: list[tuple[str, str]] = []  # (filename, context)
     # Track gs:// objects created in this request so we can delete them on DB failure
     uploaded_objects: list[tuple[str, str]] = []  # (bucket, key)
     names = parse_friendly_names(friendly_names)
@@ -137,6 +138,7 @@ async def upload_media_files(
         friendly_clean = (friendly or "").strip() or Path(filename).stem
 
         if existing_watch:
+            existing_watch.filename = filename
             existing_watch.notify_email = email_target
             existing_watch.friendly_name = friendly_clean
             existing_watch.notified_at = None
@@ -378,22 +380,8 @@ async def upload_media_files(
             except Exception:
                 pass
             # Kick transcription on overwrite for main content as well (best-effort)
-            try:
-                if category == MediaCategory.main_content:
-                    logging.info(
-                        "event=upload.enqueue attempt=true (overwrite) filename=%s cfg_project=%s cfg_loc=%s cfg_queue=%s cfg_base=%s dev=%s",
-                        existing_item.filename,
-                        os.getenv("GOOGLE_CLOUD_PROJECT"), os.getenv("TASKS_LOCATION"), os.getenv("TASKS_QUEUE"), os.getenv("TASKS_URL_BASE"), _is_dev_env()
-                    )
-                    task = enqueue_http_task("/api/tasks/transcribe", {"filename": existing_item.filename})
-                    logging.info("event=upload.enqueue ok=true (overwrite) filename=%s task_name=%s", existing_item.filename, task.get("name"))
-            except Exception as enqueue_err:
-                logging.warning(
-                    "event=upload.enqueue ok=false (overwrite) filename=%s err=%s hint=%s",
-                    existing_item.filename,
-                    enqueue_err,
-                    f"Check Cloud Tasks config GOOGLE_CLOUD_PROJECT={os.getenv('GOOGLE_CLOUD_PROJECT')} TASKS_LOCATION={os.getenv('TASKS_LOCATION')} TASKS_QUEUE={os.getenv('TASKS_QUEUE')} TASKS_URL_BASE={os.getenv('TASKS_URL_BASE')} (dev={_is_dev_env()})",
-                )
+            if category == MediaCategory.main_content:
+                pending_transcriptions.append((str(existing_item.filename or ""), "overwrite"))
         else:
             # No existing item with this name. For enforced categories, block duplicates within the same request batch
             if category in ENFORCE_UNIQUE:
@@ -445,21 +433,8 @@ async def upload_media_files(
                 pass
 
             # Kick transcription (best-effort)
-            try:
-                if category == MediaCategory.main_content:
-                    logging.info("event=upload.enqueue attempt=true filename=%s cfg_project=%s cfg_loc=%s cfg_queue=%s cfg_base=%s dev=%s",
-                                 media_item.filename,
-                                 os.getenv("GOOGLE_CLOUD_PROJECT"), os.getenv("TASKS_LOCATION"), os.getenv("TASKS_QUEUE"), os.getenv("TASKS_URL_BASE"), _is_dev_env())
-                    task = enqueue_http_task("/api/tasks/transcribe", {"filename": media_item.filename})
-                    logging.info("event=upload.enqueue ok=true filename=%s task_name=%s", media_item.filename, task.get("name"))
-            except Exception as enqueue_err:
-                # background task is best-effort; never fail the upload, but do log why it's not enqueued
-                logging.warning(
-                    "event=upload.enqueue ok=false filename=%s err=%s hint=%s",
-                    media_item.filename,
-                    enqueue_err,
-                    f"Check Cloud Tasks config GOOGLE_CLOUD_PROJECT={os.getenv('GOOGLE_CLOUD_PROJECT')} TASKS_LOCATION={os.getenv('TASKS_LOCATION')} TASKS_QUEUE={os.getenv('TASKS_QUEUE')} TASKS_URL_BASE={os.getenv('TASKS_URL_BASE')} (dev={_is_dev_env()})",
-                )
+            if category == MediaCategory.main_content:
+                pending_transcriptions.append((str(media_item.filename or ""), "new"))
 
             # Structured log: upload.receive
             logging.info(
@@ -486,6 +461,38 @@ async def upload_media_files(
         raise HTTPException(status_code=500, detail="Upload failed while saving to the database. Please retry.")
     for item in created_items:
         session.refresh(item)
+
+    for filename, context in pending_transcriptions:
+        safe_filename = (filename or "").strip()
+        if not safe_filename:
+            continue
+        context_suffix = " (overwrite)" if context == "overwrite" else ""
+        try:
+            logging.info(
+                "event=upload.enqueue attempt=true%s filename=%s cfg_project=%s cfg_loc=%s cfg_queue=%s cfg_base=%s dev=%s",
+                context_suffix,
+                safe_filename,
+                os.getenv("GOOGLE_CLOUD_PROJECT"),
+                os.getenv("TASKS_LOCATION"),
+                os.getenv("TASKS_QUEUE"),
+                os.getenv("TASKS_URL_BASE"),
+                _is_dev_env(),
+            )
+            task = enqueue_http_task("/api/tasks/transcribe", {"filename": safe_filename})
+            logging.info(
+                "event=upload.enqueue ok=true%s filename=%s task_name=%s",
+                context_suffix,
+                safe_filename,
+                task.get("name"),
+            )
+        except Exception as enqueue_err:
+            logging.warning(
+                "event=upload.enqueue ok=false%s filename=%s err=%s hint=%s",
+                context_suffix,
+                safe_filename,
+                enqueue_err,
+                f"Check Cloud Tasks config GOOGLE_CLOUD_PROJECT={os.getenv('GOOGLE_CLOUD_PROJECT')} TASKS_LOCATION={os.getenv('TASKS_LOCATION')} TASKS_QUEUE={os.getenv('TASKS_QUEUE')} TASKS_URL_BASE={os.getenv('TASKS_URL_BASE')} (dev={_is_dev_env()})",
+            )
 
     return created_items
 

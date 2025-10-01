@@ -88,6 +88,51 @@ def test_main_content_upload_records_watch_without_email(session, client, monkey
 
 
 @pytest.mark.usefixtures("db_engine")
+def test_transcription_enqueued_after_watch_commit(session, client, monkeypatch):
+    user, password = _create_user(session)
+    headers = _auth_headers(client, user.email, password)
+
+    captured: dict[str, str] = {}
+
+    def capture_task(path, body):
+        filename = str(body.get("filename") or "")
+        assert path.endswith("/transcribe")
+        session.expire_all()
+        watch = session.exec(
+            select(TranscriptionWatch).where(
+                TranscriptionWatch.user_id == user.id,
+                TranscriptionWatch.filename == filename,
+                TranscriptionWatch.notified_at == None,  # noqa: E711
+            )
+        ).first()
+        assert watch is not None
+        captured["filename"] = filename
+        return {"name": "captured"}
+
+    monkeypatch.setattr(
+        "infrastructure.tasks_client.enqueue_http_task",
+        capture_task,
+    )
+    monkeypatch.setattr(
+        "backend.api.routers.media.write.enqueue_http_task",
+        capture_task,
+    )
+
+    resp = client.post(
+        "/api/media/upload/main_content",
+        data={
+            "notify_when_ready": "true",
+            "friendly_names": json.dumps(["Commit Test"]),
+        },
+        files={
+            "files": ("commit.wav", io.BytesIO(b"RIFF....WAVE"), "audio/wav"),
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    assert "filename" in captured and captured["filename"]
+
+@pytest.mark.usefixtures("db_engine")
 def test_main_content_upload_records_email_target(session, client, monkeypatch):
     user, password = _create_user(session)
     headers = _auth_headers(client, user.email, password)

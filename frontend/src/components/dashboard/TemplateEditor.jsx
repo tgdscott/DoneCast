@@ -32,6 +32,7 @@ import { createTTS } from "@/api/media";
 import { toast } from "@/hooks/use-toast";
 import VoicePicker from "@/components/VoicePicker";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/AuthContext.jsx";
 
 const AI_DEFAULT = {
@@ -650,7 +651,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
         if (!template) return null;
 
   return (
-    <div className="p-6 bg-gray-50 min-h-screen space-y-6">
+    <div className="p-6 bg-gray-50 min-h-screen">
         <Joyride
             steps={templateTourSteps}
             run={runTemplateTour}
@@ -662,7 +663,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
             styles={{ options: { zIndex: 10000 } }}
             spotlightClicks
         />
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-center mb-6">
             <Button onClick={handleBackClick} variant="ghost" className="text-gray-700"><ArrowLeft className="w-4 h-4 mr-2" />Back</Button>
             <h1 className="text-2xl font-bold text-gray-800">Template Editor</h1>
             <div className="flex items-center gap-3">
@@ -672,56 +673,8 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
             </Button>
             </div>
         </div>
-
-                <Card className="border border-slate-200 bg-slate-50" data-tour="template-quickstart">
-                    <CardHeader className="flex flex-col gap-1 pb-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex items-center gap-2 text-slate-800">
-                            <Compass className="h-5 w-5 text-primary" aria-hidden="true" />
-                            <CardTitle className="text-base">Template quickstart</CardTitle>
-                        </div>
-                        <CardDescription className="text-sm text-slate-600 sm:text-right">
-                            Three checkpoints to get from blank template to publish-ready episodes.
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-3 text-sm text-slate-700">
-                        <ol className="list-decimal space-y-1 pl-5">
-                            <li>Name the template and attach it to the show it powers.</li>
-                            <li>Add intro, content, and outro segments—drag to match your flow.</li>
-                            <li>Open Advanced options to dial in timing, music, and AI defaults.</li>
-                        </ol>
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                            <span className="text-xs text-slate-500">Prefer a tour? We’ll highlight each area for you.</span>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                    setShowAdvanced(false);
-                                    setRunTemplateTour(true);
-                                }}
-                            >
-                                Start guided tour
-                            </Button>
-                        </div>
-                    </CardContent>
-                </Card>
-
-                <Card className="shadow-sm" data-tour="template-status">
-                    <CardContent className="p-6 flex items-center justify-between">
-                        <div>
-                            <CardTitle className="text-lg">Template status</CardTitle>
-                            <CardDescription>Mark a template inactive to hide it from selection without deleting it.</CardDescription>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <span className={`text-sm px-2 py-1 rounded-full border ${template?.is_active !== false ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-700 border-gray-300'}`}>
-                                {template?.is_active !== false ? 'Active' : 'Inactive'}
-                            </span>
-                            <Button variant="outline" onClick={() => handleTemplateChange('is_active', !(template?.is_active !== false))}>
-                                {template?.is_active !== false ? 'Disable' : 'Enable'}
-                            </Button>
-                        </div>
-                    </CardContent>
-                </Card>
-
+        <div className="grid gap-6 xl:grid-cols-[2fr_1fr] xl:items-start">
+            <div className="space-y-6">
                 <Card className="shadow-sm" data-tour="template-basics"><CardContent className="p-6 space-y-6">
                         <div>
                             <Label htmlFor="template-name" className="text-sm font-medium text-gray-600">Template Name</Label>
@@ -751,36 +704,6 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                     isNewTemplate={isNewTemplate}
                     onDirtyChange={setScheduleDirty}
                 />
-
-                {/* Default AI Voice selector */}
-                <Card className="shadow-sm">
-                    <CardContent className="p-6">
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                            <div>
-                                <Label className="text-sm font-medium text-gray-600 flex items-center gap-1">Default AI Voice<HelpCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" title="Set a default voice for template AI voice prompts." /></Label>
-                                <div className="text-sm text-gray-800 mt-1">{voiceName || 'Not set'}</div>
-                            </div>
-                            <div className="mt-2 sm:mt-0">
-                                <Button variant="outline" onClick={() => setShowVoicePicker(true)}>Choose voice</Button>
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-
-                {/* Intern command voice selector */}
-                <Card className="shadow-sm">
-                    <CardContent className="p-6">
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                            <div>
-                                <Label className="text-sm font-medium text-gray-600 flex items-center gap-1">Intern Command Voice<HelpCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" title="Used when the Intern command creates narrated edits." /></Label>
-                                <div className="text-sm text-gray-800 mt-1">{internVoiceDisplay}</div>
-                            </div>
-                            <div className="mt-2 sm:mt-0">
-                                <Button variant="outline" onClick={() => setShowInternVoicePicker(true)}>Choose voice</Button>
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
 
         <Card data-tour="template-add"><CardHeader><CardTitle>Add Segments</CardTitle><CardDescription>Add the building blocks for your episode.</CardDescription></CardHeader><CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <AddSegmentButton type="intro" onClick={addSegment} />
@@ -833,8 +756,89 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
                 </Droppable>
             </DragDropContext>
         </CardContent></Card>
+            </div>
 
-        <div className="flex items-center justify-between pt-2">
+            <aside className="space-y-6 xl:sticky xl:top-24">
+                <Card className="border border-slate-200 bg-slate-50" data-tour="template-quickstart">
+                    <CardHeader className="flex flex-col gap-1 pb-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-2 text-slate-800">
+                            <Compass className="h-5 w-5 text-primary" aria-hidden="true" />
+                            <CardTitle className="text-base">Template quickstart</CardTitle>
+                        </div>
+                        <CardDescription className="text-sm text-slate-600 sm:text-right">
+                            Three checkpoints to get from blank template to publish-ready episodes.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3 text-sm text-slate-700">
+                        <ol className="list-decimal space-y-1 pl-5">
+                            <li>Name the template and attach it to the show it powers.</li>
+                            <li>Add intro, content, and outro segments—drag to match your flow.</li>
+                            <li>Open Advanced options to dial in timing, music, and AI defaults.</li>
+                        </ol>
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <span className="text-xs text-slate-500">Prefer a tour? We’ll highlight each area for you.</span>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                    setShowAdvanced(false);
+                                    setRunTemplateTour(true);
+                                }}
+                            >
+                                Start guided tour
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                <Card className="shadow-sm" data-tour="template-status">
+                    <CardContent className="p-6 flex items-center justify-between">
+                        <div>
+                            <CardTitle className="text-lg">Template status</CardTitle>
+                            <CardDescription>Mark a template inactive to hide it from selection without deleting it.</CardDescription>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <span className={`text-sm px-2 py-1 rounded-full border ${template?.is_active !== false ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-700 border-gray-300'}`}>
+                                {template?.is_active !== false ? 'Active' : 'Inactive'}
+                            </span>
+                            <Button variant="outline" onClick={() => handleTemplateChange('is_active', !(template?.is_active !== false))}>
+                                {template?.is_active !== false ? 'Disable' : 'Enable'}
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                <Card className="shadow-sm">
+                    <CardHeader>
+                        <CardTitle className="text-base">AI voice defaults</CardTitle>
+                        <CardDescription>Choose which voices power automated narration.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-5">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <Label className="text-sm font-medium text-gray-600 flex items-center gap-1">Default AI Voice<HelpCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" title="Set a default voice for template AI voice prompts." /></Label>
+                                <div className="text-sm text-gray-800 mt-1">{voiceName || 'Not set'}</div>
+                            </div>
+                            <div className="mt-2 sm:mt-0">
+                                <Button variant="outline" onClick={() => setShowVoicePicker(true)}>Choose voice</Button>
+                            </div>
+                        </div>
+                        <Separator />
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <Label className="text-sm font-medium text-gray-600 flex items-center gap-1">Intern Command Voice<HelpCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" title="Used when the Intern command creates narrated edits." /></Label>
+                                <div className="text-sm text-gray-800 mt-1">{internVoiceDisplay}</div>
+                            </div>
+                            <div className="mt-2 sm:mt-0">
+                                <Button variant="outline" onClick={() => setShowInternVoicePicker(true)}>Choose voice</Button>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+            </aside>
+        </div>
+
+        <div className="mt-10 flex items-center justify-between">
             <h2 className="text-lg font-semibold">Advanced options</h2>
             <Button variant="outline" size="sm" onClick={() => setShowAdvanced((prev) => !prev)}>
                 {showAdvanced ? 'Hide advanced' : 'Show advanced'}
