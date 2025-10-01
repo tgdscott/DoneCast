@@ -6,6 +6,20 @@ import { Checkbox } from '../ui/checkbox';
 import { AlertCircle, ArrowLeft, CheckCircle2, Loader2, Upload } from 'lucide-react';
 import { makeApi, buildApiUrl } from '@/lib/apiClient';
 import { useToast } from '@/hooks/use-toast';
+import { convertAudioFileToMp3IfBeneficial } from '@/lib/audioConversion';
+
+const formatFileSize = (bytes) => {
+  if (!Number.isFinite(bytes)) return '';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const precision = value >= 10 || unitIndex === 0 ? 0 : 1;
+  return `${value.toFixed(precision)} ${units[unitIndex]}`;
+};
 
 export default function PreUploadManager({
   token,
@@ -23,6 +37,8 @@ export default function PreUploadManager({
   const [uploadProgress, setUploadProgress] = useState(null);
   const [successMessage, setSuccessMessage] = useState('');
   const [error, setError] = useState('');
+  const [conversionNotice, setConversionNotice] = useState('');
+  const [converting, setConverting] = useState(false);
 
   const displayName = useMemo(() => {
     if (friendlyName) return friendlyName;
@@ -34,13 +50,48 @@ export default function PreUploadManager({
     }
   }, [file, friendlyName]);
 
-  const handleFileChange = (event) => {
+  const handleFileChange = async (event) => {
     const selected = event.target.files?.[0];
+    if (event.target?.value) {
+      // Allow selecting the same file again in the future
+      event.target.value = '';
+    }
     if (!selected) return;
-    setFile(selected);
+    setConverting(true);
     setFriendlyName('');
     setSuccessMessage('');
     setError('');
+    setConversionNotice('');
+    try {
+      const result = await convertAudioFileToMp3IfBeneficial(selected);
+      if (result?.converted) {
+        setConversionNotice(
+          `Converted to MP3 for upload (${formatFileSize(result.originalSize)} → ${formatFileSize(result.convertedSize)}).`,
+        );
+      } else if (result?.reason === 'already-mp3') {
+        setConversionNotice('Selected file is already an MP3 and will be uploaded as-is.');
+      } else if (result?.reason === 'not-beneficial' && result?.convertedSize) {
+        setConversionNotice(
+          `Kept original format because conversion only saved ${formatFileSize(
+            Math.max(0, (result.originalSize || 0) - (result.convertedSize || 0)),
+          )}.`,
+        );
+      } else if (result?.reason === 'no-audio-context') {
+        setConversionNotice('Browser does not support in-browser conversion; uploading the original file instead.');
+      } else if (result?.reason === 'conversion-error') {
+        setError('Unable to convert this audio file. Please try a different file.');
+        setFile(null);
+        setConverting(false);
+        return;
+      }
+      setFile(result?.file || selected);
+    } catch (conversionError) {
+      console.error('Failed to prepare audio for upload', conversionError);
+      setError('We were unable to prepare that audio file. Please try again.');
+      setFile(null);
+    } finally {
+      setConverting(false);
+    }
   };
 
   const handleSubmit = async (event) => {
@@ -155,10 +206,28 @@ export default function PreUploadManager({
               <label htmlFor="preupload-file" className="inline-flex flex-col items-center gap-3 cursor-pointer">
                 <Upload className="w-10 h-10 text-blue-500" />
                 <span className="text-sm text-slate-600">
-                  {hasFile ? file.name : 'Drag & drop or click to choose an audio file'}
+                  {converting
+                    ? 'Preparing audio…'
+                    : hasFile
+                    ? file.name
+                    : 'Drag & drop or click to choose an audio file'}
                 </span>
               </label>
             </div>
+
+            {converting && (
+              <div className="flex items-center gap-2 text-sm text-slate-600" role="status">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Converting to MP3 for faster upload…</span>
+              </div>
+            )}
+
+            {conversionNotice && !converting && (
+              <div className="flex items-start gap-2 text-sm text-slate-600">
+                <CheckCircle2 className="w-4 h-4 mt-0.5 text-emerald-600" />
+                <span>{conversionNotice}</span>
+              </div>
+            )}
 
             {hasFile && (
               <div className="space-y-4">
@@ -209,9 +278,13 @@ export default function PreUploadManager({
               <Button type="button" variant="ghost" onClick={onDone}>
                 Return to dashboard
               </Button>
-              <Button type="submit" disabled={!hasFile}>
-                <Upload className="w-4 h-4 mr-2" />
-                Upload and return
+              <Button type="submit" disabled={!hasFile || converting}>
+                {converting ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Upload className="w-4 h-4 mr-2" />
+                )}
+                {converting ? 'Preparing…' : 'Upload and return'}
               </Button>
             </div>
           </form>
