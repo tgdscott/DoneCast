@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi import APIRouter, UploadFile, HTTPException, Depends, Request
 from fastapi import status
 
+
 from api.routers.auth import get_current_user
 from api.models.user import User
 from api.core.paths import MEDIA_DIR
@@ -17,12 +18,14 @@ ALLOWED_CONTENT_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/jpg":
 @router.post("/media/upload/cover_art", status_code=status.HTTP_201_CREATED)
 async def upload_cover_art(
     request: Request,
+
     current_user: User = Depends(get_current_user),  # noqa: ARG001 (ensures auth)
 ):
     """Accept a cover image upload and persist it under media_uploads/ returning the stored filename.
 
     Frontend expects one of: filename | path | stored_as. We return all for flexibility.
     """
+
     form = await request.form()
 
     def _coerce_upload(value):

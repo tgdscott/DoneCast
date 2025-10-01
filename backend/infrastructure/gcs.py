@@ -1,5 +1,6 @@
 import logging
 import os
+import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import IO, Optional, Union
@@ -7,9 +8,11 @@ from typing import IO, Optional, Union
 try:
     from google.cloud import storage
     from google.auth.exceptions import DefaultCredentialsError
+    from google.api_core import exceptions as gcs_exceptions
 except ImportError:
     storage = None
     DefaultCredentialsError = None
+    gcs_exceptions = None
 
 logger = logging.getLogger(__name__)
 
@@ -78,40 +81,93 @@ def get_signed_url(bucket_name: str, key: str, expiration: int = 3600) -> Option
         raise
 
 
+def _is_dev_env() -> bool:
+    val = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower()
+    return val in {"dev", "development", "local", "test", "testing"}
+
+
+def _write_local_bytes(bucket_name: str, key: str, data: bytes) -> str:
+    local_path = Path(os.getenv("MEDIA_DIR", "media")) / key
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    local_path.write_bytes(data)
+    logger.info(f"DEV: Wrote GCS upload for gs://{bucket_name}/{key} to {local_path}")
+    return str(local_path)
+
+
+def _write_local_stream(bucket_name: str, key: str, fileobj: IO) -> str:
+    local_path = Path(os.getenv("MEDIA_DIR", "media")) / key
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(local_path, "wb") as f:
+        try:
+            if hasattr(fileobj, "seek"):
+                fileobj.seek(0)
+        except Exception:
+            pass
+        shutil.copyfileobj(fileobj, f)
+    try:
+        if hasattr(fileobj, "seek"):
+            fileobj.seek(0)
+    except Exception:
+        pass
+    logger.info(f"DEV: Wrote GCS upload for gs://{bucket_name}/{key} to {local_path}")
+    return str(local_path)
+
+
+def _should_fallback_to_local(exc: Exception) -> bool:
+    if not _is_dev_env():
+        return False
+    if gcs_exceptions and isinstance(exc, gcs_exceptions.NotFound):
+        return True
+    message = str(exc).lower()
+    return "bucket does not exist" in message or "notfound" in message
+
+
 def upload_fileobj(bucket_name: str, key: str, fileobj: IO, content_type: Optional[str] = None, **kwargs) -> str:
     """Uploads a file-like object to GCS. Returns gs:// URI."""
     client = _get_gcs_client()
     if not client:
-        # Dev/local fallback: write to a local media directory
-        local_path = Path(os.getenv("MEDIA_DIR", "media")) / key
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(local_path, "wb") as f:
-            f.write(fileobj.read())
-        logger.info(f"DEV: Wrote GCS upload for gs://{bucket_name}/{key} to {local_path}") # type: ignore
-        return str(local_path)
+        return _write_local_stream(bucket_name, key, fileobj)
 
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(key)
-    blob.upload_from_file(fileobj, content_type=content_type)
-    logger.info(f"Uploaded to gs://{bucket_name}/{key}")
-    return f"gs://{bucket_name}/{key}"
+    try:
+        blob.upload_from_file(fileobj, content_type=content_type)
+        logger.info(f"Uploaded to gs://{bucket_name}/{key}")
+        return f"gs://{bucket_name}/{key}"
+    except Exception as exc:
+        if _should_fallback_to_local(exc):
+            logger.warning(
+                "GCS upload failed for gs://%s/%s in dev environment; falling back to local storage: %s",
+                bucket_name,
+                key,
+                exc,
+            )
+            return _write_local_stream(bucket_name, key, fileobj)
+        raise
 
 
 def upload_bytes(bucket_name: str, key: str, data: bytes, content_type: Optional[str] = None) -> str:
     """Uploads bytes to GCS. Returns gs:// URI."""
     client = _get_gcs_client()
     if not client:
-        local_path = Path(os.getenv("MEDIA_DIR", "media")) / key
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        local_path.write_bytes(data)
-        logger.info(f"DEV: Wrote GCS upload for gs://{bucket_name}/{key} to {local_path}")
-        return str(local_path)
+        return _write_local_bytes(bucket_name, key, data)
 
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(key)
-    blob.upload_from_string(data, content_type=content_type)
-    logger.info(f"Uploaded to gs://{bucket_name}/{key}")
-    return f"gs://{bucket_name}/{key}"
+    try:
+        blob.upload_from_string(data, content_type=content_type)
+        logger.info(f"Uploaded to gs://{bucket_name}/{key}")
+        return f"gs://{bucket_name}/{key}"
+    except Exception as exc:
+        if _should_fallback_to_local(exc):
+            logger.warning(
+                "GCS upload failed for gs://%s/%s in dev environment; falling back to local storage: %s",
+                bucket_name,
+                key,
+                exc,
+            )
+            return _write_local_bytes(bucket_name, key, data)
+        raise
 
 
 def download_gcs_bytes(bucket_name: str, key: str) -> Optional[bytes]:
