@@ -63,6 +63,7 @@ export default function StepUploadAudio({
 
   const formatDurationSafe = typeof formatDuration === 'function' ? formatDuration : () => null;
   const parseNumber = (value) => {
+    if (value === null || value === undefined || value === '') return null;
     const num = Number(value);
     return Number.isFinite(num) ? num : null;
   };
@@ -268,7 +269,7 @@ export default function StepUploadAudio({
                   <p>Uploaded audio length <strong>{audioDurationText}</strong>.</p>
                 )}
                 {requiredMinutesText && (
-                  <p>Requires <strong>{requiredMinutesText}</strong> of processing time.</p>
+                  <p>Requires approximately <strong>{requiredMinutesText}</strong> of processing time.</p>
                 )}
                 {remainingMinutesText && (
                   <p>Your plan has <strong>{remainingMinutesText}</strong> remaining.</p>
