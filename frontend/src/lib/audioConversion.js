@@ -193,7 +193,7 @@ const isLikelyWavFile = (file, arrayBuffer) => {
   }
 };
 
-const decodePcmSample = (view, offset, bytesPerSample, audioFormat) => {
+const decodePcmSample = (view, offset, bytesPerSample, audioFormat, validBitsPerSample) => {
   if (audioFormat === 3) {
     // IEEE float
     if (bytesPerSample === 4) {
@@ -205,12 +205,23 @@ const decodePcmSample = (view, offset, bytesPerSample, audioFormat) => {
     throw new Error(`Unsupported float PCM bytes per sample: ${bytesPerSample}`);
   }
 
+  const containerBits = bytesPerSample * 8;
+  const effectiveBits = Math.max(
+    1,
+    Math.min(containerBits, Number.isFinite(validBitsPerSample) && validBitsPerSample > 0 ? validBitsPerSample : containerBits)
+  );
+
   switch (bytesPerSample) {
     case 1: {
       return (view.getUint8(offset) - 128) / 128;
     }
     case 2: {
-      return view.getInt16(offset, true) / 0x8000;
+      let value = view.getInt16(offset, true);
+      const shift = containerBits - effectiveBits;
+      if (shift > 0) {
+        value >>= shift;
+      }
+      return value / (2 ** (effectiveBits - 1));
     }
     case 3: {
       const b0 = view.getUint8(offset);
@@ -220,10 +231,19 @@ const decodePcmSample = (view, offset, bytesPerSample, audioFormat) => {
       if (value & 0x800000) {
         value |= 0xff000000;
       }
-      return value / 0x800000;
+      const shift = containerBits - effectiveBits;
+      if (shift > 0) {
+        value >>= shift;
+      }
+      return value / (2 ** (effectiveBits - 1));
     }
     case 4: {
-      return view.getInt32(offset, true) / 0x80000000;
+      let value = view.getInt32(offset, true);
+      const shift = containerBits - effectiveBits;
+      if (shift > 0) {
+        value >>= shift;
+      }
+      return value / (2 ** (effectiveBits - 1));
     }
     default:
       throw new Error(`Unsupported PCM bytes per sample: ${bytesPerSample}`);
@@ -251,9 +271,9 @@ const decodeWavHeader = (arrayBuffer) => {
       const sampleRate = view.getUint32(chunkDataOffset + 4, true);
       const byteRate = view.getUint32(chunkDataOffset + 8, true);
       const blockAlign = view.getUint16(chunkDataOffset + 12, true);
-      const bitsPerSample = view.getUint16(chunkDataOffset + 14, true);
+      const containerBitsPerSample = view.getUint16(chunkDataOffset + 14, true);
       let effectiveFormat = audioFormat;
-      let effectiveBitsPerSample = bitsPerSample;
+      let validBitsPerSample = null;
 
       if (chunkSize >= 18) {
         const extensionSize = view.getUint16(chunkDataOffset + 16, true);
@@ -263,7 +283,7 @@ const decodeWavHeader = (arrayBuffer) => {
           try {
             const validBits = view.getUint16(chunkDataOffset + 18, true);
             if (validBits) {
-              effectiveBitsPerSample = validBits;
+              validBitsPerSample = validBits;
             }
           } catch {
             /* no-op */
@@ -287,7 +307,8 @@ const decodeWavHeader = (arrayBuffer) => {
         sampleRate,
         byteRate,
         blockAlign,
-        bitsPerSample: effectiveBitsPerSample,
+        bitsPerSample: containerBitsPerSample,
+        validBitsPerSample: validBitsPerSample ?? containerBitsPerSample,
       };
     } else if (chunkId === 'data') {
       data = {
@@ -303,7 +324,7 @@ const decodeWavHeader = (arrayBuffer) => {
     throw new Error('Incomplete WAV file');
   }
 
-  const { audioFormat, numberOfChannels, sampleRate, blockAlign, bitsPerSample } = fmt;
+  const { audioFormat, numberOfChannels, sampleRate, blockAlign, bitsPerSample, validBitsPerSample } = fmt;
   if (!numberOfChannels || !sampleRate || !bitsPerSample) {
     throw new Error('Unsupported WAV metadata');
   }
@@ -327,6 +348,7 @@ const decodeWavHeader = (arrayBuffer) => {
     sampleRate,
     blockAlign,
     bitsPerSample,
+    validBitsPerSample,
     bytesPerSample,
     dataOffset: data.offset,
     dataSize: data.size,
@@ -413,6 +435,7 @@ const convertWavPcmToMp3 = (arrayBuffer, opts, originalFile) => {
     sampleRate,
     blockAlign,
     bytesPerSample,
+    validBitsPerSample,
     dataOffset,
     dataSize,
   } = header;
@@ -452,7 +475,13 @@ const convertWavPcmToMp3 = (arrayBuffer, opts, originalFile) => {
         let sum = 0;
         for (let channelIndex = 0; channelIndex < numberOfChannels; channelIndex += 1) {
           const sampleOffset = frameOffset + channelIndex * bytesPerSample;
-          const pcm = decodePcmSample(view, sampleOffset, bytesPerSample, audioFormat);
+          const pcm = decodePcmSample(
+            view,
+            sampleOffset,
+            bytesPerSample,
+            audioFormat,
+            validBitsPerSample
+          );
           sum += pcm;
         }
         aggregated = [sum / numberOfChannels];
@@ -463,7 +492,13 @@ const convertWavPcmToMp3 = (arrayBuffer, opts, originalFile) => {
         let countRight = 0;
         for (let channelIndex = 0; channelIndex < numberOfChannels; channelIndex += 1) {
           const sampleOffset = frameOffset + channelIndex * bytesPerSample;
-          const pcm = decodePcmSample(view, sampleOffset, bytesPerSample, audioFormat);
+          const pcm = decodePcmSample(
+            view,
+            sampleOffset,
+            bytesPerSample,
+            audioFormat,
+            validBitsPerSample
+          );
           if (channelIndex % 2 === 0) {
             sumLeft += pcm;
             countLeft += 1;
@@ -521,6 +556,11 @@ const convertWavPcmToMp3 = (arrayBuffer, opts, originalFile) => {
   }
 
   return finalizeMp3Encoding(mp3Chunks, opts, originalFile);
+};
+
+export const wavInternals = {
+  decodeWavHeader,
+  decodePcmSample,
 };
 
 export async function convertAudioFileToMp3IfBeneficial(file, options = {}) {
