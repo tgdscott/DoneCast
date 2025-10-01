@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -32,13 +33,61 @@ class MediaContext:
     search_dirs: list[Path]
 
 
+def _ensure_media_dir_copy(path: Path) -> Path:
+    """Copy *path* into ``MEDIA_DIR`` if needed and return the persistent path."""
+
+    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+
+    try:
+        resolved = path.resolve()
+    except Exception:
+        resolved = path
+
+    if not resolved.exists() or resolved.is_dir():
+        return resolved
+
+    dest = MEDIA_DIR / resolved.name
+
+    try:
+        if dest.exists():
+            try:
+                if resolved.samefile(dest):
+                    return dest
+            except Exception:
+                if dest.resolve() == resolved.resolve():
+                    return dest
+
+            try:
+                src_stat = resolved.stat()
+                dst_stat = dest.stat()
+                if (
+                    src_stat.st_size == dst_stat.st_size
+                    and src_stat.st_mtime <= dst_stat.st_mtime
+                ):
+                    return dest
+            except Exception:
+                return dest
+
+        tmp_dest = dest.with_suffix(dest.suffix + ".tmp")
+        try:
+            if tmp_dest.exists():
+                tmp_dest.unlink()
+        except Exception:
+            pass
+        shutil.copy2(resolved, tmp_dest)
+        tmp_dest.replace(dest)
+        return dest
+    except Exception:
+        return resolved
+
+
 def _resolve_media_file(name: str) -> Optional[Path]:
     """Resolve a media filename to a local path."""
 
     try:
         path = Path(str(name))
         if path.is_absolute() and path.exists():
-            return path
+            return _ensure_media_dir_copy(path)
     except Exception:
         pass
 
@@ -56,7 +105,7 @@ def _resolve_media_file(name: str) -> Optional[Path]:
                 client = storage.Client()
                 blob = client.bucket(bucket_name).blob(key)
                 blob.download_to_filename(str(destination))
-                return destination
+                return _ensure_media_dir_copy(destination)
             except Exception:
                 pass
     except Exception:
@@ -75,6 +124,27 @@ def _resolve_media_file(name: str) -> Optional[Path]:
         MEDIA_DIR / "media_uploads" / base,
     ]
 
+    # To support sanitized filenames (e.g., whitespace/characters replaced) and
+    # different casing on case-insensitive file systems, collect alternative
+    # basenames that may exist on disk even if the stored reference does not
+    # match exactly.
+    alt_basenames: list[str] = []
+    try:
+        from api.services.audio.common import sanitize_filename  # lazy import
+
+        sanitized = sanitize_filename(base)
+        if sanitized and sanitized not in {base, base.lower()}:
+            alt_basenames.append(sanitized)
+    except Exception:
+        pass
+
+    try:
+        lower = base.lower()
+        if lower != base:
+            alt_basenames.append(lower)
+    except Exception:
+        pass
+
     try:
         cwd_media = Path.cwd() / "media_uploads" / base
         candidates.append(cwd_media)
@@ -88,7 +158,28 @@ def _resolve_media_file(name: str) -> Optional[Path]:
                 continue
             seen.add(candidate)
             if candidate.exists():
-                return candidate
+                return _ensure_media_dir_copy(candidate)
+            # Try alternative basenames in the same directory when the exact
+            # name isn't present.
+            parent = candidate.parent
+            for alt in alt_basenames:
+                alt_candidate = parent / alt
+                if alt_candidate in seen:
+                    continue
+                seen.add(alt_candidate)
+                if alt_candidate.exists():
+                    return _ensure_media_dir_copy(alt_candidate)
+            # Finally, perform a case-insensitive match by scanning the
+            # directory (bounded to the immediate directory to avoid costly
+            # recursion) to support Windows paths that may differ only by
+            # casing or sanitized characters introduced during upload.
+            try:
+                if parent.exists():
+                    for child in parent.iterdir():
+                        if child.name.lower() == Path(base).name.lower():
+                            return _ensure_media_dir_copy(child)
+            except Exception:
+                continue
         except Exception:
             continue
     return None
@@ -290,6 +381,19 @@ def resolve_media_context(
     source_audio_path = _resolve_media_file(base_audio_name) or (
         PROJECT_ROOT / "media_uploads" / Path(str(base_audio_name)).name
     )
+
+    try:
+        if source_audio_path and Path(str(source_audio_path)).exists():
+            promoted = _ensure_media_dir_copy(Path(str(source_audio_path)))
+            if promoted and promoted.exists():
+                source_audio_path = promoted
+                base_audio_name = promoted.name
+                if getattr(episode, "working_audio_name", None) != promoted.name:
+                    episode.working_audio_name = promoted.name
+                    session.add(episode)
+                    session.commit()
+    except Exception:
+        session.rollback()
 
     try:
         if (not source_audio_path) or (not Path(str(source_audio_path)).exists()):
