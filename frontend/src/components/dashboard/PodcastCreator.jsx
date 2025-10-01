@@ -128,6 +128,12 @@ export default function PodcastCreator({
     usage,
     minutesNearCap,
     minutesRemaining,
+    minutesPrecheck,
+    minutesPrecheckPending,
+    minutesPrecheckError,
+    minutesBlocking,
+    minutesRequiredPrecheck,
+    minutesRemainingPrecheck,
     minutesDialog,
     setMinutesDialog,
     activeSegment,
@@ -244,6 +250,9 @@ export default function PodcastCreator({
     return parts.join(' ');
   };
 
+  const minutesBlockingMessage = minutesPrecheck?.detail?.message
+    || (minutesBlocking ? 'Not enough processing minutes remain to assemble this episode.' : '');
+
   const minutesDialogDuration = minutesDialog?.durationSeconds != null
     ? formatDuration(minutesDialog.durationSeconds)
     : (minutesDialog?.requiredMinutes ? formatDuration(minutesDialog.requiredMinutes * 60) : null);
@@ -293,11 +302,20 @@ export default function PodcastCreator({
               onNext={() => setCurrentStep(3)}
               onRefresh={onRefreshPreuploaded}
               intents={intents}
-              pendingIntentLabels={pendingIntentLabels}
-              onIntentSubmit={handleIntentSubmit}
-              onEditAutomations={() => setShowIntentQuestions(true)}
-              onDeleteItem={handleDeletePreuploaded}
-            />
+            pendingIntentLabels={pendingIntentLabels}
+            onIntentSubmit={handleIntentSubmit}
+            onEditAutomations={() => setShowIntentQuestions(true)}
+            onDeleteItem={handleDeletePreuploaded}
+            minutesPrecheck={minutesPrecheck}
+            minutesPrecheckPending={minutesPrecheckPending}
+            minutesPrecheckError={minutesPrecheckError}
+            minutesBlocking={minutesBlocking}
+            minutesBlockingMessage={minutesBlockingMessage}
+            minutesRequired={minutesRequiredPrecheck}
+            minutesRemaining={minutesRemainingPrecheck}
+            formatDuration={formatDuration}
+            audioDurationSec={audioDurationSec}
+          />
           );
         }
         return (
@@ -316,6 +334,15 @@ export default function PodcastCreator({
             pendingIntentLabels={pendingIntentLabels}
             intents={intents}
             intentVisibility={intentVisibility}
+            minutesPrecheck={minutesPrecheck}
+            minutesPrecheckPending={minutesPrecheckPending}
+            minutesPrecheckError={minutesPrecheckError}
+            minutesBlocking={minutesBlocking}
+            minutesBlockingMessage={minutesBlockingMessage}
+            minutesRequired={minutesRequiredPrecheck}
+            minutesRemaining={minutesRemainingPrecheck}
+            formatDuration={formatDuration}
+            audioDurationSec={audioDurationSec}
           />
         );
       case 3:
@@ -390,6 +417,15 @@ export default function PodcastCreator({
             onPublishVisibilityChange={setPublishVisibility}
             onScheduleDateChange={setScheduleDate}
             onScheduleTimeChange={setScheduleTime}
+            minutesPrecheck={minutesPrecheck}
+            minutesPrecheckPending={minutesPrecheckPending}
+            minutesPrecheckError={minutesPrecheckError}
+            minutesBlocking={minutesBlocking}
+            minutesBlockingMessage={minutesBlockingMessage}
+            minutesRequired={minutesRequiredPrecheck}
+            minutesRemaining={minutesRemainingPrecheck}
+            formatDuration={formatDuration}
+            audioDurationSec={audioDurationSec}
           />
         );
       case 6:
