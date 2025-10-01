@@ -350,6 +350,9 @@ async def upload_media_files(
 
             uri, written = await _upload_to(target_bucket, target_key)
 
+            if uri and uri != existing_item.filename:
+                existing_item.filename = uri
+
             # Normalize filename to whatever form was already stored (do not force gs:// if legacy value)
             existing_item.content_type = (uf.content_type or None)
             try:
