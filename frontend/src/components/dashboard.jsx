@@ -445,9 +445,9 @@ export default function PodcastPlusDashboard() {
             errorMessage={preuploadError || ''}
             onRetry={() => { try { refreshPreuploads(); } catch {} }}
             onBack={handleBackToDashboard}
-            onChooseUpload={() => {
+            onChooseRecord={() => {
               setCreatorMode('standard');
-              setCurrentView('preuploadUpload');
+              setCurrentView('recorder');
             }}
             onChooseLibrary={async () => {
               setCreatorMode('preuploaded');
