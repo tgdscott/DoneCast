@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import Joyride, { EVENTS, STATUS } from "react-joyride";
 import { makeApi } from "@/lib/apiClient";
+import { formatDisplayName, isUuidLike } from "@/lib/displayNames";
 import { createTTS } from "@/api/media";
 import { toast } from "@/hooks/use-toast";
 import VoicePicker from "@/components/VoicePicker";
@@ -208,8 +209,14 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
             try {
                 const api = makeApi(token);
                 const v = await api.get(`/api/elevenlabs/voice/${encodeURIComponent(voiceId)}/resolve`);
-                const dn = v?.common_name || v?.name || null;
-                if (!cancelled) setVoiceName(dn);
+                const rawName = v?.common_name || v?.name || null;
+                const formatted = formatDisplayName(rawName, { fallback: '' });
+                if (!cancelled) {
+                    const fallbackName = voiceId === 'default'
+                        ? 'Default voice'
+                        : (formatDisplayName(voiceId, { fallback: '' }) || null);
+                    setVoiceName(formatted || fallbackName);
+                }
             } catch (_) { /* ignore */ }
         })();
         return () => { cancelled = true; };
@@ -222,8 +229,14 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
             try {
                 const api = makeApi(token);
                 const v = await api.get(`/api/elevenlabs/voice/${encodeURIComponent(internVoiceId)}/resolve`);
-                const dn = v?.common_name || v?.name || null;
-                if (!cancelled) setInternVoiceName(dn);
+                const rawName = v?.common_name || v?.name || null;
+                const formatted = formatDisplayName(rawName, { fallback: '' });
+                if (!cancelled) {
+                    const fallbackName = internVoiceId === 'default'
+                        ? 'Default voice'
+                        : (formatDisplayName(internVoiceId, { fallback: '' }) || null);
+                    setInternVoiceName(formatted || fallbackName);
+                }
             } catch (_) { /* ignore */ }
         })();
         return () => { cancelled = true; };
@@ -580,9 +593,23 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     // IMPORTANT: Hooks (useMemo/useCallback) must run on every render. We compute them
     // before any conditional returns so the hook order is stable across renders.
     const hasContentSegment = template?.segments?.some(s => s.segment_type === 'content') ?? false;
-    const internVoiceDisplay = internVoiceName || (internVoiceId
-        ? internVoiceId
-        : (voiceName || voiceId ? `Using default: ${voiceName || voiceId}` : 'Not set (uses default AI voice)'));
+    const resolvedInternVoiceName = internVoiceName && !isUuidLike(internVoiceName)
+        ? internVoiceName
+        : null;
+    const resolvedDefaultVoiceName = voiceName && !isUuidLike(voiceName)
+        ? voiceName
+        : (voiceId ? (formatDisplayName(voiceId, { fallback: '' }) || null) : null);
+    const defaultVoiceDisplay = resolvedDefaultVoiceName
+        ? `Using default: ${resolvedDefaultVoiceName}`
+        : (voiceId
+            ? `Using default: ${formatDisplayName(voiceId, { fallback: 'AI voice' }) || 'AI voice'}`
+            : 'Not set (uses default AI voice)');
+    const internVoiceDisplay = resolvedInternVoiceName
+        || (internVoiceId
+            ? (internVoiceId === 'default'
+                ? 'Default voice'
+                : (formatDisplayName(internVoiceId, { fallback: 'Custom voice' }) || 'Custom voice'))
+            : defaultVoiceDisplay);
 
         // removed duplicate redeclaration of templateTourSteps (defined earlier above)
 
@@ -999,7 +1026,7 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
                                     <SelectContent>
                                         {filesForType.map(mf => (
                                             <SelectItem key={mf.id} value={mf.filename}>
-                                                {mf.friendly_name || mf.filename.split('_').slice(1).join('_')}
+                                                {formatDisplayName(mf, { fallback: mf.friendly_name || 'Audio clip' }) || 'Audio clip'}
                                             </SelectItem>
                                         ))}
                                     </SelectContent>
@@ -1068,7 +1095,7 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
                                 <SelectContent>
                                     {filesForType.map(mf => (
                                         <SelectItem key={mf.id} value={mf.filename}>
-                                            {mf.friendly_name || mf.filename.split('_').slice(1).join('_')}
+                                            {formatDisplayName(mf, { fallback: mf.friendly_name || 'Audio clip' }) || 'Audio clip'}
                                         </SelectItem>
                                     ))}
                                 </SelectContent>

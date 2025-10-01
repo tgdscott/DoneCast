@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import VoicePicker from "@/components/VoicePicker";
 import { makeApi } from "@/lib/apiClient";
+import { formatDisplayName } from "@/lib/displayNames";
 import { toast } from "@/hooks/use-toast";
 import { GripVertical, HelpCircle, Loader2, Mic, Trash2, Upload } from "lucide-react";
 import { segmentIcons, segmentIconColors, sourceIcons, sourceIconColors } from "./constants";
@@ -237,7 +238,7 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
                                     <SelectContent>
                                         {filesForType.map(mf => (
                                             <SelectItem key={mf.id} value={mf.filename}>
-                                                {mf.friendly_name || mf.filename.split('_').slice(1).join('_')}
+                                                {formatDisplayName(mf, { fallback: mf.friendly_name || 'Audio clip' }) || 'Audio clip'}
                                             </SelectItem>
                                         ))}
                                     </SelectContent>
@@ -306,7 +307,7 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
                                 <SelectContent>
                                     {filesForType.map(mf => (
                                         <SelectItem key={mf.id} value={mf.filename}>
-                                            {mf.friendly_name || mf.filename.split('_').slice(1).join('_')}
+                                            {formatDisplayName(mf, { fallback: mf.friendly_name || 'Audio clip' }) || 'Audio clip'}
                                         </SelectItem>
                                     ))}
                                 </SelectContent>

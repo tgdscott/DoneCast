@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { makeApi } from '@/lib/apiClient';
+import { formatDisplayName, isUuidLike } from '@/lib/displayNames';
 
 export default function PodcastCreator({
   onBack,
@@ -128,6 +129,12 @@ export default function PodcastCreator({
     usage,
     minutesNearCap,
     minutesRemaining,
+    minutesPrecheck,
+    minutesPrecheckPending,
+    minutesPrecheckError,
+    minutesBlocking,
+    minutesRequiredPrecheck,
+    minutesRemainingPrecheck,
     minutesDialog,
     setMinutesDialog,
     activeSegment,
@@ -167,10 +174,15 @@ export default function PodcastCreator({
   );
 
   const uploadedAudioLabel = React.useMemo(() => {
-    if (uploadedFile && uploadedFile.name) return uploadedFile.name;
-    if (selectedPreuploadItem?.friendly_name) return selectedPreuploadItem.friendly_name;
-    if (selectedPreuploadItem?.filename) return selectedPreuploadItem.filename;
-    if (uploadedFilename) return uploadedFilename;
+    if (uploadedFile) {
+      return formatDisplayName(uploadedFile, { fallback: uploadedFile.name || '' });
+    }
+    if (selectedPreuploadItem) {
+      return formatDisplayName(selectedPreuploadItem, { fallback: '' });
+    }
+    if (uploadedFilename) {
+      return formatDisplayName(uploadedFilename, { fallback: '' });
+    }
     return '';
   }, [uploadedFile, selectedPreuploadItem, uploadedFilename]);
 
@@ -188,9 +200,10 @@ export default function PodcastCreator({
     try {
       const api = makeApi(token);
       await api.del(`/api/media/${item.id}`);
+      const deletedName = formatDisplayName(item, { fallback: 'audio file' }) || 'audio file';
       toast({
         title: 'Upload deleted',
-        description: `${item.friendly_name || item.filename} was removed from your library.`,
+        description: `${deletedName} was removed from your library.`,
       });
 
       try {
@@ -218,7 +231,13 @@ export default function PodcastCreator({
   };
 
   const internVoiceId = typeof resolveInternVoiceId === 'function' ? resolveInternVoiceId() : null;
-  const internVoiceName = internVoiceId ? (voiceNameById?.[internVoiceId] || internVoiceId) : null;
+  const internVoiceName = React.useMemo(() => {
+    if (!internVoiceId) return null;
+    if (internVoiceId === 'default') return 'Default voice';
+    const mapped = voiceNameById?.[internVoiceId];
+    if (mapped && !isUuidLike(mapped)) return mapped;
+    return formatDisplayName(internVoiceId, { fallback: 'Custom voice' }) || 'Custom voice';
+  }, [internVoiceId, voiceNameById]);
 
   const baseIntentHide = {
     flubber: false,
@@ -243,6 +262,9 @@ export default function PodcastCreator({
     parts.push(`${secs} sec${secs === 1 ? '' : 's'}`);
     return parts.join(' ');
   };
+
+  const minutesBlockingMessage = minutesPrecheck?.detail?.message
+    || (minutesBlocking ? 'Not enough processing minutes remain to assemble this episode.' : '');
 
   const minutesDialogDuration = minutesDialog?.durationSeconds != null
     ? formatDuration(minutesDialog.durationSeconds)
@@ -293,12 +315,20 @@ export default function PodcastCreator({
               onNext={() => setCurrentStep(3)}
               onRefresh={onRefreshPreuploaded}
               intents={intents}
-              pendingIntentLabels={pendingIntentLabels}
-              onIntentSubmit={handleIntentSubmit}
-              onEditAutomations={() => setShowIntentQuestions(true)}
-              onDeleteItem={handleDeletePreuploaded}
-              onUpload={onRequestUpload}
-            />
+            pendingIntentLabels={pendingIntentLabels}
+            onIntentSubmit={handleIntentSubmit}
+            onEditAutomations={() => setShowIntentQuestions(true)}
+            onDeleteItem={handleDeletePreuploaded}
+            minutesPrecheck={minutesPrecheck}
+            minutesPrecheckPending={minutesPrecheckPending}
+            minutesPrecheckError={minutesPrecheckError}
+            minutesBlocking={minutesBlocking}
+            minutesBlockingMessage={minutesBlockingMessage}
+            minutesRequired={minutesRequiredPrecheck}
+            minutesRemaining={minutesRemainingPrecheck}
+            formatDuration={formatDuration}
+            audioDurationSec={audioDurationSec}
+          />
           );
         }
         return (
@@ -317,6 +347,15 @@ export default function PodcastCreator({
             pendingIntentLabels={pendingIntentLabels}
             intents={intents}
             intentVisibility={intentVisibility}
+            minutesPrecheck={minutesPrecheck}
+            minutesPrecheckPending={minutesPrecheckPending}
+            minutesPrecheckError={minutesPrecheckError}
+            minutesBlocking={minutesBlocking}
+            minutesBlockingMessage={minutesBlockingMessage}
+            minutesRequired={minutesRequiredPrecheck}
+            minutesRemaining={minutesRemainingPrecheck}
+            formatDuration={formatDuration}
+            audioDurationSec={audioDurationSec}
           />
         );
       case 3:
@@ -391,6 +430,15 @@ export default function PodcastCreator({
             onPublishVisibilityChange={setPublishVisibility}
             onScheduleDateChange={setScheduleDate}
             onScheduleTimeChange={setScheduleTime}
+            minutesPrecheck={minutesPrecheck}
+            minutesPrecheckPending={minutesPrecheckPending}
+            minutesPrecheckError={minutesPrecheckError}
+            minutesBlocking={minutesBlocking}
+            minutesBlockingMessage={minutesBlockingMessage}
+            minutesRequired={minutesRequiredPrecheck}
+            minutesRemaining={minutesRemainingPrecheck}
+            formatDuration={formatDuration}
+            audioDurationSec={audioDurationSec}
           />
         );
       case 6:

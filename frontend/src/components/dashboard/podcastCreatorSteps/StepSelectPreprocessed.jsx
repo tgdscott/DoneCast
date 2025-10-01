@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
+import { formatDisplayName } from '@/lib/displayNames';
 
 import { AlertTriangle, FileAudio, Loader2, RefreshCcw, Sparkles, Trash2, Upload } from 'lucide-react';
 
@@ -15,7 +16,7 @@ const formatDate = (iso) => {
   }
 };
 
-const formatDuration = (seconds) => {
+const formatItemDuration = (seconds) => {
   if (!seconds || !isFinite(seconds)) return '—';
   const mins = Math.floor(seconds / 60);
   const secs = Math.round(seconds % 60);
@@ -37,7 +38,15 @@ export default function StepSelectPreprocessed({
   onIntentSubmit,
   onEditAutomations,
   onDeleteItem = null,
-  onUpload,
+  minutesPrecheck = null,
+  minutesPrecheckPending = false,
+  minutesPrecheckError = null,
+  minutesBlocking = false,
+  minutesBlockingMessage = '',
+  minutesRequired = null,
+  minutesRemaining = null,
+  formatDuration = () => null,
+  audioDurationSec = null,
 }) {
   const hasPendingIntents = Array.isArray(pendingIntentLabels) && pendingIntentLabels.length > 0;
 
@@ -45,6 +54,10 @@ export default function StepSelectPreprocessed({
     () => items.find((item) => item.filename === selectedFilename) || null,
     [items, selectedFilename]
   );
+
+  const selectedDisplayName = selected
+    ? formatDisplayName(selected, { fallback: 'your upload' }) || 'your upload'
+    : 'your upload';
 
   const counts = selected?.intents || {};
   const flubberCount = Number((counts?.flubber?.count) ?? 0);
@@ -66,6 +79,31 @@ export default function StepSelectPreprocessed({
   };
 
   const canContinue = !!selected;
+
+  const formatDurationSafe = typeof formatDuration === 'function' ? formatDuration : () => null;
+  const parseNumber = (value) => {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  };
+  const totalSeconds = parseNumber(minutesPrecheck?.total_seconds);
+  const staticSeconds = parseNumber(minutesPrecheck?.static_seconds);
+  const mainSeconds = parseNumber(minutesPrecheck?.main_seconds);
+  const requiredMinutesVal = parseNumber(minutesRequired);
+  const remainingMinutesVal = parseNumber(minutesRemaining);
+  const audioDurationText = audioDurationSec ? formatDurationSafe(audioDurationSec) : null;
+  const totalDurationText = totalSeconds
+    ? formatDurationSafe(totalSeconds)
+    : (mainSeconds ? formatDurationSafe(mainSeconds) : audioDurationText);
+  const staticDurationText = staticSeconds ? formatDurationSafe(staticSeconds) : null;
+  const requiredMinutesText = requiredMinutesVal != null
+    ? `${requiredMinutesVal} minute${requiredMinutesVal === 1 ? '' : 's'}`
+    : null;
+  const remainingMinutesDisplay = remainingMinutesVal != null ? Math.max(0, remainingMinutesVal) : null;
+  const remainingMinutesText = remainingMinutesDisplay != null
+    ? `${remainingMinutesDisplay} minute${remainingMinutesDisplay === 1 ? '' : 's'}`
+    : null;
+  const showPrecheckCard = !!selected && (minutesPrecheckPending || minutesPrecheck || minutesPrecheckError);
+  const blockingMessage = minutesBlockingMessage || 'Not enough processing minutes remain to assemble this episode.';
 
   return (
     <div className="space-y-6">
@@ -129,6 +167,7 @@ export default function StepSelectPreprocessed({
                   const canInteract = ready && typeof onSelect === 'function';
                   const deleteHintReady = 'Deleting a ready upload will not refund processing minutes already used.';
                   const deleteHintPending = 'Delete this upload while it is still processing? No processing minutes have been deducted yet.';
+                  const displayName = formatDisplayName(item, { fallback: 'Audio file' }) || 'Audio file';
                   return (
                     <div
                       key={item.id || item.filename}
@@ -155,7 +194,7 @@ export default function StepSelectPreprocessed({
                         <div className="flex-1 space-y-1">
                           <div className="flex items-start justify-between gap-2">
                             <div className="flex items-center gap-2">
-                              <span className="font-medium text-slate-800">{item.friendly_name || item.filename}</span>
+                              <span className="font-medium text-slate-800">{displayName}</span>
                               {ready ? (
                                 <Badge variant={isSelected ? 'default' : 'outline'} className="bg-emerald-100 text-emerald-700 border-emerald-200">
                                   Ready
@@ -176,14 +215,14 @@ export default function StepSelectPreprocessed({
                                 }}
                                 onKeyDown={(event) => event.stopPropagation()}
                                 title={ready ? deleteHintReady : deleteHintPending}
-                                aria-label={`Delete ${item.friendly_name || item.filename}`}
+                                aria-label={`Delete ${displayName}`}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </button>
                             )}
                           </div>
                           <div className="text-xs text-slate-500">
-                            Uploaded {formatDate(item.created_at)} · Duration {formatDuration(item.duration_seconds)}
+                            Uploaded {formatDate(item.created_at)} · Duration {formatItemDuration(item.duration_seconds)}
                           </div>
                           {ready && (
                             <div className="flex flex-wrap gap-2 mt-2 text-xs text-slate-600">
@@ -214,12 +253,53 @@ export default function StepSelectPreprocessed({
         </CardContent>
       </Card>
 
+      {showPrecheckCard && (
+        <div
+          className={`rounded-md border p-4 text-sm ${minutesBlocking ? 'border-red-300 bg-red-50 text-red-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-semibold">Processing minutes check</span>
+            {minutesPrecheckPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : minutesBlocking ? (
+              <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+            ) : null}
+          </div>
+          <div className="mt-2 space-y-2">
+            {minutesPrecheckPending && <p>Checking your remaining processing minutes…</p>}
+            {!minutesPrecheckPending && minutesPrecheckError && (
+              <p className="text-amber-700">{minutesPrecheckError}</p>
+            )}
+            {!minutesPrecheckPending && !minutesPrecheckError && (
+              <>
+                <p>{minutesBlocking ? blockingMessage : 'This episode fits within your available processing minutes.'}</p>
+                {totalDurationText && (
+                  <p>
+                    Estimated length <strong>{totalDurationText}</strong>
+                    {staticDurationText ? ` (template adds ${staticDurationText})` : ''}.
+                  </p>
+                )}
+                {!totalDurationText && audioDurationText && (
+                  <p>Uploaded audio length <strong>{audioDurationText}</strong>.</p>
+                )}
+                {requiredMinutesText && (
+                  <p>Requires <strong>{requiredMinutesText}</strong> of processing time.</p>
+                )}
+                {remainingMinutesText && (
+                  <p>Your plan has <strong>{remainingMinutesText}</strong> remaining.</p>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {selected && hasDetectedAutomations && (
         <Card className="border border-slate-200">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-base text-slate-800">
               <Sparkles className="w-4 h-4 text-amber-500" />
-              Automations ready for {selected.friendly_name || selected.filename}
+              Automations ready for {selectedDisplayName}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm text-slate-700">
@@ -260,13 +340,24 @@ export default function StepSelectPreprocessed({
         </Card>
       )}
 
-      <div className="flex justify-between pt-4">
+      <div className="flex justify-between pt-4 items-start">
         <Button variant="ghost" onClick={onBack}>
           Back
         </Button>
-        <Button onClick={handleContinue} disabled={!canContinue || loading}>
-          Continue
-        </Button>
+        <div className="flex flex-col items-end gap-1">
+          <Button
+            onClick={handleContinue}
+            disabled={!canContinue || loading || minutesPrecheckPending || minutesBlocking}
+          >
+            Continue
+          </Button>
+          {minutesPrecheckPending && (
+            <span className="text-xs text-slate-600">Waiting for processing minutes check…</span>
+          )}
+          {minutesBlocking && !minutesPrecheckPending && (
+            <span className="text-xs text-red-600">{blockingMessage}</span>
+          )}
+        </div>
       </div>
     </div>
   );

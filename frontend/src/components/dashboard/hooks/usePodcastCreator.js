@@ -50,6 +50,9 @@ export default function usePodcastCreator({
   const [testMode, setTestMode] = useState(false);
   const [usage, setUsage] = useState(null);
   const [minutesDialog, setMinutesDialog] = useState(null);
+  const [minutesPrecheck, setMinutesPrecheck] = useState(null);
+  const [minutesPrecheckPending, setMinutesPrecheckPending] = useState(false);
+  const [minutesPrecheckError, setMinutesPrecheckError] = useState(null);
   const [episodeDetails, setEpisodeDetails] = useState({
     season: '1',
     episodeNumber: '',
@@ -227,6 +230,55 @@ export default function usePodcastCreator({
       } catch(_) {}
     })();
   }, [token, authUser, refreshUsage]);
+
+  useEffect(() => {
+    if (!token || !selectedTemplate?.id || !uploadedFilename) {
+      setMinutesPrecheck(null);
+      setMinutesPrecheckError(null);
+      setMinutesPrecheckPending(false);
+      return;
+    }
+
+    let cancelled = false;
+    setMinutesPrecheckPending(true);
+    setMinutesPrecheckError(null);
+
+    const api = makeApi(token);
+    (async () => {
+      try {
+        const payload = {
+          template_id: selectedTemplate.id,
+          main_content_filename: uploadedFilename,
+        };
+        const res = await api.post('/api/episodes/precheck/minutes', payload);
+        if (cancelled) return;
+        setMinutesPrecheck(res || null);
+        setMinutesPrecheckError(null);
+      } catch (err) {
+        if (cancelled) return;
+        if (err && err.status === 402 && err.detail) {
+          const detail = err.detail;
+          const fallback = {
+            allowed: false,
+            detail,
+            minutes_required: Number(detail.minutes_required) || null,
+            minutes_remaining: Number(detail.minutes_remaining),
+          };
+          setMinutesPrecheck(fallback);
+          setMinutesPrecheckError(null);
+        } else {
+          setMinutesPrecheck(null);
+          setMinutesPrecheckError(err?.message || 'Unable to check minutes.');
+        }
+      } finally {
+        if (!cancelled) setMinutesPrecheckPending(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, selectedTemplate?.id, uploadedFilename]);
 
   useEffect(() => {
     const tplId = selectedTemplate?.id;
@@ -1213,6 +1265,37 @@ export default function usePodcastCreator({
   };
 
   const handleAssemble = async () => {
+    if (minutesPrecheckPending) {
+      setError('Checking processing minutes… please wait.');
+      return;
+    }
+    if (minutesPrecheck && minutesPrecheck.allowed === false) {
+      const detail = minutesPrecheck.detail || {};
+      const required = minutesRequiredPrecheck ?? (Number(detail.minutes_required) || null);
+      const remaining = (() => {
+        const candidate = detail.minutes_remaining ?? minutesRemainingPrecheck;
+        const num = Number(candidate);
+        return Number.isFinite(num) ? num : null;
+      })();
+      const renewal = detail.renewal_date || detail.renewalDate || null;
+      const durationSeconds = (() => {
+        const total = Number(minutesPrecheck.total_seconds);
+        if (Number.isFinite(total) && total > 0) return total;
+        const main = Number(minutesPrecheck.main_seconds);
+        if (Number.isFinite(main) && main > 0) return main;
+        return audioDurationSec && audioDurationSec > 0 ? audioDurationSec : null;
+      })();
+      setMinutesDialog({
+        requiredMinutes: required,
+        remainingMinutes: remaining,
+        renewalDate: renewal,
+        message: detail.message || 'Not enough processing minutes remain to assemble this episode.',
+        durationSeconds: durationSeconds || null,
+      });
+      setStatusMessage('');
+      setError('');
+      return;
+    }
     if (quotaExceeded) { setError('Monthly episode quota reached. Upgrade your plan to continue.'); window.dispatchEvent(new Event('ppp:navigate-billing')); return; }
     if (!uploadedFilename || !selectedTemplate || !episodeDetails.title) { setError('A template, title, and audio file are required.'); return; }
     if(!episodeDetails.season || !String(episodeDetails.season).trim()) {
@@ -1561,11 +1644,23 @@ export default function usePodcastCreator({
   const minutesRemaining = (typeof minutesCap === 'number' && typeof minutesUsed === 'number') ? (minutesCap - minutesUsed) : null;
   const minutesNearCap = (typeof minutesRemaining === 'number' && typeof minutesCap === 'number') && minutesRemaining > 0 && minutesRemaining <= Math.ceil(minutesCap * 0.1);
   const minutesExceeded = typeof minutesRemaining === 'number' && minutesRemaining <= 0;
+  const minutesRemainingPrecheck = (() => {
+    const candidate = minutesPrecheck?.minutes_remaining ?? minutesPrecheck?.detail?.minutes_remaining;
+    const num = Number(candidate);
+    if (Number.isFinite(num)) return num;
+    return minutesRemaining;
+  })();
+  const minutesRequiredPrecheck = (() => {
+    const candidate = minutesPrecheck?.minutes_required ?? minutesPrecheck?.detail?.minutes_required;
+    const num = Number(candidate);
+    return Number.isFinite(num) ? num : null;
+  })();
+  const minutesBlocking = Boolean(minutesPrecheck && minutesPrecheck.allowed === false);
 
   const missingTitle = !episodeDetails.title || !episodeDetails.title.trim();
   const missingEpisodeNumber = !episodeDetails.episodeNumber || !String(episodeDetails.episodeNumber).trim();
-  const blockingQuota = quotaExceeded;
-  const canProceedToStep5 = !missingTitle && !missingEpisodeNumber && !blockingQuota;
+  const blockingQuota = quotaExceeded || minutesBlocking;
+  const canProceedToStep5 = !missingTitle && !missingEpisodeNumber && !blockingQuota && !minutesPrecheckPending;
 
   useEffect(() => {
     if (currentStep !== 5 || !testMode) return;
@@ -1671,9 +1766,14 @@ export default function usePodcastCreator({
     nearQuota,
     quotaExceeded,
     minutesRemaining,
+    minutesRemainingPrecheck,
     minutesCap,
     minutesNearCap,
     minutesExceeded,
+    minutesRequiredPrecheck,
+    minutesBlocking,
+    minutesPrecheckPending,
+    minutesPrecheckError,
   };
 
   const clearCover = () => {
@@ -1863,6 +1963,12 @@ export default function usePodcastCreator({
     minutesRemaining,
     minutesNearCap,
     minutesCap,
+    minutesPrecheck,
+    minutesPrecheckPending,
+    minutesPrecheckError,
+    minutesBlocking,
+    minutesRequiredPrecheck,
+    minutesRemainingPrecheck,
     minutesDialog,
     setMinutesDialog,
     refreshUsage,

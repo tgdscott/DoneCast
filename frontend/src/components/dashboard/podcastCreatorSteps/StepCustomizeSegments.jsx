@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '../../ui/dialog';
 import { Label } from '../../ui/label';
 import { Textarea } from '../../ui/textarea';
+import { formatDisplayName, isUuidLike } from '@/lib/displayNames';
 
 export default function StepCustomizeSegments({
   selectedTemplate,
@@ -67,14 +68,39 @@ export default function StepCustomizeSegments({
 
       if (segment.source.source_type === 'tts') {
         const voiceId = segment?.source?.voice_id || '';
-        const friendly = voiceNameById[voiceId];
+        const resolvedFriendly = voiceNameById[voiceId];
+        const providedLabel = segment?.source?.voice_name || segment?.source?.voice_label || segment?.source?.name;
+        const baseVoiceLabel =
+          (!voiceId || voiceId === 'default')
+            ? 'Default voice'
+            : resolvedFriendly && !isUuidLike(resolvedFriendly)
+            ? resolvedFriendly
+            : providedLabel && !isUuidLike(providedLabel)
+            ? providedLabel
+            : formatDisplayName(voiceId, { fallback: 'Custom voice' }) || 'Custom voice';
+        const isResolvingVoice = Boolean(
+          voicesLoading &&
+            voiceId &&
+            voiceId !== 'default' &&
+            !resolvedFriendly &&
+            (!providedLabel || isUuidLike(providedLabel))
+        );
+        const voiceTitle =
+          resolvedFriendly && !isUuidLike(resolvedFriendly)
+            ? resolvedFriendly
+            : providedLabel && !isUuidLike(providedLabel)
+            ? providedLabel
+            : voiceId && voiceId !== 'default'
+            ? formatDisplayName(voiceId, { fallback: '' }) || undefined
+            : undefined;
         const value = ttsValues?.[promptKey] || '';
         const errorMessageId = isMissing ? `${fieldId}-error` : undefined;
         return (
           <div className="mt-4">
             <div className="mt-2 flex items-center justify-between">
-              <span className="text-xs text-gray-500" title={voiceId || undefined}>
-                Voice: {friendly || (voiceId || 'default')}{voicesLoading && !friendly ? '…' : ''}
+              <span className="text-xs text-gray-500" title={voiceTitle}>
+                Voice: {baseVoiceLabel}
+                {isResolvingVoice ? '…' : ''}
               </span>
               <Button size="sm" variant="outline" onClick={() => onOpenVoicePicker(segment.id)}>
                 Change voice
@@ -106,7 +132,10 @@ export default function StepCustomizeSegments({
 
       if (segment.source.source_type === 'static') {
         const mediaItem = mediaLibrary.find((item) => item.filename.endsWith(segment.source.filename));
-        const friendlyName = mediaItem ? mediaItem.friendly_name : segment.source.filename;
+        const friendlyName =
+          mediaItem
+            ? formatDisplayName(mediaItem, { fallback: 'Audio clip' }) || 'Audio clip'
+            : formatDisplayName(segment.source.filename, { fallback: 'Audio clip' }) || 'Audio clip';
         return (
           <p className="text-gray-600 mt-2">
             <span className="font-semibold text-gray-700">Audio File:</span> {friendlyName}
