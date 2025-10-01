@@ -7,6 +7,7 @@ router = APIRouter(prefix="/episodes", tags=["episodes"])
 from .read import router as read_router
 from .write import router as write_router
 from .assemble import router as assemble_router
+from .precheck import router as precheck_router
 from .publish import router as publish_router
 from .jobs import router as jobs_router
 from .edit import router as edit_router
@@ -19,6 +20,7 @@ from .retry import router as retry_router
 # runtime startup. By including the assemble router first we ensure POST
 # requests hit the intended handler instead of returning an unexpected 405.
 router.include_router(assemble_router)
+router.include_router(precheck_router)
 router.include_router(read_router)
 router.include_router(write_router)
 router.include_router(publish_router)

@@ -1,21 +1,22 @@
 from __future__ import annotations
 
+import json
 import os
-from typing import Any, Dict, Optional
+import time
+from math import ceil
+from pathlib import Path
+from typing import Any, Dict, Optional, cast
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from api.core.constants import TIER_LIMITS
+from api.core.paths import MEDIA_DIR
 from api.models.podcast import Episode
 from api.models.settings import AppSetting
-from . import repo, dto
-from worker.tasks import create_podcast_episode, celery_app
-from api.core.paths import MEDIA_DIR
 from api.services.billing import usage as usage_svc
-from math import ceil
-import time
-from typing import cast, Optional
+from worker.tasks import create_podcast_episode, celery_app
+from . import dto, repo
 
 
 def _episodes_created_this_month(session: Session, user_id) -> int:
@@ -38,50 +39,234 @@ def _episodes_created_this_month(session: Session, user_id) -> int:
         return 0
 
 
-def _estimate_processing_minutes(filename: str) -> Optional[int]:
-    """Best-effort estimate of audio length in whole minutes for quota checks."""
+def _probe_audio_seconds(path: Path) -> Optional[float]:
+    """Probe an audio file on disk and return its duration in seconds."""
+
     try:
-        from pathlib import Path as _Path
-        src_name = _Path(str(filename)).name
-        src_path = MEDIA_DIR / src_name
-        if not src_path.is_file():
+        if not path.is_file():
             return None
-        seconds = 0.0
-        try:
-            import subprocess
-            import json as _json
-
-            cmd = [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "json",
-                str(src_path),
-            ]
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-            if proc.returncode == 0:
-                data = _json.loads(proc.stdout or "{}")
-                dur = float(data.get("format", {}).get("duration", 0))
-                if dur and dur > 0:
-                    seconds = float(dur)
-        except Exception:
-            seconds = 0.0
-        if seconds <= 0:
-            try:
-                from pydub import AudioSegment as _AS
-
-                seg = _AS.from_file(src_path)
-                seconds = len(seg) / 1000.0
-            except Exception:
-                seconds = 0.0
-        if seconds <= 0:
-            return None
-        return max(1, int(ceil(seconds / 60.0)))
     except Exception:
         return None
+
+    seconds = 0.0
+    try:
+        import subprocess
+
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "json",
+            str(path),
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        if proc.returncode == 0:
+            payload = json.loads(proc.stdout or "{}")
+            duration = float(payload.get("format", {}).get("duration", 0))
+            if duration and duration > 0:
+                seconds = float(duration)
+    except Exception:
+        seconds = 0.0
+
+    if seconds <= 0:
+        try:
+            from pydub import AudioSegment as _AS
+
+            seg = _AS.from_file(path)
+            seconds = len(seg) / 1000.0
+        except Exception:
+            seconds = 0.0
+
+    return float(seconds) if seconds > 0 else None
+
+
+def _estimate_audio_seconds(filename: str) -> Optional[float]:
+    """Best-effort estimate of an audio file's duration in seconds."""
+
+    try:
+        raw = str(filename or "").strip()
+        if not raw:
+            return None
+
+        candidates: list[Path] = []
+        if raw.startswith("gs://"):
+            base = raw.split("/")[-1]
+            if base:
+                candidates.append(MEDIA_DIR / base)
+                candidates.append(MEDIA_DIR / "media_uploads" / base)
+        else:
+            path = Path(raw)
+            try:
+                if path.is_file():
+                    candidates.append(path)
+            except Exception:
+                pass
+            base = path.name
+            if base:
+                candidates.append(MEDIA_DIR / base)
+                candidates.append(MEDIA_DIR / "media_uploads" / base)
+
+        seen: set[str] = set()
+        for cand in candidates:
+            key = str(cand)
+            if key in seen:
+                continue
+            seen.add(key)
+            seconds = _probe_audio_seconds(cand)
+            if seconds and seconds > 0:
+                return float(seconds)
+        return None
+    except Exception:
+        return None
+
+
+def _estimate_processing_minutes(filename: str) -> Optional[int]:
+    """Best-effort estimate of audio length in whole minutes for quota checks."""
+
+    seconds = _estimate_audio_seconds(filename)
+    if not seconds:
+        return None
+    return max(1, int(ceil(seconds / 60.0)))
+
+
+def _estimate_static_segments_seconds(template: Any) -> float:
+    """Estimate total seconds contributed by static template segments."""
+
+    total = 0.0
+    try:
+        if hasattr(template, "segments") and isinstance(template.segments, list):
+            segments = template.segments
+        else:
+            segments = json.loads(getattr(template, "segments_json", "[]") or "[]")
+    except Exception:
+        segments = []
+
+    for segment in segments or []:
+        try:
+            source = None
+            if isinstance(segment, dict):
+                seg_type = segment.get("segment_type")
+                source = segment.get("source")
+            else:
+                seg_type = getattr(segment, "segment_type", None)
+                source = getattr(segment, "source", None)
+            if seg_type == "content":
+                continue
+            if not source:
+                continue
+            if isinstance(source, dict):
+                stype = source.get("source_type")
+                filename = source.get("filename")
+            else:
+                stype = getattr(source, "source_type", None)
+                filename = getattr(source, "filename", None)
+            if stype != "static" or not filename:
+                continue
+            seconds = _estimate_audio_seconds(filename)
+            if seconds and seconds > 0:
+                total += float(seconds)
+        except Exception:
+            continue
+    return float(total)
+
+
+def minutes_precheck(
+    *,
+    session: Session,
+    current_user,
+    template_id: Optional[str],
+    main_content_filename: str,
+) -> Dict[str, Any]:
+    """Return usage information to determine if processing minutes remain."""
+
+    tier = getattr(current_user, "tier", "free")
+    limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
+    max_minutes = limits.get("max_processing_minutes_month")
+
+    main_seconds = _estimate_audio_seconds(main_content_filename)
+    static_seconds = 0.0
+
+    template = None
+    if template_id:
+        try:
+            tid = UUID(str(template_id))
+            template = repo.get_template_by_id(session, tid)
+            if template and getattr(template, "user_id", None) not in (None, getattr(current_user, "id", None)):
+                template = None
+        except Exception:
+            template = None
+
+    if template is not None:
+        static_seconds = _estimate_static_segments_seconds(template)
+
+    total_seconds = float((main_seconds or 0.0) + static_seconds)
+    required_minutes = 0
+    if total_seconds > 0:
+        required_minutes = max(1, int(ceil(total_seconds / 60.0)))
+    elif main_seconds:
+        required_minutes = max(1, int(ceil(float(main_seconds) / 60.0)))
+
+    response: Dict[str, Any] = {
+        "tier": tier,
+        "allowed": True,
+        "max_minutes": max_minutes,
+        "main_seconds": float(main_seconds) if main_seconds else None,
+        "static_seconds": static_seconds,
+        "total_seconds": total_seconds if total_seconds > 0 else None,
+        "minutes_required": required_minutes,
+        "minutes_used": None,
+        "minutes_remaining": None,
+    }
+
+    if max_minutes is None:
+        return response
+
+    from datetime import datetime as _dt, timezone as _tz
+
+    now = _dt.now(_tz.utc)
+    start = _dt(now.year, now.month, 1, tzinfo=_tz.utc)
+    try:
+        minutes_used = usage_svc.month_minutes_used(session, current_user.id, start, now)
+    except Exception:
+        minutes_used = None
+
+    if minutes_used is not None:
+        try:
+            minutes_used = int(minutes_used)
+        except Exception:
+            minutes_used = None
+    response["minutes_used"] = minutes_used
+
+    minutes_remaining: Optional[int]
+    if minutes_used is None:
+        minutes_remaining = max_minutes
+    else:
+        minutes_remaining = max_minutes - minutes_used
+    response["minutes_remaining"] = minutes_remaining
+
+    if required_minutes <= 0:
+        return response
+
+    if minutes_remaining is not None and minutes_remaining < required_minutes:
+        detail: Dict[str, Any] = {
+            "code": "INSUFFICIENT_MINUTES",
+            "minutes_required": int(required_minutes),
+            "minutes_remaining": int(max(minutes_remaining, 0)),
+            "message": "Not enough processing minutes remain to assemble this episode.",
+            "source": "precheck",
+        }
+        renewal = getattr(current_user, "subscription_expires_at", None)
+        if renewal:
+            try:
+                detail["renewal_date"] = renewal.isoformat()
+            except Exception:
+                pass
+        response["allowed"] = False
+        response["detail"] = detail
+    return response
 
 
 def assemble_or_queue(

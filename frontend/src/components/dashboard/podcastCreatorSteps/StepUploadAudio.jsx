@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
-import { FileAudio, Loader2, Mic, Upload, ArrowLeft, Lightbulb } from 'lucide-react';
+import { FileAudio, Loader2, Mic, Upload, ArrowLeft, Lightbulb, AlertTriangle } from 'lucide-react';
 
 // Inline intent questions were removed in favor of the floating modal.
 
@@ -20,6 +20,15 @@ export default function StepUploadAudio({
   pendingIntentLabels = [],
   intents = {},
   intentVisibility = {},
+  minutesPrecheck = null,
+  minutesPrecheckPending = false,
+  minutesPrecheckError = null,
+  minutesBlocking = false,
+  minutesBlockingMessage = '',
+  minutesRequired = null,
+  minutesRemaining = null,
+  formatDuration = () => null,
+  audioDurationSec = null,
 }) {
   const handleFileInput = (event) => {
     if (event.target.files?.[0]) {
@@ -62,6 +71,32 @@ export default function StepUploadAudio({
     }
     onNext();
   };
+
+  const formatDurationSafe = typeof formatDuration === 'function' ? formatDuration : () => null;
+  const parseNumber = (value) => {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  };
+  const totalSeconds = parseNumber(minutesPrecheck?.total_seconds);
+  const staticSeconds = parseNumber(minutesPrecheck?.static_seconds);
+  const mainSeconds = parseNumber(minutesPrecheck?.main_seconds);
+  const requiredMinutesVal = parseNumber(minutesRequired);
+  const remainingMinutesVal = parseNumber(minutesRemaining);
+  const audioDurationText = audioDurationSec ? formatDurationSafe(audioDurationSec) : null;
+  const totalDurationText = totalSeconds
+    ? formatDurationSafe(totalSeconds)
+    : (mainSeconds ? formatDurationSafe(mainSeconds) : audioDurationText);
+  const staticDurationText = staticSeconds ? formatDurationSafe(staticSeconds) : null;
+  const requiredMinutesText = requiredMinutesVal != null
+    ? `${requiredMinutesVal} minute${requiredMinutesVal === 1 ? '' : 's'}`
+    : null;
+  const remainingMinutesDisplay = remainingMinutesVal != null ? Math.max(0, remainingMinutesVal) : null;
+  const remainingMinutesText = remainingMinutesDisplay != null
+    ? `${remainingMinutesDisplay} minute${remainingMinutesDisplay === 1 ? '' : 's'}`
+    : null;
+  const showPrecheckCard = (uploadedFile || uploadedFilename)
+    && (minutesPrecheckPending || minutesPrecheck || minutesPrecheckError);
+  const blockingMessage = minutesBlockingMessage || 'Not enough processing minutes remain to assemble this episode.';
 
   return (
     <div className="space-y-8">
@@ -208,6 +243,47 @@ export default function StepUploadAudio({
         </Card>
       )}
 
+      {showPrecheckCard && (
+        <div
+          className={`rounded-md border p-4 text-sm ${minutesBlocking ? 'border-red-300 bg-red-50 text-red-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-semibold">Processing minutes check</span>
+            {minutesPrecheckPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : minutesBlocking ? (
+              <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+            ) : null}
+          </div>
+          <div className="mt-2 space-y-2">
+            {minutesPrecheckPending && <p>Checking your remaining processing minutes…</p>}
+            {!minutesPrecheckPending && minutesPrecheckError && (
+              <p className="text-amber-700">{minutesPrecheckError}</p>
+            )}
+            {!minutesPrecheckPending && !minutesPrecheckError && (
+              <>
+                <p>{minutesBlocking ? blockingMessage : 'This episode fits within your available processing minutes.'}</p>
+                {totalDurationText && (
+                  <p>
+                    Estimated length <strong>{totalDurationText}</strong>
+                    {staticDurationText ? ` (template adds ${staticDurationText})` : ''}.
+                  </p>
+                )}
+                {!totalDurationText && audioDurationText && (
+                  <p>Uploaded audio length <strong>{audioDurationText}</strong>.</p>
+                )}
+                {requiredMinutesText && (
+                  <p>Requires <strong>{requiredMinutesText}</strong> of processing time.</p>
+                )}
+                {remainingMinutesText && (
+                  <p>Your plan has <strong>{remainingMinutesText}</strong> remaining.</p>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col gap-4 pt-8 sm:flex-row sm:items-center sm:justify-between">
         <Button onClick={onBack} variant="outline" size="lg">
           <ArrowLeft className="w-5 h-5 mr-2" />Back to Templates
@@ -220,11 +296,22 @@ export default function StepUploadAudio({
                 size="lg"
                 className="text-white"
                 style={{ backgroundColor: '#2C3E50' }}
-                disabled={isUploading || !(uploadedFile || uploadedFilename)}
+                disabled={
+                  isUploading
+                  || !(uploadedFile || uploadedFilename)
+                  || minutesPrecheckPending
+                  || minutesBlocking
+                }
               >
                 Continue
               </Button>
             </div>
+            {minutesPrecheckPending && (
+              <p className="text-xs text-slate-600 text-right">Waiting for processing minutes check…</p>
+            )}
+            {minutesBlocking && !minutesPrecheckPending && (
+              <p className="text-xs text-red-600 text-right">{blockingMessage}</p>
+            )}
           </div>
         )}
       </div>

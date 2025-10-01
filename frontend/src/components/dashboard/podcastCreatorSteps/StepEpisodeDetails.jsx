@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import { Textarea } from '../../ui/textarea';
-import { ArrowLeft, Loader2, Wand2, Lightbulb, ListChecks } from 'lucide-react';
+import { ArrowLeft, Loader2, Wand2, Lightbulb, ListChecks, AlertTriangle } from 'lucide-react';
 
 export default function StepEpisodeDetails({
   episodeDetails,
@@ -30,7 +30,41 @@ export default function StepEpisodeDetails({
   onPublishVisibilityChange,
   onScheduleDateChange,
   onScheduleTimeChange,
+  minutesPrecheck = null,
+  minutesPrecheckPending = false,
+  minutesPrecheckError = null,
+  minutesBlocking = false,
+  minutesBlockingMessage = '',
+  minutesRequired = null,
+  minutesRemaining = null,
+  formatDuration = () => null,
+  audioDurationSec = null,
 }) {
+  const formatDurationSafe = typeof formatDuration === 'function' ? formatDuration : () => null;
+  const parseNumber = (value) => {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  };
+  const totalSeconds = parseNumber(minutesPrecheck?.total_seconds);
+  const staticSeconds = parseNumber(minutesPrecheck?.static_seconds);
+  const mainSeconds = parseNumber(minutesPrecheck?.main_seconds);
+  const requiredMinutesVal = parseNumber(minutesRequired);
+  const remainingMinutesVal = parseNumber(minutesRemaining);
+  const audioDurationText = audioDurationSec ? formatDurationSafe(audioDurationSec) : null;
+  const totalDurationText = totalSeconds
+    ? formatDurationSafe(totalSeconds)
+    : (mainSeconds ? formatDurationSafe(mainSeconds) : audioDurationText);
+  const staticDurationText = staticSeconds ? formatDurationSafe(staticSeconds) : null;
+  const requiredMinutesText = requiredMinutesVal != null
+    ? `${requiredMinutesVal} minute${requiredMinutesVal === 1 ? '' : 's'}`
+    : null;
+  const remainingMinutesDisplay = remainingMinutesVal != null ? Math.max(0, remainingMinutesVal) : null;
+  const remainingMinutesText = remainingMinutesDisplay != null
+    ? `${remainingMinutesDisplay} minute${remainingMinutesDisplay === 1 ? '' : 's'}`
+    : null;
+  const showPrecheckNotice = minutesPrecheckPending || minutesPrecheck || minutesPrecheckError;
+  const blockingMessage = minutesBlockingMessage || 'Not enough processing minutes remain to assemble this episode.';
+
   return (
     <div className="space-y-8">
       <CardHeader className="text-center">
@@ -67,6 +101,46 @@ export default function StepEpisodeDetails({
           </p>
         </CardContent>
       </Card>
+      {showPrecheckNotice && (
+        <div
+          className={`rounded-md border p-4 text-sm ${minutesBlocking ? 'border-red-300 bg-red-50 text-red-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-semibold">Processing minutes check</span>
+            {minutesPrecheckPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : minutesBlocking ? (
+              <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+            ) : null}
+          </div>
+          <div className="mt-2 space-y-2">
+            {minutesPrecheckPending && <p>Checking your remaining processing minutes…</p>}
+            {!minutesPrecheckPending && minutesPrecheckError && (
+              <p className="text-amber-700">{minutesPrecheckError}</p>
+            )}
+            {!minutesPrecheckPending && !minutesPrecheckError && (
+              <>
+                <p>{minutesBlocking ? blockingMessage : 'This episode fits within your available processing minutes.'}</p>
+                {totalDurationText && (
+                  <p>
+                    Estimated length <strong>{totalDurationText}</strong>
+                    {staticDurationText ? ` (template adds ${staticDurationText})` : ''}.
+                  </p>
+                )}
+                {!totalDurationText && audioDurationText && (
+                  <p>Uploaded audio length <strong>{audioDurationText}</strong>.</p>
+                )}
+                {requiredMinutesText && (
+                  <p>Requires <strong>{requiredMinutesText}</strong> of processing time.</p>
+                )}
+                {remainingMinutesText && (
+                  <p>Your plan has <strong>{remainingMinutesText}</strong> remaining.</p>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
       <Card className="border-0 shadow-lg bg-white">
         <CardContent className="p-6 space-y-6">
           <p className="text-[13px] text-slate-500">It may take a few seconds for the AI fields to autofill.</p>
@@ -277,7 +351,7 @@ export default function StepEpisodeDetails({
         <div className="flex flex-col items-end">
           <Button
             onClick={onAssemble}
-            disabled={!canProceed || isAssembling}
+            disabled={!canProceed || isAssembling || minutesPrecheckPending || minutesBlocking}
             size="lg"
             className="px-8 py-3 text-lg font-semibold text-white disabled:opacity-70"
             style={{ backgroundColor: '#2C3E50' }}
@@ -285,9 +359,13 @@ export default function StepEpisodeDetails({
             {isAssembling ? 'Assembling...' : 'Save and continue'}
             <ArrowLeft className="w-5 h-5 ml-2 rotate-180" />
           </Button>
-          {!canProceed && (
-            <div className="text-xs text-red-600 mt-2 max-w-sm text-right">
-              {blockingQuota
+          {(minutesPrecheckPending || !canProceed) && (
+            <div className={`text-xs mt-2 max-w-sm text-right ${minutesBlocking ? 'text-red-600' : minutesPrecheckPending ? 'text-slate-600' : 'text-red-600'}`}>
+              {minutesPrecheckPending
+                ? 'Waiting for processing minutes check…'
+                : minutesBlocking
+                ? blockingMessage
+                : blockingQuota
                 ? 'Quota exceeded – upgrade or wait for reset.'
                 : missingTitle
                 ? 'Enter a title to continue.'
