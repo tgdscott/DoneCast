@@ -203,14 +203,29 @@ def _export_snippet(audio: "AudioSegment", filename: str, start_s: float, end_s:
     start_ms = max(0, int(start_s * 1000))
     end_ms = max(start_ms + 1, int(end_s * 1000))
     clip = audio[start_ms:end_ms]
-    out_name = f"{safe_stem}_{suffix}_{start_ms}_{end_ms}.mp3"
-    out_path = INTERN_CTX_DIR / out_name
+    base_name = f"{safe_stem}_{suffix}_{start_ms}_{end_ms}"
+    mp3_path = INTERN_CTX_DIR / f"{base_name}.mp3"
     try:
-        clip.export(out_path, format="mp3")
-    except Exception as exc:  # pragma: no cover - best effort guard
-        _LOG.warning("[intern] failed to export snippet %s: %s", out_path, exc)
-        raise HTTPException(status_code=500, detail="Unable to prepare intern audio snippet")
-    return out_name, out_path
+        INTERN_CTX_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:  # pragma: no cover - directory creation best effort
+        pass
+
+    try:
+        clip.export(mp3_path, format="mp3")
+    except Exception as exc:
+        _LOG.warning("[intern] mp3 export failed for %s: %s", mp3_path, exc)
+        try:
+            mp3_path.unlink(missing_ok=True)
+        except Exception:  # pragma: no cover - cleanup best effort
+            pass
+        wav_path = mp3_path.with_suffix(".wav")
+        try:
+            clip.export(wav_path, format="wav")
+        except Exception as exc2:
+            _LOG.warning("[intern] wav export failed for %s: %s", wav_path, exc2)
+            raise HTTPException(status_code=500, detail="Unable to prepare intern audio snippet")
+        return wav_path.name, wav_path
+    return mp3_path.name, mp3_path
 
 
 @router.post(
