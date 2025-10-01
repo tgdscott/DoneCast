@@ -1,7 +1,9 @@
 import logging
 import os
 import shutil
-from datetime import timedelta
+
+from datetime import datetime, timedelta, timezone
+
 from pathlib import Path
 from typing import IO, Optional
 
@@ -160,8 +162,7 @@ def _generate_signed_url(
         )
         raise
 
-
-def get_signed_url(bucket_name: str, key: str, expiration: int = 3600) -> Optional[str]:
+ef get_signed_url(bucket_name: str, key: str, expiration: int = 3600) -> Optional[str]:
     """Generates a signed URL for a GCS object, handling service account signing correctly."""
 
     expiration = max(1, int(expiration or 0))
@@ -219,26 +220,22 @@ def make_signed_url(
 
     raise RuntimeError(f"Unable to create signed URL for gs://{bucket}/{key}")
 
-
 def _is_dev_env() -> bool:
     val = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower()
     return val in {"dev", "development", "local", "test", "testing"}
 
 
 def _write_local_bytes(bucket_name: str, key: str, data: bytes) -> str:
-    rel_key = _normalize_object_key(key)
-    local_root = _resolve_local_media_dir()
-    local_path = local_root / rel_key
+
+    local_path = Path(os.getenv("MEDIA_DIR", "media")) / key
     local_path.parent.mkdir(parents=True, exist_ok=True)
     local_path.write_bytes(data)
-    logger.info("DEV: Wrote GCS upload for gs://%s/%s to %s", bucket_name, key, local_path)
-    return rel_key.as_posix()
+    logger.info(f"DEV: Wrote GCS upload for gs://{bucket_name}/{key} to {local_path}")
+    return str(local_path)
 
 
 def _write_local_stream(bucket_name: str, key: str, fileobj: IO) -> str:
-    rel_key = _normalize_object_key(key)
-    local_root = _resolve_local_media_dir()
-    local_path = local_root / rel_key
+    local_path = Path(os.getenv("MEDIA_DIR", "media")) / key
     local_path.parent.mkdir(parents=True, exist_ok=True)
     with open(local_path, "wb") as f:
         try:
@@ -252,6 +249,7 @@ def _write_local_stream(bucket_name: str, key: str, fileobj: IO) -> str:
             fileobj.seek(0)
     except Exception:
         pass
+
     logger.info("DEV: Wrote GCS upload for gs://%s/%s to %s", bucket_name, key, local_path)
     return rel_key.as_posix()
 
