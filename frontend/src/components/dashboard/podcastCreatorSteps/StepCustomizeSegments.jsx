@@ -60,8 +60,7 @@ export default function StepCustomizeSegments({
         const contentLabel = uploadedAudioLabel || uploadedFile?.name || 'Audio not selected yet';
         return (
           <div className="mt-2 bg-blue-50 p-3 rounded-md">
-            <p className="font-semibold text-blue-800">Your Uploaded Audio:</p>
-            <p className="text-gray-700">{contentLabel}</p>
+            <p className="text-gray-700 font-semibold">{contentLabel}</p>
           </div>
         );
       }
@@ -136,11 +135,7 @@ export default function StepCustomizeSegments({
           mediaItem
             ? formatDisplayName(mediaItem, { fallback: 'Audio clip' }) || 'Audio clip'
             : formatDisplayName(segment.source.filename, { fallback: 'Audio clip' }) || 'Audio clip';
-        return (
-          <p className="text-gray-600 mt-2">
-            <span className="font-semibold text-gray-700">Audio File:</span> {friendlyName}
-          </p>
-        );
+        return <p className="text-gray-600 mt-2">{friendlyName}</p>;
       }
 
       return <p className="text-red-500 mt-2">Unknown segment source type</p>;
