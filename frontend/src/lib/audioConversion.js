@@ -43,6 +43,19 @@ const defaultOptions = {
   minImprovementRatio: 2,
 };
 
+const yieldToEventLoop = () =>
+  new Promise((resolve) => {
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => resolve());
+      return;
+    }
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
+
 const SUPPORTED_MP3_SAMPLE_RATES = [48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000];
 
 const clampSampleRateForMp3 = (sampleRate) => {
@@ -432,7 +445,7 @@ const encodeMp3 = (channelData, inputSampleRate, opts, originalFile) => {
   return finalizeMp3Encoding(mp3Chunks, opts, originalFile);
 };
 
-const convertWavPcmToMp3 = (arrayBuffer, opts, originalFile) => {
+const convertWavPcmToMp3 = async (arrayBuffer, opts, originalFile) => {
   const header = decodeWavHeader(arrayBuffer);
   const {
     audioFormat,
@@ -456,6 +469,21 @@ const convertWavPcmToMp3 = (arrayBuffer, opts, originalFile) => {
   let offset = dataOffset;
 
   const resampler = createStreamingResampler(sampleRate, targetSampleRate, encodeChannels);
+
+  const emitProgress = (info) => {
+    if (typeof opts?.onProgress !== 'function') {
+      return;
+    }
+    try {
+      const payload = { phase: 'encoding', totalFrames, framesProcessed, ...(info || {}) };
+      if (Number.isFinite(payload.progress)) {
+        payload.progress = Math.max(0, Math.min(1, payload.progress));
+      }
+      opts.onProgress(payload);
+    } catch (error) {
+      console.warn('convertWavPcmToMp3 progress callback failed', error);
+    }
+  };
 
   while (framesProcessed < totalFrames && offset + blockAlign <= view.byteLength) {
     const remainingFrames = totalFrames - framesProcessed;
@@ -530,6 +558,11 @@ const convertWavPcmToMp3 = (arrayBuffer, opts, originalFile) => {
 
     framesProcessed += framesThisChunk;
     offset += framesThisChunk * blockAlign;
+
+    emitProgress({ progress: totalFrames ? framesProcessed / totalFrames : 0 });
+    if (framesProcessed < totalFrames) {
+      await yieldToEventLoop();
+    }
   }
 
   let remainingLeft = [];
@@ -560,6 +593,8 @@ const convertWavPcmToMp3 = (arrayBuffer, opts, originalFile) => {
     mp3Chunks.push(end);
   }
 
+  emitProgress({ progress: 1 });
+
   return finalizeMp3Encoding(mp3Chunks, opts, originalFile);
 };
 
@@ -573,7 +608,25 @@ export async function convertAudioFileToMp3IfBeneficial(file, options = {}) {
     return { file, converted: false, reason: 'no-file' };
   }
 
-  const opts = { ...defaultOptions, ...options };
+  const { onProgress, ...optionOverrides } = options || {};
+  const opts = { ...defaultOptions, ...optionOverrides };
+  if (typeof onProgress === 'function') {
+    opts.onProgress = onProgress;
+  }
+  const reportProgress = (info) => {
+    if (typeof opts.onProgress !== 'function') {
+      return;
+    }
+    try {
+      const payload = { ...(info || {}) };
+      if (Number.isFinite(payload.progress)) {
+        payload.progress = Math.max(0, Math.min(1, payload.progress));
+      }
+      opts.onProgress(payload);
+    } catch (error) {
+      console.warn('convertAudioFileToMp3IfBeneficial progress callback failed', error);
+    }
+  };
   const lowerName = (file.name || '').toLowerCase();
 
   if (file.type === 'audio/mpeg' || lowerName.endsWith('.mp3')) {
@@ -586,10 +639,12 @@ export async function convertAudioFileToMp3IfBeneficial(file, options = {}) {
 
   try {
     const arrayBuffer = await file.arrayBuffer();
+    reportProgress({ phase: 'loading', progress: 0 });
     if (isLikelyWavFile(file, arrayBuffer)) {
       try {
-
-        return convertWavPcmToMp3(arrayBuffer, opts, file);
+        const result = await convertWavPcmToMp3(arrayBuffer, opts, file);
+        reportProgress({ phase: 'done', progress: 1 });
+        return result;
       } catch (wavError) {
         console.warn('Failed to parse WAV file, falling back to AudioContext', wavError);
       }
@@ -600,6 +655,7 @@ export async function convertAudioFileToMp3IfBeneficial(file, options = {}) {
         return { file, converted: false, reason: 'no-audio-context' };
       }
       audioContext = new AudioContextCtor();
+      reportProgress({ phase: 'decoding', progress: 0 });
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
       const channelCount = Math.max(1, audioBuffer.numberOfChannels || 1);
       sampleRate = audioBuffer.sampleRate || 44100;
@@ -614,7 +670,9 @@ export async function convertAudioFileToMp3IfBeneficial(file, options = {}) {
       sampleRate = 44100;
     }
 
-    return encodeMp3(channelData, sampleRate, opts, file);
+    const result = encodeMp3(channelData, sampleRate, opts, file);
+    reportProgress({ phase: 'done', progress: 1 });
+    return result;
   } catch (error) {
     return { file, converted: false, reason: 'conversion-error', error };
   } finally {
