@@ -1,0 +1,48 @@
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+const TemplateBasicsCard = ({ template, podcasts, onTemplateChange }) => (
+  <Card className="shadow-sm" data-tour="template-basics">
+    <CardContent className="p-6 space-y-6">
+      <div>
+        <Label htmlFor="template-name" className="text-sm font-medium text-gray-600">
+          Template Name
+        </Label>
+        <Input
+          id="template-name"
+          className="text-2xl font-bold border-0 border-b-2 border-gray-200 focus:border-blue-500 transition-colors p-0"
+          value={template.name || ""}
+          onChange={(e) => onTemplateChange("name", e.target.value)}
+        />
+      </div>
+      <div>
+        <Label className="text-sm font-medium text-gray-600">Show (Required)</Label>
+        {podcasts.length === 0 ? (
+          <div className="mt-2 p-3 border rounded bg-yellow-50 text-sm text-yellow-700">
+            You have no shows yet. Create a show first in the Show Manager, then return to create a template.
+          </div>
+        ) : (
+          <Select
+            value={template.podcast_id || ""}
+            onValueChange={(v) => onTemplateChange("podcast_id", v)}
+          >
+            <SelectTrigger className="mt-2">
+              <SelectValue placeholder="Select a show" />
+            </SelectTrigger>
+            <SelectContent>
+              {podcasts.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
+    </CardContent>
+  </Card>
+);
+
+export default TemplateBasicsCard;

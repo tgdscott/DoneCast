@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { ChevronDown } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -64,6 +65,8 @@ export default function RecurringScheduleManager({
   userTimezone,
   isNewTemplate,
   onDirtyChange,
+  collapsible = false,
+  defaultOpen = true,
 }) {
   const deviceTimezone = useMemo(() => detectDeviceTimezone(userTimezone || 'UTC'), [userTimezone]);
   const [loading, setLoading] = useState(false);
@@ -75,6 +78,12 @@ export default function RecurringScheduleManager({
   const [timeInput, setTimeInput] = useState('05:00');
   const [daySelection, setDaySelection] = useState(() => new Set([0]));
   const [baseline, setBaseline] = useState({ timezone: deviceTimezone, slots: [] });
+
+  const [isOpen, setIsOpen] = useState(!collapsible || defaultOpen);
+
+  useEffect(() => {
+    setIsOpen(!collapsible || defaultOpen);
+  }, [collapsible, defaultOpen]);
 
   useEffect(() => {
     if (typeof onDirtyChange === 'function') {
@@ -250,30 +259,63 @@ export default function RecurringScheduleManager({
   if (!templateId || templateId === 'new' || isNewTemplate) {
     return (
       <Card className="shadow-sm">
-        <CardHeader>
-          <CardTitle>Recurring Publish Schedule</CardTitle>
-          <CardDescription>Save your template first to plan automatic publish slots.</CardDescription>
+        <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <CardTitle>Recurring Publish Schedule</CardTitle>
+            <CardDescription>Save your template first to plan automatic publish slots.</CardDescription>
+          </div>
+          {collapsible && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="mt-2 h-8 px-2 text-slate-600 sm:mt-0"
+              onClick={() => setIsOpen((prev) => !prev)}
+              aria-expanded={isOpen}
+            >
+              <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+              <span className="sr-only">Toggle schedule details</span>
+            </Button>
+          )}
         </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            Once this template is saved, you can choose the days and times it should publish automatically. Each new episode will
-            pick the next open slot.
-          </p>
-        </CardContent>
+        {(!collapsible || isOpen) && (
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              Once this template is saved, you can choose the days and times it should publish automatically. Each new episode will
+              pick the next open slot.
+            </p>
+          </CardContent>
+        )}
       </Card>
     );
   }
 
   return (
     <Card className="shadow-sm">
-      <CardHeader>
-        <CardTitle>Recurring Publish Schedule</CardTitle>
-        <CardDescription>
-          Tell Plus Plus when episodes made from this template should go live. We&rsquo;ll skip conflicts with already scheduled
-          episodes.
-        </CardDescription>
+      <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <CardTitle>Recurring Publish Schedule</CardTitle>
+          <CardDescription>
+            Tell Plus Plus when episodes made from this template should go live. We&rsquo;ll skip conflicts with already scheduled
+            episodes.
+          </CardDescription>
+        </div>
+        {collapsible && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="mt-2 h-8 px-2 text-slate-600 sm:mt-0"
+            onClick={() => setIsOpen((prev) => !prev)}
+            aria-expanded={isOpen}
+          >
+            <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+            <span className="sr-only">Toggle schedule details</span>
+          </Button>
+        )}
       </CardHeader>
-      <CardContent className="space-y-6">
+      {(!collapsible || isOpen) && (
+        <CardContent className="space-y-6">
         {error && <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
         <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
@@ -409,7 +451,8 @@ export default function RecurringScheduleManager({
             </Button>
           </div>
         </div>
-      </CardContent>
+        </CardContent>
+      )}
     </Card>
   );
 }

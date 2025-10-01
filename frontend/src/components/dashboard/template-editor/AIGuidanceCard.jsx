@@ -1,0 +1,35 @@
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import TemplateAIContent from "../TemplateAIContent";
+import { ChevronDown } from "lucide-react";
+
+const AIGuidanceCard = ({ isOpen, onToggle, aiSettings, onChange, defaultSettings }) => (
+  <Card className="shadow-sm">
+    <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+      <div>
+        <CardTitle>AI Content guidance</CardTitle>
+        <CardDescription>
+          Tell the assistant how to write titles, notes, and tags for this template.
+        </CardDescription>
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="mt-2 h-8 px-2 text-slate-600 sm:mt-0"
+        onClick={onToggle}
+        aria-expanded={isOpen}
+      >
+        <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+        <span className="sr-only">Toggle AI content guidance</span>
+      </Button>
+    </CardHeader>
+    {isOpen && (
+      <CardContent className="space-y-6">
+        <TemplateAIContent value={aiSettings || defaultSettings} onChange={onChange} className="space-y-5" />
+      </CardContent>
+    )}
+  </Card>
+);
+
+export default AIGuidanceCard;
