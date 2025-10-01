@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { formatDisplayName } from "@/lib/displayNames";
 import { Separator } from "@/components/ui/separator";
 import {
   DEFAULT_VOLUME_LEVEL,
@@ -153,7 +154,7 @@ const MusicTimingSection = ({
                               <SelectContent>
                                 {musicFiles.map((f) => (
                                   <SelectItem key={f.id} value={f.filename}>
-                                    {f.friendly_name || f.filename.split("_").slice(1).join("_")}
+                                    {formatDisplayName(f, { fallback: f.friendly_name || 'Audio clip' }) || 'Audio clip'}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
