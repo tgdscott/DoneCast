@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict
 from uuid import UUID
 
@@ -108,12 +108,21 @@ def balance_minutes(session: Any, user_id: UUID) -> int:
     return cred - deb
 
 
+def _normalize_to_utc(dt: datetime) -> datetime:
+    """Ensure the datetime has timezone info and is expressed in UTC."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def month_minutes_used(
     session: Any,
     user_id: UUID,
     period_start: datetime,
     period_end: datetime,
 ) -> int:
+    norm_start = _normalize_to_utc(period_start)
+    norm_end = _normalize_to_utc(period_end)
     q = (
         select(ProcessingMinutesLedger)
         .where(ProcessingMinutesLedger.user_id == user_id)
@@ -124,7 +133,8 @@ def month_minutes_used(
         ts = getattr(r, "created_at", None)
         if ts is None:
             continue
-        if ts < period_start or ts > period_end:
+        ts_utc = _normalize_to_utc(ts)
+        if ts_utc < norm_start or ts_utc > norm_end:
             continue
         if r.direction == LedgerDirection.DEBIT:
             used += int(r.minutes)
