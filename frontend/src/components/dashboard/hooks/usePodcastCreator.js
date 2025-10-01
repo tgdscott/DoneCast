@@ -80,6 +80,12 @@ export default function usePodcastCreator({
   const [autoPublishPending, setAutoPublishPending] = useState(false);
   const [lastAutoPublishedEpisodeId, setLastAutoPublishedEpisodeId] = useState(null);
   const [transcriptReady, setTranscriptReady] = useState(false);
+  const [transcriptPath, setTranscriptPath] = useState(null);
+  const resetTranscriptState = useCallback(() => {
+    setTranscriptReady(false);
+    setTranscriptPath(null);
+    transcriptReadyRef.current = false;
+  }, []);
   const [showVoicePicker, setShowVoicePicker] = useState(false);
   const [voicePickerTargetId, setVoicePickerTargetId] = useState(null);
   const [voiceNameById, setVoiceNameById] = useState({});
@@ -127,7 +133,11 @@ export default function usePodcastCreator({
         setIntentDetectionReady(false);
         const targetStep = typeof preselectedStartStep === 'number' ? preselectedStartStep : 5;
         setCurrentStep(targetStep);
-        if (preselectedTranscriptReady === true) { setTranscriptReady(true); transcriptReadyRef.current = true; }
+        if (preselectedTranscriptReady === true) {
+          setTranscriptReady(true);
+          transcriptReadyRef.current = true;
+          setTranscriptPath(null);
+        }
         used = true;
       }
     } catch {}
@@ -150,7 +160,11 @@ export default function usePodcastCreator({
         }
       }
       if (startStep === '5') setCurrentStep(5);
-      if (wasReady === '1') { setTranscriptReady(true); transcriptReadyRef.current = true; }
+      if (wasReady === '1') {
+        setTranscriptReady(true);
+        transcriptReadyRef.current = true;
+        setTranscriptPath(null);
+      }
     } catch {}
     try {
       localStorage.removeItem('ppp_start_step');
@@ -163,7 +177,11 @@ export default function usePodcastCreator({
     try {
       if (testInject.selectedTemplate) setSelectedTemplate(testInject.selectedTemplate);
       if (testInject.uploadedFilename) setUploadedFilename(testInject.uploadedFilename);
-      if (typeof testInject.transcriptReady === 'boolean') setTranscriptReady(!!testInject.transcriptReady);
+      if (typeof testInject.transcriptReady === 'boolean') {
+        const ready = !!testInject.transcriptReady;
+        setTranscriptReady(ready);
+        setTranscriptPath(ready ? (testInject.transcriptPath || null) : null);
+      }
       if (testInject.episodeDetails) setEpisodeDetails(prev => ({ ...prev, ...testInject.episodeDetails }));
     } catch {}
   }, [testInject]);
@@ -624,15 +642,15 @@ export default function usePodcastCreator({
 
       autoFillKeyRef.current = key;
     })();
-  }, [currentStep, selectedTemplate?.id, transcriptReady, uploadedFilename, expectedEpisodeId]);
+  }, [currentStep, selectedTemplate?.id, transcriptReady, uploadedFilename, expectedEpisodeId, transcriptPath]);
 
   useEffect(() => { transcriptReadyRef.current = transcriptReady; }, [transcriptReady]);
 
   useEffect(() => {
     aiCacheRef.current = { title: null, notes: null, tags: null };
     autoFillKeyRef.current = '';
-    if (currentStep === 5) setTranscriptReady(false);
-  }, [uploadedFilename, expectedEpisodeId, selectedTemplate?.id]);
+    if (currentStep === 5) resetTranscriptState();
+  }, [uploadedFilename, expectedEpisodeId, selectedTemplate?.id, currentStep, resetTranscriptState]);
 
   useEffect(() => {
     if (currentStep !== 5) return;
@@ -649,6 +667,9 @@ export default function usePodcastCreator({
         if (uploadedFilename) params.push(`hint=${encodeURIComponent(uploadedFilename)}`);
         const url = `/api/ai/transcript-ready${params.length ? `?${params.join('&')}` : ''}`;
         const r = await api.get(url);
+        if (Object.prototype.hasOwnProperty.call(r || {}, 'transcript_path')) {
+          setTranscriptPath(r?.transcript_path || null);
+        }
         if (r?.ready) {
           setTranscriptReady(true);
           return;
@@ -1027,8 +1048,7 @@ export default function usePodcastCreator({
     if (!item) {
       setSelectedPreupload(null);
       setUploadedFilename(null);
-      setTranscriptReady(false);
-      transcriptReadyRef.current = false;
+      resetTranscriptState();
       setInternResponses([]);
       setInternPendingContexts(null);
       setInternReviewContexts([]);
@@ -1053,6 +1073,7 @@ export default function usePodcastCreator({
     const ready = !!item.transcript_ready;
     setTranscriptReady(ready);
     transcriptReadyRef.current = ready;
+    setTranscriptPath(ready ? item.transcript_path || null : null);
     const intentsData = item.intents || {};
     setIntentDetections(intentsData);
     setIntentDetectionReady(true);
@@ -1069,7 +1090,7 @@ export default function usePodcastCreator({
       else if (next.sfx === null) next.sfx = 'yes';
       return next;
     });
-  }, []);
+  }, [resetTranscriptState]);
 
   const cancelBuild = () => {
     // Abort in-flight audio upload, if any
@@ -1087,8 +1108,7 @@ export default function usePodcastCreator({
     setUploadedFile(null);
     setUploadedFilename(null);
     setUploadProgress(null);
-    setTranscriptReady(false);
-    transcriptReadyRef.current = false;
+    resetTranscriptState();
     setIntents({ flubber: null, intern: null, sfx: null, intern_overrides: [] });
     setIntentDetections({ flubber: null, intern: null, sfx: null });
     setIntentDetectionReady(true);
@@ -1213,7 +1233,7 @@ export default function usePodcastCreator({
     const payload = {
       episode_id: expectedEpisodeId || crypto.randomUUID(),
       podcast_id: selectedTemplate?.podcast_id,
-      transcript_path: null,
+      transcript_path: transcriptPath || null,
       hint: uploadedFilename || null,
       base_prompt: '',
       extra_instructions: selectedTemplate?.ai_settings?.title_instructions || '',
@@ -1224,7 +1244,7 @@ export default function usePodcastCreator({
       title = res?.title || '';
     } catch(e) {
       if (e && e.status === 409) {
-        setTranscriptReady(false);
+        resetTranscriptState();
         try { toast({ title: 'Transcript not ready', description: 'Transcript not ready yet — still processing', variant: 'default' }); } catch {}
         return '';
       }
@@ -1249,7 +1269,7 @@ export default function usePodcastCreator({
     const payload = {
       episode_id: expectedEpisodeId || crypto.randomUUID(),
       podcast_id: selectedTemplate?.podcast_id,
-      transcript_path: null,
+      transcript_path: transcriptPath || null,
       hint: uploadedFilename || null,
       base_prompt: '',
       extra_instructions: selectedTemplate?.ai_settings?.notes_instructions || '',
@@ -1260,7 +1280,7 @@ export default function usePodcastCreator({
       desc = res?.description || '';
     } catch(e) {
       if (e && e.status === 409) {
-        setTranscriptReady(false);
+        resetTranscriptState();
         try { toast({ title: 'Transcript not ready', description: 'Transcript not ready yet — still processing', variant: 'default' }); } catch {}
         return '';
       }
@@ -1284,14 +1304,31 @@ export default function usePodcastCreator({
     const payload = {
       episode_id: expectedEpisodeId || crypto.randomUUID(),
       podcast_id: selectedTemplate?.podcast_id,
-      transcript_path: null,
+      transcript_path: transcriptPath || null,
       hint: uploadedFilename || null,
       tags_always_include: selectedTemplate?.ai_settings?.tags_always_include || [],
     };
-    const res = await api.post('/api/ai/tags', payload);
-    const tags = Array.isArray(res?.tags) ? res.tags : [];
-    aiCacheRef.current.tags = tags;
-    return tags;
+    try {
+      const res = await api.post('/api/ai/tags', payload);
+      const tags = Array.isArray(res?.tags) ? res.tags : [];
+      aiCacheRef.current.tags = tags;
+      return tags;
+    } catch (e) {
+      if (e && e.status === 409) {
+        resetTranscriptState();
+        try { toast({ title: 'Transcript not ready', description: 'Transcript not ready yet — still processing', variant: 'default' }); } catch {}
+        return [];
+      }
+      try {
+        if (e && e.status === 429) {
+          toast({ variant: 'destructive', title: 'AI Tags error', description: 'Too many requests — please slow down and try again.' });
+        } else {
+          const code = e && e.status ? ` (${e.status})` : '';
+          toast({ variant: 'destructive', title: 'AI Tags error', description: `Request failed${code}. Please try again.` });
+        }
+      } catch {}
+      return [];
+    }
   };
 
   const handleAISuggestTitle = async () => {
@@ -2030,6 +2067,7 @@ export default function usePodcastCreator({
     scheduleTime,
     autoPublishPending,
     transcriptReady,
+    transcriptPath,
     showVoicePicker,
     voicePickerTargetId,
     voiceNameById,
