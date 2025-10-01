@@ -88,6 +88,37 @@ def test_main_content_upload_records_watch_without_email(session, client, monkey
 
 
 @pytest.mark.usefixtures("db_engine")
+def test_main_content_upload_requires_friendly_name(session, client, monkeypatch):
+    user, password = _create_user(session)
+    headers = _auth_headers(client, user.email, password)
+
+    stub_task = lambda path, body: {"name": "stubbed"}
+    monkeypatch.setattr(
+        "infrastructure.tasks_client.enqueue_http_task",
+        stub_task,
+    )
+    monkeypatch.setattr(
+        "backend.api.routers.media.write.enqueue_http_task",
+        stub_task,
+    )
+
+    resp = client.post(
+        "/api/media/upload/main_content",
+        data={
+            "notify_when_ready": "false",
+        },
+        files={
+            "files": ("sample.wav", io.BytesIO(b"RIFF....WAVE"), "audio/wav"),
+        },
+        headers=headers,
+    )
+
+    assert resp.status_code == 400
+    body = resp.json()
+    assert "Friendly name" in json.dumps(body)
+
+
+@pytest.mark.usefixtures("db_engine")
 def test_transcription_enqueued_after_watch_commit(session, client, monkeypatch):
     user, password = _create_user(session)
     headers = _auth_headers(client, user.email, password)
@@ -153,6 +184,7 @@ def test_main_content_upload_records_email_target(session, client, monkeypatch):
         data={
             "notify_when_ready": "true",
             "notify_email": notify_email,
+            "friendly_names": json.dumps(["Alert Upload"]),
         },
         files={
             "files": ("another.wav", io.BytesIO(b"RIFF....WAVE"), "audio/wav"),
