@@ -2,6 +2,7 @@ import React from 'react';
 import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { FileAudio, Loader2, Mic, Upload, ArrowLeft, Lightbulb, AlertTriangle } from 'lucide-react';
+import { formatDisplayName } from '@/lib/displayNames';
 
 // Inline intent questions were removed in favor of the floating modal.
 
@@ -28,8 +29,9 @@ export default function StepUploadAudio({
   minutesRequired = null,
   minutesRemaining = null,
   formatDuration = () => null,
-  audioDurationSec = null,
+  audioDurationSec: audioDurationSecProp = null,
 }) {
+  const audioDurationSec = audioDurationSecProp;
   const handleFileInput = (event) => {
     if (event.target.files?.[0]) {
       onFileChange(event.target.files[0]);

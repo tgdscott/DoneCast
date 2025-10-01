@@ -38,8 +38,9 @@ export default function StepEpisodeDetails({
   minutesRequired = null,
   minutesRemaining = null,
   formatDuration = () => null,
-  audioDurationSec = null,
+  audioDurationSec: audioDurationSecProp = null,
 }) {
+  const audioDurationSec = audioDurationSecProp;
   const formatDurationSafe = typeof formatDuration === 'function' ? formatDuration : () => null;
   const parseNumber = (value) => {
     const num = Number(value);
