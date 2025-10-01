@@ -458,10 +458,6 @@ export default function PodcastPlusDashboard() {
               }
               setCurrentView('createEpisode');
             }}
-            onChooseRecord={() => {
-              setCreatorMode('standard');
-              setCurrentView('recorder');
-            }}
           />
         );
       }
@@ -493,6 +489,10 @@ export default function PodcastPlusDashboard() {
             preuploadedLoading={preuploadLoading}
             onRefreshPreuploaded={refreshPreuploads}
             preselectedStartStep={creatorMode === 'preuploaded' ? 1 : undefined}
+            onRequestUpload={() => {
+              setCreatorMode('standard');
+              setCurrentView('preuploadUpload');
+            }}
           />
         );
       case 'mediaLibrary':

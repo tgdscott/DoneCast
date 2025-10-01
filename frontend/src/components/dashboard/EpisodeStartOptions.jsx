@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
-import { AlertTriangle, ArrowLeft, Library, Mic, Upload } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Library, Upload } from 'lucide-react';
 import styles from './EpisodeStartOptions.module.css';
 
 export default function EpisodeStartOptions({
@@ -12,7 +12,6 @@ export default function EpisodeStartOptions({
   onBack,
   onChooseUpload,
   onChooseLibrary,
-  onChooseRecord,
 }) {
   return (
     <div className="space-y-6">
@@ -28,10 +27,10 @@ export default function EpisodeStartOptions({
         <CardHeader>
           <CardTitle className="text-2xl" style={{ color: '#2C3E50' }}>How do you want to start?</CardTitle>
           <CardDescription className="text-slate-600 text-sm">
-            Upload new audio to process in the background, pick from your finished uploads, or record right now.
+            Upload fresh audio or jump straight into picking a processed file that’s ready to edit.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-3">
+        <CardContent className="grid gap-4 md:grid-cols-2">
           <button
             type="button"
             onClick={onChooseUpload}
@@ -44,45 +43,26 @@ export default function EpisodeStartOptions({
             </p>
           </button>
 
-          <div className={`relative ${!hasReadyAudio ? 'group' : ''}`}>
+          <div className="border border-emerald-200 rounded-xl text-left hover:border-emerald-500 hover:shadow-sm transition relative">
             <button
               type="button"
-              onClick={hasReadyAudio ? onChooseLibrary : undefined}
-              disabled={!hasReadyAudio || loading}
-              title={!hasReadyAudio ? 'You must upload audio first' : undefined}
-              className={`border rounded-xl text-left transition ${
-                hasReadyAudio
-                  ? 'border-emerald-200 hover:border-emerald-500 hover:shadow-sm'
-                  : 'border-slate-200 bg-slate-100 cursor-not-allowed text-slate-400'
-              } ${styles['uniform-card']}`}
+              onClick={onChooseLibrary}
+              disabled={loading}
+              className={`${styles['uniform-card']} w-full text-left ${loading ? 'opacity-90 cursor-wait' : ''}`}
             >
               <Library className={`w-6 h-6 mb-4 ${hasReadyAudio ? 'text-emerald-500' : 'text-slate-400'}`} />
-              <div className="font-semibold text-slate-800 mb-1">Use processed audio</div>
+              <div className="font-semibold text-slate-800 mb-1">Upload and use processed audio</div>
               <p className="text-sm text-slate-600">
-                Jump straight into editing with transcripts and automations ready. {hasReadyAudio ? '' : 'Upload audio first and we will unlock this option.'}
+                Jump straight into Step 2 to pick a processed upload or add a new file. {hasReadyAudio ? '' : 'If you haven’t uploaded anything yet, we’ll guide you there.'}
               </p>
             </button>
 
             {!hasReadyAudio && (
-              <div className="absolute left-0 -bottom-2 translate-y-full z-10 hidden group-hover:block">
-                <div className="max-w-xs rounded-md border border-red-200 bg-white shadow-md p-2">
-                  <span className="text-sm text-red-600">You must upload audio first</span>
-                </div>
+              <div className="px-4 pb-4 text-xs text-amber-700">
+                You’ll need at least one processed upload before you can continue, but we’ll show you how to add one.
               </div>
             )}
           </div>
-
-          <button
-            type="button"
-            onClick={onChooseRecord}
-            className={`border border-slate-200 rounded-xl text-left hover:border-purple-400 hover:shadow-sm transition ${styles['uniform-card']}`}
-          >
-            <Mic className="w-6 h-6 text-purple-500 mb-4" />
-            <div className="font-semibold text-slate-800 mb-1">Record your show</div>
-            <p className="text-sm text-slate-600">
-              Capture your episode now. Once the recording finishes we’ll process it just like an upload and alert you when it’s ready.
-            </p>
-          </button>
         </CardContent>
       </Card>
 
