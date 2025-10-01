@@ -4,7 +4,7 @@ import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
 import { formatDisplayName } from '@/lib/displayNames';
 
-import { AlertTriangle, FileAudio, Loader2, RefreshCcw, Sparkles, Trash2 } from 'lucide-react';
+import { AlertTriangle, FileAudio, Loader2, RefreshCcw, Sparkles, Trash2, Upload } from 'lucide-react';
 
 const formatDate = (iso) => {
   if (!iso) return '—';
@@ -107,8 +107,14 @@ export default function StepSelectPreprocessed({
 
   return (
     <div className="space-y-6">
-      <CardHeader className="text-center">
+      <CardHeader className="flex flex-col gap-3 text-center sm:text-left sm:flex-row sm:items-center sm:justify-between">
         <CardTitle style={{ color: '#2C3E50' }}>Step 2: Choose Your Processed Audio</CardTitle>
+        {typeof onUpload === 'function' && (
+          <Button variant="outline" size="sm" onClick={onUpload} className="self-center">
+            <Upload className="w-4 h-4 mr-2" />
+            Upload audio
+          </Button>
+        )}
       </CardHeader>
 
       <Card className="bg-slate-50 border border-slate-200">
@@ -137,8 +143,16 @@ export default function StepSelectPreprocessed({
               </div>
             )}
             {!loading && items.length === 0 && (
-              <div className="py-10 text-center text-sm text-slate-500">
-                No uploads yet. Upload audio from the previous step to see it here.
+              <div className="py-10 px-6 text-center text-sm text-slate-600 space-y-4">
+                <p className="text-base font-medium text-slate-700">No processed uploads yet</p>
+                <p>
+                  Upload audio so we can work our magic. Once it’s processed you’ll find it here, ready with transcripts and automations.
+                </p>
+                {typeof onUpload === 'function' && (
+                  <Button onClick={onUpload}>
+                    <Upload className="w-4 h-4 mr-2" /> Upload audio
+                  </Button>
+                )}
               </div>
             )}
             {!loading && items.length > 0 && (

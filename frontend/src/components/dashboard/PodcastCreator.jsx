@@ -34,6 +34,7 @@ export default function PodcastCreator({
   preuploadedLoading = false,
   onRefreshPreuploaded = () => {},
   preselectedStartStep,
+  onRequestUpload,
 }) {
   const controller = usePodcastCreator({
     token,
@@ -151,6 +152,18 @@ export default function PodcastCreator({
   } = controller;
 
   const { toast } = useToast();
+
+  const autoAdvanceRef = React.useRef(false);
+  React.useEffect(() => {
+    if (creatorMode === 'preuploaded') {
+      if (!autoAdvanceRef.current && currentStep === 1) {
+        setCurrentStep(2);
+        autoAdvanceRef.current = true;
+      }
+    } else {
+      autoAdvanceRef.current = false;
+    }
+  }, [creatorMode, currentStep, setCurrentStep]);
 
   const selectedPreuploadItem = React.useMemo(
     () => {
