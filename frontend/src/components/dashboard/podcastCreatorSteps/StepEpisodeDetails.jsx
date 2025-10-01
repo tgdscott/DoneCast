@@ -47,20 +47,44 @@ export default function StepEpisodeDetails({
     const num = Number(value);
     return Number.isFinite(num) ? num : null;
   };
-  const totalSeconds = parseNumber(minutesPrecheck?.total_seconds);
-  const staticSeconds = parseNumber(minutesPrecheck?.static_seconds);
-  const mainSeconds = parseNumber(minutesPrecheck?.main_seconds);
-  const requiredMinutesVal = parseNumber(minutesRequired);
+  const toPositiveSeconds = (value) => {
+    const num = parseNumber(value);
+    return num != null && num > 0 ? num : null;
+  };
+  const formatSeconds = (seconds) => (seconds != null && seconds > 0 ? formatDurationSafe(seconds) : null);
+  const minutesFromSeconds = (seconds) => (seconds != null && seconds > 0 ? Math.max(1, Math.ceil(seconds / 60)) : null);
+
+  const totalSeconds = toPositiveSeconds(minutesPrecheck?.total_seconds);
+  const staticSeconds = toPositiveSeconds(minutesPrecheck?.static_seconds);
+  const mainSeconds = toPositiveSeconds(minutesPrecheck?.main_seconds);
+  const effectiveAudioSeconds = toPositiveSeconds(audioDurationSec);
+
+  const parsedRequiredMinutes = parseNumber(minutesRequired);
+  const requiredMinutesVal = (() => {
+    if (parsedRequiredMinutes != null && parsedRequiredMinutes > 0) {
+      return Math.max(1, Math.ceil(parsedRequiredMinutes));
+    }
+    const fallbackMinutes =
+      minutesFromSeconds(totalSeconds) ??
+      minutesFromSeconds(mainSeconds) ??
+      minutesFromSeconds(effectiveAudioSeconds);
+    return fallbackMinutes;
+  })();
+
   const remainingMinutesVal = parseNumber(minutesRemaining);
-  const audioDurationText = audioDurationSec ? formatDurationSafe(audioDurationSec) : null;
-  const totalDurationText = totalSeconds
-    ? formatDurationSafe(totalSeconds)
-    : (mainSeconds ? formatDurationSafe(mainSeconds) : audioDurationText);
-  const staticDurationText = staticSeconds ? formatDurationSafe(staticSeconds) : null;
-  const requiredMinutesText = requiredMinutesVal != null
-    ? `${requiredMinutesVal} minute${requiredMinutesVal === 1 ? '' : 's'}`
-    : null;
-  const remainingMinutesDisplay = remainingMinutesVal != null ? Math.max(0, remainingMinutesVal) : null;
+  const remainingMinutesDisplay =
+    remainingMinutesVal != null && Number.isFinite(remainingMinutesVal)
+      ? Math.max(0, Math.ceil(remainingMinutesVal))
+      : null;
+
+  const totalDurationText =
+    formatSeconds(totalSeconds) ?? formatSeconds(mainSeconds) ?? formatSeconds(effectiveAudioSeconds);
+  const staticDurationText = formatSeconds(staticSeconds);
+  const audioDurationText = formatSeconds(effectiveAudioSeconds);
+  const requiredMinutesText =
+    requiredMinutesVal != null
+      ? `${requiredMinutesVal} minute${requiredMinutesVal === 1 ? '' : 's'}`
+      : null;
   const remainingMinutesText = remainingMinutesDisplay != null
     ? `${remainingMinutesDisplay} minute${remainingMinutesDisplay === 1 ? '' : 's'}`
     : null;
