@@ -679,15 +679,11 @@ export default function PodcastPlusDashboard() {
                         onClick={() => setCurrentView('websiteBuilder')}
                         variant="outline"
                         className="justify-start text-sm h-10 text-slate-400 border-slate-200 bg-slate-50 hover:bg-slate-100"
-                        className="justify-start text-sm h-10"
-                        disabled
                       >
                         <Globe2 className="w-4 h-4 mr-2" />
                         <span className="flex items-center w-full">
-                        <span className="flex flex-col items-start -my-1">
                           <span>Website Builder</span>
                           <span className="ml-auto text-xs font-medium uppercase tracking-wide text-slate-400">Coming Soon</span>
-                          <span className="text-xs italic font-normal text-muted-foreground -mt-1">Coming soon</span>
                         </span>
                       </Button>
                       {isAdmin(authUser) && (

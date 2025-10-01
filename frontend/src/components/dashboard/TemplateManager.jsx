@@ -82,16 +82,18 @@ export default function TemplateManager({ onBack, token, setCurrentView }) {
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-bold">Template Manager</h1>
         <div className="flex gap-2 items-end">
-          <Button
-            type="button"
-            variant="outline"
-            disabled
-            className="opacity-60 cursor-not-allowed"
-            title="AI Template Wizard is coming soon"
-          >
-            <Bot className="w-4 h-4 mr-2" />Create with AI Wizard
-            <span className="italic text-xs text-muted-foreground ml-2">(Coming soon)</span>
-          </Button>
+          <div className="flex flex-col items-end">
+            <span className="italic text-xs text-muted-foreground mb-1">Coming soon</span>
+            <Button
+              type="button"
+              variant="outline"
+              disabled
+              className="opacity-60 cursor-not-allowed"
+              title="AI Template Wizard is coming soon"
+            >
+              <Bot className="w-4 h-4 mr-2" />Create with AI Wizard
+            </Button>
+          </div>
           <Button onClick={handleCreateNew}><Plus className="w-4 h-4 mr-2" />Create New Template</Button>
         </div>
       </div>
