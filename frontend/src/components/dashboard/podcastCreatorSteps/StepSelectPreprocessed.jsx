@@ -33,6 +33,7 @@ export default function StepSelectPreprocessed({
   onBack,
   onNext,
   onRefresh,
+  onUpload = null,
   intents = {},
   pendingIntentLabels = [],
   onIntentSubmit,
