@@ -1,4 +1,21 @@
 import lamejs from 'lamejs';
+import LameModule from 'lamejs/src/js/Lame.js';
+import MPEGModeModule from 'lamejs/src/js/MPEGMode.js';
+
+const MPEGMode = MPEGModeModule?.default || MPEGModeModule;
+const Lame = LameModule?.default || LameModule;
+
+if (typeof globalThis !== 'undefined') {
+  const globalScope = globalThis;
+  if (globalScope) {
+    if (!globalScope.MPEGMode && MPEGMode) {
+      globalScope.MPEGMode = MPEGMode;
+    }
+    if (!globalScope.Lame && Lame) {
+      globalScope.Lame = Lame;
+    }
+  }
+}
 
 const hasWindow = typeof window !== 'undefined';
 const AudioContextCtor = hasWindow ? window.AudioContext || window.webkitAudioContext : null;
