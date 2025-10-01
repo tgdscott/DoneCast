@@ -53,7 +53,6 @@ def test_load_content_scans_for_alternates(monkeypatch, log):
     assert words == []
     assert sanitized == 'episode-name-2'
 
-
 def test_do_transcript_io_shape(monkeypatch, log):
     def fake_load(fname, words_json, out_name, log_):
         # No logs needed here; focus on shape
