@@ -310,6 +310,8 @@ def _gather_user_sfx_entries(session: Session, current_user: User) -> Iterable[D
 
 
 def _get_template_settings(session: Session, podcast_id):
+    if podcast_id is None or (isinstance(podcast_id, str) and not podcast_id.strip()):
+        return {}
     try:
         tmpl = session.exec(select(PodcastTemplate).where(PodcastTemplate.podcast_id == podcast_id)).first()
     except Exception:
