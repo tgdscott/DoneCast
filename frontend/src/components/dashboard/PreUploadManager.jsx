@@ -39,6 +39,7 @@ export default function PreUploadManager({
   const [error, setError] = useState('');
   const [conversionNotice, setConversionNotice] = useState('');
   const [converting, setConverting] = useState(false);
+  const [conversionProgress, setConversionProgress] = useState(null);
 
   const displayName = useMemo(() => {
     if (friendlyName) return friendlyName;
@@ -62,8 +63,19 @@ export default function PreUploadManager({
     setSuccessMessage('');
     setError('');
     setConversionNotice('');
+    setConversionProgress({ phase: 'starting', progress: 0 });
     try {
-      const result = await convertAudioFileToMp3IfBeneficial(selected);
+      const result = await convertAudioFileToMp3IfBeneficial(selected, {
+        onProgress: (info = {}) => {
+          setConversionProgress((previous) => {
+            const next = { ...(previous || {}), ...(info || {}) };
+            if (Number.isFinite(info.progress)) {
+              next.progress = Math.max(0, Math.min(1, info.progress));
+            }
+            return next;
+          });
+        },
+      });
       if (result?.converted) {
         setConversionNotice(
           `Converted to MP3 for upload (${formatFileSize(result.originalSize)} → ${formatFileSize(result.convertedSize)}).`,
@@ -89,6 +101,7 @@ export default function PreUploadManager({
       setFile(null);
     } finally {
       setConverting(false);
+      setConversionProgress(null);
     }
   };
 
@@ -214,9 +227,26 @@ export default function PreUploadManager({
             </div>
 
             {converting && (
-              <div className="flex items-center gap-2 text-sm text-slate-600" role="status">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Converting to MP3 for faster upload…</span>
+              <div className="flex flex-col gap-2 text-sm text-slate-600" role="status">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <div className="flex flex-col">
+                    <span>Converting to MP3 for faster upload…</span>
+                    {typeof conversionProgress?.progress === 'number' && (
+                      <span className="text-xs text-slate-500">
+                        {Math.round(conversionProgress.progress * 100)}% complete
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {typeof conversionProgress?.progress === 'number' && (
+                  <div className="mt-1 h-2 w-full rounded-full bg-slate-200 overflow-hidden">
+                    <div
+                      className="h-full bg-slate-600 transition-all duration-200"
+                      style={{ width: `${Math.max(5, Math.min(100, Math.round(conversionProgress.progress * 100) || 0))}%` }}
+                    />
+                  </div>
+                )}
               </div>
             )}
 
