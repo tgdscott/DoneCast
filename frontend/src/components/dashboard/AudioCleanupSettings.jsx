@@ -333,7 +333,7 @@ export default function AudioCleanupSettings({ className }) {
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Upload a single-hit SFX if you want something custom.
+                  Upload a single-hit sound effect if you want something custom.
                 </p>
               </div>
             </div>

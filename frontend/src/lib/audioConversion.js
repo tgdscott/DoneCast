@@ -2,7 +2,6 @@ import lamejs from 'lamejs';
 
 const hasWindow = typeof window !== 'undefined';
 const AudioContextCtor = hasWindow ? window.AudioContext || window.webkitAudioContext : null;
-
 const clampAndScaleToInt16 = (sample) => {
   const clamped = Math.max(-1, Math.min(1, sample || 0));
   const scaled = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
@@ -82,6 +81,7 @@ const decodePcmSample = (view, offset, bytesPerSample, audioFormat) => {
 };
 
 const decodeWavHeader = (arrayBuffer) => {
+
   const view = new DataView(arrayBuffer);
   if (readFourCC(view, 0) !== 'RIFF' || readFourCC(view, 8) !== 'WAVE') {
     throw new Error('Not a RIFF/WAVE file');
@@ -242,7 +242,6 @@ const encodeMp3 = (channelData, sampleRate, opts, originalFile) => {
   if (end && end.length) {
     mp3Chunks.push(end);
   }
-
   return finalizeMp3Encoding(mp3Chunks, opts, originalFile);
 };
 
@@ -344,6 +343,7 @@ export async function convertAudioFileToMp3IfBeneficial(file, options = {}) {
     const arrayBuffer = await file.arrayBuffer();
     if (isLikelyWavFile(file, arrayBuffer)) {
       try {
+
         return convertWavPcmToMp3(arrayBuffer, opts, file);
       } catch (wavError) {
         console.warn('Failed to parse WAV file, falling back to AudioContext', wavError);

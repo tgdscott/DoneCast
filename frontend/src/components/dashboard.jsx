@@ -29,7 +29,6 @@ import {
   Settings as SettingsIcon,
   DollarSign,
   Globe2,
-  BookOpen,
 } from "lucide-react";
 import { useState, useEffect, useMemo, useCallback } from "react";
 
@@ -525,7 +524,6 @@ export default function PodcastPlusDashboard() {
         return <BillingPage token={token} onBack={() => setCurrentView('dashboard')} />;
       case 'dashboard':
       default: {
-        const canViewWebsiteBuilderDocs = canManageCustomDomain;
         const canCreateEpisode = podcasts.length > 0 && templates.length > 0;
         return (
           <div className="space-y-8">
@@ -676,29 +674,18 @@ export default function PodcastPlusDashboard() {
           <Button onClick={() => setCurrentView('episodeHistory')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-episodes"><BarChart3 className="w-4 h-4 mr-2" />Episodes</Button>
           {/* Import moved under Podcasts */}
           <Button onClick={() => setCurrentView('billing')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-subscription"><DollarSign className="w-4 h-4 mr-2" />Subscription</Button>
+                      <Button onClick={() => setCurrentView('settings')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-settings"><SettingsIcon className="w-4 h-4 mr-2" />Settings</Button>
                       <Button
                         onClick={() => setCurrentView('websiteBuilder')}
                         variant="outline"
-                        className="justify-start text-sm h-10"
+                        className="justify-start text-sm h-10 text-slate-400 border-slate-200 bg-slate-50 hover:bg-slate-100"
                       >
-                        <Globe2 className="w-4 h-4 mr-2" />Website Builder
+                        <Globe2 className="w-4 h-4 mr-2" />
+                        <span className="flex items-center w-full">
+                          <span>Website Builder</span>
+                          <span className="ml-auto text-xs font-medium uppercase tracking-wide text-slate-400">Coming Soon</span>
+                        </span>
                       </Button>
-                      {canViewWebsiteBuilderDocs && (
-                        <Button
-                          asChild
-                          variant="outline"
-                          className="justify-start text-sm h-10"
-                        >
-                          <a
-                            href="/docs/podcast-website-builder"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            <BookOpen className="w-4 h-4 mr-2" />Website Builder Guide
-                          </a>
-                        </Button>
-                      )}
-                      <Button onClick={() => setCurrentView('settings')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-settings"><SettingsIcon className="w-4 h-4 mr-2" />Settings</Button>
                       {isAdmin(authUser) && (
                         <Button onClick={() => setCurrentView('devTools')} variant="destructive" className="justify-start text-sm h-10"><AlertTriangle className="w-4 h-4 mr-2" />Dev</Button>
                       )}

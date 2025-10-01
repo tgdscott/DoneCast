@@ -3,6 +3,14 @@ import os
 from pathlib import Path
 from typing import List, Dict, Any
 
+# ``google-cloud-speech`` attempts to negotiate ALTS credentials automatically
+# when DirectPath is enabled.  Outside of Google Cloud this results in noisy
+# "untrusted ALTS is not enabled" log messages and can block requests in some
+# environments.  Disable DirectPath pre-emptively so that the client falls back
+# to standard TLS everywhere.
+os.environ.setdefault("GOOGLE_CLOUD_ENABLE_DIRECT_PATH", "0")
+os.environ.setdefault("GOOGLE_CLOUD_ENABLE_DIRECT_PATH_XDS", "0")
+
 CHUNK_DURATION_MS = 10 * 60 * 1000  # reuse chunk size
 
 try:
