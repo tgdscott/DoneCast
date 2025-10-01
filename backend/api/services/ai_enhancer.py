@@ -38,11 +38,12 @@ def generate_speech_from_text(
     google_voice: str | None = None,
     speaking_rate: float = 1.0,
     user: Optional[User] = None,
+    api_key: str | None = None,
 ) -> AudioSegment:
     """Generate speech from text using the requested provider."""
 
     if provider == "elevenlabs":
-        return _generate_with_elevenlabs(text, voice_id=voice_id, user=user)
+        return _generate_with_elevenlabs(text, voice_id=voice_id, user=user, api_key_override=api_key)
     if provider == "google":
         raise AIEnhancerError("Google TTS provider is not yet implemented.")
     raise AIEnhancerError(f"Unsupported TTS provider: {provider}")
@@ -53,8 +54,13 @@ def _generate_with_elevenlabs(
     *,
     voice_id: str | None,
     user: Optional[User],
+    api_key_override: str | None,
 ) -> AudioSegment:
-    api_key = (user and user.elevenlabs_api_key) or settings.ELEVENLABS_API_KEY
+    api_key = (
+        api_key_override
+        or (user and user.elevenlabs_api_key)
+        or settings.ELEVENLABS_API_KEY
+    )
     if not api_key or api_key == "dummy":
         raise AIEnhancerError("ElevenLabs API key is not configured on the server or for your user account.")
 
