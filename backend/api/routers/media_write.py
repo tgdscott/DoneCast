@@ -35,6 +35,8 @@ async def upload_media_files(
         created_items = []
         names = json.loads(friendly_names) if friendly_names else []
 
+        require_friendly = category == MediaCategory.main_content
+
         notify_requested = False
         if isinstance(notify_when_ready, str):
             notify_requested = notify_when_ready.strip().lower() in {"1", "true", "yes", "on"}
@@ -120,7 +122,15 @@ async def upload_media_files(
 				pass
 			raise HTTPException(status_code=500, detail="Failed to save uploaded file.")
 
-		friendly_name = names[i] if i < len(names) and names[i].strip() else default_friendly_name
+                provided_name = names[i] if i < len(names) else None
+                provided_clean = str(provided_name).strip() if provided_name is not None else ""
+                if require_friendly and not provided_clean:
+                        raise HTTPException(
+                                status_code=400,
+                                detail="Friendly name is required when uploading episode audio.",
+                        )
+
+                friendly_name = provided_name if provided_clean else default_friendly_name
 
                 media_item = MediaItem(
                         filename=safe_filename,

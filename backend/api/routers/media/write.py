@@ -100,6 +100,12 @@ async def upload_media_files(
     uploaded_objects: list[tuple[str, str]] = []  # (bucket, key)
     names = parse_friendly_names(friendly_names)
 
+    # When uploading the primary episode audio, a human-friendly label must be
+    # provided so downstream UI and notifications can reference the file by
+    # name. Deriving one from the filename makes it easy to accidentally skip
+    # naming, so enforce that the client supplies a value explicitly.
+    require_friendly = category == MediaCategory.main_content
+
     notify_requested = False
     if isinstance(notify_when_ready, str):
         notify_requested = notify_when_ready.strip().lower() in {"1", "true", "yes", "on"}
@@ -221,7 +227,15 @@ async def upload_media_files(
         # Determine proposed friendly name for this file (before any upload)
         original_filename = Path(uf.filename or "").stem
         default_friendly_name = " ".join(original_filename.split("_")).title()
-        friendly_name = names[i] if i < len(names) and str(names[i]).strip() else default_friendly_name
+        provided_name = names[i] if i < len(names) else None
+        provided_clean = str(provided_name).strip() if provided_name is not None else ""
+        if require_friendly and not provided_clean:
+            raise HTTPException(
+                status_code=400,
+                detail="Friendly name is required when uploading episode audio.",
+            )
+
+        friendly_name = provided_name if provided_clean else default_friendly_name
         fn_norm = str(friendly_name).strip() or default_friendly_name
         fn_key = fn_norm.lower()
 
