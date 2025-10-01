@@ -75,6 +75,27 @@ def _resolve_media_file(name: str) -> Optional[Path]:
         MEDIA_DIR / "media_uploads" / base,
     ]
 
+    # To support sanitized filenames (e.g., whitespace/characters replaced) and
+    # different casing on case-insensitive file systems, collect alternative
+    # basenames that may exist on disk even if the stored reference does not
+    # match exactly.
+    alt_basenames: list[str] = []
+    try:
+        from api.services.audio.common import sanitize_filename  # lazy import
+
+        sanitized = sanitize_filename(base)
+        if sanitized and sanitized not in {base, base.lower()}:
+            alt_basenames.append(sanitized)
+    except Exception:
+        pass
+
+    try:
+        lower = base.lower()
+        if lower != base:
+            alt_basenames.append(lower)
+    except Exception:
+        pass
+
     try:
         cwd_media = Path.cwd() / "media_uploads" / base
         candidates.append(cwd_media)
@@ -89,6 +110,27 @@ def _resolve_media_file(name: str) -> Optional[Path]:
             seen.add(candidate)
             if candidate.exists():
                 return candidate
+            # Try alternative basenames in the same directory when the exact
+            # name isn't present.
+            parent = candidate.parent
+            for alt in alt_basenames:
+                alt_candidate = parent / alt
+                if alt_candidate in seen:
+                    continue
+                seen.add(alt_candidate)
+                if alt_candidate.exists():
+                    return alt_candidate
+            # Finally, perform a case-insensitive match by scanning the
+            # directory (bounded to the immediate directory to avoid costly
+            # recursion) to support Windows paths that may differ only by
+            # casing or sanitized characters introduced during upload.
+            try:
+                if parent.exists():
+                    for child in parent.iterdir():
+                        if child.name.lower() == Path(base).name.lower():
+                            return child
+            except Exception:
+                continue
         except Exception:
             continue
     return None
