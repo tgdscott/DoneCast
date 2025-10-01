@@ -129,6 +129,7 @@ export default function PodcastCreator({
     usage,
     minutesNearCap,
     minutesRemaining,
+    audioDurationSec,
     minutesPrecheck,
     minutesPrecheckPending,
     minutesPrecheckError,
