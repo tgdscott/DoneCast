@@ -1,9 +1,11 @@
 import lamejs from 'lamejs';
 import LameModule from 'lamejs/src/js/Lame.js';
 import MPEGModeModule from 'lamejs/src/js/MPEGMode.js';
+import BitStreamModule from 'lamejs/src/js/BitStream.js';
 
 const MPEGMode = MPEGModeModule?.default || MPEGModeModule;
 const Lame = LameModule?.default || LameModule;
+const BitStream = BitStreamModule?.default || BitStreamModule;
 
 if (typeof globalThis !== 'undefined') {
   const globalScope = globalThis;
@@ -13,6 +15,9 @@ if (typeof globalThis !== 'undefined') {
     }
     if (!globalScope.Lame && Lame) {
       globalScope.Lame = Lame;
+    }
+    if (!globalScope.BitStream && BitStream) {
+      globalScope.BitStream = BitStream;
     }
   }
 }
