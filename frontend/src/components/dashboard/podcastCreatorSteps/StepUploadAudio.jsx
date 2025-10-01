@@ -46,19 +46,6 @@ export default function StepUploadAudio({
   const hasPendingIntents = Array.isArray(pendingIntentLabels) && pendingIntentLabels.length > 0;
   const pendingLabelText = hasPendingIntents ? pendingIntentLabels.join(', ') : '';
 
-  // Helper to format a filename by dropping UUID / hash prefixes and extension; prettify.
-  const formatDisplayName = (name) => {
-    try {
-      if (!name) return '';
-      let s = name.split(/[\\/]/).pop();
-      s = s.replace(/\.[a-z0-9]{2,5}$/i, '');
-      s = s.replace(/^(?:[a-f0-9]{8,}|[a-f0-9-]{20,})[_-]+/i, '');
-      s = s.replace(/[._-]+/g, ' ').trim();
-      if (s.length) s = s[0].toUpperCase() + s.slice(1);
-      return s;
-    } catch { return name; }
-  };
-
   const handleContinue = async () => {
     if (hasPendingIntents && typeof onEditAutomations === 'function') {
       onEditAutomations();
@@ -162,10 +149,16 @@ export default function StepUploadAudio({
                 <p className={`text-xl font-semibold ${isUploading ? 'text-slate-600' : 'text-green-600'}`}>
                   {isUploading ? 'Uploading your audio…' : 'File Ready!'}
                 </p>
-                {uploadedFile && <p className="text-gray-600">{formatDisplayName(uploadedFile.name)}</p>}
+                {uploadedFile && (
+                  <p className="text-gray-600">
+                    {formatDisplayName(uploadedFile, { fallback: uploadedFile.name || 'Audio file' })}
+                  </p>
+                )}
                 {!uploadedFile && uploadedFilename && (
                   <>
-                    <p className="text-gray-600">Server file: {uploadedFilename}</p>
+                    <p className="text-gray-600">
+                      Server file: {formatDisplayName(uploadedFilename, { fallback: 'Audio file' })}
+                    </p>
                     <p className="text-xs text-muted-foreground">We found your previously uploaded audio — you can continue without re-uploading.</p>
                   </>
                 )}
