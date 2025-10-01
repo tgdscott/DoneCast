@@ -490,6 +490,31 @@ def prepare_transcript_context(
                     "[assemble] Failed to copy cleaned audio to MEDIA_DIR; mixer may not find it",
                     exc_info=True,
                 )
+
+            # Ensure downstream components that expect files under MEDIA_DIR/media_uploads
+            # (e.g., the API assembly pipeline) can resolve the cleaned audio. Some
+            # environments configure ``MEDIA_DIR`` to a generic writable temp directory
+            # while the mixer looks specifically under a ``media_uploads`` child. Mirror
+            # the cleaned audio there when needed so lookups succeed regardless of the
+            # configured MEDIA_ROOT.
+            try:
+                uploads_dir = MEDIA_DIR / "media_uploads"
+                if MEDIA_DIR.name == "media_uploads":
+                    uploads_dir = MEDIA_DIR
+                uploads_dir.mkdir(parents=True, exist_ok=True)
+                mirror_dest = uploads_dir / src.name
+                if dest.exists() and mirror_dest.resolve() != dest.resolve():
+                    shutil.copyfile(dest, mirror_dest)
+                    logging.info(
+                        "[assemble] Mirrored cleaned audio into MEDIA_DIR/media_uploads: %s",
+                        mirror_dest,
+                    )
+            except Exception:
+                logging.warning(
+                    "[assemble] Failed to mirror cleaned audio into MEDIA_DIR/media_uploads",
+                    exc_info=True,
+                )
+
             episode.working_audio_name = dest.name
             session.add(episode)
             session.commit()
