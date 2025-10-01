@@ -78,9 +78,11 @@ export default function PreUploadManager({
         );
       } else if (result?.reason === 'no-audio-context') {
         setConversionNotice('Browser does not support in-browser conversion; uploading the original file instead.');
+
       } else if (result?.reason === 'conversion-error' || result?.reason === 'decode-failed') {
         console.error('Audio conversion failed; uploading original file.', result?.error);
         setConversionNotice('Unable to convert automatically. We\'ll upload the original file instead.');
+
       }
       setFile(result?.file || selected);
     } catch (conversionError) {

@@ -259,6 +259,7 @@ export async function convertAudioFileToMp3IfBeneficial(file, options = {}) {
       } catch (closeError) {
         console.warn('Failed to close audio context after conversion', closeError);
       }
+
     }
   }
 }
