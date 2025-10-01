@@ -9,7 +9,7 @@ import VoicePicker from "@/components/VoicePicker";
 import { makeApi } from "@/lib/apiClient";
 import { toast } from "@/hooks/use-toast";
 import { GripVertical, HelpCircle, Loader2, Mic, Trash2, Upload } from "lucide-react";
-import { segmentIcons, sourceIcons } from "./constants";
+import { segmentIcons, segmentIconColors, sourceIcons, sourceIconColors } from "./constants";
 
 const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDragging, onOpenTTS, justCreatedTs, templateVoiceId, token, onMediaUploaded }) => {
     const filesForType = mediaFiles[segment.segment_type] || [];
@@ -118,7 +118,11 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
                 <CardHeader className="flex flex-row items-center justify-between p-3 bg-green-100">
                     <div className="flex items-center gap-3">
                         <GripVertical className="w-5 h-5 text-gray-400" />
-                        {segmentIcons.content}
+                                                {(() => {
+                                                    const Icon = segmentIcons.content;
+                                                    const colorClass = segmentIconColors.content || "";
+                                                    return <Icon className={`w-5 h-5 ${colorClass}`} />;
+                                                })()}
                         <span className="font-semibold text-green-800">Main Content</span>
                     </div>
                     <p className="text-sm text-gray-600">Cannot be deleted</p>
@@ -140,7 +144,11 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
             <CardHeader className="flex flex-row items-center justify-between p-3 bg-gray-100 border-b">
                 <div className="flex items-center gap-3">
                     <GripVertical className="w-5 h-5 text-gray-400" />
-                    {segmentIcons[segment.segment_type]}
+                                        {(() => {
+                                            const Icon = segmentIcons[segment.segment_type];
+                                            const colorClass = segmentIconColors[segment.segment_type] || "";
+                                            return <Icon className={`w-5 h-5 ${colorClass}`} />;
+                                        })()}
                     <span className="font-semibold text-gray-800">{segment.segment_type.charAt(0).toUpperCase() + segment.segment_type.slice(1)}</span>
                     {justCreatedTs ? (
                         <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">Created with AI voice</span>
@@ -188,8 +196,20 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
                                     <SelectValue placeholder="Select source type..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="static">{sourceIcons.static} Audio file (upload or choose)</SelectItem>
-                                    <SelectItem value="tts">{sourceIcons.tts} Per episode AI voice</SelectItem>
+                                                                        <SelectItem value="static">
+                                                                            {(() => {
+                                                                                const Icon = sourceIcons.static;
+                                                                                const colorClass = sourceIconColors.static || "";
+                                                                                return <Icon className={`w-4 h-4 mr-2 ${colorClass}`} />;
+                                                                            })()} Audio file (upload or choose)
+                                                                        </SelectItem>
+                                                                        <SelectItem value="tts">
+                                                                            {(() => {
+                                                                                const Icon = sourceIcons.tts;
+                                                                                const colorClass = sourceIconColors.tts || "";
+                                                                                return <Icon className={`w-4 h-4 mr-2 ${colorClass}`} />;
+                                                                            })()} Per episode AI voice
+                                                                        </SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>

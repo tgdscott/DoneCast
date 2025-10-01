@@ -45,30 +45,25 @@ const EpisodeStructureCard = ({
     </CardHeader>
     {isOpen && (
       <CardContent className="space-y-8">
-        <div className="grid gap-6 lg:grid-cols-[minmax(220px,1fr)_minmax(320px,1.6fr)]">
-          <section className="space-y-4" data-tour="template-add">
-            <div className="space-y-1">
-              <p className="text-xs uppercase tracking-wide text-slate-500">Bit segments</p>
-              <h3 className="text-base font-semibold text-slate-800">Add segments</h3>
-              <p className="text-sm text-slate-600">Drop in the recurring pieces that make up each episode.</p>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-              <AddSegmentButton type="intro" onClick={addSegment} />
-              <AddSegmentButton type="content" onClick={addSegment} disabled={hasContentSegment} />
-              <AddSegmentButton type="outro" onClick={addSegment} />
-              <AddSegmentButton type="commercial" onClick={addSegment} />
-            </div>
-          </section>
-          <section className="space-y-4">
-            <div className="space-y-1">
+        <div className="flex flex-col gap-4">
+          {/* Add segment buttons at the top in a horizontal row */}
+          <div className="flex gap-2 justify-start items-center pb-2">
+            <AddSegmentButton type="intro" onClick={addSegment} size="lg" />
+            <AddSegmentButton type="content" onClick={addSegment} disabled={hasContentSegment} size="lg" />
+            <AddSegmentButton type="outro" onClick={addSegment} size="lg" />
+            <AddSegmentButton type="commercial" onClick={addSegment} size="lg" disabled />
+          </div>
+          {/* Segment order and content boxes in a tighter vertical layout */}
+          <div className="space-y-2">
+            <div className="space-y-0.5">
               <p className="text-xs uppercase tracking-wide text-slate-500">Segment order</p>
-              <h3 className="text-base font-semibold text-slate-800">Arrange your show flow</h3>
-              <p className="text-sm text-slate-600">Drag and drop segments to update the running order.</p>
+              <h3 className="text-sm font-semibold text-slate-800">Arrange your show flow</h3>
+              <p className="text-xs text-slate-600">Drag and drop segments to update the running order.</p>
             </div>
             <DragDropContext onDragEnd={onDragEnd}>
               <Droppable droppableId="segments">
                 {(provided) => (
-                  <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-3">
+                  <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-2">
                     {segments.map((segment, index) => (
                       <Draggable
                         key={segment.id}
@@ -103,7 +98,7 @@ const EpisodeStructureCard = ({
                 )}
               </Droppable>
             </DragDropContext>
-          </section>
+          </div>
         </div>
       </CardContent>
     )}

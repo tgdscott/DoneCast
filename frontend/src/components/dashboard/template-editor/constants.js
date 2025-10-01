@@ -1,3 +1,15 @@
+// Icon color mappings for segment and source types
+export const segmentIconColors = {
+  intro: "text-blue-500",
+  outro: "text-purple-500",
+  content: "text-green-500",
+  commercial: "text-orange-500",
+};
+
+export const sourceIconColors = {
+  static: "text-gray-500",
+  tts: "text-orange-500",
+};
 import { FileText, Mic, Music } from "lucide-react";
 
 export const AI_DEFAULT = {
@@ -61,13 +73,13 @@ export const describeVolumeLevel = (level) => {
 };
 
 export const segmentIcons = {
-  intro: <Music className="w-5 h-5 text-blue-500" />,
-  outro: <Music className="w-5 h-5 text-purple-500" />,
-  content: <FileText className="w-5 h-5 text-green-500" />,
-  commercial: <Mic className="w-5 h-5 text-orange-500" />,
+  intro: Music,
+  outro: Music,
+  content: FileText,
+  commercial: Mic,
 };
 
 export const sourceIcons = {
-  static: <FileText className="w-4 h-4 mr-2" />,
-  tts: <Mic className="w-4 h-4 mr-2" />,
+  static: FileText,
+  tts: Mic,
 };
