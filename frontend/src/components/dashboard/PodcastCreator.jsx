@@ -315,21 +315,22 @@ export default function PodcastCreator({
               onBack={() => setCurrentStep(1)}
               onNext={() => setCurrentStep(3)}
               onRefresh={onRefreshPreuploaded}
+              onUpload={onRequestUpload}
               intents={intents}
-            pendingIntentLabels={pendingIntentLabels}
-            onIntentSubmit={handleIntentSubmit}
-            onEditAutomations={() => setShowIntentQuestions(true)}
-            onDeleteItem={handleDeletePreuploaded}
-            minutesPrecheck={minutesPrecheck}
-            minutesPrecheckPending={minutesPrecheckPending}
-            minutesPrecheckError={minutesPrecheckError}
-            minutesBlocking={minutesBlocking}
-            minutesBlockingMessage={minutesBlockingMessage}
-            minutesRequired={minutesRequiredPrecheck}
-            minutesRemaining={minutesRemainingPrecheck}
-            formatDuration={formatDuration}
-            audioDurationSec={audioDurationSec}
-          />
+              pendingIntentLabels={pendingIntentLabels}
+              onIntentSubmit={handleIntentSubmit}
+              onEditAutomations={() => setShowIntentQuestions(true)}
+              onDeleteItem={handleDeletePreuploaded}
+              minutesPrecheck={minutesPrecheck}
+              minutesPrecheckPending={minutesPrecheckPending}
+              minutesPrecheckError={minutesPrecheckError}
+              minutesBlocking={minutesBlocking}
+              minutesBlockingMessage={minutesBlockingMessage}
+              minutesRequired={minutesRequiredPrecheck}
+              minutesRemaining={minutesRemainingPrecheck}
+              formatDuration={formatDuration}
+              audioDurationSec={audioDurationSec}
+            />
           );
         }
         return (
