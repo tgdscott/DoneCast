@@ -2,12 +2,16 @@ import lamejs from 'lamejs';
 
 const hasWindow = typeof window !== 'undefined';
 const AudioContextCtor = hasWindow ? window.AudioContext || window.webkitAudioContext : null;
+const clampAndScaleToInt16 = (sample) => {
+  const clamped = Math.max(-1, Math.min(1, sample || 0));
+  const scaled = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+  return Math.round(scaled);
+};
 
 const floatTo16BitPCM = (float32) => {
   const buffer = new Int16Array(float32.length);
   for (let i = 0; i < float32.length; i += 1) {
-    const sample = Math.max(-1, Math.min(1, float32[i] || 0));
-    buffer[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+    buffer[i] = clampAndScaleToInt16(float32[i]);
   }
   return buffer;
 };
@@ -76,7 +80,8 @@ const decodePcmSample = (view, offset, bytesPerSample, audioFormat) => {
   }
 };
 
-const decodeWavPcm = (arrayBuffer) => {
+const decodeWavHeader = (arrayBuffer) => {
+
   const view = new DataView(arrayBuffer);
   if (readFourCC(view, 0) !== 'RIFF' || readFourCC(view, 8) !== 'WAVE') {
     throw new Error('Not a RIFF/WAVE file');
@@ -166,48 +171,19 @@ const decodeWavPcm = (arrayBuffer) => {
     throw new Error('WAV file contains no audio data');
   }
 
-  const channelData = Array.from({ length: numberOfChannels }, () => new Float32Array(sampleCount));
-  let dataOffset = data.offset;
-  for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex += 1) {
-    for (let channelIndex = 0; channelIndex < numberOfChannels; channelIndex += 1) {
-      const sampleOffset = dataOffset + channelIndex * bytesPerSample;
-      const pcm = decodePcmSample(view, sampleOffset, bytesPerSample, audioFormat);
-      channelData[channelIndex][sampleIndex] = Math.max(-1, Math.min(1, pcm || 0));
-    }
-    dataOffset += blockAlign;
-  }
-
-  return { channelData, sampleRate };
+  return {
+    audioFormat,
+    numberOfChannels,
+    sampleRate,
+    blockAlign,
+    bitsPerSample,
+    bytesPerSample,
+    dataOffset: data.offset,
+    dataSize: data.size,
+  };
 };
 
-const encodeMp3 = (channelData, sampleRate, opts, originalFile) => {
-  const channelCount = Math.max(1, channelData.length || 1);
-  const left = floatTo16BitPCM(channelData[0]);
-  const right = channelCount > 1 ? floatTo16BitPCM(channelData[1]) : null;
-
-  const encoder = new lamejs.Mp3Encoder(channelCount > 1 ? 2 : 1, sampleRate, opts.bitrate);
-  const blockSize = 1152;
-  const mp3Chunks = [];
-
-  for (let i = 0; i < left.length; i += blockSize) {
-    const leftChunk = left.subarray(i, Math.min(i + blockSize, left.length));
-    let data;
-    if (right) {
-      const rightChunk = right.subarray(i, Math.min(i + blockSize, right.length));
-      data = encoder.encodeBuffer(leftChunk, rightChunk);
-    } else {
-      data = encoder.encodeBuffer(leftChunk);
-    }
-    if (data && data.length) {
-      mp3Chunks.push(data);
-    }
-  }
-
-  const end = encoder.flush();
-  if (end && end.length) {
-    mp3Chunks.push(end);
-  }
-
+const finalizeMp3Encoding = (mp3Chunks, opts, originalFile) => {
   const mp3Blob = new Blob(mp3Chunks, { type: 'audio/mpeg' });
   const mp3Size = mp3Blob.size;
 
@@ -239,6 +215,114 @@ const encodeMp3 = (channelData, sampleRate, opts, originalFile) => {
   };
 };
 
+const encodeMp3 = (channelData, sampleRate, opts, originalFile) => {
+  const channelCount = Math.max(1, channelData.length || 1);
+  const left = floatTo16BitPCM(channelData[0]);
+  const right = channelCount > 1 ? floatTo16BitPCM(channelData[1]) : null;
+
+  const encoder = new lamejs.Mp3Encoder(channelCount > 1 ? 2 : 1, sampleRate, opts.bitrate);
+  const blockSize = 1152;
+  const mp3Chunks = [];
+
+  for (let i = 0; i < left.length; i += blockSize) {
+    const leftChunk = left.subarray(i, Math.min(i + blockSize, left.length));
+    let data;
+    if (right) {
+      const rightChunk = right.subarray(i, Math.min(i + blockSize, right.length));
+      data = encoder.encodeBuffer(leftChunk, rightChunk);
+    } else {
+      data = encoder.encodeBuffer(leftChunk);
+    }
+    if (data && data.length) {
+      mp3Chunks.push(data);
+    }
+  }
+
+  const end = encoder.flush();
+  if (end && end.length) {
+    mp3Chunks.push(end);
+  }
+  return finalizeMp3Encoding(mp3Chunks, opts, originalFile);
+};
+
+const convertWavPcmToMp3 = (arrayBuffer, opts, originalFile) => {
+  const header = decodeWavHeader(arrayBuffer);
+  const {
+    audioFormat,
+    numberOfChannels,
+    sampleRate,
+    blockAlign,
+    bytesPerSample,
+    dataOffset,
+    dataSize,
+  } = header;
+
+  const encodeChannels = numberOfChannels > 1 ? 2 : 1;
+  const encoder = new lamejs.Mp3Encoder(encodeChannels, sampleRate, opts.bitrate);
+  const mp3Chunks = [];
+  const view = new DataView(arrayBuffer);
+  const framesPerChunk = 1152 * 20;
+  const totalFrames = Math.floor(dataSize / blockAlign);
+  let framesProcessed = 0;
+  let offset = dataOffset;
+
+  while (framesProcessed < totalFrames && offset + blockAlign <= view.byteLength) {
+    const remainingFrames = totalFrames - framesProcessed;
+    const framesThisChunk = Math.max(1, Math.min(framesPerChunk, remainingFrames));
+    const left = new Int16Array(framesThisChunk);
+    const right = encodeChannels === 2 ? new Int16Array(framesThisChunk) : null;
+
+    for (let frame = 0; frame < framesThisChunk; frame += 1) {
+      const frameOffset = offset + frame * blockAlign;
+      if (encodeChannels === 1) {
+        let sum = 0;
+        for (let channelIndex = 0; channelIndex < numberOfChannels; channelIndex += 1) {
+          const sampleOffset = frameOffset + channelIndex * bytesPerSample;
+          const pcm = decodePcmSample(view, sampleOffset, bytesPerSample, audioFormat);
+          sum += pcm;
+        }
+        const averaged = sum / numberOfChannels;
+        left[frame] = clampAndScaleToInt16(averaged);
+      } else {
+        let sumLeft = 0;
+        let sumRight = 0;
+        let countLeft = 0;
+        let countRight = 0;
+        for (let channelIndex = 0; channelIndex < numberOfChannels; channelIndex += 1) {
+          const sampleOffset = frameOffset + channelIndex * bytesPerSample;
+          const pcm = decodePcmSample(view, sampleOffset, bytesPerSample, audioFormat);
+          if (channelIndex % 2 === 0) {
+            sumLeft += pcm;
+            countLeft += 1;
+          } else {
+            sumRight += pcm;
+            countRight += 1;
+          }
+        }
+        const leftAvg = sumLeft / (countLeft || numberOfChannels);
+        const rightAvg = countRight ? sumRight / countRight : leftAvg;
+        left[frame] = clampAndScaleToInt16(leftAvg);
+        right[frame] = clampAndScaleToInt16(rightAvg);
+      }
+    }
+
+    const encoded = right ? encoder.encodeBuffer(left, right) : encoder.encodeBuffer(left);
+    if (encoded && encoded.length) {
+      mp3Chunks.push(encoded);
+    }
+
+    framesProcessed += framesThisChunk;
+    offset += framesThisChunk * blockAlign;
+  }
+
+  const end = encoder.flush();
+  if (end && end.length) {
+    mp3Chunks.push(end);
+  }
+
+  return finalizeMp3Encoding(mp3Chunks, opts, originalFile);
+};
+
 export async function convertAudioFileToMp3IfBeneficial(file, options = {}) {
   if (!file) {
     return { file, converted: false, reason: 'no-file' };
@@ -259,7 +343,8 @@ export async function convertAudioFileToMp3IfBeneficial(file, options = {}) {
     const arrayBuffer = await file.arrayBuffer();
     if (isLikelyWavFile(file, arrayBuffer)) {
       try {
-        ({ channelData, sampleRate } = decodeWavPcm(arrayBuffer));
+
+        return convertWavPcmToMp3(arrayBuffer, opts, file);
       } catch (wavError) {
         console.warn('Failed to parse WAV file, falling back to AudioContext', wavError);
       }
