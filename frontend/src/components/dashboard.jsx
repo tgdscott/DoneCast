@@ -493,6 +493,7 @@ export default function PodcastPlusDashboard() {
               setCreatorMode('standard');
               setCurrentView('preuploadUpload');
             }}
+            userTimezone={user?.timezone || authUser?.timezone || null}
           />
         );
       case 'mediaLibrary':

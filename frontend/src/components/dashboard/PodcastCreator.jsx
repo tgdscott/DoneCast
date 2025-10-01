@@ -35,6 +35,7 @@ export default function PodcastCreator({
   onRefreshPreuploaded = () => {},
   preselectedStartStep,
   onRequestUpload,
+  userTimezone = null,
 }) {
   const controller = usePodcastCreator({
     token,
@@ -330,6 +331,7 @@ export default function PodcastCreator({
               minutesRemaining={minutesRemainingPrecheck}
               formatDuration={formatDuration}
               audioDurationSec={audioDurationSec}
+              userTimezone={userTimezone}
             />
           );
         }
