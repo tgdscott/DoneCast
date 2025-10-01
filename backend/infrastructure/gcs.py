@@ -1,9 +1,11 @@
 import logging
 import os
 import shutil
+
 from datetime import datetime, timedelta, timezone
+
 from pathlib import Path
-from typing import IO, Optional, Union
+from typing import IO, Optional
 
 try:
     from google.cloud import storage
@@ -15,6 +17,75 @@ except ImportError:
     gcs_exceptions = None
 
 logger = logging.getLogger(__name__)
+
+
+_LOCAL_MEDIA_DIR: Optional[Path] = None
+
+
+def _resolve_local_media_dir() -> Path:
+    """Return the directory that should hold local media fallbacks."""
+
+    global _LOCAL_MEDIA_DIR
+    if _LOCAL_MEDIA_DIR is not None:
+        return _LOCAL_MEDIA_DIR
+
+    candidates: list[Path] = []
+
+    env_override = (os.getenv("MEDIA_ROOT") or os.getenv("MEDIA_DIR") or "").strip()
+    if env_override:
+        candidates.append(Path(env_override).expanduser())
+
+    try:
+        # Prefer the canonical path used by the API layer when available.
+        from api.core.paths import MEDIA_DIR as API_MEDIA_DIR  # type: ignore
+
+        if isinstance(API_MEDIA_DIR, Path):
+            candidates.append(API_MEDIA_DIR)
+        elif API_MEDIA_DIR:
+            candidates.append(Path(API_MEDIA_DIR))
+    except Exception:
+        pass
+
+    # Final fallback lives inside the repository for local dev runs.
+    candidates.append(Path("local_media"))
+
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except Exception:
+            resolved = candidate
+        try:
+            resolved.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            continue
+        _LOCAL_MEDIA_DIR = resolved
+        return resolved
+
+    # In the unlikely event all candidates failed, fall back to cwd/media.
+    fallback = Path("media")
+    fallback.mkdir(parents=True, exist_ok=True)
+    _LOCAL_MEDIA_DIR = fallback
+    return fallback
+
+
+def _normalize_object_key(key: str) -> Path:
+    """Normalize an object key to a safe relative Path."""
+
+    key = (key or "").replace("\\", "/").strip("/")
+    parts = [part for part in key.split("/") if part and part not in {".", ".."}]
+    return Path(*parts)
+
+
+def _local_media_url(key: str) -> Optional[str]:
+    rel_key = _normalize_object_key(key)
+    if not rel_key.parts:
+        return None
+
+    local_root = _resolve_local_media_dir()
+    candidate = local_root / rel_key
+    if not candidate.exists():
+        return None
+    return f"/static/media/{rel_key.as_posix()}"
 
 # --- GCS Client Initialization ---
 
@@ -57,8 +128,14 @@ _get_gcs_client()
 
 # --- Public API ---
 
-def get_signed_url(bucket_name: str, key: str, expiration: int = 3600) -> Optional[str]:
-    """Generates a signed URL for a GCS object, handling service account signing correctly."""
+def _generate_signed_url(
+    bucket_name: str,
+    key: str,
+    *,
+    expires: timedelta,
+    method: str = "GET",
+    content_type: Optional[str] = None,
+) -> Optional[str]:
     client = _get_gcs_client()
     if not client:
         return None
@@ -66,20 +143,82 @@ def get_signed_url(bucket_name: str, key: str, expiration: int = 3600) -> Option
     try:
         bucket = client.bucket(bucket_name)
         blob = bucket.blob(key)
-        # This is the fix: explicitly provide the service_account_email.
-        # The library will then use the IAM API to sign the URL instead of looking for a private key.
-        url = blob.generate_signed_url(
-            version="v4",
-            expiration=timedelta(seconds=expiration),
-            method="GET",
-            service_account_email=_signer_email,
+        kwargs = {
+            "version": "v4",
+            "expiration": expires,
+            "method": method,
+            "service_account_email": _signer_email,
+        }
+        if content_type and method.upper() in {"POST", "PUT"}:
+            kwargs["content_type"] = content_type
+        return blob.generate_signed_url(**kwargs)
+    except Exception as exc:
+        logger.error(
+            "Failed to sign URL for gs://%s/%s: %s",
+            bucket_name,
+            key,
+            exc,
+            exc_info=True,
         )
-        return url
-    except Exception as e:
-        logger.error("Failed to sign URL for gs://%s/%s: %s", bucket_name, key, e, exc_info=True)
-        # Re-raise the original error to be handled by the caller, which produces the 500 error you saw.
         raise
 
+ef get_signed_url(bucket_name: str, key: str, expiration: int = 3600) -> Optional[str]:
+    """Generates a signed URL for a GCS object, handling service account signing correctly."""
+
+    expiration = max(1, int(expiration or 0))
+    return _generate_signed_url(
+        bucket_name,
+        key,
+        expires=timedelta(seconds=expiration),
+        method="GET",
+    )
+
+
+def make_signed_url(
+    bucket: str,
+    key: str,
+    minutes: int = 60,
+    *,
+    method: str = "GET",
+    content_type: Optional[str] = None,
+) -> str:
+    """Return a signed URL or dev fallback for the given object."""
+
+    minutes = max(1, int(minutes or 0))
+    url: Optional[str] = None
+    try:
+        url = _generate_signed_url(
+            bucket,
+            key,
+            expires=timedelta(minutes=minutes),
+            method=method,
+            content_type=content_type,
+        )
+    except Exception as exc:
+        if not _should_fallback_to_local(exc):
+            raise
+        logger.warning(
+            "GCS signed-url generation failed for gs://%s/%s in dev; using local media: %s",
+            bucket,
+            key,
+            exc,
+        )
+
+    if url:
+        return url
+
+    fallback = _local_media_url(key)
+    if fallback:
+        if _is_dev_env():
+            logger.debug(
+                "DEV: Using local media fallback for gs://%s/%s -> %s",
+                bucket,
+                key,
+                fallback,
+            )
+        return fallback
+
+    raise RuntimeError(f"Unable to create signed URL for gs://{bucket}/{key}")
 
 def _is_dev_env() -> bool:
     val = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower()
@@ -87,6 +226,7 @@ def _is_dev_env() -> bool:
 
 
 def _write_local_bytes(bucket_name: str, key: str, data: bytes) -> str:
+
     local_path = Path(os.getenv("MEDIA_DIR", "media")) / key
     local_path.parent.mkdir(parents=True, exist_ok=True)
     local_path.write_bytes(data)
@@ -109,8 +249,9 @@ def _write_local_stream(bucket_name: str, key: str, fileobj: IO) -> str:
             fileobj.seek(0)
     except Exception:
         pass
-    logger.info(f"DEV: Wrote GCS upload for gs://{bucket_name}/{key} to {local_path}")
-    return str(local_path)
+
+    logger.info("DEV: Wrote GCS upload for gs://%s/%s to %s", bucket_name, key, local_path)
+    return rel_key.as_posix()
 
 
 def _should_fallback_to_local(exc: Exception) -> bool:
@@ -175,9 +316,15 @@ def download_gcs_bytes(bucket_name: str, key: str) -> Optional[bytes]:
     client = _get_gcs_client()
     if not client:
         # Dev/local fallback: read from local media directory
-        local_path = Path(os.getenv("MEDIA_DIR", "media")) / key
+        rel_key = _normalize_object_key(key)
+        local_path = _resolve_local_media_dir() / rel_key
         if local_path.exists():
-            logger.info(f"DEV: Reading GCS download for gs://{bucket_name}/{key} from {local_path}")
+            logger.info(
+                "DEV: Reading GCS download for gs://%s/%s from %s",
+                bucket_name,
+                key,
+                local_path,
+            )
             return local_path.read_bytes()
         return None
 
