@@ -20,6 +20,8 @@ def get_recent_titles(podcast_id, n: int = 10) -> List[str]:
 
     Ordered by publish_at DESC then created_at DESC. Truncated to keep prompts small.
     """
+    if podcast_id is None or (isinstance(podcast_id, str) and not podcast_id.strip()):
+        return []
     try:
         with Session(engine) as session:
             stmt = (
@@ -40,6 +42,8 @@ def get_recent_notes(podcast_id, n: int = 10) -> List[str]:
 
     Ordered by publish_at DESC then created_at DESC. Truncated.
     """
+    if podcast_id is None or (isinstance(podcast_id, str) and not podcast_id.strip()):
+        return []
     try:
         with Session(engine) as session:
             stmt = (
@@ -59,6 +63,8 @@ def get_recent_sections(podcast_id, tag: str, section_type: str, n: int = 10) ->
 
     Returns list of content strings (trimmed), capped at n.
     """
+    if podcast_id is None or (isinstance(podcast_id, str) and not podcast_id.strip()):
+        return []
     try:
         with Session(engine) as session:
             stmt = (

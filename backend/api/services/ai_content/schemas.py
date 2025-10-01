@@ -10,7 +10,7 @@ IdT = Union[UUID, int]
 
 class SuggestTitleIn(BaseModel):
     episode_id: IdT
-    podcast_id: IdT
+    podcast_id: Optional[IdT] = None
     transcript_path: Optional[str] = None
     hint: Optional[str] = None
     base_prompt: Optional[str] = None
@@ -20,7 +20,7 @@ class SuggestTitleIn(BaseModel):
 
 class SuggestNotesIn(BaseModel):
     episode_id: IdT
-    podcast_id: IdT
+    podcast_id: Optional[IdT] = None
     transcript_path: Optional[str] = None
     hint: Optional[str] = None
     base_prompt: Optional[str] = None
@@ -30,7 +30,7 @@ class SuggestNotesIn(BaseModel):
 
 class SuggestTagsIn(BaseModel):
     episode_id: IdT
-    podcast_id: IdT
+    podcast_id: Optional[IdT] = None
     transcript_path: Optional[str] = None
     hint: Optional[str] = None
     base_prompt: Optional[str] = None
@@ -54,7 +54,7 @@ class SuggestTagsOut(BaseModel):
 
 class SuggestSectionIn(BaseModel):
     episode_id: IdT
-    podcast_id: IdT
+    podcast_id: Optional[IdT] = None
     tag: str
     section_type: str  # "intro" | "outro" | "custom"
     transcript_path: Optional[str] = None
