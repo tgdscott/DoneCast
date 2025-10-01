@@ -15,7 +15,15 @@ export default function MediaLibrary({ onBack, token }) {
   const [uploadFiles, setUploadFiles] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState("music");
   const [isUploading, setIsUploading] = useState(false);
-  
+
+  const categoryLabels = {
+    intro: "Intro",
+    outro: "Outro",
+    music: "Music",
+    commercial: "Commercial",
+    sfx: "Sound Effects",
+  };
+
   const [editingId, setEditingId] = useState(null);
   const [editingName, setEditingName] = useState("");
   const [editingTrigger, setEditingTrigger] = useState("");
@@ -56,17 +64,18 @@ export default function MediaLibrary({ onBack, token }) {
       sfx: 25 * MB,
     };
     const maxBytes = maxBytesByCat[selectedCategory] ?? (50 * MB);
+    const selectedLabel = categoryLabels[selectedCategory] || selectedCategory;
     const files = Array.from(e.target.files || []);
     const accepted = [];
     for (const file of files) {
       const ct = (file.type || '').toLowerCase();
       if (!ct.startsWith('audio/')) {
-        toast({ variant: 'destructive', title: 'Invalid file type', description: `${file.name}: only audio files are allowed for ${selectedCategory}.` });
+        toast({ variant: 'destructive', title: 'Invalid file type', description: `${file.name}: only audio files are allowed for ${selectedLabel}.` });
         continue;
       }
       if (file.size > maxBytes) {
         const lim = Math.floor(maxBytes / MB);
-        toast({ variant: 'destructive', title: 'File too large', description: `${file.name}: exceeds ${lim}MB limit for ${selectedCategory}.` });
+        toast({ variant: 'destructive', title: 'File too large', description: `${file.name}: exceeds ${lim}MB limit for ${selectedLabel}.` });
         continue;
       }
       accepted.push({ file, friendly_name: file.name.split('.').slice(0, -1).join('.') });
@@ -215,7 +224,8 @@ export default function MediaLibrary({ onBack, token }) {
   const deleteSelected = async (category) => {
     const ids = Array.from(selectedIdsByCat[category] || []);
     if (!ids.length) return;
-    if (!window.confirm(`Delete ${ids.length} selected ${category} item(s)? This cannot be undone.`)) return;
+    const label = categoryLabels[category] || category;
+    if (!window.confirm(`Delete ${ids.length} selected ${label} item(s)? This cannot be undone.`)) return;
     try {
       const api = makeApi(token);
       for (const id of ids) {
@@ -223,7 +233,7 @@ export default function MediaLibrary({ onBack, token }) {
       }
       setMediaFiles(prev => prev.filter(f => !(f.category === category && ids.includes(f.id))));
       clearSelection(category);
-      toast({ description: `Deleted ${ids.length} ${category} item(s).` });
+      toast({ description: `Deleted ${ids.length} ${label} item(s).` });
     } catch (err) {
       setError(err.message);
     }
@@ -236,7 +246,20 @@ export default function MediaLibrary({ onBack, token }) {
         <CardHeader><CardTitle>Upload New Media</CardTitle></CardHeader>
         <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-2"><Label htmlFor="media-category">Category</Label><Select value={selectedCategory} onValueChange={setSelectedCategory}><SelectTrigger id="media-category"><SelectValue /></SelectTrigger><SelectContent>{["intro", "outro", "music", "commercial", "sfx"].map(cat => <SelectItem key={cat} value={cat}>{cat.charAt(0).toUpperCase() + cat.slice(1)}</SelectItem>)}</SelectContent></Select></div>
+                <div className="space-y-2"><Label htmlFor="media-category">Category</Label><Select value={selectedCategory} onValueChange={setSelectedCategory}><SelectTrigger id="media-category"><SelectValue placeholder="Select a category" /></SelectTrigger><SelectContent>{["intro", "outro", "music", "commercial", "sfx"].map(cat => {
+                  const isCommercialOption = cat === 'commercial';
+                  const label = categoryLabels[cat] || cat.charAt(0).toUpperCase() + cat.slice(1);
+                  return (
+                    <SelectItem
+                      key={cat}
+                      value={cat}
+                      disabled={isCommercialOption}
+                      className={isCommercialOption ? 'text-muted-foreground' : undefined}
+                    >
+                      {isCommercialOption ? 'Commercial (Coming Soon)' : label}
+                    </SelectItem>
+                  );
+                })}</SelectContent></Select></div>
                 <div className="space-y-2 md:col-span-2"><Label htmlFor="media-upload">File(s)</Label><Input id="media-upload" type="file" accept="audio/*" multiple onChange={handleFileSelect} /></div>
             </div>
 
@@ -265,18 +288,19 @@ export default function MediaLibrary({ onBack, token }) {
         {orderedCategories.map((category) => {
           const files = groupedMedia[category] || [];
           const isCommercial = category === 'commercial';
+          const categoryLabel = categoryLabels[category] || category.replace("_", " ");
           return (
           <Card key={category}>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle className="capitalize flex items-center gap-2">
-                  {category.replace("_", " ")}
+                <CardTitle className="flex items-center gap-2">
+                  {categoryLabel}
                   {isCommercial && <span className="text-xs text-gray-500">(Coming Soon)</span>}
                 </CardTitle>
                 {(!isCommercial && (selectedIdsByCat[category]?.size > 0)) && (
                   <div className="flex items-center gap-2">
                     <Button variant="destructive" size="sm" onClick={()=>deleteSelected(category)}>
-                      Delete selected {category}
+                      Delete selected {categoryLabel.toLowerCase()}
                     </Button>
                     <Button variant="ghost" size="sm" onClick={()=>clearSelection(category)}>Clear</Button>
                   </div>

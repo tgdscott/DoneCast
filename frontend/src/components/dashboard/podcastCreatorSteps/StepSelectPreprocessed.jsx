@@ -179,7 +179,7 @@ export default function StepSelectPreprocessed({
                                 Intern: {intern}
                               </Badge>
                               <Badge variant="outline" className="border-slate-300 text-slate-600">
-                                SFX: {sfx}
+                                Sound Effects: {sfx}
                               </Badge>
                               {item.notify_pending && (
                                 <Badge variant="outline" className="border-blue-200 text-blue-600 bg-blue-50">

@@ -111,9 +111,9 @@ export default function AudioCleanup({ token }) {
             <div className="mt-2 flex items-center gap-3">
               <label className="text-sm">Sound</label>
               <select className="rounded-lg border px-2 py-1 text-sm" disabled={beepType!== 'custom'} value={selectedSfx} onChange={(e)=>setSelectedSfx(e.target.value)}>
-                <option value="">Select SFX...</option>
+                <option value="">Select sound effects...</option>
                 {sfxList.map(s => <option key={s.id} value={s.id}>{s.friendly_name || s.filename}</option>)}
-                <option value="__upload">Upload new SFX…</option>
+                <option value="__upload">Upload new sound effects…</option>
               </select>
               {selectedSfx && selectedSfx !== '__upload' && (
                 <span className="text-xs text-muted-foreground">Selected: {sfxList.find(s=>s.id===selectedSfx)?.friendly_name || selectedSfx}</span>
@@ -131,7 +131,7 @@ export default function AudioCleanup({ token }) {
         <div className="font-medium">Coming soon</div>
         <div className="mt-2 grid sm:grid-cols-2 gap-2 text-sm">
           <label className="flex items-center gap-2 opacity-60"><input type="checkbox" disabled /> Remove coughs</label>
-          <label className="flex items-center gap-2 opacity-60"><input type="checkbox" disabled /> Duck background SFX</label>
+          <label className="flex items-center gap-2 opacity-60"><input type="checkbox" disabled /> Duck background sound effects</label>
         </div>
       </div>
     </div>

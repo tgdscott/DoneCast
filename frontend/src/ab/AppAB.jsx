@@ -92,7 +92,7 @@ export default function AppAB({ token }) {
       try {
         const items = await abApi(token).listMedia();
         if (aborted) return;
-        // Only surface main content uploads here; intro/outro/SFX belong to template/media tools
+        // Only surface main content uploads here; intro/outro/sound effects belong to template/media tools
         const mapped = (items || [])
           .filter((it) => {
             const cat = (it?.category || '').toLowerCase();

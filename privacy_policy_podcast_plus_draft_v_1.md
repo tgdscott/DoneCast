@@ -28,7 +28,7 @@ We collect information in three ways: (A) you provide it, (B) collected automati
 - **Cloud storage** (if you link it): file names, sizes, and content you select to import.
 - **Single Sign-On (SSO)** (e.g., Google): name, email, and SSO identifiers authorized by you.
 
-> **AI Processing Notice.** Our Services may analyze and transform User Content to provide features such as transcription, filler-word removal ("Flubber"), command-based editing ("Intern"), SFX/music insertion, summarization, and publishing automations.
+- **AI Processing Notice.** Our Services may analyze and transform User Content to provide features such as transcription, filler-word removal ("Flubber"), command-based editing ("Intern"), sound effects/music insertion, summarization, and publishing automations.
 
 ---
 
@@ -112,7 +112,7 @@ The Services are **not for children under 13**. If we learn that we have collect
 ---
 
 ## 10) AI & Content Processing Details
-- **Transcription & editing**: Your audio may be transcribed and analyzed to support features like diarization, filler-word removal, SFX insertion, and command-based edits.
+- **Transcription & editing**: Your audio may be transcribed and analyzed to support features like diarization, filler-word removal, sound effects insertion, and command-based edits.
 - **Models**: We may use a combination of in-house and third-party models. We do **not** permit third-party foundation model providers to use your content to train their general models for others.
 - **Human review**: Unless you contact support asking for help, we do not read/listen to your content. If a human review is required to resolve an issue, access is limited and logged.
 - **Processing minutes**: We track job duration and resource usage to manage quotas and billing.
