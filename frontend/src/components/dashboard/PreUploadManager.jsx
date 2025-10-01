@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 import { Input } from '../ui/input';
@@ -40,16 +40,6 @@ export default function PreUploadManager({
   const [conversionNotice, setConversionNotice] = useState('');
   const [converting, setConverting] = useState(false);
   const [conversionProgress, setConversionProgress] = useState(null);
-
-  const displayName = useMemo(() => {
-    if (friendlyName) return friendlyName;
-    if (!file) return '';
-    try {
-      return file.name.replace(/\.[a-z0-9]+$/i, '').replace(/[._-]+/g, ' ').trim();
-    } catch {
-      return file.name;
-    }
-  }, [file, friendlyName]);
 
   const handleFileChange = async (event) => {
     const selected = event.target.files?.[0];
@@ -107,16 +97,20 @@ export default function PreUploadManager({
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    const trimmedFriendlyName = friendlyName.trim();
+
     if (!file) {
       setError('Select an audio file to upload.');
+      return;
+    }
+    if (!trimmedFriendlyName) {
+      setError('Enter a friendly name for this episode before uploading.');
       return;
     }
     // Build the form once
     const form = new FormData();
     form.append('files', file);
-    if (displayName) {
-      form.append('friendly_names', JSON.stringify([displayName]));
-    }
+    form.append('friendly_names', JSON.stringify([trimmedFriendlyName]));
     form.append('notify_when_ready', notify ? 'true' : 'false');
     if (notify && email) {
       form.append('notify_email', email);
@@ -263,9 +257,13 @@ export default function PreUploadManager({
                   <label className="text-sm font-medium text-slate-700">Friendly name</label>
                   <Input
                     value={friendlyName}
-                    onChange={(event) => setFriendlyName(event.target.value)}
+                    onChange={(event) => {
+                      setFriendlyName(event.target.value);
+                      if (error) setError('');
+                    }}
                     placeholder="My episode draft"
                     className="mt-1"
+                    required
                   />
                 </div>
 
@@ -306,7 +304,7 @@ export default function PreUploadManager({
               <Button type="button" variant="ghost" onClick={onDone}>
                 Return to dashboard
               </Button>
-              <Button type="submit" disabled={!hasFile || converting}>
+              <Button type="submit" disabled={!hasFile || converting || !friendlyName.trim()}>
                 {converting ? (
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                 ) : (
