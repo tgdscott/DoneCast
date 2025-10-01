@@ -43,3 +43,20 @@ def test_resolve_media_returns_existing_media(tmp_path):
 
     assert resolved == target
     assert resolved.read_bytes() == b"audio"
+
+
+def test_resolve_media_handles_uploader_sanitization(tmp_path):
+    """Filenames saved by the upload endpoint preserve casing and use underscores."""
+
+    from backend.worker.tasks.assembly import media as media_module
+
+    original_name = "Demo Episode: What's New?.mp3"
+    sanitized = "Demo_Episode__What_s_New_.mp3"
+
+    durable = media_module.MEDIA_DIR / sanitized
+    durable.write_bytes(b"durable")
+
+    resolved = media_module._resolve_media_file(original_name)
+
+    assert resolved == durable
+    assert resolved.read_bytes() == b"durable"

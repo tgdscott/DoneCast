@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -128,20 +129,45 @@ def _resolve_media_file(name: str) -> Optional[Path]:
     # different casing on case-insensitive file systems, collect alternative
     # basenames that may exist on disk even if the stored reference does not
     # match exactly.
-    alt_basenames: list[str] = []
+    alt_basenames: set[str] = set()
+
+    def _add_alt(candidate: str) -> None:
+        try:
+            if candidate and candidate != base:
+                alt_basenames.add(candidate)
+        except Exception:
+            pass
+
+    def _uploader_sanitize(name: str) -> str:
+        try:
+            derived = Path(name).name
+        except Exception:
+            derived = str(name)
+        sanitized = re.sub(r"[^A-Za-z0-9._-]", "_", derived).strip("._")
+        if not sanitized:
+            sanitized = "file"
+        return sanitized[:200]
+
     try:
         from api.services.audio.common import sanitize_filename  # lazy import
 
         sanitized = sanitize_filename(base)
-        if sanitized and sanitized not in {base, base.lower()}:
-            alt_basenames.append(sanitized)
+        if sanitized:
+            _add_alt(sanitized)
+    except Exception:
+        pass
+
+    try:
+        uploader_variant = _uploader_sanitize(base)
+        if uploader_variant:
+            _add_alt(uploader_variant)
     except Exception:
         pass
 
     try:
         lower = base.lower()
         if lower != base:
-            alt_basenames.append(lower)
+            _add_alt(lower)
     except Exception:
         pass
 
