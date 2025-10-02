@@ -54,7 +54,7 @@ def test_load_content_scans_for_alternates(monkeypatch, log):
     assert sanitized == 'episode-name-2'
 
 def test_do_transcript_io_shape(monkeypatch, log):
-    def fake_load(fname, words_json, out_name, log_):
+    def fake_load(fname, words_json, out_name, log_, **kwargs):
         # No logs needed here; focus on shape
         return Path('media/foo.mp3'), FakeAudio(), [{'word': 'hello', 'start': 0.0, 'end': 0.1}], 'episode_sanitized'
 

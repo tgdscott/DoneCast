@@ -455,6 +455,26 @@ def download_gcs_bytes(bucket_name: str, key: str) -> Optional[bytes]:
     return local_path.read_bytes()
 
 
+def download_bytes(bucket_name: str, key: str) -> Optional[bytes]:
+    """Backwards compatible wrapper for legacy imports.
+
+    Several parts of the codebase still import :func:`download_bytes` from this
+    module.  During the infrastructure/worker split the helper was renamed to
+    :func:`download_gcs_bytes`, but the old symbol was never re-exported.  The
+    resulting ``ImportError`` caused transcript downloads to silently fail in
+    worker processes (they fall back to ``None`` when the import is missing),
+    which meant assembly could not locate existing transcript JSON artefacts
+    stored in GCS.  Episode assembly would then skip cleanup because
+    ``words_json_path`` was ``None``.
+
+    Providing a thin wrapper keeps existing call sites working and restores the
+    expected behaviour without changing their imports.  New code should prefer
+    :func:`download_gcs_bytes` but both names now behave identically.
+    """
+
+    return download_gcs_bytes(bucket_name, key)
+
+
 def delete_gcs_blob(bucket_name: str, blob_name: str) -> None:
     """Delete a blob from a GCS bucket, ignoring failures in development."""
 
