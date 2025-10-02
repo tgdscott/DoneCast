@@ -9,11 +9,8 @@ from pathlib import Path
 
 from .app import celery_app
 from api.core.paths import TRANSCRIPTS_DIR, MEDIA_DIR
-from api.services import transcription as trans
-from api.services.transcription.watchers import (
-    notify_watchers_processed,
-    mark_watchers_failed,
-)
+from api.services.transcription import transcribe_media_file as run_transcription
+from api.services.transcription.watchers import notify_watchers_processed
 
 
 @celery_app.task(name="transcribe_media_file")
@@ -33,7 +30,7 @@ def transcribe_media_file(filename: str) -> dict:
             in {"1", "true", "yes", "on"}
         )
 
-        words = trans.get_word_timestamps(filename)
+        words = run_transcription(filename)
         stem = Path(filename).stem
         import json as _json
 
@@ -96,11 +93,9 @@ def transcribe_media_file(filename: str) -> dict:
             "original": orig_new.name,
             "working": work_new.name,
         }
-        notify_watchers_processed(filename)
         return result
     except Exception as exc:
         logging.warning("[transcribe] failed for %s: %s", filename, exc, exc_info=True)
-        mark_watchers_failed(filename, str(exc))
 
         try:
             if os.getenv("TRANSCRIPTION_FAKE", "").strip().lower() in {

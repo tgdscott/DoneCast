@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 from dataclasses import dataclass
@@ -492,6 +493,7 @@ def resolve_media_context(
     if not words_json_path:
         try:
             import json
+
             meta = json.loads(getattr(episode, "meta_json", "{}") or "{}") if getattr(episode, "meta_json", None) else {}
             gcs_json = None
             transcripts_meta = meta.get("transcripts") if isinstance(meta, dict) else None
@@ -500,9 +502,21 @@ def resolve_media_context(
             if not gcs_json:
                 # Some older paths may store at top level
                 gcs_json = meta.get("gcs_json") or meta.get("transcript_gcs_json")
-            if gcs_json and isinstance(gcs_json, str) and gcs_json.startswith("gs://"):
+            if gcs_json and isinstance(gcs_json, str):
+                normalized = gcs_json.strip()
                 try:
-                    without_scheme = gcs_json[len("gs://"):]
+                    if normalized.startswith("gs://"):
+                        without_scheme = normalized[len("gs://"):]
+                    elif "storage.googleapis.com/" in normalized:
+                        without_scheme = normalized.split("storage.googleapis.com/", 1)[1]
+                    else:
+                        without_scheme = ""
+                except Exception:
+                    without_scheme = ""
+
+                if without_scheme:
+                    try:
+                        bucket_name, key = without_scheme.split("/", 1)
                     bucket_name, key = without_scheme.split("/", 1)
                     # Decide a local filename: prefer last stem in base_stems, else from key
                     try:
@@ -511,18 +525,56 @@ def resolve_media_context(
                         local_stem = Path(key).stem
                     local_path = (PROJECT_ROOT / "transcripts") / f"{sanitize_filename(local_stem)}.json"
                     local_path.parent.mkdir(parents=True, exist_ok=True)
-                    from google.cloud import storage  # type: ignore
+                    from infrastructure import gcs as gcs_utils  # type: ignore
 
-                    client = storage.Client()
-                    blob = client.bucket(bucket_name).blob(key)
-                    blob.download_to_filename(str(local_path))
-                    if local_path.exists() and local_path.stat().st_size > 0:
-                        words_json_path = local_path
-                        logging.info("[assemble] downloaded transcript JSON from GCS to %s", str(local_path))
+                    data = gcs_utils.download_gcs_bytes(bucket_name, key)
+                    if data:
+                        local_path.write_bytes(data)
+                        if local_path.exists() and local_path.stat().st_size > 0:
+                            words_json_path = local_path
+                            logging.info("[assemble] downloaded transcript JSON from GCS to %s", str(local_path))
                 except Exception:
                     logging.warning("[assemble] Failed to download transcript JSON from %s", gcs_json, exc_info=True)
         except Exception:
             pass
+
+    if not words_json_path:
+        bucket_guess = (os.getenv("TRANSCRIPTS_BUCKET") or os.getenv("MEDIA_BUCKET") or "").strip()
+        if bucket_guess:
+            try:
+                from infrastructure import gcs as gcs_utils  # type: ignore
+
+                candidate_stems: list[str] = []
+                for stem in base_stems:
+                    if not stem:
+                        continue
+                    sanitized = sanitize_filename(str(stem))
+                    for candidate in (sanitized, str(stem)):
+                        normalized = str(candidate or "").strip()
+                        if normalized and normalized not in candidate_stems:
+                            candidate_stems.append(normalized)
+
+                for candidate in candidate_stems:
+                    key = f"transcripts/{candidate}.json"
+                    data = gcs_utils.download_gcs_bytes(bucket_guess, key)
+                    if not data:
+                        continue
+                    local_path = (PROJECT_ROOT / "transcripts") / f"{sanitize_filename(candidate)}.json"
+                    try:
+                        local_path.parent.mkdir(parents=True, exist_ok=True)
+                        local_path.write_bytes(data)
+                    except Exception:
+                        continue
+                    if local_path.exists() and local_path.stat().st_size > 0:
+                        words_json_path = local_path
+                        logging.info(
+                            "[assemble] downloaded transcript JSON from bucket=%s key=%s", bucket_guess, key
+                        )
+                        break
+            except Exception:
+                logging.warning(
+                    "[assemble] Unable to download transcript JSON from configured bucket", exc_info=True
+                )
 
     return (
         MediaContext(
