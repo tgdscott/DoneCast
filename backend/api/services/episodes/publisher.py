@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, Optional
+from importlib import import_module
+from importlib.util import find_spec
+from typing import Any, Dict, Optional, Tuple
 from uuid import UUID
 
 from sqlmodel import Session, select
@@ -12,8 +14,83 @@ from api.services.publisher import SpreakerClient
 
 logger = logging.getLogger("ppp.episodes.publisher.service")
 
+publish_episode_to_spreaker_task: Optional[Any] = None
+celery_app: Optional[Any] = None
+_worker_import_attempted = False
+_worker_import_error: Optional[BaseException] = None
+
+
+def _load_worker_publish_exports() -> Tuple[Optional[Any], Optional[Any]]:
+    """Attempt to load publish task + celery app from worker.tasks."""
+
+    global _worker_import_attempted, _worker_import_error
+
+    if _worker_import_attempted:
+        return publish_episode_to_spreaker_task, celery_app
+
+    _worker_import_attempted = True
+
+    spec = find_spec("worker.tasks")
+    if spec is None:
+        logger.debug("[publish] worker.tasks spec not found; publish task unavailable")
+        return None, None
+
+    try:
+        module = import_module("worker.tasks")
+    except Exception as exc:  # pragma: no cover - defensive logging for optional dependency
+        _worker_import_error = exc
+        logger.warning("[publish] Failed to import worker.tasks", exc_info=True)
+        return None, None
+
+    task = getattr(module, "publish_episode_to_spreaker_task", None)
+    celery = getattr(module, "celery_app", None)
+
+    if task is None:
+        _worker_import_error = ImportError("publish_episode_to_spreaker_task missing from worker.tasks")
+        logger.warning(
+            "[publish] worker.tasks missing publish_episode_to_spreaker_task; treating worker as unavailable"
+        )
+        return None, None
+
+    _worker_import_error = None
+    return task, celery
+
+
+def _ensure_worker_dependencies_loaded() -> None:
+    global publish_episode_to_spreaker_task, celery_app
+
+    if publish_episode_to_spreaker_task is not None:
+        return
+
+    task, celery = _load_worker_publish_exports()
+    if task is not None:
+        publish_episode_to_spreaker_task = task
+        celery_app = celery
+
+
+def _ensure_publish_task_available() -> None:
+    """Raise a HTTP 503 if the publish task is unavailable."""
+
+    _ensure_worker_dependencies_loaded()
+
+    if publish_episode_to_spreaker_task is not None:
+        return
+
+    from fastapi import HTTPException  # Local import to avoid FastAPI dependency at module import
+
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "code": "PUBLISH_WORKER_UNAVAILABLE",
+            "message": "Episode publish worker is not available. Please try again later or contact support.",
+            "import_error": repr(_worker_import_error) if _worker_import_error else None,
+        },
+    )
+
 
 def publish(session: Session, current_user, episode_id: UUID, derived_show_id: str, publish_state: Optional[str], auto_publish_iso: Optional[str]) -> Dict[str, Any]:
+    _ensure_publish_task_available()
+
     ep = repo.get_episode_by_id(session, episode_id, user_id=current_user.id)
     if not ep:
         from fastapi import HTTPException
@@ -28,7 +105,6 @@ def publish(session: Session, current_user, episode_id: UUID, derived_show_id: s
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="User is not connected to Spreaker")
 
-    from worker.tasks import publish_episode_to_spreaker_task, celery_app
     task_kwargs = {
         'episode_id': str(ep.id),
         'spreaker_show_id': str(derived_show_id),
@@ -49,10 +125,12 @@ def publish(session: Session, current_user, episode_id: UUID, derived_show_id: s
         return {"job_id": "inline", "result": payload}
 
     eager = False
-    try:
-        eager = bool(getattr(celery_app.conf, 'task_always_eager', False))
-    except Exception:
-        eager = False
+    _celery = celery_app
+    if _celery is not None:
+        try:
+            eager = bool(getattr(_celery.conf, 'task_always_eager', False))
+        except Exception:
+            eager = False
     if eager:
         # Execute synchronously for dev reliability
         result = publish_episode_to_spreaker_task.apply(args=(), kwargs=task_kwargs)
@@ -66,10 +144,10 @@ def publish(session: Session, current_user, episode_id: UUID, derived_show_id: s
 
     auto_fallback = os.getenv("CELERY_AUTO_FALLBACK", "").strip().lower() in {"1", "true", "yes", "on"}
     env = os.getenv("APP_ENV", "dev").strip().lower()
-    if auto_fallback or env in {"dev", "development", "local"}:
+    if (auto_fallback or env in {"dev", "development", "local"}) and _celery is not None:
         needs_fallback = False
         try:
-            ping = celery_app.control.ping(timeout=1)
+            ping = _celery.control.ping(timeout=1)
             if not ping:
                 needs_fallback = True
         except Exception:
@@ -167,6 +245,8 @@ def republish(session: Session, current_user, episode_id: UUID) -> Dict[str, Any
 
     Returns dict with keys: job_id, spreaker_show_id
     """
+    _ensure_publish_task_available()
+
     ep = repo.get_episode_by_id(session, episode_id, user_id=current_user.id)
     if not ep:
         from fastapi import HTTPException
@@ -205,7 +285,6 @@ def republish(session: Session, current_user, episode_id: UUID) -> Dict[str, Any
         session.commit()
     except Exception:
         session.rollback()
-    from worker.tasks import publish_episode_to_spreaker_task
     async_result = publish_episode_to_spreaker_task.delay(
         episode_id=str(ep.id),
         spreaker_show_id=show_id,
