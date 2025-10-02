@@ -517,40 +517,48 @@ def assemble_or_queue(
         # Optional: Use Cloud Tasks HTTP dispatch instead of Celery when enabled.
         if os.getenv("USE_CLOUD_TASKS", "").strip().lower() in {"1", "true", "yes", "on"}:
             try:
-                # Build payload to send to /api/tasks/assemble; in dev this will route to a local
-                # thread fallback; in prod it uses Cloud Tasks HTTP to call back into the API.
-                payload = {
-                    "episode_id": str(ep.id),
-                    "template_id": str(template_id),
-                    "main_content_filename": str(main_content_filename),
-                    "output_filename": str(output_filename or ""),
-                    "tts_values": cast(Dict[str, Any], tts_values or {}),
-                    "episode_details": cast(Dict[str, Any], episode_details or {}),
-                    "user_id": str(current_user.id),
-                    "podcast_id": str(getattr(ep, 'podcast_id', '') or ''),
-                    "intents": cast(Dict[str, Any], intents or {}),
-                }
-                # Defer to infrastructure client that chooses Cloud Tasks vs local dev mode
-                from infrastructure.tasks_client import enqueue_http_task  # type: ignore
-                task_info = enqueue_http_task("/api/tasks/assemble", payload)
-                # Store pseudo job id for visibility
-                try:
-                    import json as _json
-                    meta = {}
-                    if getattr(ep, 'meta_json', None):
-                        try:
-                            meta = _json.loads(ep.meta_json or '{}')
-                        except Exception:
-                            meta = {}
-                    meta['assembly_job_id'] = task_info.get('name') or 'cloud-task'
-                    ep.meta_json = _json.dumps(meta)
-                    session.add(ep); session.commit(); session.refresh(ep)
-                except Exception:
-                    session.rollback()
-                return {"mode": "cloud-task", "job_id": task_info.get("name", "cloud-task"), "episode_id": str(ep.id)}
+                from infrastructure.tasks_client import enqueue_http_task, should_use_cloud_tasks  # type: ignore
             except Exception:
-                # If Cloud Tasks path fails, continue to Celery queue path as a secondary option
-                pass
+                should_use = False
+            else:
+                should_use = bool(should_use_cloud_tasks())
+
+            if should_use:
+                try:
+                    # Build payload to send to /api/tasks/assemble; in dev this will route to a local
+                    # thread fallback; in prod it uses Cloud Tasks HTTP to call back into the API.
+                    payload = {
+                        "episode_id": str(ep.id),
+                        "template_id": str(template_id),
+                        "main_content_filename": str(main_content_filename),
+                        "output_filename": str(output_filename or ""),
+                        "tts_values": cast(Dict[str, Any], tts_values or {}),
+                        "episode_details": cast(Dict[str, Any], episode_details or {}),
+                        "user_id": str(current_user.id),
+                        "podcast_id": str(getattr(ep, 'podcast_id', '') or ''),
+                        "intents": cast(Dict[str, Any], intents or {}),
+                    }
+                    task_info = enqueue_http_task("/api/tasks/assemble", payload)
+                    # Store pseudo job id for visibility
+                    try:
+                        import json as _json
+                        meta = {}
+                        if getattr(ep, 'meta_json', None):
+                            try:
+                                meta = _json.loads(ep.meta_json or '{}')
+                            except Exception:
+                                meta = {}
+                        meta['assembly_job_id'] = task_info.get('name') or 'cloud-task'
+                        ep.meta_json = _json.dumps(meta)
+                        session.add(ep)
+                        session.commit()
+                        session.refresh(ep)
+                    except Exception:
+                        session.rollback()
+                    return {"mode": "cloud-task", "job_id": task_info.get("name", "cloud-task"), "episode_id": str(ep.id)}
+                except Exception:
+                    # If Cloud Tasks path fails, continue to Celery queue path as a secondary option
+                    pass
 
         # Celery path (default)
         # Attempt to enqueue on Celery broker. If the broker is unreachable or

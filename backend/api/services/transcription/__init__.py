@@ -15,13 +15,24 @@ from typing import Any, Dict, List
 import json
 import logging
 import os
+import uuid
 
 from ...core.paths import MEDIA_DIR, TRANSCRIPTS_DIR
 from .watchers import notify_watchers_processed, mark_watchers_failed
+from ..audio.common import sanitize_filename
 
 
 class TranscriptionError(Exception):
     """Generic transcription failure."""
+
+
+def _resolve_transcripts_bucket() -> str:
+    bucket = (os.getenv("TRANSCRIPTS_BUCKET") or "").strip()
+    fallback = (os.getenv("MEDIA_BUCKET") or "").strip()
+    chosen = bucket or fallback
+    if not chosen:
+        raise TranscriptionError("Transcript bucket not configured")
+    return chosen
 
 
 def get_word_timestamps(filename: str) -> List[Dict[str, Any]]:
@@ -149,33 +160,38 @@ def transcribe_media_file(filename: str) -> List[Dict[str, Any]]:
         try:
             TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
             stem = Path(local_name).stem
-            out_path = TRANSCRIPTS_DIR / f"{stem}.json"
             payload = json.dumps(words, ensure_ascii=False, indent=2)
+
+            safe_stem = sanitize_filename(stem) or stem or f"transcript-{uuid.uuid4().hex}"
+            out_path = TRANSCRIPTS_DIR / f"{stem}.json"
             # Always persist locally (overwrite with freshest)
             out_path.write_text(payload, encoding="utf-8")
 
-            # Upload permanently to GCS in a deterministic location: transcripts/{stem}.json
+            # Upload permanently to GCS in a deterministic location: transcripts/{safe_stem}.json
             gcs_url = None
+            gcs_uri = None
             try:
-                bucket = (os.getenv("TRANSCRIPTS_BUCKET") or os.getenv("MEDIA_BUCKET") or "").strip()
-                if bucket:
-                    from ...infrastructure.gcs import upload_bytes, stat_object  # type: ignore
-                    key = f"transcripts/{stem}.json"
-                    # Idempotent: if object already exists and size looks good, skip re-upload
-                    try:
-                        info = stat_object(bucket, key)  # returns dict with size, updated, etc.
-                        if not info or int(info.get("size", 0)) < 10:
-                            raise RuntimeError("object_too_small_or_missing")
-                    except Exception:
-                        upload_bytes(
-                            bucket,
-                            key,
-                            payload.encode("utf-8"),
-                            content_type="application/json; charset=utf-8",
-                        )
+                bucket = _resolve_transcripts_bucket()
+                from ...infrastructure.gcs import upload_bytes  # type: ignore
+
+                key = f"transcripts/{safe_stem}.json"
+                gcs_uri = upload_bytes(
+                    bucket,
+                    key,
+                    payload.encode("utf-8"),
+                    content_type="application/json; charset=utf-8",
+                )
+                if gcs_uri and gcs_uri.startswith("gs://"):
                     gcs_url = f"https://storage.googleapis.com/{bucket}/{key}"
-            except Exception:  # pragma: no cover - GCS optional
-                pass
+                else:
+                    gcs_uri = None
+            except Exception as upload_exc:
+                logging.error(
+                    "[transcription] Failed to persist transcript to bucket: %s",
+                    upload_exc,
+                    exc_info=True,
+                )
+                raise
 
             # Record the GCS key on the episode for deterministic reuse during assembly
             try:
@@ -194,11 +210,15 @@ def transcribe_media_file(filename: str) -> List[Dict[str, Any]]:
                     if ep:
                         meta = json.loads(ep.meta_json or "{}")
                         transcripts = dict(meta.get("transcripts", {}))
-                        if gcs_url:
-                            transcripts["gcs_json"] = gcs_url
-                            transcripts["stem"] = stem
-                        else:
-                            transcripts["stem"] = stem
+                        transcripts["stem"] = stem
+                        transcripts["bucket_stem"] = safe_stem
+                        if gcs_uri:
+                            transcripts["gcs_json"] = gcs_uri
+                            transcripts["gcs_url"] = gcs_url or transcripts.get("gcs_url")
+                            transcripts["gcs_key"] = key
+                            transcripts["gcs_bucket"] = bucket
+                        elif gcs_url:
+                            transcripts["gcs_url"] = gcs_url
                         meta["transcripts"] = transcripts
                         ep.meta_json = json.dumps(meta)
                         update_episode(session, ep, {"meta_json": ep.meta_json})
@@ -211,6 +231,27 @@ def transcribe_media_file(filename: str) -> List[Dict[str, Any]]:
         return words
     except Exception as exc:
         mark_watchers_failed(filename, str(exc))
+        try:
+            from api.core import database as db
+            from api.models.podcast import MediaItem
+            from sqlmodel import Session, select
+
+            with Session(db.engine) as session:
+                item = session.exec(
+                    select(MediaItem).where(MediaItem.filename == filename)
+                ).first()
+                if item:
+                    session.delete(item)
+                    session.commit()
+        except Exception:
+            logging.warning(
+                "[transcription] Failed to roll back media item after transcription error",
+                exc_info=True,
+            )
+        try:
+            (MEDIA_DIR / filename).unlink(missing_ok=True)
+        except Exception:
+            pass
         raise
     finally:
         if delete_after:

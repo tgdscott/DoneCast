@@ -1,30 +1,69 @@
 import os, json, threading, logging
+from datetime import datetime
+
 try:
     from google.cloud import tasks_v2
     from google.protobuf import timestamp_pb2
 except ImportError:
-    tasks_v2 = None # type: ignore
-from datetime import datetime
+    tasks_v2 = None  # type: ignore
 
-IS_DEV_ENV = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower() == "dev"
+_ENV_VALUE = (
+    os.getenv("APP_ENV")
+    or os.getenv("ENV")
+    or os.getenv("PYTHON_ENV")
+    or ""
+).strip().lower()
+
+IS_DEV_ENV = _ENV_VALUE in {"", "dev", "development", "local"}
+IS_TEST_ENV = _ENV_VALUE in {"test", "testing"}
+
 log = logging.getLogger("tasks.client")
 
-def enqueue_http_task(path: str, body: dict) -> dict:
-    if IS_DEV_ENV:
-        """Dev-mode lightweight task dispatcher.
 
-        Previously this attempted a *synchronous* loopback HTTP POST to the
-        running API ( /api/tasks/transcribe ). When invoked from inside the
-        upload request handler this could deadlock the single worker event loop
-        (or at least stall progress) causing a 300s httpx timeout before the
-        fallback thread was spawned. That explains the ~5 minute gap you saw
-        before the transcription actually began.
+def should_use_cloud_tasks() -> bool:
+    """Return ``True`` when Cloud Tasks HTTP dispatch should be used."""
 
-        To eliminate that delay, we now dispatch the transcription directly in
-        a background thread immediately. An opt-in env var
-        TASKS_FORCE_HTTP_LOOPBACK=true restores the old behavior for debugging.
-        """
-        def _dispatch_transcribe(payload: dict) -> None:
+    if IS_DEV_ENV or IS_TEST_ENV:
+        return False
+
+    if os.getenv("TASKS_FORCE_HTTP_LOOPBACK"):
+        return False
+
+    if tasks_v2 is None:
+        return False
+
+    required = {
+        "GOOGLE_CLOUD_PROJECT": os.getenv("GOOGLE_CLOUD_PROJECT"),
+        "TASKS_LOCATION": os.getenv("TASKS_LOCATION"),
+        "TASKS_QUEUE": os.getenv("TASKS_QUEUE"),
+        "TASKS_URL_BASE": os.getenv("TASKS_URL_BASE"),
+    }
+
+    missing = [name for name, value in required.items() if not (value and value.strip())]
+    if missing:
+        log.info(
+            "event=tasks.cloud.disabled reason=missing_config missing=%s", missing
+        )
+        return False
+
+    return True
+
+
+def _dispatch_local_task(path: str, body: dict) -> dict:
+    """Execute tasks locally without spinning up a new API process.
+
+    Previously this attempted a *synchronous* loopback HTTP POST to the running
+    API (``/api/tasks/transcribe``). When invoked from inside the upload request
+    handler this could deadlock the single worker event loop (or at least stall
+    progress) causing a 300s httpx timeout before the fallback thread was
+    spawned. That explains the ~5 minute gap you saw before the transcription
+    actually began.
+
+    To eliminate that delay, we now dispatch the transcription directly in a
+    background thread immediately. An opt-in env var
+    ``TASKS_FORCE_HTTP_LOOPBACK=true`` restores the old behavior for debugging.
+    """
+    def _dispatch_transcribe(payload: dict) -> None:
             filename = str(payload.get("filename") or "").strip()
             if not filename:
                 print("DEV MODE fallback skipped: payload missing 'filename'")
@@ -63,7 +102,7 @@ def enqueue_http_task(path: str, body: dict) -> dict:
             ).start()
             print(f"DEV MODE fallback transcription dispatched for {filename}")
 
-        def _dispatch_assemble(payload: dict) -> None:
+    def _dispatch_assemble(payload: dict) -> None:
             # Expect the same payload as /api/tasks/assemble
             try:
                 from worker.tasks import create_podcast_episode  # type: ignore
@@ -111,7 +150,7 @@ def enqueue_http_task(path: str, body: dict) -> dict:
             print(f"DEV MODE assemble dispatched for episode {episode_id}")
 
         # Allow forcing legacy loopback for debugging perf of the tasks endpoint
-        if os.getenv("TASKS_FORCE_HTTP_LOOPBACK"):
+    if os.getenv("TASKS_FORCE_HTTP_LOOPBACK"):
             import httpx
             base = (os.getenv("TASKS_URL_BASE") or os.getenv("APP_BASE_URL") or f"http://127.0.0.1:{os.getenv('API_PORT','8000')}").rstrip("/")
             if ":5173" in base and not os.getenv("TASKS_FORCE_VITE_PROXY"):
@@ -135,15 +174,44 @@ def enqueue_http_task(path: str, body: dict) -> dict:
                 return {"name": "local-loopback-failed"}
 
         # Default: immediate background dispatch based on path
-        if "/assemble" in path:
-            _dispatch_assemble(body)
-        else:
-            _dispatch_transcribe(body)
+    if os.getenv("TASKS_FORCE_HTTP_LOOPBACK"):
+        import httpx
+        base = (os.getenv("TASKS_URL_BASE") or os.getenv("APP_BASE_URL") or f"http://127.0.0.1:{os.getenv('API_PORT','8000')}").rstrip("/")
+        if ":5173" in base and not os.getenv("TASKS_FORCE_VITE_PROXY"):
+            base = f"http://127.0.0.1:{os.getenv('API_PORT','8000')}"
+        api_url = f"{base}{path}"
+        auth_secret = os.getenv("TASKS_AUTH", "a-secure-local-secret")
+        headers = {"Content-Type": "application/json", "X-Tasks-Auth": auth_secret}
+        print(f"DEV MODE (forced loopback): POST {api_url}")
         try:
-            log.info("event=tasks.dev.dispatch path=%s body_keys=%s", path, list(body.keys()))
-        except Exception:
-            pass
-        return {"name": "local-direct-dispatch"}
+            with httpx.Client(timeout=30.0) as client:  # shorter timeout since this is optional
+                r = client.post(api_url, json=body, headers=headers)
+                r.raise_for_status()
+                print("DEV MODE loopback call successful.")
+                return {"name": f"local-loopback-{datetime.utcnow().isoformat()}"}
+        except Exception as e:  # pragma: no cover
+            print(f"DEV MODE loopback failed ({e}); falling back to direct thread dispatch")
+            if "/assemble" in path:
+                _dispatch_assemble(body)
+            else:
+                _dispatch_transcribe(body)
+            return {"name": "local-loopback-failed"}
+
+    # Default: immediate background dispatch based on path
+    if "/assemble" in path:
+        _dispatch_assemble(body)
+    else:
+        _dispatch_transcribe(body)
+    try:
+        log.info("event=tasks.dev.dispatch path=%s body_keys=%s", path, list(body.keys()))
+    except Exception:
+        pass
+    return {"name": "local-direct-dispatch"}
+
+
+def enqueue_http_task(path: str, body: dict) -> dict:
+    if not should_use_cloud_tasks():
+        return _dispatch_local_task(path, body)
 
     if tasks_v2 is None:
         raise ImportError("google-cloud-tasks is not installed")
