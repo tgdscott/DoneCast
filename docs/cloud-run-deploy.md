@@ -2,7 +2,9 @@
 
 1. **Provision Postgres**: create or identify the Cloud SQL (PostgreSQL) instance and database. Collect the connection string in SQLAlchemy form `postgresql+psycopg://USER:PASSWORD@HOST:5432/DBNAME`. If you use a socket/Cloud SQL proxy, adapt the URL accordingly.
 2. **Store secrets**: add the connection string to Cloud Build / GitHub Actions secrets (`_DATABASE_URL` substitution or `CLOUDRUN_DATABASE_URL` GitHub secret). Keep `SESSION_SECRET`, Stripe keys, etc. in Secret Manager or GH secrets as you prefer.
-3. **Create a media bucket**: provision a Cloud Storage bucket (example: `gsutil mb -l us-west1 gs://ppp-media-us-west1`). Grant the Cloud Run service account `roles/storage.objectAdmin` (or narrower `roles/storage.objectCreator` plus `roles/storage.objectViewer`) for that bucket. Record the bucket name because the API expects it via `MEDIA_BUCKET`.
+3. **Create storage buckets**: provision
+   * a private media bucket (example: `gsutil mb -l us-west1 gs://ppp-media-us-west1`) for audio uploads and artwork. Grant the Cloud Run service account `roles/storage.objectAdmin` (or narrower `roles/storage.objectCreator` plus `roles/storage.objectViewer`) for that bucket and record the bucket name for `MEDIA_BUCKET`.
+   * a public transcripts bucket (example: `gsutil mb -l us-west1 gs://ppp-transcripts-us-west1`) that will hold the JSON transcripts. Grant anonymous read access so episode transcript links can be shared: `gsutil iam ch allUsers:objectViewer gs://ppp-transcripts-us-west1`. Set `TRANSCRIPTS_BUCKET` to this bucket name.
 4. **Deploy with env vars**:
    ```bash
    gcloud run deploy podcast-web \
@@ -18,7 +20,7 @@
      --region=us-west1 \
      --platform=managed \
      --allow-unauthenticated \
-  --set-env-vars=APP_ENV=production,ADMIN_EMAIL=scott@scottgerhardt.com,MEDIA_ROOT=/tmp,MEDIA_BUCKET=<your-media-bucket>,OAUTH_BACKEND_BASE=https://api.podcastplusplus.com,\
+  --set-env-vars=APP_ENV=production,ADMIN_EMAIL=scott@scottgerhardt.com,MEDIA_ROOT=/tmp,MEDIA_BUCKET=<your-media-bucket>,TRANSCRIPTS_BUCKET=<your-transcripts-bucket>,OAUTH_BACKEND_BASE=https://api.podcastplusplus.com,\
        CORS_ALLOWED_ORIGINS=https://app.podcastplusplus.com\,https://podcastplusplus.com\,https://www.podcastplusplus.com \
      --set-secrets=DATABASE_URL=<secret-name>:latest,SECRET_KEY=<secret-name>:latest,SESSION_SECRET=<secret-name>:latest
    ```
