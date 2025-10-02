@@ -3,7 +3,15 @@ import logging
 from pathlib import Path
 
 from celery import Celery
-from dotenv import load_dotenv
+
+try:  # pragma: no cover - exercised via import in tests
+    from dotenv import load_dotenv
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    def load_dotenv(*args, **kwargs):
+        logging.getLogger(__name__).warning(
+            "[celery] python-dotenv not installed; skipping load_dotenv() call.",
+        )
+        return False
 from celery.schedules import crontab
 
 # Load env first

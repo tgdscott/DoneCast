@@ -60,10 +60,22 @@ def _load_legacy_shim() -> None:
         pass
 
 
-if not (
-    transcribe_media_file and create_podcast_episode and publish_episode_to_spreaker_task
-):
+_required_exports = (
+    "transcribe_media_file",
+    "create_podcast_episode",
+    "publish_episode_to_spreaker_task",
+)
+
+if not all(globals().get(name) for name in _required_exports):
     _load_legacy_shim()
+
+missing = [name for name in _required_exports if globals().get(name) is None]
+if missing:
+    raise ImportError(
+        "worker.tasks failed to import required callables: {}".format(
+            ", ".join(sorted(missing))
+        )
+    )
 
 
 __all__ = [
