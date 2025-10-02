@@ -1,15 +1,18 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
-from typing import Optional, Iterable, Dict, Any
+from typing import Optional, Iterable, Dict, Any, TYPE_CHECKING
 from pathlib import Path
 from urllib.parse import urlparse
 import json, os
+import re
 import uuid
 
 from api.core.paths import TRANSCRIPTS_DIR
 import logging
 from api.services.audio.transcript_io import load_transcript_json
 from api.services.episodes import repo as _ep_repo
-from api.models.podcast import Episode, MediaItem, MediaCategory
+from api.models.podcast import MediaItem, MediaCategory
+if TYPE_CHECKING:  # avoid runtime import cycles
+    from api.models.podcast import Episode  # type: ignore
 from uuid import UUID as _UUID
 from api.core.database import get_session
 from sqlmodel import Session, select
@@ -661,17 +664,56 @@ def intent_hints(
 ):
     """Return detected command keywords for a transcript."""
 
+    # First try to resolve a JSON transcript for richer word metadata.
     path = _discover_transcript_json_path(session, episode_id, hint)
-    if not path:
-        raise HTTPException(status_code=409, detail="TRANSCRIPT_NOT_READY")
 
-    try:
-        words = load_transcript_json(path)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="TRANSCRIPT_NOT_FOUND")
-    except Exception as exc:  # pragma: no cover - unexpected parse errors
-        _log.warning("[intent-hints] failed to load transcript %s: %s", path, exc, exc_info=True)
-        raise HTTPException(status_code=500, detail="TRANSCRIPT_LOAD_ERROR")
+    words = None
+    transcript_label: Optional[str] = None
+
+    if path:
+        try:
+            words = load_transcript_json(path)
+            transcript_label = path.name
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="TRANSCRIPT_NOT_FOUND")
+        except Exception as exc:  # pragma: no cover - unexpected parse errors
+            _log.warning("[intent-hints] failed to load transcript %s: %s", path, exc, exc_info=True)
+            raise HTTPException(status_code=500, detail="TRANSCRIPT_LOAD_ERROR")
+    else:
+        # Fallback: if no JSON exists yet, try to use a .txt transcript so the UI
+        # can still compute keyword hints. This aligns with /transcript-ready
+        # which may return ready=True for .txt files.
+        try:
+            eid = episode_id if episode_id else "00000000-0000-0000-0000-000000000000"
+            txt_path_str = _discover_transcript_for_episode(session, str(eid), hint) or _discover_or_materialize_transcript(str(eid))
+        except Exception:
+            txt_path_str = None
+        if txt_path_str:
+            tpath = Path(txt_path_str)
+            transcript_label = tpath.name
+            if tpath.suffix.lower() == ".json":
+                try:
+                    words = load_transcript_json(tpath)
+                except FileNotFoundError:
+                    raise HTTPException(status_code=404, detail="TRANSCRIPT_NOT_FOUND")
+                except Exception as exc:
+                    _log.warning("[intent-hints] failed to load transcript %s: %s", tpath, exc, exc_info=True)
+                    raise HTTPException(status_code=500, detail="TRANSCRIPT_LOAD_ERROR")
+            else:
+                # Tokenize plain text into word dicts compatible with analyzer
+                try:
+                    text = tpath.read_text(encoding="utf-8", errors="ignore")
+                    tokens = [tok for tok in re.split(r"\s+", text) if tok]
+                    words = [{"word": tok} for tok in tokens]
+                except FileNotFoundError:
+                    raise HTTPException(status_code=404, detail="TRANSCRIPT_NOT_FOUND")
+                except Exception as exc:
+                    _log.warning("[intent-hints] failed to read text transcript %s: %s", tpath, exc, exc_info=True)
+                    raise HTTPException(status_code=500, detail="TRANSCRIPT_LOAD_ERROR")
+
+    if words is None:
+        # Neither JSON nor text transcript is available yet.
+        raise HTTPException(status_code=409, detail="TRANSCRIPT_NOT_READY")
 
     commands_cfg = get_user_commands(current_user)
     sfx_entries = list(_gather_user_sfx_entries(session, current_user))
@@ -679,6 +721,6 @@ def intent_hints(
 
     return {
         "ready": True,
-        "transcript": path.name,
+        "transcript": transcript_label,
         "intents": intents,
     }
