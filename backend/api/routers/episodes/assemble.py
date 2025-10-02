@@ -13,6 +13,7 @@ router = APIRouter(tags=["episodes"])  # parent episodes router provides '/episo
 log = logging.getLogger("ppp.episodes.assemble")
 
 @router.post("/assemble", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/assemble/", status_code=status.HTTP_202_ACCEPTED)
 async def assemble_episode(
     payload: Dict[str, Any],
     session: Session = Depends(get_session),
