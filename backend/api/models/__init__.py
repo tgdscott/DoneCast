@@ -11,16 +11,3 @@ from .usage import ProcessingMinutesLedger, LedgerDirection, LedgerReason  # noq
 from .recurring import RecurringSchedule  # noqa: F401
 from .website import PodcastWebsite, PodcastWebsiteStatus  # noqa: F401
 from .transcription import TranscriptionWatch  # noqa: F401
-from .feedback import (  # noqa: F401
-    Feedback,
-    FeedbackComment,
-    FeedbackCommentPublic,
-    FeedbackCreate,
-    FeedbackDetail,
-    FeedbackPublic,
-    FeedbackStatus,
-    FeedbackType,
-    FeedbackUpdate,
-    FeedbackVote,
-    FeedbackVoteRequest,
-)

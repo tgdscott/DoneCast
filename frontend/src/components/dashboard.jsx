@@ -29,7 +29,6 @@ import {
   Settings as SettingsIcon,
   DollarSign,
   Globe2,
-  MessageSquare,
 } from "lucide-react";
 import { useState, useEffect, useMemo, useCallback } from "react";
 
@@ -56,7 +55,6 @@ import TemplateManager from "@/components/dashboard/TemplateManager";
 import BillingPage from "@/components/dashboard/BillingPage";
 import Recorder from "@/components/quicktools/Recorder";
 import WebsiteBuilder from "@/components/dashboard/WebsiteBuilder.jsx";
-import FeedbackCenter from "@/components/dashboard/FeedbackCenter.jsx";
 
 const isAdmin = (u) => !!(u && (u.is_admin || u.role === 'admin'));
 const DASHBOARD_TOUR_STORAGE_KEY = 'ppp_dashboard_tour_completed';
@@ -530,15 +528,6 @@ export default function PodcastPlusDashboard() {
           : <div className="p-6 text-sm text-red-600">Not authorized.</div>;
       case 'settings':
         return <Settings token={token} />;
-      case 'feedbackCenter':
-        return (
-          <FeedbackCenter
-            token={token}
-            onBack={handleBackToDashboard}
-            currentUser={user}
-            canModerate={isAdmin(authUser)}
-          />
-        );
       case 'templateWizard':
         return <TemplateWizard user={user} token={token} onBack={() => setCurrentView('templateManager')} onTemplateCreated={() => { fetchData(); setCurrentView('templateManager'); }} />;
       case 'billing':
@@ -696,7 +685,6 @@ export default function PodcastPlusDashboard() {
           {/* Import moved under Podcasts */}
           <Button onClick={() => setCurrentView('billing')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-subscription"><DollarSign className="w-4 h-4 mr-2" />Subscription</Button>
                       <Button onClick={() => setCurrentView('settings')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-settings"><SettingsIcon className="w-4 h-4 mr-2" />Settings</Button>
-                      <Button onClick={() => setCurrentView('feedbackCenter')} variant="outline" className="justify-start text-sm h-10"><MessageSquare className="w-4 h-4 mr-2" />Feedback</Button>
                       <Button
                         onClick={() => setCurrentView('websiteBuilder')}
                         variant="outline"
