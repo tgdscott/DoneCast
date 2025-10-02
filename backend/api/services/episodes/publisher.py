@@ -66,13 +66,17 @@ def _ensure_worker_dependencies_loaded() -> None:
     if task is not None:
         publish_episode_to_spreaker_task = task
         celery_app = celery
-
+        
+try:  # Celery worker package is optional in some environments
+    from worker.tasks import publish_episode_to_spreaker_task, celery_app  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - dev/staging without worker package
+    publish_episode_to_spreaker_task = None  # type: ignore[assignment]
+    celery_app = None  # type: ignore[assignment]
 
 def _ensure_publish_task_available() -> None:
     """Raise a HTTP 503 if the publish task is unavailable."""
 
     _ensure_worker_dependencies_loaded()
-
     if publish_episode_to_spreaker_task is not None:
         return
 
