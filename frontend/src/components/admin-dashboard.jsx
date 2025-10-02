@@ -65,6 +65,7 @@ export default function AdminDashboard() {
   const [metrics, setMetrics] = useState(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [seedResult, setSeedResult] = useState(null);
+  const [killingQueue, setKillingQueue] = useState(false);
   const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
   // Admin settings (real backend) - currently only test_mode
   const [adminSettings, setAdminSettings] = useState(null);
@@ -147,6 +148,25 @@ export default function AdminDashboard() {
       .then(data=> { setSeedResult(data); api.get('/api/admin/summary').then(setSummary); })
       .catch(()=>{});
   }
+
+  const handleKillQueue = async () => {
+    if (!token || killingQueue) return;
+    const confirmed = window.confirm('Immediately stop and flush all background tasks? This cannot be undone.');
+    if (!confirmed) return;
+    setKillingQueue(true);
+    try {
+      const api = makeApi(token);
+      const result = await api.post('/api/admin/tasks/kill');
+      const queueLabel = result?.queue ? `Queue ${result.queue}` : 'Tasks queue';
+      try {
+        toast({ title: 'Queue reset', description: `${queueLabel} purged and restarted.` });
+      } catch {}
+    } catch (e) {
+      toastApiError(e, 'Failed to kill queue');
+    } finally {
+      setKillingQueue(false);
+    }
+  };
 
   // Analytics data (safe defaults so UI doesn't crash while loading)
   // Backend summary currently returns: users, podcasts, templates, episodes, published_episodes
@@ -1221,6 +1241,14 @@ export default function AdminDashboard() {
                       <CardTitle style={{ color: "#2C3E50" }}>Quick Actions</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-3">
+                      <Button
+                        variant="destructive"
+                        className="w-full justify-start"
+                        onClick={handleKillQueue}
+                        disabled={killingQueue}>
+                        <AlertTriangle className="w-4 h-4 mr-3" />
+                        {killingQueue ? 'Killing Tasks…' : 'KILL Tasks Queue'}
+                      </Button>
                       <Button variant="outline" className="w-full justify-start bg-transparent">
                         <MessageSquare className="w-4 h-4 mr-3" />
                         Send Platform Announcement
