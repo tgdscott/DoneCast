@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import Optional, Iterable, Dict, Any
 from pathlib import Path
+from urllib.parse import urlparse
 import json, os
 import uuid
 
@@ -28,6 +29,10 @@ from api.services.intent_detection import analyze_intents, get_user_commands
 from api.routers.auth import get_current_user
 from api.models.user import User
 from api.services.audio.common import sanitize_filename
+try:  # Optional dependency for transcript downloads from GCS
+    from api.infrastructure import gcs as _gcs  # type: ignore
+except Exception:  # pragma: no cover - optional dependency missing
+    _gcs = None  # type: ignore
 
 try:
     # Limiter is attached to app.state by main.py; get a safe reference for decorators
@@ -101,6 +106,60 @@ def _extend_candidates(values: Iterable[Any]) -> list[str]:
 def _is_dev_env() -> bool:
     val = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower()
     return val in {"dev", "development", "local", "test", "testing"}
+
+
+def _download_transcript_from_bucket(stem: str, user_id: Optional[str] = None) -> Optional[Path]:
+    """Attempt to download ``{stem}.json`` from the configured transcript bucket."""
+
+    bucket = (os.getenv("TRANSCRIPTS_BUCKET") or os.getenv("MEDIA_BUCKET") or "").strip()
+    if not bucket or not stem:
+        return None
+    if _gcs is None:  # pragma: no cover - optional dependency missing in tests
+        return None
+
+    keys: list[str] = []
+    if user_id:
+        keys.append(f"transcripts/{user_id}/{stem}.json")
+    keys.append(f"transcripts/{stem}.json")
+
+    for key in keys:
+        try:
+            data = _gcs.download_bytes(bucket, key)  # type: ignore[attr-defined]
+        except Exception:
+            continue
+        try:
+            TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+            path = TRANSCRIPTS_DIR / f"{stem}.json"
+            path.write_bytes(data)
+            return path
+        except Exception:
+            continue
+    return None
+
+
+def _download_transcript_from_url(url: str) -> Optional[Path]:
+    """Attempt to download a transcript JSON from an HTTP(S) URL."""
+
+    if not isinstance(url, str) or not url.strip():
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    try:
+        import requests
+    except Exception:  # pragma: no cover - optional dependency missing in some envs
+        return None
+    try:
+        resp = requests.get(url, timeout=10)
+        if resp.status_code != 200:
+            return None
+        stem = Path(parsed.path).stem or uuid.uuid4().hex
+        TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+        path = TRANSCRIPTS_DIR / f"{stem}.json"
+        path.write_bytes(resp.content)
+        return path
+    except Exception:
+        return None
 
 
 def _discover_or_materialize_transcript(episode_id: Optional[str] = None) -> Optional[str]:
@@ -279,13 +338,16 @@ def _discover_transcript_json_path(
 
     candidates: list[str] = []
     seen: set[str] = set()
-
+    remote_sources: list[str] = []
+    user_id: Optional[str] = None
     hint_stem: Optional[str] = None
     if hint:
         try:
             hint_stem = Path(str(hint)).stem
         except Exception:
             hint_stem = None
+        if isinstance(hint, str) and hint.strip():
+            remote_sources.append(hint.strip())
     if hint_stem:
         for variant in _stem_variants(hint_stem):
             if variant in seen:
@@ -304,6 +366,10 @@ def _discover_transcript_json_path(
         except Exception:
             ep = None
         if ep:
+            try:
+                user_id = str(getattr(ep, "user_id", "") or "") or None
+            except Exception:
+                user_id = None
             for attr in ("working_audio_name", "final_audio_path"):
                 stem = getattr(ep, attr, None)
                 for variant in _stem_variants(stem):
@@ -320,6 +386,22 @@ def _discover_transcript_json_path(
                             continue
                         seen.add(variant)
                         candidates.append(variant)
+                transcripts_meta = meta.get("transcripts") or {}
+                if isinstance(transcripts_meta, dict):
+                    for val in transcripts_meta.values():
+                        for variant in _stem_variants(val):
+                            if variant in seen:
+                                continue
+                            seen.add(variant)
+                            candidates.append(variant)
+                        if isinstance(val, str) and val.strip():
+                            remote_sources.append(val.strip())
+                extra_stem = meta.get("transcript_stem")
+                for variant in _stem_variants(extra_stem):
+                    if variant in seen:
+                        continue
+                    seen.add(variant)
+                    candidates.append(variant)
             except Exception:
                 pass
 
@@ -334,6 +416,8 @@ def _discover_transcript_json_path(
             TRANSCRIPTS_DIR / f"{stem}.original.json",
             TRANSCRIPTS_DIR / f"{stem}.words.json",
             TRANSCRIPTS_DIR / f"{stem}.original.words.json",
+            TRANSCRIPTS_DIR / f"{stem}.final.json",
+            TRANSCRIPTS_DIR / f"{stem}.final.words.json",
         ]
         for path in preferred:
             if path.exists():
@@ -351,10 +435,30 @@ def _discover_transcript_json_path(
             return None
         return None
 
+    attempted_download: set[str] = set()
     for stem in candidates:
         resolved = _resolve_for_stem(stem)
         if resolved:
             return resolved
+        if stem not in attempted_download:
+            attempted_download.add(stem)
+            downloaded = _download_transcript_from_bucket(stem, user_id)
+            if downloaded:
+                return downloaded
+
+    for source in dict.fromkeys(remote_sources):
+        parsed = urlparse(source)
+        stem_hint = Path(parsed.path).stem if parsed.scheme else Path(source).stem
+        downloaded = None
+        if parsed.scheme in {"http", "https"}:
+            downloaded = _download_transcript_from_url(source)
+        elif parsed.scheme == "gs":
+            downloaded = _download_transcript_from_bucket(stem_hint, user_id)
+        else:
+            downloaded = _resolve_for_stem(Path(source).stem)
+        if downloaded:
+            return downloaded
+
     return None
 
 
