@@ -18,6 +18,12 @@ from api.services import ai_enhancer, clean_engine, transcription as trans
 from api.services.audio.common import sanitize_filename
 from api.services.clean_engine.features import apply_flubber_cuts
 from api.core.paths import MEDIA_DIR, WS_ROOT as PROJECT_ROOT
+from api.core.paths import TRANSCRIPTS_DIR as _TRANSCRIPTS_DIR
+
+try:  # Optional GCS util
+    from api.infrastructure.gcs import download_bytes as _gcs_download  # type: ignore
+except Exception:  # pragma: no cover
+    _gcs_download = None  # type: ignore
 
 from .media import MediaContext, _resolve_media_file
 
@@ -95,6 +101,46 @@ def _maybe_generate_transcript(
     target_dir = PROJECT_ROOT / "transcripts"
     target_dir.mkdir(parents=True, exist_ok=True)
 
+    def _transcribe_allowed() -> bool:
+        """Return True if assembly is permitted to start a brand-new transcription.
+
+        Controlled by env var ALLOW_ASSEMBLY_TRANSCRIBE or ASSEMBLY_ALLOW_TRANSCRIBE.
+        Defaults to False to avoid duplicate/expensive transcriptions during assembly.
+        """
+        raw = os.getenv("ALLOW_ASSEMBLY_TRANSCRIBE") or os.getenv(
+            "ASSEMBLY_ALLOW_TRANSCRIBE"
+        )
+        if not raw:
+            return False
+        val = str(raw).strip().lower()
+        return val in {"1", "true", "yes", "on"}
+
+    def _attempt_download_from_bucket(stem: str) -> Optional[Path]:
+        bucket = (os.getenv("TRANSCRIPTS_BUCKET") or os.getenv("MEDIA_BUCKET") or "").strip()
+        if not bucket or not _gcs_download or not stem:
+            return None
+        variants = [
+            f"{stem}.json",
+            f"{stem}.words.json",
+            f"{stem}.original.json",
+            f"{stem}.original.words.json",
+            f"{stem}.final.json",
+            f"{stem}.final.words.json",
+            f"{stem}.nopunct.json",
+        ]
+        for v in variants:
+            key = f"transcripts/{v}"
+            try:
+                data = _gcs_download(bucket, key)  # type: ignore[misc]
+                if data:
+                    out = target_dir / v
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    out.write_bytes(data)
+                    return out
+            except Exception:
+                continue
+        return None
+
     try:
         preferred_raw = Path(output_filename).stem if output_filename else None
     except Exception:
@@ -135,9 +181,60 @@ def _maybe_generate_transcript(
                     "[assemble] failed GCS download prior to transcription", exc_info=True
                 )
 
+    # Before generating a new transcript, try to find or download an existing JSON
+    try:
+        stems_try: list[str] = []
+        try:
+            preferred_raw = Path(output_filename).stem if output_filename else None
+        except Exception:
+            preferred_raw = None
+        if preferred_raw:
+            stems_try.extend([preferred_raw, sanitize_filename(str(preferred_raw))])
+        try:
+            stems_try.append(Path(base_audio_name).stem)
+        except Exception:
+            pass
+        try:
+            stems_try.append(sanitize_filename(Path(base_audio_name).stem))
+        except Exception:
+            pass
+        stems_try = [s for s in dict.fromkeys([s for s in stems_try if s])]
+
+        # Local search first (across ws_root and shared transcripts dir), then GCS
+        local_dirs = [target_dir, _TRANSCRIPTS_DIR]
+        for stem in stems_try:
+            for d in local_dirs:
+                for name in (
+                    f"{stem}.json",
+                    f"{stem}.original.json",
+                    f"{stem}.words.json",
+                    f"{stem}.original.words.json",
+                    f"{stem}.final.json",
+                    f"{stem}.final.words.json",
+                    f"{stem}.nopunct.json",
+                ):
+                    candidate = d / name
+                    if candidate.is_file():
+                        return candidate
+            downloaded = _attempt_download_from_bucket(stem)
+            if downloaded and downloaded.is_file():
+                return downloaded
+    except Exception:
+        pass
+
+    # If we reached here, we didn't find an existing transcript locally or in GCS.
+    # Respect the kill-switch to avoid new transcription during assembly.
+    if not _transcribe_allowed():
+        logging.warning(
+            "[assemble] transcript JSON not found for %s and assembly is configured to not transcribe (ALLOW_ASSEMBLY_TRANSCRIBE=0); proceeding without cleanup",
+            basename,
+        )
+        return None
+
     words_list = None
     try:
-        words_list = trans.get_word_timestamps(basename)
+        # Prefer the helper that reuses any existing JSON before contacting providers
+        words_list = trans.transcribe_media_file(basename)
     except Exception:
         try:
             gcs_uri = None
@@ -348,25 +445,34 @@ def prepare_transcript_context(
             engine_output = f"{out_stem}.mp3"
         except Exception:
             engine_output = f"cleaned_{Path(base_audio_name).stem}.mp3"
-        engine_result = clean_engine.run_all(
-            audio_path=source_audio_path,
-            words_json_path=words_json_path,
-            work_dir=PROJECT_ROOT,
-            user_settings=us,
-            silence_cfg=ss,
-            intern_cfg=ins,
-            censor_cfg=censor_cfg,
-            sfx_map=sfx_map if sfx_map else None,
-            synth=_synth,
-            flubber_cuts_ms=cuts_ms,
-            output_name=engine_output,
-            disable_intern_insertion=True,
-        )
-        cleaned_path = (
-            Path(engine_result.get("final_path"))
-            if isinstance(engine_result, dict) and engine_result.get("final_path")
-            else None
-        )
+        audio_src: Optional[Path] = None
+        try:
+            audio_src = Path(str(source_audio_path)) if source_audio_path else None
+        except Exception:
+            audio_src = None
+        if audio_src is not None:
+            engine_result = clean_engine.run_all(
+                audio_path=audio_src,
+                words_json_path=words_json_path,
+                work_dir=PROJECT_ROOT,
+                user_settings=us,
+                silence_cfg=ss,
+                intern_cfg=ins,
+                censor_cfg=censor_cfg,
+                sfx_map=sfx_map if sfx_map else None,
+                synth=_synth,
+                flubber_cuts_ms=cuts_ms,
+                output_name=engine_output,
+                disable_intern_insertion=True,
+            )
+        cleaned_path = None
+        try:
+            if isinstance(engine_result, dict):
+                final_path = engine_result.get("final_path")
+                if isinstance(final_path, str) and final_path:
+                    cleaned_path = Path(final_path)
+        except Exception:
+            cleaned_path = None
         try:
             edits = (((engine_result or {}).get("summary", {}) or {}).get("edits", {}) or {})
             spans = edits.get("censor_spans_ms", [])

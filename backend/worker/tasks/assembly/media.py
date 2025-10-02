@@ -7,7 +7,7 @@ import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 from uuid import UUID
 
 from sqlmodel import select
@@ -22,9 +22,9 @@ from api.services.audio.common import sanitize_filename
 
 @dataclass
 class MediaContext:
-    template: any
+    template: Any
     episode: Episode
-    user: any
+    user: Any
     cover_image_path: Optional[str]
     cleanup_settings: dict
     preferred_tts_provider: str
@@ -460,13 +460,20 @@ def resolve_media_context(
     words_json_path = None
     for directory in search_dirs:
         for stem in base_stems:
-            candidate = directory / f"{stem}.json"
-            legacy = directory / f"{stem}.words.json"
-            if candidate.is_file():
-                words_json_path = candidate
-                break
-            if legacy.is_file():
-                words_json_path = legacy
+            for name in (
+                f"{stem}.json",
+                f"{stem}.words.json",
+                f"{stem}.original.json",
+                f"{stem}.original.words.json",
+                f"{stem}.final.json",
+                f"{stem}.final.words.json",
+                f"{stem}.nopunct.json",
+            ):
+                candidate = directory / name
+                if candidate.is_file():
+                    words_json_path = candidate
+                    break
+            if words_json_path:
                 break
         if words_json_path:
             break

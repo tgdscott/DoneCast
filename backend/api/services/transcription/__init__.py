@@ -83,9 +83,52 @@ def _download_gcs_to_media(gcs_uri: str) -> str:
     return dst_name
 
 
+def _read_existing_transcript_for(filename: str) -> List[Dict[str, Any]] | None:
+    """Return transcript words if an existing JSON is present for filename.
+
+    Checks TRANSCRIPTS_DIR and a workspace-level transcripts folder for common
+    variants, reusing existing artifacts to avoid re-transcription.
+    """
+    try:
+        stem = Path(filename).stem
+    except Exception:
+        stem = Path(str(filename)).stem
+
+    candidates = [
+        TRANSCRIPTS_DIR / f"{stem}.json",
+        TRANSCRIPTS_DIR / f"{stem}.words.json",
+    ]
+    # Workspace-level transcripts directory
+    try:
+        ws_root = MEDIA_DIR.parent  # WS_ROOT
+        ws_tr = ws_root / "transcripts"
+        candidates.extend([ws_tr / f"{stem}.json", ws_tr / f"{stem}.words.json"])
+    except Exception:
+        pass
+
+    for path in candidates:
+        try:
+            if path.is_file():
+                data = path.read_text(encoding="utf-8")
+                return json.loads(data)
+        except Exception:
+            continue
+    return None
+
+
 def transcribe_media_file(filename: str) -> List[Dict[str, Any]]:
 
     """Synchronously transcribe a media file and persist transcript artifacts."""
+
+    # Global safeguard: allow disabling brand-new transcription at runtime.
+    raw_toggle = os.getenv("ALLOW_TRANSCRIPTION") or os.getenv("TRANSCRIBE_ENABLED")
+
+    # First, if we already have a transcript JSON, reuse it and return early.
+    existing = _read_existing_transcript_for(filename)
+    if existing is not None:
+        logging.info("[transcription] Reusing existing transcript for %s", filename)
+        notify_watchers_processed(filename)
+        return existing
 
     local_name = filename
     delete_after = False
@@ -97,6 +140,10 @@ def transcribe_media_file(filename: str) -> List[Dict[str, Any]]:
             except Exception as exc:  # pragma: no cover - network dependent
                 logging.error("[transcription] GCS download failed for %s: %s", filename, exc)
                 raise
+
+        # Respect global kill-switch if set to falsey values.
+        if raw_toggle and str(raw_toggle).strip().lower() in {"0", "false", "no", "off"}:
+            raise TranscriptionError("Transcription disabled by environment")
 
         words = get_word_timestamps(local_name)
         try:
