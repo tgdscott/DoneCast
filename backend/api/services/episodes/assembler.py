@@ -15,8 +15,28 @@ from api.core.paths import MEDIA_DIR
 from api.models.podcast import Episode
 from api.models.settings import AppSetting
 from api.services.billing import usage as usage_svc
-from worker.tasks import create_podcast_episode, celery_app
+
+try:  # Optional dependency: Celery worker package is not always installed
+    from worker.tasks import create_podcast_episode, celery_app  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - dev/staging environments without Celery
+    create_podcast_episode = None  # type: ignore
+    celery_app = None  # type: ignore
+
 from . import dto, repo
+
+
+def _raise_worker_unavailable() -> None:
+    """Raise a HTTP 503 describing that the background worker is unavailable."""
+
+    from fastapi import HTTPException  # Local import to avoid FastAPI dependency at module import
+
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "code": "ASSEMBLY_WORKER_UNAVAILABLE",
+            "message": "Episode assembly worker is not available. Please try again later or contact support.",
+        },
+    )
 
 
 def _episodes_created_this_month(session: Session, user_id) -> int:
@@ -288,6 +308,10 @@ def assemble_or_queue(
         if used >= max_eps:
             from fastapi import HTTPException
             raise HTTPException(status_code=402, detail="Monthly episode quota reached for your tier")
+
+    # Ensure the worker task module is available before performing any DB writes.
+    if create_podcast_episode is None:
+        _raise_worker_unavailable()
 
     # Prepare metadata and admin test-mode overrides
     ep_title = (episode_details.get("title") or output_filename or "").strip() or "Untitled Episode"
@@ -564,7 +588,10 @@ def assemble_or_queue(
         # Attempt to enqueue on Celery broker. If the broker is unreachable or
         # misconfigured, gracefully fall back to inline execution so the request
         # does not hang in production.
+        async_result = None
         try:
+            if not hasattr(create_podcast_episode, "delay"):
+                raise AttributeError("task missing delay attribute")
             async_result = create_podcast_episode.delay(
                 episode_id=str(ep.id),
                 template_id=str(template_id),
@@ -605,29 +632,33 @@ def assemble_or_queue(
                 # Fall through to return a generic queued response (unlikely path)
                 pass
         # Store job id in meta for diagnostics
-        try:
-            import json as _json
-            meta = {}
-            if getattr(ep, 'meta_json', None):
-                try:
-                    meta = _json.loads(ep.meta_json or '{}')
-                except Exception:
-                    meta = {}
-            meta['assembly_job_id'] = async_result.id
-            ep.meta_json = _json.dumps(meta)
-            session.add(ep); session.commit(); session.refresh(ep)
-        except Exception:
-            session.rollback()
+        if async_result is not None:
+            try:
+                import json as _json
+                meta = {}
+                if getattr(ep, 'meta_json', None):
+                    try:
+                        meta = _json.loads(ep.meta_json or '{}')
+                    except Exception:
+                        meta = {}
+                meta['assembly_job_id'] = async_result.id
+                ep.meta_json = _json.dumps(meta)
+                session.add(ep); session.commit(); session.refresh(ep)
+            except Exception:
+                session.rollback()
 
         # Automatic dev/local fallback (or explicit env) if no workers respond
         if os.getenv("CELERY_AUTO_FALLBACK", "").strip().lower() in {"1","true","yes","on"} or (os.getenv("APP_ENV","dev").lower() in {"dev","development","local"}):
             no_workers = False
-            try:
-                ping = celery_app.control.ping(timeout=1)
-                if not ping:
-                    no_workers = True
-            except Exception:
+            if celery_app is None:
                 no_workers = True
+            else:
+                try:
+                    ping = celery_app.control.ping(timeout=1)
+                    if not ping:
+                        no_workers = True
+                except Exception:
+                    no_workers = True
             if no_workers:
                 try:
                     import logging as _log
@@ -647,4 +678,6 @@ def assemble_or_queue(
                     return {"mode": "fallback-inline", "job_id": "fallback-inline", "result": result, "episode_id": str(ep.id)}
                 except Exception:
                     pass
+        if async_result is None:
+            _raise_worker_unavailable()
         return {"mode": "queued", "job_id": async_result.id, "episode_id": str(ep.id)}
