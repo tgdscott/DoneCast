@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from sqlmodel import Session
 from typing import Optional
 import json
@@ -116,3 +116,45 @@ def get_episode_transcript_text(episode_id: str, session: Session = Depends(get_
     except Exception:
         text = ""
     return Response(content=text.encode("utf-8"), media_type="text/plain; charset=utf-8")
+
+
+@router.get("/by-hint")
+def get_transcript_by_hint(
+    hint: str = Query(..., description="Filename or URI hint pointing to the media/transcript (e.g., gs://.../file.mp3)"),
+    fmt: str = Query("json", description="Output format: 'json' (default) or 'txt'"),
+    session: Session = Depends(get_session),
+):
+    """Return a transcript using a filename or GCS URI hint.
+
+    This endpoint is useful immediately after upload, before an Episode row exists.
+    It reuses discovery to find or download a transcript JSON locally and can
+    return either the raw JSON array of word tokens or a plain-text rendering.
+    """
+    if not isinstance(hint, str) or not hint.strip():
+        raise HTTPException(status_code=400, detail="Missing hint")
+
+    # Reuse broad discovery: looks locally, then attempts GCS download
+    path = _discover_transcript_json_path(session, episode_id=None, hint=hint)
+    if not path or not Path(path).exists():
+        raise HTTPException(status_code=404, detail="TRANSCRIPT_NOT_FOUND")
+
+    try:
+        if (fmt or "json").lower() == "txt":
+            try:
+                words = load_transcript_json(Path(path))
+            except Exception:
+                words = None
+            if words is None:
+                raise HTTPException(status_code=404, detail="TRANSCRIPT_NOT_FOUND")
+            try:
+                text = " ".join([str(w.get("word", "")).strip() for w in words if w.get("word")])
+            except Exception:
+                text = ""
+            return Response(content=text.encode("utf-8"), media_type="text/plain; charset=utf-8")
+        else:
+            content = Path(path).read_bytes()
+            return Response(content=content, media_type="application/json")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=404, detail="TRANSCRIPT_NOT_FOUND")

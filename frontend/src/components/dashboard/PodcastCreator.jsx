@@ -18,6 +18,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { makeApi } from '@/lib/apiClient';
+import { useResolvedTimezone } from '@/hooks/useResolvedTimezone';
+import { formatInTimezone } from '@/lib/timezone';
 import { formatDisplayName, isUuidLike } from '@/lib/displayNames';
 
 export default function PodcastCreator({
@@ -37,6 +39,7 @@ export default function PodcastCreator({
   onRequestUpload,
   userTimezone = null,
 }) {
+  const resolvedTimezone = useResolvedTimezone(userTimezone);
   const controller = usePodcastCreator({
     token,
     templates,
@@ -277,7 +280,7 @@ export default function PodcastCreator({
   const minutesDialogRenewal = minutesDialog?.renewalDate
     ? (() => {
         try {
-          return new Date(minutesDialog.renewalDate).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
+          return formatInTimezone(minutesDialog.renewalDate, { month: 'long', day: 'numeric', year: 'numeric' }, resolvedTimezone);
         } catch {
           return minutesDialog.renewalDate;
         }
@@ -331,7 +334,7 @@ export default function PodcastCreator({
               minutesRemaining={minutesRemainingPrecheck}
               formatDuration={formatDuration}
               audioDurationSec={audioDurationSec}
-              userTimezone={userTimezone}
+              userTimezone={resolvedTimezone}
             />
           );
         }

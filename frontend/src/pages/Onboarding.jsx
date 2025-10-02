@@ -11,10 +11,13 @@ import { useComfort } from '@/ComfortContext.jsx';
 import { makeApi, buildApiUrl } from '@/lib/apiClient';
 import { FORMATS, NO_MUSIC_OPTION } from "@/components/onboarding/OnboardingWizard.jsx";
 import CoverCropper from "@/components/dashboard/CoverCropper.jsx";
+import { useResolvedTimezone } from '@/hooks/useResolvedTimezone';
+import { formatInTimezone } from '@/lib/timezone';
 
 export default function Onboarding() {
   const { token, user, refreshUser } = useAuth();
   const { toast } = useToast();
+  const resolvedTimezone = useResolvedTimezone(user?.timezone);
   const STEP_KEY = 'ppp.onboarding.step';
   // Detect if launched from Podcast Manager and whether to reset saved step
   const [fromManager] = useState(() => {
@@ -1233,7 +1236,7 @@ export default function Onboarding() {
                 while (cells.length % 7 !== 0) cells.push({ key: `t-${cells.length}`, blank: true });
                 return (
                   <div key={idx} className="space-y-2">
-                    <div className="font-medium text-sm">{m.toLocaleString(undefined,{ month:'long', year:'numeric' })}</div>
+                    <div className="font-medium text-sm">{formatInTimezone(m, { month:'long', year:'numeric' }, resolvedTimezone)}</div>
                     <div className="grid grid-cols-7 gap-1 text-[11px] text-muted-foreground">
                       {HEADERS.map(h => <div key={h} className="py-1 text-center">{h}</div>)}
                     </div>
