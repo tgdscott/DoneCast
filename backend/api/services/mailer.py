@@ -25,6 +25,41 @@ class Mailer:
         self.sender = os.getenv("SMTP_FROM", "no-reply@podcastplusplus.com")
         self.sender_name = os.getenv("SMTP_FROM_NAME", "Podcast Plus Plus")
 
+        # Perform a lightweight startup probe so deploys fail fast when DNS or
+        # networking is misconfigured. We only warn instead of raising because
+        # the service should keep running (operators can still fix the env vars
+        # live without a redeploy).
+        self._startup_probe()
+
+    def _startup_probe(self) -> None:
+        """Validate that the configured SMTP host resolves and is reachable."""
+
+        if not self.host:
+            logger.info("SMTP_HOST not configured; mailer will log emails to stdout")
+            return
+
+        try:
+            info = socket.getaddrinfo(self.host, self.port)
+        except socket.gaierror as dns_err:
+            logger.error("Unable to resolve SMTP host '%s': %s", self.host, dns_err)
+            return
+
+        # Collapse results into a distinct set of IP addresses for logging.
+        addresses = sorted({result[4][0] for result in info if result[4]})
+        if addresses:
+            logger.info("SMTP host '%s' resolved to %s", self.host, ", ".join(addresses))
+
+        try:
+            with socket.create_connection((self.host, self.port), timeout=5):
+                logger.info("SMTP connectivity probe succeeded to %s:%s", self.host, self.port)
+        except OSError as conn_err:
+            logger.warning(
+                "SMTP connectivity probe failed to %s:%s: %s. Check outbound firewall rules.",
+                self.host,
+                self.port,
+                conn_err,
+            )
+
     def send(self, to: str, subject: str, text: str, html: Optional[str] = None) -> bool:
         """Send an email. Returns True if accepted by remote SMTP server.
 

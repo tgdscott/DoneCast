@@ -21,3 +21,7 @@ TASKS_URL_BASE: "https://api.podcastplusplus.com"
 TASKS_AUTH: "a-secure-local-secret"
 # Increase GCS resumable upload chunk size for better throughput
 GCS_CHUNK_MB: "32"
+SMTP_HOST: "smtp.sendgrid.net"
+SMTP_PORT: "587"
+SMTP_USER: "apikey"
+SMTP_PASS: "REDACTED_SENDGRID_API_KEY"

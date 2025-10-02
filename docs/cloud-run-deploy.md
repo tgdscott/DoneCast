@@ -23,7 +23,9 @@
      --set-secrets=DATABASE_URL=<secret-name>:latest,SECRET_KEY=<secret-name>:latest,SESSION_SECRET=<secret-name>:latest
    ```
    Replace `<secret-name>` with the Secret Manager entries that hold your configuration secrets and `<your-media-bucket>` with the bucket from step 3. If you prefer direct values, swap `--set-secrets` for `--set-env-vars=...`. If you serve the SPA on additional domains (apex or www), add them to `CORS_ALLOWED_ORIGINS` as well (separate with semicolons like `https://example.com;https://www.example.com`).
+   Remember to include your SMTP configuration (for example `SMTP_HOST=smtp.sendgrid.net,SMTP_PORT=587,SMTP_USER=apikey`) either as env vars or secrets so transactional email works outside of local development.
 5. **Verify runtime**: after deploy, hit `/api/users/me`, run `scripts/login_and_me.py`, try an RSS import, upload a media file, and confirm the Postgres-backed instance handles reads/writes while media uploads land in Cloud Storage.
-6. **First-time DB bootstrap**: the API auto-creates tables on startup. If you need to backfill admin data, run `scripts/create_test_user.py` against the new API or add manual entries through psql.
+6. **Validate mailer connectivity**: check the Cloud Run logs for `SMTP host '...' resolved` / `SMTP connectivity probe succeeded` messages emitted on startup. If you see DNS failures or firewall warnings, run `nslookup smtp.sendgrid.net` in the deploy pipeline or open the Cloud Run troubleshooting shell to make sure outbound SMTP is permitted.
+7. **First-time DB bootstrap**: the API auto-creates tables on startup. If you need to backfill admin data, run `scripts/create_test_user.py` against the new API or add manual entries through psql.
 
 Keep `MEDIA_ROOT=/tmp` so FastAPI writes transient scratch files into Cloud Run's writable space. With a GCS bucket in place, long-term assets (intros/outros/music) persist under `gs://<your-media-bucket>/` as expected.

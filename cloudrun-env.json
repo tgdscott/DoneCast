@@ -6,5 +6,9 @@
     "OAUTH_BACKEND_BASE":  "https://podcast-web-524304361363.us-west1.run.app",
     "SECRET_KEY":  "REDACTED_SECRET_KEY_PLACEHOLDER",
     "DATABASE_URL":  "postgresql+psycopg://USER:PASSWORD@HOST:5432/DBNAME",
-    "MEDIA_ROOT":  "/tmp"
+    "MEDIA_ROOT":  "/tmp",
+    "SMTP_HOST": "smtp.sendgrid.net",
+    "SMTP_PORT": "587",
+    "SMTP_USER": "apikey",
+    "SMTP_PASS": "REDACTED_SENDGRID_API_KEY"
 }
