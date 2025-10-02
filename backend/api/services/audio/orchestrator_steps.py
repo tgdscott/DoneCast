@@ -1260,14 +1260,8 @@ def write_final_transcripts_and_cleanup(
                     log.append(f"[TRANSCRIPTS_CLEAN] removed {p.name}")
             except Exception as _e:
                 log.append(f"[TRANSCRIPTS_CLEAN_WARN] could not remove {getattr(p,'name',p)}: {type(_e).__name__}: {_e}")
-        for s in [content_stem, cleaned_stem, precut_stem]:
-            candidate = TRANSCRIPTS_DIR / f"{s}.json"
-            try:
-                if candidate.exists() and candidate.name != keep_base:
-                    candidate.unlink()
-                    log.append(f"[TRANSCRIPTS_CLEAN] removed {candidate.name}")
-            except Exception as _e:
-                log.append(f"[TRANSCRIPTS_CLEAN_WARN] could not remove {candidate.name}: {type(_e).__name__}: {_e}")
+        # Do NOT remove canonical transcripts like <output_slug>.json or <content_stem>.json; keep permanent copies.
+        # Only remove clearly legacy variants handled above. This preserves upload-time canonical JSON artifacts.
     except Exception as e:
         log.append(f"[TRANSCRIPTS_CLEAN_ERROR] {e}")
 

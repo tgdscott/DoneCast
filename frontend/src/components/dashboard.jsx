@@ -88,15 +88,19 @@ function formatAssemblyStatus(status) {
 }
 
 function formatShort(iso) {
-  if(!iso) return '';
+  if (!iso) return '';
   try {
     const d = new Date(iso);
     const now = new Date();
-    const pad = (n) => String(n).padStart(2,'0');
     const sameDay = d.toDateString() === now.toDateString();
-    if (sameDay) return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    return `${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  } catch { return ''; }
+    const fmt = new Intl.DateTimeFormat(undefined, sameDay
+      ? { hour: '2-digit', minute: '2-digit' }
+      : { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }
+    );
+    return fmt.format(d);
+  } catch {
+    return '';
+  }
 }
 
 export default function PodcastPlusDashboard() {

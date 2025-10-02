@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException
@@ -76,15 +76,23 @@ async def get_distribution_checklist(
     status_map = {str(row.platform_key): row for row in status_rows if getattr(row, "platform_key", None)}
 
     context = build_distribution_context(podcast)
-    items = [
-        DistributionChecklistItem(
-            **build_distribution_item_payload(
-                host,
-                status_map.get(str(host.get("key"))),
-                context,
-            )
+    # Build payload dicts then validate into models to satisfy type-checkers
+    payloads: List[dict[str, Any]] = [
+        build_distribution_item_payload(
+            host,
+            status_map.get(str(host.get("key"))),
+            context,
         )
         for host in get_distribution_hosts()
+    ]
+    raw_items: List[DistributionChecklistItem] = [
+        DistributionChecklistItem.model_validate(p) for p in payloads
+    ]
+
+    # Reorder so that items marked 'completed' are shown at the bottom.
+    # Preserve original declaration order among the non-completed items.
+    items = [i for i in raw_items if i.status != DistributionStatus.completed] + [
+        i for i in raw_items if i.status == DistributionStatus.completed
     ]
 
     return DistributionChecklistResponse(
@@ -134,6 +142,7 @@ async def update_distribution_checklist_item(
     session.refresh(status_row)
 
     context = build_distribution_context(podcast)
-    return DistributionChecklistItem(
-        **build_distribution_item_payload(host_def, status_row, context)
+    # Validate payload into model for type safety
+    return DistributionChecklistItem.model_validate(
+        build_distribution_item_payload(host_def, status_row, context)
     )

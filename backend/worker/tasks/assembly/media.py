@@ -488,6 +488,42 @@ def resolve_media_context(
     except Exception:
         pass
 
+    # If not found locally, try episode.meta_json hint for a GCS transcript and download it
+    if not words_json_path:
+        try:
+            import json
+            meta = json.loads(getattr(episode, "meta_json", "{}") or "{}") if getattr(episode, "meta_json", None) else {}
+            gcs_json = None
+            transcripts_meta = meta.get("transcripts") if isinstance(meta, dict) else None
+            if isinstance(transcripts_meta, dict):
+                gcs_json = transcripts_meta.get("gcs_json") or transcripts_meta.get("gcs_url")
+            if not gcs_json:
+                # Some older paths may store at top level
+                gcs_json = meta.get("gcs_json") or meta.get("transcript_gcs_json")
+            if gcs_json and isinstance(gcs_json, str) and gcs_json.startswith("gs://"):
+                try:
+                    without_scheme = gcs_json[len("gs://"):]
+                    bucket_name, key = without_scheme.split("/", 1)
+                    # Decide a local filename: prefer last stem in base_stems, else from key
+                    try:
+                        local_stem = base_stems[-1] if base_stems else Path(key).stem
+                    except Exception:
+                        local_stem = Path(key).stem
+                    local_path = (PROJECT_ROOT / "transcripts") / f"{sanitize_filename(local_stem)}.json"
+                    local_path.parent.mkdir(parents=True, exist_ok=True)
+                    from google.cloud import storage  # type: ignore
+
+                    client = storage.Client()
+                    blob = client.bucket(bucket_name).blob(key)
+                    blob.download_to_filename(str(local_path))
+                    if local_path.exists() and local_path.stat().st_size > 0:
+                        words_json_path = local_path
+                        logging.info("[assemble] downloaded transcript JSON from GCS to %s", str(local_path))
+                except Exception:
+                    logging.warning("[assemble] Failed to download transcript JSON from %s", gcs_json, exc_info=True)
+        except Exception:
+            pass
+
     return (
         MediaContext(
             template=template,
