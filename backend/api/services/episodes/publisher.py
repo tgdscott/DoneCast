@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, Optional
+from importlib import import_module
+from importlib.util import find_spec
+from typing import Any, Dict, Optional, Tuple
 from uuid import UUID
 
 from sqlmodel import Session, select
@@ -12,16 +14,69 @@ from api.services.publisher import SpreakerClient
 
 logger = logging.getLogger("ppp.episodes.publisher.service")
 
+publish_episode_to_spreaker_task: Optional[Any] = None
+celery_app: Optional[Any] = None
+_worker_import_attempted = False
+_worker_import_error: Optional[BaseException] = None
+
+
+def _load_worker_publish_exports() -> Tuple[Optional[Any], Optional[Any]]:
+    """Attempt to load publish task + celery app from worker.tasks."""
+
+    global _worker_import_attempted, _worker_import_error
+
+    if _worker_import_attempted:
+        return publish_episode_to_spreaker_task, celery_app
+
+    _worker_import_attempted = True
+
+    spec = find_spec("worker.tasks")
+    if spec is None:
+        logger.debug("[publish] worker.tasks spec not found; publish task unavailable")
+        return None, None
+
+    try:
+        module = import_module("worker.tasks")
+    except Exception as exc:  # pragma: no cover - defensive logging for optional dependency
+        _worker_import_error = exc
+        logger.warning("[publish] Failed to import worker.tasks", exc_info=True)
+        return None, None
+
+    task = getattr(module, "publish_episode_to_spreaker_task", None)
+    celery = getattr(module, "celery_app", None)
+
+    if task is None:
+        _worker_import_error = ImportError("publish_episode_to_spreaker_task missing from worker.tasks")
+        logger.warning(
+            "[publish] worker.tasks missing publish_episode_to_spreaker_task; treating worker as unavailable"
+        )
+        return None, None
+
+    _worker_import_error = None
+    return task, celery
+
+
+def _ensure_worker_dependencies_loaded() -> None:
+    global publish_episode_to_spreaker_task, celery_app
+
+    if publish_episode_to_spreaker_task is not None:
+        return
+
+    task, celery = _load_worker_publish_exports()
+    if task is not None:
+        publish_episode_to_spreaker_task = task
+        celery_app = celery
+        
 try:  # Celery worker package is optional in some environments
     from worker.tasks import publish_episode_to_spreaker_task, celery_app  # type: ignore
 except ModuleNotFoundError:  # pragma: no cover - dev/staging without worker package
     publish_episode_to_spreaker_task = None  # type: ignore[assignment]
     celery_app = None  # type: ignore[assignment]
 
-
 def _ensure_publish_task_available() -> None:
     """Raise a HTTP 503 if the publish task is unavailable."""
 
+    _ensure_worker_dependencies_loaded()
     if publish_episode_to_spreaker_task is not None:
         return
 
@@ -32,6 +87,7 @@ def _ensure_publish_task_available() -> None:
         detail={
             "code": "PUBLISH_WORKER_UNAVAILABLE",
             "message": "Episode publish worker is not available. Please try again later or contact support.",
+            "import_error": repr(_worker_import_error) if _worker_import_error else None,
         },
     )
 
