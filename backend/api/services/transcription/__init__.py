@@ -150,47 +150,60 @@ def transcribe_media_file(filename: str) -> List[Dict[str, Any]]:
             TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
             stem = Path(local_name).stem
             out_path = TRANSCRIPTS_DIR / f"{stem}.json"
-            if not out_path.exists():
-                payload = json.dumps(words, ensure_ascii=False, indent=2)
-                out_path.write_text(payload, encoding="utf-8")
-                gcs_url = None
-                try:
-                    bucket = (os.getenv("TRANSCRIPTS_BUCKET") or os.getenv("MEDIA_BUCKET") or "").strip()
-                    if bucket:
-                        from ...infrastructure.gcs import upload_bytes  # type: ignore
+            payload = json.dumps(words, ensure_ascii=False, indent=2)
+            # Always persist locally (overwrite with freshest)
+            out_path.write_text(payload, encoding="utf-8")
+
+            # Upload permanently to GCS in a deterministic location: transcripts/{stem}.json
+            gcs_url = None
+            try:
+                bucket = (os.getenv("TRANSCRIPTS_BUCKET") or os.getenv("MEDIA_BUCKET") or "").strip()
+                if bucket:
+                    from ...infrastructure.gcs import upload_bytes, stat_object  # type: ignore
+                    key = f"transcripts/{stem}.json"
+                    # Idempotent: if object already exists and size looks good, skip re-upload
+                    try:
+                        info = stat_object(bucket, key)  # returns dict with size, updated, etc.
+                        if not info or int(info.get("size", 0)) < 10:
+                            raise RuntimeError("object_too_small_or_missing")
+                    except Exception:
                         upload_bytes(
                             bucket,
-                            f"transcripts/{stem}.json",
+                            key,
                             payload.encode("utf-8"),
                             content_type="application/json; charset=utf-8",
                         )
-                        gcs_url = f"https://storage.googleapis.com/{bucket}/transcripts/{stem}.json"
-                except Exception:  # pragma: no cover - GCS optional
-                    pass
-                # Associate transcript with episode
+                    gcs_url = f"https://storage.googleapis.com/{bucket}/{key}"
+            except Exception:  # pragma: no cover - GCS optional
+                pass
+
+            # Record the GCS key on the episode for deterministic reuse during assembly
+            try:
+                from api.services.episodes.repo import get_episode_by_id, update_episode
+                from uuid import UUID
+                episode_id = None
                 try:
-                    from api.services.episodes.repo import get_episode_by_id, update_episode
-                    from uuid import UUID
-                    # Try to extract episode_id from stem (assumes stem is episode UUID or contains it)
-                    episode_id = None
-                    try:
-                        episode_id = UUID(stem)
-                    except Exception:
-                        pass
-                    if episode_id:
-                        from api.core.database import get_session
-                        session_gen = get_session()
-                        session = next(session_gen)
-                        ep = get_episode_by_id(session, episode_id)
-                        if ep:
-                            meta = json.loads(ep.meta_json or "{}")
-                            transcripts = meta.get("transcripts", {})
+                    episode_id = UUID(stem)
+                except Exception:
+                    pass
+                if episode_id:
+                    from api.core.database import get_session
+                    session_gen = get_session()
+                    session = next(session_gen)
+                    ep = get_episode_by_id(session, episode_id)
+                    if ep:
+                        meta = json.loads(ep.meta_json or "{}")
+                        transcripts = dict(meta.get("transcripts", {}))
+                        if gcs_url:
                             transcripts["gcs_json"] = gcs_url
-                            meta["transcripts"] = transcripts
-                            ep.meta_json = json.dumps(meta)
-                            update_episode(session, ep, {"meta_json": ep.meta_json})
-                except Exception as e:
-                    logging.warning(f"Failed to associate transcript with episode: {e}")
+                            transcripts["stem"] = stem
+                        else:
+                            transcripts["stem"] = stem
+                        meta["transcripts"] = transcripts
+                        ep.meta_json = json.dumps(meta)
+                        update_episode(session, ep, {"meta_json": ep.meta_json})
+            except Exception as e:
+                logging.warning(f"Failed to associate transcript with episode: {e}")
         except Exception:  # pragma: no cover - best effort persistence
             pass
 

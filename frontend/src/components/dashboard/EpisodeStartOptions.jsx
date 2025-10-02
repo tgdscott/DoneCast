@@ -58,7 +58,7 @@ export default function EpisodeStartOptions({
             </button>
 
             {!hasReadyAudio && (
-              <div className="px-4 pb-4 text-xs text-amber-700">
+              <div className="px-6 pb-4 text-xs text-amber-700 max-w-xs">
                 You’ll need at least one processed upload before you can continue, but we’ll show you how to add one.
               </div>
             )}
@@ -88,8 +88,8 @@ export default function EpisodeStartOptions({
 
       {!hasReadyAudio && !errorMessage && (
         <Card className="border border-amber-200 bg-amber-50">
-          <CardContent className="flex items-start gap-3 text-sm text-amber-800">
-            <AlertTriangle className="w-5 h-5 mt-1" />
+          <CardContent className="flex items-center gap-3 text-sm text-amber-800">
+            <AlertTriangle className="w-5 h-5" />
             <div>
               We’ll email you as soon as each upload is transcribed so you can come back and assemble without waiting.
             </div>

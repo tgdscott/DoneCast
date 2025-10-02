@@ -3,7 +3,7 @@ import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 import { Input } from '../ui/input';
 import { Checkbox } from '../ui/checkbox';
-import { AlertCircle, ArrowLeft, CheckCircle2, Loader2, Upload } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowLeft, CheckCircle2, Loader2, Upload } from 'lucide-react';
 import { makeApi, buildApiUrl } from '@/lib/apiClient';
 import { useToast } from '@/hooks/use-toast';
 import { convertAudioFileToMp3IfBeneficial } from '@/lib/audioConversion';
@@ -40,6 +40,7 @@ export default function PreUploadManager({
   const [conversionNotice, setConversionNotice] = useState('');
   const [converting, setConverting] = useState(false);
   const [conversionProgress, setConversionProgress] = useState(null);
+  const [submitAfterConvert, setSubmitAfterConvert] = useState(false);
 
   const handleFileChange = async (event) => {
     const selected = event.target.files?.[0];
@@ -54,6 +55,7 @@ export default function PreUploadManager({
     setError('');
     setConversionNotice('');
     setConversionProgress({ phase: 'starting', progress: 0 });
+    let preparedFile = null;
     try {
       const result = await convertAudioFileToMp3IfBeneficial(selected, {
         onProgress: (info = {}) => {
@@ -84,22 +86,29 @@ export default function PreUploadManager({
         console.error('Audio conversion failed; uploading original file.', result?.error);
         setConversionNotice('Unable to convert automatically. We\'ll upload the original file instead.');
       }
-      setFile(result?.file || selected);
+      preparedFile = result?.file || selected;
+      setFile(preparedFile);
     } catch (conversionError) {
       console.error('Failed to prepare audio for upload', conversionError);
       setError('We were unable to prepare that audio file. Please try again.');
       setFile(null);
+      setSubmitAfterConvert(false);
     } finally {
       setConverting(false);
       setConversionProgress(null);
+      // If the user clicked Upload while we were preparing, start upload now
+      if (submitAfterConvert && preparedFile && friendlyName.trim()) {
+        setSubmitAfterConvert(false);
+        try { await doUpload(preparedFile); } catch {}
+      }
     }
   };
 
-  const handleSubmit = async (event) => {
-    event.preventDefault();
+  // Shared upload logic so we can trigger after conversion
+  const doUpload = async (overrideFile) => {
     const trimmedFriendlyName = friendlyName.trim();
-
-    if (!file) {
+    const fileToSend = overrideFile || file;
+    if (!fileToSend) {
       setError('Select an audio file to upload.');
       return;
     }
@@ -107,34 +116,24 @@ export default function PreUploadManager({
       setError('Enter a friendly name for this episode before uploading.');
       return;
     }
-    // Build the form once
     const form = new FormData();
-    form.append('files', file);
+    form.append('files', fileToSend);
     form.append('friendly_names', JSON.stringify([trimmedFriendlyName]));
     form.append('notify_when_ready', notify ? 'true' : 'false');
-    if (notify && email) {
-      form.append('notify_email', email);
-    }
+    if (notify && email) form.append('notify_email', email);
 
-    // Fire-and-forget upload: start it and immediately return user to dashboard
     const startBackgroundUpload = () => new Promise((resolve, reject) => {
       try {
         if (typeof XMLHttpRequest === 'undefined') {
           const api = makeApi(token);
-          api
-            .raw('/api/media/upload/main_content', { method: 'POST', body: form })
-            .then(resolve)
-            .catch(reject);
+          api.raw('/api/media/upload/main_content', { method: 'POST', body: form }).then(resolve).catch(reject);
           return;
         }
         const xhr = new XMLHttpRequest();
         xhr.open('POST', buildApiUrl('/api/media/upload/main_content'));
         xhr.withCredentials = true;
-        if (token) {
-          try { xhr.setRequestHeader('Authorization', `Bearer ${token}`); } catch {}
-        }
+        if (token) { try { xhr.setRequestHeader('Authorization', `Bearer ${token}`); } catch {} }
         xhr.responseType = 'json';
-        // Avoid updating component state after unmount; no progress callback here.
         xhr.onerror = () => reject(new Error('Upload failed. Please try again.'));
         xhr.onabort = () => reject(new Error('Upload cancelled'));
         xhr.onload = () => {
@@ -148,27 +147,31 @@ export default function PreUploadManager({
           resolve(xhr.response);
         };
         xhr.send(form);
-      } catch (e) {
-        reject(e);
-      }
+      } catch (e) { reject(e); }
     });
 
-    // Let the user leave immediately
-    toast({
-      title: 'Uploading in background',
-      description: 'You can return to your dashboard. We\'ll email you when it\'s processed.',
-    });
-
+    toast({ title: 'Uploading in background', description: 'You can return to your dashboard. We\'ll email you when it\'s processed.' });
     const p = startBackgroundUpload();
-    p.then(() => {
-      toast({ title: 'Upload received', description: 'Transcription has started.' });
+    p.then(() => { try { toast({ title: 'Upload received', description: 'Transcription has started.' }); } catch {}
       onUploaded();
-    }).catch((err) => {
-      toast({ variant: 'destructive', title: 'Upload failed', description: err?.message || 'Unable to upload audio.' });
-    });
-
-    // Navigate away immediately
+    }).catch((err) => { try { toast({ variant: 'destructive', title: 'Upload failed', description: err?.message || 'Unable to upload audio.' }); } catch {} });
     onDone();
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    const trimmedFriendlyName = friendlyName.trim();
+    if (!trimmedFriendlyName) {
+      setError('Enter a friendly name for this episode before uploading.');
+      return;
+    }
+    if (converting || !file) {
+      // Queue submission to run once conversion finishes
+      setSubmitAfterConvert(true);
+      toast({ title: 'Preparing your audio…', description: 'We\'ll start uploading automatically when the file is ready.' });
+      return;
+    }
+    await doUpload();
   };
 
   const hasFile = !!file;
@@ -241,6 +244,12 @@ export default function PreUploadManager({
                     />
                   </div>
                 )}
+                <div className="mt-2 flex items-start gap-2 rounded-md bg-amber-50 border border-amber-200 p-2 text-amber-800">
+                  <AlertTriangle className="w-4 h-4 mt-0.5" />
+                  <span>
+                    Keep this tab visible while we prepare your audio. Browsers can throttle or pause background or hidden tabs, which may slow or stop conversion.
+                  </span>
+                </div>
               </div>
             )}
 
@@ -251,7 +260,7 @@ export default function PreUploadManager({
               </div>
             )}
 
-            {hasFile && (
+            {(hasFile || converting) && (
               <div className="space-y-4">
                 <div>
                   <label className="text-sm font-medium text-slate-700">Friendly name</label>
@@ -304,7 +313,7 @@ export default function PreUploadManager({
               <Button type="button" variant="ghost" onClick={onDone}>
                 Return to dashboard
               </Button>
-              <Button type="submit" disabled={!hasFile || converting || !friendlyName.trim()}>
+              <Button type="submit" disabled={!friendlyName.trim() || (!hasFile && !converting)}>
                 {converting ? (
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                 ) : (

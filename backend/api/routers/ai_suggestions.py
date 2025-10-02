@@ -120,10 +120,22 @@ def _download_transcript_from_bucket(stem: str, user_id: Optional[str] = None) -
     if _gcs is None:  # pragma: no cover - optional dependency missing in tests
         return None
 
+    # Try a range of common transcript JSON variants used by the pipeline
+    variants = [
+        f"{stem}.json",
+        f"{stem}.words.json",
+        f"{stem}.original.json",
+        f"{stem}.original.words.json",
+        f"{stem}.final.json",
+        f"{stem}.final.words.json",
+        f"{stem}.nopunct.json",  # least preferred, but fine for intent detection
+    ]
+
     keys: list[str] = []
-    if user_id:
-        keys.append(f"transcripts/{user_id}/{stem}.json")
-    keys.append(f"transcripts/{stem}.json")
+    for v in variants:
+        if user_id:
+            keys.append(f"transcripts/{user_id}/{v}")
+        keys.append(f"transcripts/{v}")
 
     for key in keys:
         try:
@@ -132,7 +144,8 @@ def _download_transcript_from_bucket(stem: str, user_id: Optional[str] = None) -
             continue
         try:
             TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
-            path = TRANSCRIPTS_DIR / f"{stem}.json"
+            # Preserve the specific variant filename locally to avoid collisions
+            path = TRANSCRIPTS_DIR / Path(key).name
             path.write_bytes(data)
             return path
         except Exception:
@@ -421,6 +434,7 @@ def _discover_transcript_json_path(
             TRANSCRIPTS_DIR / f"{stem}.original.words.json",
             TRANSCRIPTS_DIR / f"{stem}.final.json",
             TRANSCRIPTS_DIR / f"{stem}.final.words.json",
+            TRANSCRIPTS_DIR / f"{stem}.nopunct.json",  # acceptable for intent analysis
         ]
         for path in preferred:
             if path.exists():
@@ -429,7 +443,7 @@ def _discover_transcript_json_path(
             matches = [
                 p
                 for p in TRANSCRIPTS_DIR.glob("*.json")
-                if stem in p.stem and not p.name.endswith(".nopunct.json")
+                if stem in p.stem
             ]
             matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
             if matches:

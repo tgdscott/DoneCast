@@ -12,6 +12,7 @@ for a later wiring step and can be used by other callers for granular ops.
 
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, cast, Set
+import os
 import json
 import re
 
@@ -167,6 +168,8 @@ def load_content_and_init_transcripts(
     words_json_path: Optional[str],
     output_filename: str,
     log: List[str],
+    *,
+    forbid_transcribe: bool = False,
 ) -> Tuple[Path, AudioSegment, List[Dict[str, Any]], str]:
     """Load content, obtain words, and write initial transcripts.
 
@@ -415,13 +418,25 @@ def load_content_and_init_transcripts(
             with open(words_json_path, 'r', encoding='utf-8') as fh:
                 words = json.load(fh)
         except Exception as e:
-            log.append(f"[WORDS_FALLBACK] Failed to load provided words '{words_json_path}': {e}; transcribing.")
+            # Respect assembly transcribe kill-switch: do NOT auto-transcribe during assembly unless explicitly enabled.
+            raw_toggle = os.getenv("ALLOW_ASSEMBLY_TRANSCRIBE") or os.getenv("ASSEMBLY_ALLOW_TRANSCRIBE") or os.getenv("ALLOW_TRANSCRIPTION")
+            allow = (not forbid_transcribe) and bool(raw_toggle and str(raw_toggle).strip().lower() in {"1", "true", "yes", "on"})
+            if allow:
+                log.append(f"[WORDS_FALLBACK] Failed to load provided words '{words_json_path}': {e}; transcribing.")
+            else:
+                log.append(f"[WORDS_FALLBACK] Failed to load provided words '{words_json_path}': {e}; skipping transcription (assembly transcribe disabled).")
     if not words:
-        try:
-            words = transcription.get_word_timestamps(main_content_filename)
-        except Exception as e:
-            words = []
-            log.append(f"[WORDS_UNAVAILABLE] {type(e).__name__}: {e}; proceeding without transcript.")
+        # Only attempt on explicit opt-in
+        raw_toggle = os.getenv("ALLOW_ASSEMBLY_TRANSCRIBE") or os.getenv("ASSEMBLY_ALLOW_TRANSCRIBE") or os.getenv("ALLOW_TRANSCRIPTION")
+        allow = (not forbid_transcribe) and bool(raw_toggle and str(raw_toggle).strip().lower() in {"1", "true", "yes", "on"})
+        if allow:
+            try:
+                words = transcription.get_word_timestamps(main_content_filename)
+            except Exception as e:
+                words = []
+                log.append(f"[WORDS_UNAVAILABLE] {type(e).__name__}: {e}; proceeding without transcript.")
+        else:
+            log.append("[WORDS_UNAVAILABLE] assembly transcribe disabled; proceeding without transcript.")
 
     # Initial transcripts
     sanitized_output_filename = sanitize_filename(output_filename)
@@ -1275,8 +1290,9 @@ def do_transcript_io(paths: Dict[str, Any], cfg: Dict[str, Any], log: List[str])
     main_content_filename = str(paths.get('audio_in') or '')
     output_filename = str(paths.get('output_name') or Path(main_content_filename).stem or 'episode')
     words_json_path = str(paths.get('words_json') or '') or None
+    forbid_transcribe = bool(cfg.get('forbid_transcribe') or cfg.get('forbidTranscribe') or False)
     content_path, main_content_audio, words, sanitized_output_filename = load_content_and_init_transcripts(
-        main_content_filename, words_json_path, output_filename, log
+        main_content_filename, words_json_path, output_filename, log, forbid_transcribe=forbid_transcribe
     )
     return {
         'template': template,

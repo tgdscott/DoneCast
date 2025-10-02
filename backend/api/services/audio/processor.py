@@ -105,6 +105,8 @@ def process_and_assemble_episode(
         "tts_provider": tts_provider,
         "elevenlabs_api_key": elevenlabs_api_key,
         "mix_only": bool(mix_only),
+        # Forbid fallback transcription during assembly; only explicit env overrides will allow it
+        "forbid_transcribe": True,
     }
 
     # Delegate to the orchestrator and adapt the return to the legacy tuple

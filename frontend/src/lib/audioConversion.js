@@ -43,16 +43,11 @@ const defaultOptions = {
   minImprovementRatio: 2,
 };
 
+// Yield between chunks so the UI remains responsive. Use a timer instead of
+// requestAnimationFrame so work continues when the tab is hidden (rAF can be
+// throttled to 1fps or paused entirely in background tabs across browsers).
 const yieldToEventLoop = () =>
   new Promise((resolve) => {
-    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-      window.requestAnimationFrame(() => resolve());
-      return;
-    }
-    if (typeof requestAnimationFrame === 'function') {
-      requestAnimationFrame(() => resolve());
-      return;
-    }
     setTimeout(resolve, 0);
   });
 
