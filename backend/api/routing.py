@@ -92,6 +92,7 @@ transcripts_router     = _safe_import("api.routers.transcripts")
 elevenlabs_router      = _safe_import("api.routers.elevenlabs")
 media_tts_router       = _safe_import("api.routers.media_tts")
 dashboard_router       = _safe_import("api.routers.dashboard")
+feedback_router        = _safe_import("api.routers.feedback")
 recurring              = _safe_import("api.routers.recurring")
 assemblyai_router      = _safe_import("api.routers.assemblyai_webhook")
 media_upload_alias     = _safe_import("api.routers.media_upload_alias")
@@ -166,6 +167,8 @@ def attach_routers(app: FastAPI) -> dict:
     availability['media_tts_router'] = media_tts_router is not None
     _maybe(app, dashboard_router)
     availability['dashboard_router'] = dashboard_router is not None
+    _maybe(app, feedback_router)
+    availability['feedback_router'] = feedback_router is not None
     _maybe(app, recurring)
     availability['recurring'] = recurring is not None
     _maybe(app, assemblyai_router)
