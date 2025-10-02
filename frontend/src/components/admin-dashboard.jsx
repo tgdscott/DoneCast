@@ -48,10 +48,13 @@ import AdminLayoutToggle from '@/components/admin/AdminLayoutToggle.jsx';
 import AdminTierEditor from '@/components/admin/AdminTierEditor.jsx';
 import AdminMusicLibrary from '@/components/admin/AdminMusicLibrary.jsx';
 import AdminLandingEditor from '@/components/admin/AdminLandingEditor.jsx';
+import { useResolvedTimezone } from '@/hooks/useResolvedTimezone';
+import { formatInTimezone } from '@/lib/timezone';
 
 export default function AdminDashboard() {
   const { token, logout } = useAuth();
   const { toast } = useToast();
+  const resolvedTimezone = useResolvedTimezone();
   const [activeTab, setActiveTab] = useState("users")
   const [searchTerm, setSearchTerm] = useState("")
   const [tierFilter, setTierFilter] = useState("all")
@@ -406,7 +409,7 @@ export default function AdminDashboard() {
               <div className="text-xs px-2 py-1 rounded bg-secondary text-secondary-foreground">
                 Brand: {document.documentElement.getAttribute("data-brand") || "ppp"}
               </div>
-              <div className="text-sm text-gray-600">Last updated: {new Date().toLocaleTimeString()}</div>
+              <div className="text-sm text-gray-600">Last updated: {formatInTimezone(new Date(), { timeStyle: 'medium' }, resolvedTimezone)}</div>
             </div>
           </div>
         </header>
@@ -1527,8 +1530,8 @@ function AdminPodcastsTab() {
                   <TableCell className="font-medium">{row.name || '—'}</TableCell>
                   <TableCell>{row.owner_email || '—'}</TableCell>
                   <TableCell>{row.episode_count ?? 0}</TableCell>
-                  <TableCell>{row.created_at ? new Date(row.created_at).toLocaleString() : '—'}</TableCell>
-                  <TableCell>{row.last_episode_at ? new Date(row.last_episode_at).toLocaleString() : '—'}</TableCell>
+                  <TableCell>{row.created_at ? formatInTimezone(row.created_at, { dateStyle: 'medium', timeStyle: 'short' }, resolvedTimezone) : '—'}</TableCell>
+                  <TableCell>{row.last_episode_at ? formatInTimezone(row.last_episode_at, { dateStyle: 'medium', timeStyle: 'short' }, resolvedTimezone) : '—'}</TableCell>
                   <TableCell className="text-right space-x-2">
                     <Button size="sm" variant="outline" onClick={()=>openManager(row.id)}>Open in Podcast Manager</Button>
                     <Button size="sm" variant="secondary" onClick={()=>copyId(row.id)}>Copy ID</Button>

@@ -8,6 +8,8 @@ import FlubberReview from './FlubberReview';
 import ManualEditorModal from './ManualEditorModal';
 import CoverCropper from './CoverCropper';
 import { makeApi, isApiError } from "@/lib/apiClient";
+import { useResolvedTimezone } from "@/hooks/useResolvedTimezone";
+import { formatInTimezone } from "@/lib/timezone";
 // ------------------------------
 // Utility helpers (pure / outside component to avoid re-creation)
 // ------------------------------
@@ -36,13 +38,13 @@ const isWithin24h = (iso) => {
   if(!d) return false;
   return (Date.now() - d.getTime()) < 24*3600*1000;
 };
-const formatPublishAt = (iso) => {
-  if(!iso) return '';
+const formatPublishAt = (iso, { fallback = null, timezone } = {}) => {
+  if(!iso) return fallback ?? '';
   try {
     const d = normalizeDate(iso);
-    if(!d) return iso;
-    const datePart = d.toLocaleDateString(undefined, { year:'numeric', month:'short', day:'numeric' });
-    const timePart = d.toLocaleTimeString(undefined, { hour:'numeric', minute:'2-digit', hour12:true, timeZoneName:'short' });
+    if(!d) return fallback ?? iso;
+    const datePart = formatInTimezone(d, { year:'numeric', month:'short', day:'numeric' }, timezone);
+    const timePart = formatInTimezone(d, { hour:'numeric', minute:'2-digit', hour12:true, timeZoneName:'short' }, timezone);
     const now = Date.now();
     const diffMin = Math.round((d.getTime()-now)/60000);
     let rel='';
@@ -50,8 +52,11 @@ const formatPublishAt = (iso) => {
       if (diffMin>0) rel = diffMin<60?`in ${diffMin}m`: (diffMin<1440?`in ${Math.round(diffMin/60)}h`:`in ${Math.round(diffMin/60/24)}d`);
       else if (diffMin<0){ const m=Math.abs(diffMin); rel = m<60?`${m}m ago`:(m<1440?`${Math.round(m/60)}h ago`:`${Math.round(m/60/24)}d ago`); }
     }
-    return `${datePart} ${timePart}${rel ? " - " + rel : ""}`;
-  } catch { return iso; }
+    const label = [datePart, timePart].filter(Boolean).join(' ').trim();
+    return label ? `${label}${rel ? " - " + rel : ""}` : (fallback ?? iso);
+  } catch {
+    return fallback ?? iso;
+  }
 };
 
 
@@ -74,6 +79,11 @@ const deriveEpisodeHint = (episode) => {
 
 export default function EpisodeHistory({ token, onBack }) {
   // Core lists & fetch state
+  const resolvedTimezone = useResolvedTimezone();
+  const formatPublishAtForUser = useCallback(
+    (iso, fallback) => formatPublishAt(iso, { fallback, timezone: resolvedTimezone }),
+    [resolvedTimezone]
+  );
   const [episodes, setEpisodes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -851,7 +861,7 @@ export default function EpisodeHistory({ token, onBack }) {
                 )}
                 {ep.publish_at && (
                   <span className="text-[11px] text-gray-500 flex items-center gap-1" title={ep.publish_at}>
-                    <CalendarClock className="w-3 h-3"/> {ep.status === 'scheduled' ? 'Publishes' : 'Publish'}: {formatPublishAt(ep.publish_at)}
+                    <CalendarClock className="w-3 h-3"/> {ep.status === 'scheduled' ? 'Publishes' : 'Publish'}: {formatPublishAtForUser(ep.publish_at)}
                   </span>
                 )}
                 {/* Spreaker & Streaming badges intentionally removed (Option E: reduce redundant UI) */}
@@ -952,7 +962,7 @@ export default function EpisodeHistory({ token, onBack }) {
             </div>
             <div className="col-span-2 flex items-center flex-wrap gap-1">{statusChip(ep.status)}</div>
             <div className="col-span-2 text-[11px] text-gray-600">
-              {ep.publish_at ? formatPublishAt(ep.publish_at, ep.publish_at_local) : '-'}
+              {ep.publish_at ? formatPublishAtForUser(ep.publish_at, ep.publish_at_local) : '-'}
             </div>
             <div className="col-span-2 text-[11px]">{typeof ep.plays_total === 'number' ? ep.plays_total : '-'}</div>
             <div className="col-span-1 flex justify-end">
@@ -1030,7 +1040,7 @@ export default function EpisodeHistory({ token, onBack }) {
         episodes={displayEpisodes}
         onEdit={(ep)=>startEdit(ep)}
         onDelete={(ep)=>handleDeleteEpisode(ep.id)}
-        formatPublishAt={formatPublishAt}
+        formatPublishAt={formatPublishAtForUser}
       />
     </div>
   );

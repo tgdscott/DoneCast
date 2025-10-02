@@ -14,6 +14,8 @@ import {
   normalizeLandingContent,
   prepareLandingPayload,
 } from "@/lib/landingDefaults";
+import { useResolvedTimezone } from "@/hooks/useResolvedTimezone";
+import { formatInTimezone } from "@/lib/timezone";
 
 const emptyReview = () => ({ quote: "", author: "", role: "", avatar_url: "", rating: 5 });
 const emptyFaq = () => ({ question: "", answer: "" });
@@ -25,6 +27,7 @@ export default function AdminLandingEditor({ token }) {
   const [content, setContent] = useState(defaultLandingContent);
   const [initialContent, setInitialContent] = useState(defaultLandingContent);
   const [error, setError] = useState(null);
+  const resolvedTimezone = useResolvedTimezone();
 
   useEffect(() => {
     if (!token) {
@@ -69,6 +72,9 @@ export default function AdminLandingEditor({ token }) {
       return null;
     }
   }, [initialContent?.updated_at]);
+  const lastSavedDisplay = lastSaved
+    ? formatInTimezone(lastSaved, { dateStyle: 'medium', timeStyle: 'short', timeZoneName: 'short' }, resolvedTimezone)
+    : null;
 
   const updateField = (field, value) => {
     setContent((prev) => ({ ...prev, [field]: value }));
@@ -187,8 +193,8 @@ export default function AdminLandingEditor({ token }) {
                 {error}
               </p>
             )}
-            {lastSaved && (
-              <p className="text-xs text-gray-500 mt-2">Last saved {lastSaved.toLocaleString()}</p>
+            {lastSavedDisplay && (
+              <p className="text-xs text-gray-500 mt-2">Last saved {lastSavedDisplay}</p>
             )}
           </div>
           <div className="flex flex-wrap gap-2">

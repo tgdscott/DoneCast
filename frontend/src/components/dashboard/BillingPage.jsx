@@ -6,9 +6,12 @@ import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
 import { Progress } from '../ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { makeApi, isApiError } from '@/lib/apiClient';
+import { useResolvedTimezone } from '@/hooks/useResolvedTimezone';
+import { formatToPartsInTimezone } from '@/lib/timezone';
 
 export default function BillingPage({ token, onBack }) {
   const { refreshUser } = useAuth();
+  const resolvedTimezone = useResolvedTimezone();
   const [subscription, setSubscription] = useState(null);
   const [usage, setUsage] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -177,7 +180,18 @@ export default function BillingPage({ token, onBack }) {
   };
 
   const formatDate = (iso) => {
-    try { const d = new Date(iso); const mm = String(d.getMonth()+1).padStart(2,'0'); const dd = String(d.getDate()).padStart(2,'0'); const yy = d.getFullYear(); return `${mm}-${dd}-${yy}`; } catch { return iso; }
+    const parts = formatToPartsInTimezone(iso, { month: '2-digit', day: '2-digit', year: 'numeric' }, resolvedTimezone);
+    if (!parts) return iso;
+    const lookup = parts.reduce((acc, part) => {
+      if (part.type === 'month' || part.type === 'day' || part.type === 'year') {
+        acc[part.type] = part.value;
+      }
+      return acc;
+    }, {});
+    if (lookup.month && lookup.day && lookup.year) {
+      return `${lookup.month}-${lookup.day}-${lookup.year}`;
+    }
+    return iso;
   };
 
   // Pricing data (Creator & Pro only for in-app billing)

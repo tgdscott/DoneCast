@@ -37,6 +37,8 @@ import { useAuth } from "@/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import Logo from "@/components/Logo.jsx";
 import Joyride, { STATUS } from "react-joyride";
+import { useResolvedTimezone } from "@/hooks/useResolvedTimezone";
+import { formatInTimezone } from "@/lib/timezone";
 
 import TemplateEditor from "@/components/dashboard/TemplateEditor";
 import PodcastCreator from "@/components/dashboard/PodcastCreator";
@@ -87,17 +89,19 @@ function formatAssemblyStatus(status) {
   }
 }
 
-function formatShort(iso) {
+function formatShort(iso, timezone) {
   if (!iso) return '';
   try {
     const d = new Date(iso);
     const now = new Date();
     const sameDay = d.toDateString() === now.toDateString();
-    const fmt = new Intl.DateTimeFormat(undefined, sameDay
-      ? { hour: '2-digit', minute: '2-digit' }
-      : { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }
+    return formatInTimezone(
+      d,
+      sameDay
+        ? { hour: '2-digit', minute: '2-digit' }
+        : { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' },
+      timezone
     );
-    return fmt.format(d);
   } catch {
     return '';
   }
@@ -106,6 +110,7 @@ function formatShort(iso) {
 export default function PodcastPlusDashboard() {
   const { token, logout, user: authUser } = useAuth();
   const { toast } = useToast();
+  const resolvedTimezone = useResolvedTimezone(authUser?.timezone);
   const [user, setUser] = useState(null); // local alias for convenience
   const [templates, setTemplates] = useState([]);
   const [podcasts, setPodcasts] = useState([]);
@@ -497,7 +502,7 @@ export default function PodcastPlusDashboard() {
               setCreatorMode('standard');
               setCurrentView('preuploadUpload');
             }}
-            userTimezone={user?.timezone || authUser?.timezone || null}
+            userTimezone={resolvedTimezone}
           />
         );
       case 'mediaLibrary':
@@ -797,7 +802,7 @@ export default function PodcastPlusDashboard() {
                     <div key={n.id} className="p-3 text-sm border-b last:border-b-0 flex flex-col gap-1">
                       <div className="flex items-center justify-between">
                         <div className="font-medium mr-2 truncate">{n.title}</div>
-                        <div className="text-[11px] text-gray-500 whitespace-nowrap">{formatShort(n.created_at)}</div>
+                        <div className="text-[11px] text-gray-500 whitespace-nowrap">{formatShort(n.created_at, resolvedTimezone)}</div>
                       </div>
                       {n.body && <div className="text-gray-600 text-xs">{n.body}</div>}
                       {!n.read_at && <button className="text-xs text-blue-600 self-start" onClick={async ()=>{ try { const api = makeApi(token); await api.post(`/api/notifications/${n.id}/read`); setNotifications(curr=>curr.map(x=>x.id===n.id?{...x,read_at:new Date().toISOString()}:x)); } catch{} }}>Mark read</button>}

@@ -1,5 +1,7 @@
 import React, { useMemo } from 'react';
 import { Clock, CheckCircle2, Radio, Rss, Globe2, CalendarClock } from 'lucide-react';
+import { useResolvedTimezone } from '@/hooks/useResolvedTimezone';
+import { formatInTimezone } from '@/lib/timezone';
 
 /**
  * EpisodePublishTimeline
@@ -15,6 +17,7 @@ export default function EpisodePublishTimeline({
   hasArtwork,
   hasSocial,
 }) {
+  const userTimezone = useResolvedTimezone();
   const now = new Date();
   const scheduledAt = useMemo(() => {
     if (publishOption !== 'schedule' || !scheduleDate) return null;
@@ -24,7 +27,7 @@ export default function EpisodePublishTimeline({
     } catch { return null; }
   }, [publishOption, scheduleDate, scheduleTime]);
 
-  const fmt = (d) => d ? d.toLocaleString(undefined, { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }) : '';
+  const fmt = (d) => d ? formatInTimezone(d, { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }, userTimezone) : '';
   const addMinutes = (d, m) => new Date(d.getTime() + m * 60000);
 
   const effectiveStart = scheduledAt || now;
