@@ -15,6 +15,44 @@ def log():
     return []
 
 
+def test_load_content_prefers_ws_root(monkeypatch, log):
+    fname = 'cleaned_example.mp3'
+    ws_media = steps.WS_ROOT / 'media_uploads'
+    ws_media.mkdir(parents=True, exist_ok=True)
+    target = ws_media / fname
+    target.write_bytes(b'fake')
+
+    monkeypatch.setattr(steps.AudioSegment, 'from_file', lambda path: FakeAudio())
+    monkeypatch.setattr(steps.transcription, 'get_word_timestamps', lambda *_: [])
+
+    content_path, audio, words, sanitized = steps.load_content_and_init_transcripts(fname, None, 'Episode Name', log)
+
+    assert content_path == target
+    assert isinstance(audio, FakeAudio)
+    assert words == []
+    assert sanitized == 'episode-name'
+
+
+def test_load_content_scans_for_alternates(monkeypatch, log):
+    requested = 'cleaned_missing_example.mp3'
+    actual = 'missing_example.mp3'
+    ws_media = steps.WS_ROOT / 'media_uploads'
+    ws_media.mkdir(parents=True, exist_ok=True)
+    alt_target = ws_media / actual
+    alt_target.write_bytes(b'fake')
+
+    monkeypatch.setattr(steps.AudioSegment, 'from_file', lambda path: FakeAudio())
+    monkeypatch.setattr(steps.transcription, 'get_word_timestamps', lambda *_: [])
+
+    content_path, audio, words, sanitized = steps.load_content_and_init_transcripts(
+        requested, None, 'Episode Name 2', log
+    )
+
+    assert content_path == alt_target
+    assert isinstance(audio, FakeAudio)
+    assert words == []
+    assert sanitized == 'episode-name-2'
+
 def test_do_transcript_io_shape(monkeypatch, log):
     def fake_load(fname, words_json, out_name, log_):
         # No logs needed here; focus on shape

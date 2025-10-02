@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
@@ -6,11 +6,18 @@ import { formatDisplayName } from '@/lib/displayNames';
 
 import { AlertTriangle, FileAudio, Loader2, RefreshCcw, Sparkles, Trash2, Upload } from 'lucide-react';
 
-const formatDate = (iso) => {
+const formatDate = (iso, timezone = null) => {
   if (!iso) return '—';
   try {
-    const d = new Date(iso);
-    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return iso;
+
+    const baseOptions = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' };
+    if (timezone) {
+      return new Intl.DateTimeFormat(undefined, { ...baseOptions, timeZone: timezone, timeZoneName: 'short' }).format(date);
+    }
+
+    return new Intl.DateTimeFormat(undefined, baseOptions).format(date);
   } catch {
     return iso;
   }
@@ -48,9 +55,37 @@ export default function StepSelectPreprocessed({
   minutesRemaining = null,
   formatDuration = () => null,
   audioDurationSec: audioDurationSecProp = null,
+  userTimezone = null,
 }) {
   const audioDurationSec = audioDurationSecProp;
   const hasPendingIntents = Array.isArray(pendingIntentLabels) && pendingIntentLabels.length > 0;
+
+  const resolvedTimezone = useMemo(() => {
+    const validateTimezone = (tz) => {
+      if (!tz || typeof tz !== 'string') return null;
+      const trimmed = tz.trim();
+      if (!trimmed) return null;
+      try {
+        // Attempt to format with the timezone to ensure it is valid
+        new Intl.DateTimeFormat(undefined, { timeZone: trimmed }).format(new Date());
+        return trimmed;
+      } catch {
+        return null;
+      }
+    };
+
+    const candidate = validateTimezone(userTimezone);
+    if (candidate) return candidate;
+
+    try {
+      const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      return validateTimezone(detected);
+    } catch {
+      return null;
+    }
+  }, [userTimezone]);
+
+  const formatUploadedAt = useCallback((iso) => formatDate(iso, resolvedTimezone), [resolvedTimezone]);
 
   const selected = useMemo(
     () => items.find((item) => item.filename === selectedFilename) || null,
@@ -250,7 +285,7 @@ export default function StepSelectPreprocessed({
                             )}
                           </div>
                           <div className="text-xs text-slate-500">
-                            Uploaded {formatDate(item.created_at)} · Duration {formatItemDuration(item.duration_seconds)}
+                            Uploaded {formatUploadedAt(item.created_at)} · Duration {formatItemDuration(item.duration_seconds)}
                           </div>
                           {ready && (
                             <div className="flex flex-wrap gap-2 mt-2 text-xs text-slate-600">

@@ -29,7 +29,6 @@ from api.services.intent_detection import analyze_intents, get_user_commands
 from api.routers.auth import get_current_user
 from api.models.user import User
 from api.services.audio.common import sanitize_filename
-
 try:  # Optional dependency for transcript downloads from GCS
     from api.infrastructure import gcs as _gcs  # type: ignore
 except Exception:  # pragma: no cover - optional dependency missing
@@ -341,7 +340,6 @@ def _discover_transcript_json_path(
     seen: set[str] = set()
     remote_sources: list[str] = []
     user_id: Optional[str] = None
-
     hint_stem: Optional[str] = None
     if hint:
         try:
@@ -438,7 +436,6 @@ def _discover_transcript_json_path(
         return None
 
     attempted_download: set[str] = set()
-
     for stem in candidates:
         resolved = _resolve_for_stem(stem)
         if resolved:
