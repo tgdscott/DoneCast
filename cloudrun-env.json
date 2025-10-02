@@ -1,12 +1,18 @@
 {
-    "CSP_EXTRA_HOSTS":  "https://api.getpodcastplus.com,https://placehold.co",
-    "SESSION_SECRET":  "lgDnuhODeksyOMwMilHstVth76Uo2U-1pOL030scnkA",
-    "GOOGLE_CLIENT_ID":  "724497178186-kdv8rp3loagl1me3e0v3udlctigq36g9.apps.googleusercontent.com",
-    "GOOGLE_CLIENT_SECRET":  "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",
-    "OAUTH_BACKEND_BASE":  "https://podcast-web-524304361363.us-west1.run.app",
-    "SECRET_KEY":  "REDACTED_SECRET_KEY_PLACEHOLDER",
-    "DATABASE_URL":  "postgresql+psycopg://USER:PASSWORD@HOST:5432/DBNAME",
-    "MEDIA_ROOT":  "/tmp",
-    "MEDIA_BUCKET":  "ppp-media-us-west1",
-    "TRANSCRIPTS_BUCKET":  "ppp-transcripts-us-west1"
+CSP_EXTRA_HOSTS: "https://api.podcastplusplus.com,https://placehold.co"
+SESSION_SECRET: Session Secret
+GOOGLE_CLIENT_ID: Google ID
+GOOGLE_CLIENT_SECRET: Google Secret
+OAUTH_BACKEND_BASE: "https://api.podcastplusplus.com"
+SECRET_KEY: "REDACTED_SECRET_KEY_PLACEHOLDER"
+ADMIN_EMAIL: "scott@scottgerhardt.com"
+DATABASE_URL: "postgresql+psycopg://USER:PASSWORD@HOST:5432/DBNAME"
+MEDIA_ROOT: "/tmp"
+SMTP_HOST: "smtp.mailgun.org"
+SMTP_PORT: "587"
+SMTP_USER: "apikey"
+SMTP_PASS: "REDACTED_SENDGRID_API_KEY"
+MEDIA_BUCKET: "ppp-media-us-west1"
+TRANSCRIPTS_BUCKET: "ppp-transcripts-us-west1"
+
 }
