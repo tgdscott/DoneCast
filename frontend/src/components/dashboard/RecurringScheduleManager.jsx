@@ -7,6 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { makeApi } from '@/lib/apiClient';
 import { toast } from '@/hooks/use-toast';
+import { useResolvedTimezone } from '@/hooks/useResolvedTimezone';
+import { detectDeviceTimezone, ensureDate, formatInTimezone } from '@/lib/timezone';
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -31,32 +33,24 @@ const normalizeSlot = (slot) => ({
   next_scheduled_time: slot.next_scheduled_time || null,
 });
 
-const formatNext = (slot) => {
+const formatNext = (slot, displayTimezone) => {
   const iso = slot.next_scheduled || (slot.next_scheduled_local ? `${slot.next_scheduled_local}:00` : null);
   if (!iso) return '—';
-  const dt = new Date(iso);
-  if (Number.isNaN(dt.getTime())) {
+  const dt = ensureDate(iso);
+  if (!dt) {
     if (slot.next_scheduled_date && slot.next_scheduled_time) {
       return `${slot.next_scheduled_date} ${slot.next_scheduled_time}`;
     }
     return '—';
   }
-  return dt.toLocaleString(undefined, {
+  const formatted = formatInTimezone(dt, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  });
-};
-
-const detectDeviceTimezone = (fallback = 'UTC') => {
-  try {
-    const resolved = Intl?.DateTimeFormat?.().resolvedOptions?.().timeZone;
-    return resolved || fallback;
-  } catch (err) {
-    return fallback;
-  }
+  }, displayTimezone);
+  return formatted || '—';
 };
 
 export default function RecurringScheduleManager({
@@ -68,7 +62,8 @@ export default function RecurringScheduleManager({
   collapsible = false,
   defaultOpen = true,
 }) {
-  const deviceTimezone = useMemo(() => detectDeviceTimezone(userTimezone || 'UTC'), [userTimezone]);
+  const resolvedUserTimezone = useResolvedTimezone(userTimezone);
+  const deviceTimezone = useMemo(() => detectDeviceTimezone(userTimezone || resolvedUserTimezone || 'UTC'), [userTimezone, resolvedUserTimezone]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -407,8 +402,11 @@ export default function RecurringScheduleManager({
                   <div className="space-y-1">
                     <Label className="text-xs uppercase tracking-wide text-muted-foreground">Next publish</Label>
                     <div className="text-sm text-slate-700">
-                      {formatNext(slot)}
-                      <span className="ml-1 text-xs text-muted-foreground">({slot.timezone || timezone})</span>
+                      {formatNext(slot, resolvedUserTimezone)}
+                      <span className="ml-1 text-xs text-muted-foreground">
+                        ({resolvedUserTimezone}
+                        {slot.timezone && slot.timezone !== resolvedUserTimezone ? ` · Slot: ${slot.timezone}` : ''})
+                      </span>
                     </div>
                   </div>
                 </div>
