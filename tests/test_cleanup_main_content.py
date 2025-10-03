@@ -42,3 +42,41 @@ def test_cleanup_main_content_removes_file_and_record(session):
 
     assert not file_path.exists()
     assert session.get(MediaItem, media_item.id) is None
+
+
+def test_cleanup_main_content_handles_gcs_uri(session):
+    user = User(email="cleanup-gcs@example.com", hashed_password="hashed")
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+
+    podcast = Podcast(name="Cleanup Pod", user_id=user.id)
+    session.add(podcast)
+    session.commit()
+    session.refresh(podcast)
+
+    episode = Episode(user_id=user.id, podcast_id=podcast.id, title="Cleanup Episode")
+    session.add(episode)
+    session.commit()
+    session.refresh(episode)
+
+    gcs_uri = "gs://bucket/audio/uuid_cleanup-test-audio.mp3"
+    base_name = "uuid_cleanup-test-audio.mp3"
+
+    media_item = MediaItem(
+        filename=gcs_uri,
+        friendly_name="Cleanup Test",
+        user_id=user.id,
+        category=MediaCategory.main_content,
+    )
+    session.add(media_item)
+    session.commit()
+    session.refresh(media_item)
+
+    _cleanup_main_content(
+        session=session,
+        episode=episode,
+        main_content_filename=base_name,
+    )
+
+    assert session.get(MediaItem, media_item.id) is None

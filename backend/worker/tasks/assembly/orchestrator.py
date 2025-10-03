@@ -52,11 +52,45 @@ def _persist_stream_log(episode, log_data) -> None:
 
 def _cleanup_main_content(*, session, episode, main_content_filename: str) -> None:
     try:
-        main_fn = os.path.basename(str(main_content_filename))
+        raw_value = str(main_content_filename or "").strip()
+        if not raw_value:
+            return
+
+        main_fn = os.path.basename(raw_value)
+        # Build a set of plausible filename representations to match against the
+        # stored MediaItem filename. In practice uploads are stored as gs:// URIs
+        # (or local paths) while episode metadata may only persist the basename.
+        candidates: set[str] = {raw_value}
+        if main_fn:
+            candidates.add(main_fn)
+        if raw_value.startswith("gs://"):
+            try:
+                without_scheme = raw_value[len("gs://") :]
+                if without_scheme:
+                    candidates.add(without_scheme)
+            except Exception:
+                pass
+
         query = select(MediaItem).where(
-            MediaItem.filename == main_fn, MediaItem.user_id == episode.user_id
+            MediaItem.user_id == episode.user_id,
+            MediaItem.category == MediaCategory.main_content,
         )
-        media_item = session.exec(query).first()
+        media_item = None
+        for item in session.exec(query).all():
+            stored = str(getattr(item, "filename", "") or "").strip()
+            if not stored:
+                continue
+            if stored in candidates:
+                media_item = item
+                break
+            # Fallback: match when either value endswith the other to support
+            # cases like gs://bucket/path/<name> vs <name>.
+            for candidate in candidates:
+                if stored.endswith(candidate) or candidate.endswith(stored):
+                    media_item = item
+                    break
+            if media_item:
+                break
         if not media_item or media_item.category != MediaCategory.main_content:
             return
 
