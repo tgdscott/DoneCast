@@ -3,7 +3,12 @@ from sqlmodel import Session, select
 from sqlalchemy import text
 from api.core.database import get_session
 from api.models.podcast import Episode
-from api.models.settings import load_landing_content, LandingPageContent
+from api.models.settings import (
+    AdminSettings,
+    load_admin_settings,
+    load_landing_content,
+    LandingPageContent,
+)
 import os
 from pathlib import Path
 from api.core.paths import FINAL_DIR, MEDIA_DIR
@@ -60,14 +65,43 @@ def public_episodes(limit: int = Query(10, ge=1, le=50), session: Session = Depe
 # Lightweight config surface for SPA boot-time fetch.
 from api.core.config import settings
 
+
+def _load_admin_settings_safe() -> AdminSettings:
+    try:
+        from api.core.database import engine
+        from sqlmodel import Session as SQLSession
+
+        with SQLSession(engine) as session:
+            return load_admin_settings(session)
+    except Exception:
+        return AdminSettings()
+
+
+def _clamp_upload_limit(raw_value: int | None) -> int:
+    try:
+        base_value = raw_value if raw_value else 500
+        value = int(base_value)
+    except (TypeError, ValueError):
+        return 500
+    if value < 10:
+        return 10
+    if value > 2048:
+        return 2048
+    return value
+
+
 @router.get("/config")
 def public_config():
+    admin_settings = _load_admin_settings_safe()
     return {
         "terms_version": getattr(settings, "TERMS_VERSION", ""),
     # Rebrand: expose new API base (frontend should prefer dynamic origin in prod)
         "api_base": "https://api.podcastplusplus.com",
         # Include dynamic admin-exposed limits for client UX (non-sensitive)
-        "max_upload_mb": _get_max_upload_mb(),
+        "max_upload_mb": _get_max_upload_mb(admin_settings),
+        "browser_audio_conversion_enabled": bool(
+            admin_settings.browser_audio_conversion_enabled
+        ),
     }
 
 
@@ -76,22 +110,9 @@ def public_landing_content(session: Session = Depends(get_session)) -> LandingPa
     return load_landing_content(session)
 
 # Pull current admin setting from DB if available; default to 500 on error
-def _get_max_upload_mb() -> int:
+def _get_max_upload_mb(admin_settings: AdminSettings | None = None) -> int:
     try:
-        from api.core.database import get_session
-        from fastapi import Depends
-        # We cannot use Depends here; manually open a session
-        from sqlmodel import Session
-        from api.core.database import engine
-        with Session(engine) as s:
-            from api.models.settings import load_admin_settings
-            admin = load_admin_settings(s)
-            val = int(getattr(admin, 'max_upload_mb', 500) or 500)
-            # enforce a sane floor/ceiling
-            if val < 10:
-                return 10
-            if val > 2048:
-                return 2048
-            return val
+        settings_obj = admin_settings or _load_admin_settings_safe()
+        return _clamp_upload_limit(getattr(settings_obj, "max_upload_mb", 500))
     except Exception:
         return 500
