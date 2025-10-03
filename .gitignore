@@ -95,10 +95,11 @@ gcloud-*
 # Build outputs, coverage, caches
 .cache/
 dist/
-node_modules/
 
 # Ignore environment for editors
 *.vsix
 
+# Tooling binaries
+cloud-sql-proxy.exe
+
 # End of aggressive .gitignore
-node_modules

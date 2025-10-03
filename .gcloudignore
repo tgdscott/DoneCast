@@ -28,6 +28,7 @@ transcripts/
 backend/cleaned_audio/
 backend/media_uploads/
 backend/final_episodes/
+cloud-sql-proxy.exe
 logs.txt
 recent_logs*.txt
 recent_logs*.json
