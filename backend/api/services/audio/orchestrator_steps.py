@@ -10,11 +10,13 @@ Note: orchestrator.py is intentionally not modified yet; these helpers prepare
 for a later wiring step and can be used by other callers for granular ops.
 """
 
+import audioop
+import json
+import math
+import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, cast, Set
-import os
-import json
-import re
 
 from pydub import AudioSegment
 
@@ -65,6 +67,77 @@ AI_SEGMENTS_DIR = _AI_SEGMENTS_DIR
 CLEANED_DIR = _CLEANED_DIR
 TRANSCRIPTS_DIR = _TRANSCRIPTS_DIR
 WS_ROOT = _WS_ROOT
+
+
+class _StreamingMixBuffer:
+    """Accumulate overlays directly into a mutable PCM buffer.
+
+    This avoids materializing a giant ``AudioSegment`` for the entire duration at each
+    overlay step, which previously doubled memory pressure during template mixing.
+    """
+
+    def __init__(
+        self,
+        frame_rate: int,
+        channels: int,
+        sample_width: int,
+        *,
+        initial_duration_ms: int = 0,
+    ) -> None:
+        self.frame_rate = max(1, int(frame_rate))
+        self.channels = max(1, int(channels))
+        self.sample_width = max(1, int(sample_width))
+        initial_frames = self._ms_to_frames(initial_duration_ms)
+        self._buffer = bytearray(initial_frames * self.channels * self.sample_width)
+        self._max_frame = initial_frames
+
+    def _ms_to_frames(self, ms: int) -> int:
+        if ms <= 0:
+            return 0
+        return int(math.ceil(ms * self.frame_rate / 1000.0))
+
+    def _ms_to_start_frame(self, ms: int) -> int:
+        if ms <= 0:
+            return 0
+        return int(math.floor(ms * self.frame_rate / 1000.0))
+
+    def _ensure_capacity(self, end_frame: int) -> None:
+        if end_frame <= self._max_frame:
+            return
+        needed_bytes = end_frame * self.channels * self.sample_width
+        if needed_bytes > len(self._buffer):
+            self._buffer.extend(b"\x00" * (needed_bytes - len(self._buffer)))
+        self._max_frame = end_frame
+
+    def overlay(self, segment: AudioSegment, position_ms: int) -> None:
+        seg = (
+            segment.set_frame_rate(self.frame_rate)
+            .set_channels(self.channels)
+            .set_sample_width(self.sample_width)
+        )
+        raw = seg.raw_data
+        if not raw:
+            return
+        start_frame = max(0, self._ms_to_start_frame(position_ms))
+        start_byte = start_frame * self.channels * self.sample_width
+        frames = len(raw) // (self.channels * self.sample_width)
+        end_frame = start_frame + frames
+        self._ensure_capacity(end_frame)
+        end_byte = start_byte + len(raw)
+        existing = bytes(self._buffer[start_byte:end_byte])
+        if len(existing) < len(raw):
+            existing = existing + b"\x00" * (len(raw) - len(existing))
+        mixed = audioop.add(existing, raw, self.sample_width)
+        self._buffer[start_byte:end_byte] = mixed
+
+    def to_segment(self) -> AudioSegment:
+        data = bytes(self._buffer[: self._max_frame * self.channels * self.sample_width])
+        return AudioSegment(
+            data=data,
+            sample_width=self.sample_width,
+            frame_rate=self.frame_rate,
+            channels=self.channels,
+        )
 
 
 # --- Shared small helpers (kept local to match orchestrator behavior) ---
@@ -1015,10 +1088,15 @@ def build_template_and_final_mix_step(
         pass
 
     total_duration_ms = pos_ms if pos_ms > 0 else max(1, len(stitched_content))
-    final_mix = AudioSegment.silent(duration=total_duration_ms)
+    mix_buffer = _StreamingMixBuffer(
+        cleaned_audio.frame_rate,
+        cleaned_audio.channels,
+        cleaned_audio.sample_width,
+        initial_duration_ms=total_duration_ms,
+    )
     for _seg, _aud, _st, _en in placements:
         if len(_aud) > 0:
-            final_mix = final_mix.overlay(_aud, position=_st)
+            mix_buffer.overlay(_aud, _st)
 
     try:
         def _loop_to_duration(seg, dur_ms: int):
@@ -1031,7 +1109,16 @@ def build_template_and_final_mix_step(
                 out = out + seg
             return out[:dur_ms]
 
-        def _apply(bg_seg: AudioSegment, start_ms: int, end_ms: int, *, vol_db: float, fade_in_ms: int, fade_out_ms: int, label: str) -> None:
+        def _apply(
+            bg_seg: AudioSegment,
+            start_ms: int,
+            end_ms: int,
+            *,
+            vol_db: float,
+            fade_in_ms: int,
+            fade_out_ms: int,
+            label: str,
+        ) -> None:
             dur = max(0, end_ms - start_ms)
             if dur <= 0:
                 return
@@ -1061,8 +1148,7 @@ def build_template_and_final_mix_step(
                     m = m_seg3.fade_out(fo)
             except Exception:
                 pass
-            nonlocal final_mix
-            final_mix = final_mix.overlay(cast(AudioSegment, m), position=start_ms)
+            mix_buffer.overlay(cast(AudioSegment, m), start_ms)
             try:
                 log.append(f"[MUSIC_RULE_APPLY] label={label} pos_ms={start_ms} dur_ms={dur} vol_db={vol_db} fade_in_ms={fade_in_ms} fade_out_ms={fade_out_ms}")
             except Exception:
@@ -1132,6 +1218,7 @@ def build_template_and_final_mix_step(
     except Exception as e:
         log.append(f"[MUSIC_RULES_WARN] {type(e).__name__}: {e}")
 
+    final_mix = mix_buffer.to_segment()
     try:
         log.append(f"[FINAL_MIX] duration_ms={len(final_mix)}")
     except Exception:
