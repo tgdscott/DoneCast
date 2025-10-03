@@ -252,8 +252,6 @@ def publish_episode_to_spreaker_task(
                 except Exception:
                     episode.status = "processed"  # type: ignore[assignment]
             try:
-                from datetime import datetime, timezone
-
                 dt = datetime.strptime(original_auto, "%Y-%m-%d %H:%M:%S").replace(
                     tzinfo=timezone.utc
                 )
