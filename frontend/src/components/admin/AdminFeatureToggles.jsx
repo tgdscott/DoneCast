@@ -11,27 +11,36 @@ import { makeApi } from "@/lib/apiClient";
  * Renders the shared "Test Mode (Admin)" toggle and saves to /api/admin/settings.
  * Props:
  * - token: string (required)
- * - initial: { test_mode?: boolean } | null (optional)
+ * - initial: Partial<typeof DEFAULT_SETTINGS> | null (optional)
  * - onSaved?: (settings) => void (optional)
  */
+const DEFAULT_SETTINGS = {
+  test_mode: false,
+  default_user_active: true,
+  max_upload_mb: 500,
+  browser_audio_conversion_enabled: false,
+};
+
 export default function AdminFeatureToggles({ token, initial = null, onSaved }) {
   const { toast } = useToast();
-  const [settings, setSettings] = React.useState(initial);
+  const [settings, setSettings] = React.useState(
+    initial ? { ...DEFAULT_SETTINGS, ...initial } : null
+  );
   const [saving, setSaving] = React.useState(false);
   const [err, setErr] = React.useState(null);
 
   // Load if no initial provided
   React.useEffect(() => {
-    if (initial != null) { setSettings(initial); return; }
+    if (initial != null) { setSettings({ ...DEFAULT_SETTINGS, ...initial }); return; }
     if (!token) return;
     let canceled = false;
     (async () => {
       try {
         const api = makeApi(token);
-  const data = await api.get('/api/admin/settings');
-  if (!canceled) setSettings(data || { test_mode: false, default_user_active: true });
+        const data = await api.get('/api/admin/settings');
+        if (!canceled) setSettings(data ? { ...DEFAULT_SETTINGS, ...data } : { ...DEFAULT_SETTINGS });
       } catch {
-  if (!canceled) setSettings({ test_mode: false, default_user_active: true });
+        if (!canceled) setSettings({ ...DEFAULT_SETTINGS });
       }
     })();
     return () => { canceled = true; };
@@ -44,8 +53,9 @@ export default function AdminFeatureToggles({ token, initial = null, onSaved }) 
     try {
       const api = makeApi(token);
       const data = await api.put('/api/admin/settings', next);
-      setSettings(data);
-      if (onSaved) onSaved(data);
+      const merged = data ? { ...DEFAULT_SETTINGS, ...data } : { ...DEFAULT_SETTINGS, ...next };
+      setSettings(merged);
+      if (onSaved) onSaved(merged);
     } catch (e) {
       setErr(e?.message || 'Failed');
       try { toast({ title: 'Error', description: 'Failed to update admin settings', variant: 'destructive' }); } catch {}
@@ -70,6 +80,13 @@ export default function AdminFeatureToggles({ token, initial = null, onSaved }) 
     save(next, prev);
   };
 
+  const onBrowserConversionToggle = (checked) => {
+    const prev = { ...(settings || {}) };
+    const next = { ...prev, browser_audio_conversion_enabled: !!checked };
+    setSettings(next);
+    save(next, prev);
+  };
+
   const onMaxUploadChange = (mbStr) => {
     const prev = { ...(settings || {}) };
     let n = parseInt(mbStr, 10);
@@ -88,7 +105,7 @@ export default function AdminFeatureToggles({ token, initial = null, onSaved }) 
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <Label className="text-base font-medium text-gray-700">Test Mode (Admin)</Label>
+          <Label htmlFor="admin-test-mode" className="text-base font-medium text-gray-700">Test Mode (Admin)</Label>
           <p className="text-sm text-gray-500 mt-1">
             When enabled, new episodes default to draft and season/episode numbers are overridden to day-of-month and HHMM.
           </p>
@@ -97,6 +114,7 @@ export default function AdminFeatureToggles({ token, initial = null, onSaved }) 
           {saving && <span className="text-xs text-gray-400">Saving…</span>}
           {err && <span className="text-xs text-red-500" title={err}>Err</span>}
           <Switch
+            id="admin-test-mode"
             checked={!!(settings && settings.test_mode)}
             disabled={saving}
             onCheckedChange={onToggle}
@@ -105,7 +123,7 @@ export default function AdminFeatureToggles({ token, initial = null, onSaved }) 
       </div>
       <div className="flex items-center justify-between">
         <div>
-          <Label className="text-base font-medium text-gray-700">New Users Are Active By Default</Label>
+          <Label htmlFor="admin-default-user-active" className="text-base font-medium text-gray-700">New Users Are Active By Default</Label>
           <p className="text-sm text-gray-500 mt-1">
             When disabled, newly created accounts start as inactive and will see the Closed-Alpha gate until approved.
           </p>
@@ -114,9 +132,28 @@ export default function AdminFeatureToggles({ token, initial = null, onSaved }) 
           {saving && <span className="text-xs text-gray-400">Saving…</span>}
           {err && <span className="text-xs text-red-500" title={err}>Err</span>}
           <Switch
+            id="admin-default-user-active"
             checked={!!(settings && settings.default_user_active)}
             disabled={saving}
             onCheckedChange={onDefaultActiveToggle}
+          />
+        </div>
+      </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <Label htmlFor="admin-browser-audio-conversion" className="text-base font-medium text-gray-700">Browser Audio Conversion</Label>
+          <p className="text-sm text-gray-500 mt-1">
+            When enabled, uploads converted in the browser are accepted without requiring server-side transcoding.
+          </p>
+        </div>
+        <div className="flex items-center space-x-2">
+          {saving && <span className="text-xs text-gray-400">Saving…</span>}
+          {err && <span className="text-xs text-red-500" title={err}>Err</span>}
+          <Switch
+            id="admin-browser-audio-conversion"
+            checked={!!(settings && settings.browser_audio_conversion_enabled)}
+            disabled={saving}
+            onCheckedChange={onBrowserConversionToggle}
           />
         </div>
       </div>

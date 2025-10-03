@@ -10,23 +10,48 @@ import AdminFeatureToggles from "@/components/admin/AdminFeatureToggles.jsx";
 export default function AdminSettings() {
   const { user, token } = useAuth();
   const { toast } = useToast();
-  const [loading, setLoading] = useState(false);
-  const [testMode, setTestMode] = useState(false);
+  const [settings, setSettings] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
+    let canceled = false;
     (async () => {
-        try {
+      try {
+        if (!token) {
+          if (!canceled) {
+            setIsAdmin(false);
+            setSettings(null);
+          }
+          return;
+        }
         // Only attempt admin fetch if user is known admin; otherwise skip noisy 403s
         if (!(user && (user.is_admin || user.role === 'admin'))) {
-          setIsAdmin(false);
+          if (!canceled) {
+            setIsAdmin(false);
+            setSettings(null);
+          }
           return;
         }
         const data = await makeApi(token).get('/api/admin/settings');
-        if (data) { setIsAdmin(true); setTestMode(!!data.test_mode); } else { setIsAdmin(false); }
-      } catch {}
+        if (!canceled) {
+          if (data) {
+            setIsAdmin(true);
+            setSettings(data);
+          } else {
+            setIsAdmin(false);
+            setSettings(null);
+          }
+        }
+      } catch (e) {
+        if (!canceled) {
+          setIsAdmin(false);
+          setSettings(null);
+          try { toast({ title: 'Error', description: 'Unable to load admin settings', variant: 'destructive' }); } catch {}
+        }
+      }
     })();
-  }, [token, user]);
+    return () => { canceled = true; };
+  }, [token, user, toast]);
 
   if (!isAdmin) return null;
 
@@ -36,7 +61,11 @@ export default function AdminSettings() {
         <CardTitle>Admin Settings</CardTitle>
       </CardHeader>
       <CardContent>
-        <AdminFeatureToggles token={token} initial={{ test_mode: testMode }} onSaved={(s)=> setTestMode(!!s?.test_mode)} />
+        <AdminFeatureToggles
+          token={token}
+          initial={settings}
+          onSaved={setSettings}
+        />
       </CardContent>
     </Card>
   );
