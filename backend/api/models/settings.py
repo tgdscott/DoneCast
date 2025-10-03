@@ -32,6 +32,8 @@ class AdminSettings(BaseModel):
     - default_user_active: whether newly created users start active (True) or inactive (False)
     - maintenance_mode: when True, non-admin API requests are rejected with HTTP 503
     - maintenance_message: optional string surfaced to clients when maintenance is active
+    - browser_audio_conversion_enabled: feature flag exposed to clients for toggling
+      browser-side audio conversion support
     """
 
     test_mode: bool = False
@@ -40,6 +42,7 @@ class AdminSettings(BaseModel):
     max_upload_mb: int = 500
     maintenance_mode: bool = False
     maintenance_message: Optional[str] = None
+    browser_audio_conversion_enabled: bool = True
 
 
 def load_admin_settings(session: Session) -> AdminSettings:
