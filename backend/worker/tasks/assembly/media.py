@@ -497,11 +497,65 @@ def resolve_media_context(
             meta = json.loads(getattr(episode, "meta_json", "{}") or "{}") if getattr(episode, "meta_json", None) else {}
             gcs_json = None
             transcripts_meta = meta.get("transcripts") if isinstance(meta, dict) else None
+            bucket_name_hint = None
+            bucket_stem_hint = None
+            candidate_stems: list[str] = []
+
+            def _add_stem(value: Optional[str]) -> None:
+                try:
+                    normalized = str(value or "").strip()
+                except Exception:
+                    normalized = ""
+                if not normalized:
+                    return
+                if normalized not in candidate_stems:
+                    candidate_stems.append(normalized)
+
+            def _sanitize(value: Optional[str]) -> Optional[str]:
+                if not value:
+                    return None
+                try:
+                    sanitized = sanitize_filename(str(value))
+                except Exception:
+                    return None
+                return sanitized or None
+
             if isinstance(transcripts_meta, dict):
                 gcs_json = transcripts_meta.get("gcs_json") or transcripts_meta.get("gcs_url")
+                bucket_name_hint = (
+                    transcripts_meta.get("gcs_bucket")
+                    or transcripts_meta.get("bucket")
+                    or transcripts_meta.get("bucket_name")
+                )
+                bucket_stem_hint = transcripts_meta.get("bucket_stem")
+                _add_stem(bucket_stem_hint)
+                sanitized_bucket_stem = _sanitize(bucket_stem_hint)
+                if sanitized_bucket_stem:
+                    _add_stem(sanitized_bucket_stem)
+                stem_hint = transcripts_meta.get("stem")
+                sanitized_stem_hint = _sanitize(stem_hint)
+                if sanitized_stem_hint:
+                    _add_stem(sanitized_stem_hint)
+                _add_stem(stem_hint)
             if not gcs_json:
                 # Some older paths may store at top level
                 gcs_json = meta.get("gcs_json") or meta.get("transcript_gcs_json")
+
+            key_from_gcs = None
+            bucket_from_gcs = None
+            prefix_from_gcs: Optional[str] = None
+            base_name_from_key: Optional[str] = None
+            suffix_order: list[str] = []
+            default_suffixes = [
+                "",
+                ".words",
+                ".original",
+                ".original.words",
+                ".final",
+                ".final.words",
+                ".nopunct",
+            ]
+
             if gcs_json and isinstance(gcs_json, str):
                 normalized = gcs_json.strip()
                 try:
@@ -516,30 +570,132 @@ def resolve_media_context(
 
                 if without_scheme:
                     try:
-                        bucket_name, key = without_scheme.split("/", 1)
-                        try:
-                            local_stem = base_stems[-1] if base_stems else Path(key).stem
-                        except Exception:
-                            local_stem = Path(key).stem
-                        local_path = (PROJECT_ROOT / "transcripts") / f"{sanitize_filename(local_stem)}.json"
-                        local_path.parent.mkdir(parents=True, exist_ok=True)
-                        from infrastructure import gcs as gcs_utils  # type: ignore
-
-                        data = gcs_utils.download_gcs_bytes(bucket_name, key)
-                        if data:
-                            local_path.write_bytes(data)
-                            if local_path.exists() and local_path.stat().st_size > 0:
-                                words_json_path = local_path
-                                logging.info(
-                                    "[assemble] downloaded transcript JSON from GCS to %s",
-                                    str(local_path),
-                                )
+                        bucket_from_gcs, key_from_gcs = without_scheme.split("/", 1)
                     except Exception:
-                        logging.warning(
-                            "[assemble] Failed to download transcript JSON from %s",
-                            gcs_json,
-                            exc_info=True,
-                        )
+                        bucket_from_gcs, key_from_gcs = None, None
+
+            if key_from_gcs:
+                try:
+                    key_path = Path(key_from_gcs)
+                    parent = str(key_path.parent)
+                    prefix_from_gcs = parent if parent and parent != "." else None
+                    key_name = key_path.name
+                    detected_suffix = None
+                    for suffix in sorted(default_suffixes, key=len, reverse=True):
+                        token = f"{suffix}.json" if suffix else ".json"
+                        if key_name.endswith(token):
+                            detected_suffix = suffix
+                            base_name_from_key = key_name[: -len(token)]
+                            break
+                    if base_name_from_key is None:
+                        base_name_from_key = key_path.stem
+                    if detected_suffix is not None:
+                        suffix_order.append(detected_suffix)
+                    sanitized_base = _sanitize(base_name_from_key)
+                    if sanitized_base:
+                        _add_stem(sanitized_base)
+                    _add_stem(base_name_from_key)
+                except Exception:
+                    base_name_from_key = None
+
+            for stem in base_stems:
+                sanitized = _sanitize(stem)
+                if sanitized:
+                    _add_stem(sanitized)
+                _add_stem(stem)
+
+            for suffix in default_suffixes:
+                if suffix not in suffix_order:
+                    suffix_order.append(suffix)
+
+            bucket_candidates = [bucket_name_hint, bucket_from_gcs]
+            try:
+                env_bucket = (os.getenv("TRANSCRIPTS_BUCKET") or os.getenv("MEDIA_BUCKET") or "").strip()
+            except Exception:
+                env_bucket = ""
+            bucket_candidates.append(env_bucket or None)
+            bucket_name = None
+            for candidate in bucket_candidates:
+                if candidate:
+                    try:
+                        normalized_bucket = str(candidate).strip()
+                    except Exception:
+                        normalized_bucket = ""
+                    if normalized_bucket:
+                        bucket_name = normalized_bucket
+                        break
+
+            if not prefix_from_gcs:
+                prefix_from_gcs = "transcripts"
+
+            candidate_keys: list[tuple[str, str]] = []
+            seen_keys: set[str] = set()
+
+            def _compose_key(stem: str, suffix: str) -> str:
+                relative = f"{stem}{suffix}.json"
+                if prefix_from_gcs:
+                    return f"{prefix_from_gcs.rstrip('/')}/{relative}"
+                return relative
+
+            for stem in candidate_stems:
+                for suffix in suffix_order:
+                    candidate_key = _compose_key(stem, suffix)
+                    if candidate_key in seen_keys:
+                        continue
+                    candidate_keys.append((candidate_key, f"{stem}{suffix}" if suffix else stem))
+                    seen_keys.add(candidate_key)
+
+            if key_from_gcs and key_from_gcs not in seen_keys:
+                candidate_keys.append((key_from_gcs, Path(key_from_gcs).stem))
+                seen_keys.add(key_from_gcs)
+
+            if bucket_name and candidate_keys:
+                try:
+                    from infrastructure import gcs as gcs_utils  # type: ignore
+
+                    attempted_keys: list[str] = []
+                    for candidate_key, stem_with_suffix in candidate_keys:
+                        attempted_keys.append(candidate_key)
+                        try:
+                            data = gcs_utils.download_gcs_bytes(bucket_name, candidate_key)
+                        except Exception:
+                            continue
+                        if not data:
+                            continue
+                        safe_local_name = _sanitize(stem_with_suffix) or _sanitize(Path(candidate_key).stem) or "transcript"
+                        local_path = (PROJECT_ROOT / "transcripts") / f"{safe_local_name}.json"
+                        try:
+                            local_path.parent.mkdir(parents=True, exist_ok=True)
+                            local_path.write_bytes(data)
+                        except Exception:
+                            continue
+                        if local_path.exists() and local_path.stat().st_size > 0:
+                            words_json_path = local_path
+                            logging.info(
+                                "[assemble] downloaded transcript JSON from bucket=%s key=%s",
+                                bucket_name,
+                                candidate_key,
+                            )
+                            break
+                    else:
+                        if gcs_json:
+                            logging.warning(
+                                "[assemble] Failed to download transcript JSON from %s (tried keys=%s)",
+                                gcs_json,
+                                attempted_keys,
+                            )
+                        elif bucket_stem_hint:
+                            logging.warning(
+                                "[assemble] Unable to locate transcript JSON in bucket=%s for stems=%s",
+                                bucket_name,
+                                candidate_stems,
+                            )
+                except Exception:
+                    logging.warning(
+                        "[assemble] Failed to download transcript JSON for episode=%s",
+                        getattr(episode, "id", episode_id),
+                        exc_info=True,
+                    )
         except Exception:
             pass
 
