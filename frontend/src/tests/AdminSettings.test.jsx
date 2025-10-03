@@ -11,7 +11,16 @@ const token = 'test-token';
 function renderToggles(props = {}) {
   return render(
     <>
-      <AdminFeatureToggles token={token} initial={{ test_mode: false }} {...props} />
+      <AdminFeatureToggles
+        token={token}
+        initial={{
+          test_mode: false,
+          default_user_active: true,
+          browser_audio_conversion_enabled: false,
+          max_upload_mb: 500,
+        }}
+        {...props}
+      />
       <Toaster />
     </>
   );
@@ -21,18 +30,23 @@ describe('AdminSettings toggles', () => {
   beforeEach(() => {
     // Default GET returns test_mode=false
     server.use(
-      http.get('/api/admin/settings', () => HttpResponse.json({ test_mode: false }))
+      http.get('/api/admin/settings', () => HttpResponse.json({
+        test_mode: false,
+        default_user_active: true,
+        browser_audio_conversion_enabled: false,
+        max_upload_mb: 500,
+      }))
     );
   });
 
   it('renders each toggle with a visible label', async () => {
     renderToggles();
-    // Label text from component
-    const label = await screen.findByText(/Test Mode \(Admin\)/i);
-    expect(label).toBeVisible();
-    // Ensure the switch is in the document and accessible via role
-    const switchEl = screen.getByRole('switch');
-    expect(switchEl).toBeInTheDocument();
+    const testModeSwitch = await screen.findByLabelText(/Test Mode \(Admin\)/i);
+    expect(testModeSwitch).toBeInTheDocument();
+    const defaultActiveSwitch = screen.getByLabelText(/New Users Are Active/i);
+    expect(defaultActiveSwitch).toBeInTheDocument();
+    const browserConversionSwitch = screen.getByLabelText(/Browser Audio Conversion/i);
+    expect(browserConversionSwitch).toBeInTheDocument();
   });
 
   it('toggling calls /api/admin/settings with correct payload', async () => {
@@ -46,12 +60,17 @@ describe('AdminSettings toggles', () => {
     );
     renderToggles();
 
-    const sw = await screen.findByRole('switch');
+    const sw = await screen.findByLabelText(/Test Mode \(Admin\)/i);
     // Start unchecked (false), click to enable
-  fireEvent.click(sw);
+    fireEvent.click(sw);
 
     await waitFor(() => {
-      expect(lastBody).toEqual({ test_mode: true });
+      expect(lastBody).toEqual({
+        test_mode: true,
+        default_user_active: true,
+        browser_audio_conversion_enabled: false,
+        max_upload_mb: 500,
+      });
     });
   });
 
@@ -63,12 +82,12 @@ describe('AdminSettings toggles', () => {
 
     renderToggles({ initial: { test_mode: true } });
 
-    const sw = await screen.findByRole('switch');
+    const sw = await screen.findByLabelText(/Test Mode \(Admin\)/i);
     // Ensure initially checked
     expect(sw).toHaveAttribute('data-state', 'checked');
 
     // Click to attempt to turn off -> server 500 -> component should show toast and revert
-  fireEvent.click(sw);
+    fireEvent.click(sw);
 
     // Toast title from component on error
     await screen.findByText(/Failed to update admin settings/i);
