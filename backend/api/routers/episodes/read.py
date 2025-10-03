@@ -348,7 +348,19 @@ def list_episodes(
 
                 # Prefer local cover_path first so newly uploaded covers display immediately;
                 # remote_cover_url will override later once publish sync updates it.
-                preferred_cover = e.cover_path or getattr(e, 'remote_cover_url', None)
+                remote_cover = getattr(e, 'remote_cover_url', None)
+                preferred_cover = e.cover_path or remote_cover
+                cover_url = None
+                if cover_exists and e.cover_path:
+                        cover_url = _cover_url_for(e.cover_path)
+                elif remote_cover:
+                        cover_url = _cover_url_for(remote_cover)
+                if not cover_exists and e.cover_path and not str(e.cover_path).lower().startswith(('http://', 'https://')):
+                        logger.warning(
+                                "[episodes.list] Missing mirrored cover for episode %s at %s",
+                                getattr(e, 'id', None),
+                                e.cover_path,
+                        )
                 stream_url = playback.get("stream_url")
                 final_audio_url = playback.get("final_audio_url")
                 playback_url = playback.get("playback_url")
@@ -385,7 +397,7 @@ def list_episodes(
                         "processed_at": e.processed_at.isoformat() if getattr(e, "processed_at", None) else None,
                         "duration_ms": getattr(e, 'duration_ms', None),
                         "final_audio_url": final_audio_url,
-                        "cover_url": _cover_url_for(preferred_cover),
+                        "cover_url": cover_url,
                         "description": getattr(e, "show_notes", None) or "",
                         "tags": getattr(e, 'tags', lambda: [])(),
                         "is_explicit": bool(getattr(e, 'is_explicit', False)),
@@ -500,17 +512,29 @@ def episode_diagnostics(
                         cover_path,
                         str((MEDIA_DIR / base).resolve()),
                 ]
+        remote_cover = getattr(ep, 'remote_cover_url', None)
         cover_exists = any(os.path.isfile(c) for c in cover_candidates)
+        cover_url = None
+        if cover_exists and cover_path:
+                cover_url = _cover_url_for(cover_path)
+        elif remote_cover:
+                cover_url = _cover_url_for(remote_cover)
+        if not cover_exists and cover_path and not str(cover_path).lower().startswith(('http://', 'https://')):
+                logger.warning(
+                        "[episodes.diagnostics] Missing mirrored cover for episode %s at %s",
+                        getattr(ep, 'id', None),
+                        cover_path,
+                )
         return {
                 "id": str(ep.id),
                 "final_audio_path": final_path,
                 "final_audio_url": _final_url_for(final_path),
                 "final_audio_exists": final_exists,
                 "cover_path": cover_path,
-                "cover_url": _cover_url_for(cover_path),
+                "cover_url": cover_url,
                 "cover_exists": cover_exists,
                 "cover_candidates": cover_candidates,
-        "cwd": str(APP_ROOT.parent),
+                "cwd": str(APP_ROOT.parent),
         }
 
 
