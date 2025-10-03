@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 import { Input } from '../ui/input';
@@ -7,6 +7,7 @@ import { AlertCircle, AlertTriangle, ArrowLeft, CheckCircle2, Loader2, Upload } 
 import { makeApi, buildApiUrl } from '@/lib/apiClient';
 import { useToast } from '@/hooks/use-toast';
 import { convertAudioFileToMp3IfBeneficial } from '@/lib/audioConversion';
+import usePublicConfig from '@/hooks/usePublicConfig';
 
 const formatFileSize = (bytes) => {
   if (!Number.isFinite(bytes)) return '';
@@ -29,6 +30,7 @@ export default function PreUploadManager({
   onUploaded = () => {},
 }) {
   const { toast } = useToast();
+  const { config: publicConfig, error: publicConfigError } = usePublicConfig();
   const [file, setFile] = useState(null);
   const [friendlyName, setFriendlyName] = useState('');
   const [notify, setNotify] = useState(true);
@@ -41,6 +43,28 @@ export default function PreUploadManager({
   const [converting, setConverting] = useState(false);
   const [conversionProgress, setConversionProgress] = useState(null);
   const [submitAfterConvert, setSubmitAfterConvert] = useState(false);
+  const [conversionEnabled, setConversionEnabled] = useState(true);
+
+  const CONVERSION_DISABLED_NOTICE =
+    'Browser-based audio conversion is disabled. The original file will be uploaded as-is.';
+
+  useEffect(() => {
+    if (publicConfig && typeof publicConfig.browser_audio_conversion_enabled === 'boolean') {
+      setConversionEnabled(!!publicConfig.browser_audio_conversion_enabled);
+    } else if (publicConfigError) {
+      setConversionEnabled(true);
+    }
+  }, [publicConfig, publicConfigError]);
+
+  useEffect(() => {
+    if (!conversionEnabled && converting) {
+      setConverting(false);
+      setConversionProgress(null);
+    }
+    if (conversionEnabled && conversionNotice === CONVERSION_DISABLED_NOTICE) {
+      setConversionNotice('');
+    }
+  }, [conversionEnabled, converting, conversionNotice]);
 
   const handleFileChange = async (event) => {
     const selected = event.target.files?.[0];
@@ -49,13 +73,27 @@ export default function PreUploadManager({
       event.target.value = '';
     }
     if (!selected) return;
-    setConverting(true);
     setFriendlyName('');
     setSuccessMessage('');
     setError('');
     setConversionNotice('');
-    setConversionProgress({ phase: 'starting', progress: 0 });
+    setConversionProgress(null);
     let preparedFile = null;
+    if (!conversionEnabled) {
+      setFile(selected);
+      setConversionNotice(CONVERSION_DISABLED_NOTICE);
+      if (submitAfterConvert && selected && friendlyName.trim()) {
+        setSubmitAfterConvert(false);
+        try {
+          await doUpload(selected);
+        } catch (uploadError) {
+          console.error('Failed to upload after selecting file with conversion disabled', uploadError);
+        }
+      }
+      return;
+    }
+    setConverting(true);
+    setConversionProgress({ phase: 'starting', progress: 0 });
     try {
       const result = await convertAudioFileToMp3IfBeneficial(selected, {
         onProgress: (info = {}) => {
