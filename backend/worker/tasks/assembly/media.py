@@ -517,24 +517,29 @@ def resolve_media_context(
                 if without_scheme:
                     try:
                         bucket_name, key = without_scheme.split("/", 1)
-                    bucket_name, key = without_scheme.split("/", 1)
-                    # Decide a local filename: prefer last stem in base_stems, else from key
-                    try:
-                        local_stem = base_stems[-1] if base_stems else Path(key).stem
-                    except Exception:
-                        local_stem = Path(key).stem
-                    local_path = (PROJECT_ROOT / "transcripts") / f"{sanitize_filename(local_stem)}.json"
-                    local_path.parent.mkdir(parents=True, exist_ok=True)
-                    from infrastructure import gcs as gcs_utils  # type: ignore
+                        try:
+                            local_stem = base_stems[-1] if base_stems else Path(key).stem
+                        except Exception:
+                            local_stem = Path(key).stem
+                        local_path = (PROJECT_ROOT / "transcripts") / f"{sanitize_filename(local_stem)}.json"
+                        local_path.parent.mkdir(parents=True, exist_ok=True)
+                        from infrastructure import gcs as gcs_utils  # type: ignore
 
-                    data = gcs_utils.download_gcs_bytes(bucket_name, key)
-                    if data:
-                        local_path.write_bytes(data)
-                        if local_path.exists() and local_path.stat().st_size > 0:
-                            words_json_path = local_path
-                            logging.info("[assemble] downloaded transcript JSON from GCS to %s", str(local_path))
-                except Exception:
-                    logging.warning("[assemble] Failed to download transcript JSON from %s", gcs_json, exc_info=True)
+                        data = gcs_utils.download_gcs_bytes(bucket_name, key)
+                        if data:
+                            local_path.write_bytes(data)
+                            if local_path.exists() and local_path.stat().st_size > 0:
+                                words_json_path = local_path
+                                logging.info(
+                                    "[assemble] downloaded transcript JSON from GCS to %s",
+                                    str(local_path),
+                                )
+                    except Exception:
+                        logging.warning(
+                            "[assemble] Failed to download transcript JSON from %s",
+                            gcs_json,
+                            exc_info=True,
+                        )
         except Exception:
             pass
 

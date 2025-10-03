@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
-from celery import current_task
+try:
+    from celery import current_task
+except ModuleNotFoundError:  # pragma: no cover - exercised when Celery absent
+    current_task = None  # type: ignore[assignment]
+except Exception:  # pragma: no cover - defensive import guard
+    current_task = None  # type: ignore[assignment]
 
 from api.core.paths import MEDIA_DIR
 from api.services.billing import usage as usage_svc
