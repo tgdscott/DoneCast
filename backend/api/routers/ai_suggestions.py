@@ -178,25 +178,84 @@ def _download_transcript_from_url(url: str) -> Optional[Path]:
         return None
 
 
-def _discover_or_materialize_transcript(episode_id: Optional[str] = None) -> Optional[str]:
+def _discover_or_materialize_transcript(
+    episode_id: Optional[str] = None, hint: Optional[str] = None
+) -> Optional[str]:
+    """Locate or synthesize a transcript bound to the provided identifiers.
+
+    Historically this helper returned the newest transcript in ``TRANSCRIPTS_DIR``
+    regardless of which episode created it. That behaviour caused AI suggestion
+    endpoints to occasionally reuse transcripts from unrelated episodes. The
+    updated implementation limits discovery to files whose stem (including
+    common pipeline variants like ``.original`` or temporary ``ai_*`` files)
+    matches the episode identifier or optional ``hint`` provided by the client.
+    """
+
+    candidates = set(_extend_candidates([episode_id, hint]))
+    if not candidates:
+        return None
+
     try:
         TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
-        # Prefer newest .txt transcript
-        txts = sorted(TRANSCRIPTS_DIR.glob("*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
-        if txts:
-            return str(txts[0])
-        # Fallback: construct text from newest working JSON
-        jsons = [p for p in TRANSCRIPTS_DIR.glob("*.json") if not p.name.endswith(".nopunct.json")]
-        jsons.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        if jsons:
-            words = load_transcript_json(jsons[0])
+    except Exception:
+        return None
+
+    def _path_variants(path: Path) -> set[str]:
+        stem = path.stem
+        variants = set(_stem_variants(stem))
+        if "." in stem:
+            variants.update(_stem_variants(stem.split(".", 1)[0]))
+        if stem.endswith(".tmp"):
+            variants.update(_stem_variants(stem[:-4]))
+        if stem.startswith("ai_"):
+            variants.update(_stem_variants(stem[3:]))
+        if stem.startswith("ai_") and stem.endswith(".tmp"):
+            variants.update(_stem_variants(stem[3:-4]))
+        return variants
+
+    def _matches(path: Path) -> bool:
+        try:
+            variants = _path_variants(path)
+        except Exception:
+            return False
+        return any(v in candidates for v in variants)
+
+    try:
+        txt_matches = sorted(
+            [p for p in TRANSCRIPTS_DIR.glob("*.txt") if _matches(p)],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+    except Exception:
+        txt_matches = []
+
+    if txt_matches:
+        return str(txt_matches[0])
+
+    try:
+        json_matches = sorted(
+            [
+                p
+                for p in TRANSCRIPTS_DIR.glob("*.json")
+                if not p.name.endswith(".nopunct.json") and _matches(p)
+            ],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+    except Exception:
+        json_matches = []
+
+    if json_matches:
+        json_path = json_matches[0]
+        try:
+            words = load_transcript_json(json_path)
             text = " ".join([str(w.get("word", "")).strip() for w in words if w.get("word")])
-            stem = (str(episode_id) if episode_id else uuid.uuid4().hex)[:8]
-            out = TRANSCRIPTS_DIR / f"ai_{stem}.tmp.txt"
+            out = TRANSCRIPTS_DIR / f"ai_{json_path.stem}.tmp.txt"
             out.write_text(text, encoding="utf-8")
             return str(out)
-    except Exception:
-        pass
+        except Exception:
+            return None
+
     return None
 
 
@@ -522,7 +581,8 @@ def _get_template_settings(session: Session, podcast_id):
 @(_limiter.limit("10/minute") if _limiter and hasattr(_limiter, "limit") else (lambda f: f))
 def post_title(request: Request, inp: SuggestTitleIn, session: Session = Depends(get_session)) -> SuggestTitleOut:
     if not inp.transcript_path:
-        inp.transcript_path = _discover_transcript_for_episode(session, str(inp.episode_id), getattr(inp, 'hint', None)) or _discover_or_materialize_transcript(str(inp.episode_id))
+        hint = getattr(inp, 'hint', None)
+        inp.transcript_path = _discover_transcript_for_episode(session, str(inp.episode_id), hint) or _discover_or_materialize_transcript(str(inp.episode_id), hint)
     if not inp.transcript_path:
         raise HTTPException(status_code=409, detail="TRANSCRIPT_NOT_READY")
     settings = _get_template_settings(session, inp.podcast_id)
@@ -548,7 +608,8 @@ def post_title(request: Request, inp: SuggestTitleIn, session: Session = Depends
 @(_limiter.limit("10/minute") if _limiter and hasattr(_limiter, "limit") else (lambda f: f))
 def post_notes(request: Request, inp: SuggestNotesIn, session: Session = Depends(get_session)) -> SuggestNotesOut:
     if not inp.transcript_path:
-        inp.transcript_path = _discover_transcript_for_episode(session, str(inp.episode_id), getattr(inp, 'hint', None)) or _discover_or_materialize_transcript(str(inp.episode_id))
+        hint = getattr(inp, 'hint', None)
+        inp.transcript_path = _discover_transcript_for_episode(session, str(inp.episode_id), hint) or _discover_or_materialize_transcript(str(inp.episode_id), hint)
     if not inp.transcript_path:
         raise HTTPException(status_code=409, detail="TRANSCRIPT_NOT_READY")
     settings = _get_template_settings(session, inp.podcast_id)
@@ -572,7 +633,8 @@ def post_notes(request: Request, inp: SuggestNotesIn, session: Session = Depends
 @(_limiter.limit("10/minute") if _limiter and hasattr(_limiter, "limit") else (lambda f: f))
 def post_tags(request: Request, inp: SuggestTagsIn, session: Session = Depends(get_session)) -> SuggestTagsOut:
     if not inp.transcript_path:
-        inp.transcript_path = _discover_transcript_for_episode(session, str(inp.episode_id), getattr(inp, 'hint', None)) or _discover_or_materialize_transcript(str(inp.episode_id))
+        hint = getattr(inp, 'hint', None)
+        inp.transcript_path = _discover_transcript_for_episode(session, str(inp.episode_id), hint) or _discover_or_materialize_transcript(str(inp.episode_id), hint)
     if not inp.transcript_path:
         raise HTTPException(status_code=409, detail="TRANSCRIPT_NOT_READY")
     settings = _get_template_settings(session, inp.podcast_id)
