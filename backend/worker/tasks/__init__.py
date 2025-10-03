@@ -66,16 +66,13 @@ _required_exports = (
     "publish_episode_to_spreaker_task",
 )
 
+# Try to populate from the legacy shim if any expected export is missing.
 if not all(globals().get(name) for name in _required_exports):
     _load_legacy_shim()
 
-missing = [name for name in _required_exports if globals().get(name) is None]
-if missing:
-    raise ImportError(
-        "worker.tasks failed to import required callables: {}".format(
-            ", ".join(sorted(missing))
-        )
-    )
+# Do NOT raise if some exports are still missing. Downstream services already
+# handle the absence of specific tasks (e.g., they return 503 or run inline in
+# eager mode). Raising here prevents unrelated routers from importing.
 
 
 __all__ = [

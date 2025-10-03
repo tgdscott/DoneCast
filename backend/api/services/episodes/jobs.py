@@ -6,6 +6,8 @@ try:  # Celery worker is optional in some environments
     from worker.tasks import celery_app  # type: ignore
 except ModuleNotFoundError:  # pragma: no cover - local/dev without worker package
     celery_app = None  # type: ignore
+except Exception:  # pragma: no cover - guard against indirect import errors inside worker.tasks
+    celery_app = None  # type: ignore
 
 
 def get_status(job_id: str) -> Dict[str, Any]:

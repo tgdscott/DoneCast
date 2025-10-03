@@ -72,6 +72,9 @@ try:  # Celery worker package is optional in some environments
 except ModuleNotFoundError:  # pragma: no cover - dev/staging without worker package
     publish_episode_to_spreaker_task = None  # type: ignore[assignment]
     celery_app = None  # type: ignore[assignment]
+except Exception:  # pragma: no cover - guard against indirect import errors inside worker.tasks
+    publish_episode_to_spreaker_task = None  # type: ignore[assignment]
+    celery_app = None  # type: ignore[assignment]
 
 def _ensure_publish_task_available() -> None:
     """Raise a HTTP 503 if the publish task is unavailable."""
@@ -121,7 +124,9 @@ def publish(session: Session, current_user, episode_id: UUID, derived_show_id: s
 
     def _run_inline_publish() -> Dict[str, Any]:
         try:
-            result = publish_episode_to_spreaker_task.apply(args=(), kwargs=task_kwargs)
+            from typing import cast as _cast, Any as _Any
+            _task = _cast(_Any, publish_episode_to_spreaker_task)
+            result = _task.apply(args=(), kwargs=task_kwargs)
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[publish] Inline publish task raised", exc_info=True)
             raise exc
@@ -137,11 +142,15 @@ def publish(session: Session, current_user, episode_id: UUID, derived_show_id: s
             eager = False
     if eager:
         # Execute synchronously for dev reliability
-        result = publish_episode_to_spreaker_task.apply(args=(), kwargs=task_kwargs)
+        from typing import cast as _cast, Any as _Any
+        _task = _cast(_Any, publish_episode_to_spreaker_task)
+        result = _task.apply(args=(), kwargs=task_kwargs)
         return {"job_id": "eager", "result": getattr(result, 'result', None)}
 
     try:
-        async_result = publish_episode_to_spreaker_task.apply_async(kwargs=task_kwargs)
+        from typing import cast as _cast, Any as _Any
+        _task = _cast(_Any, publish_episode_to_spreaker_task)
+        async_result = _task.apply_async(kwargs=task_kwargs)
     except Exception:
         logger.warning("[publish] Celery enqueue failed; running inline", exc_info=True)
         return _run_inline_publish()
@@ -289,7 +298,9 @@ def republish(session: Session, current_user, episode_id: UUID) -> Dict[str, Any
         session.commit()
     except Exception:
         session.rollback()
-    async_result = publish_episode_to_spreaker_task.delay(
+    from typing import cast as _cast, Any as _Any
+    _task = _cast(_Any, publish_episode_to_spreaker_task)
+    async_result = _task.delay(
         episode_id=str(ep.id),
         spreaker_show_id=show_id,
         title=str(ep.title or "Untitled Episode"),

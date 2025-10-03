@@ -13,7 +13,10 @@ from sqlmodel import select
 from api.core.database import get_session
 from api.models.notification import Notification
 from api.models.podcast import MediaCategory, MediaItem
-from api.services import audio_processor
+# Import the audio package and alias it to the expected name. The orchestrator
+# calls audio_processor.process_and_assemble_episode(...), and api.services.audio
+# re-exports process_and_assemble_episode from its __init__.py.
+from api.services import audio as audio_processor
 from api.core.paths import WS_ROOT as PROJECT_ROOT, FINAL_DIR, MEDIA_DIR
 
 from . import billing, media, transcript

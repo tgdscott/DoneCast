@@ -21,6 +21,11 @@ try:  # Optional dependency: Celery worker package is not always installed
 except ModuleNotFoundError:  # pragma: no cover - dev/staging environments without Celery
     create_podcast_episode = None  # type: ignore
     celery_app = None  # type: ignore
+except Exception:  # pragma: no cover - guard against indirect import errors inside worker.tasks
+    # If worker.tasks exists but raises during import (e.g., due to a submodule error),
+    # avoid failing this service import so the API can still start and surface a 503 at runtime.
+    create_podcast_episode = None  # type: ignore
+    celery_app = None  # type: ignore
 
 from . import dto, repo
 
@@ -519,7 +524,9 @@ def assemble_or_queue(
             )
         except Exception:
             pass
-        result = create_podcast_episode(
+        from typing import cast as _cast, Any as _Any
+        task_fn = _cast(_Any, create_podcast_episode)
+        result = task_fn(
             episode_id=str(ep.id),
             template_id=str(template_id),
             main_content_filename=str(main_content_filename),
@@ -590,9 +597,11 @@ def assemble_or_queue(
         # does not hang in production.
         async_result = None
         try:
-            if not hasattr(create_podcast_episode, "delay"):
+            from typing import cast as _cast, Any as _Any
+            task_fn = _cast(_Any, create_podcast_episode)
+            if not hasattr(task_fn, "delay"):
                 raise AttributeError("task missing delay attribute")
-            async_result = create_podcast_episode.delay(
+            async_result = task_fn.delay(
                 episode_id=str(ep.id),
                 template_id=str(template_id),
                 main_content_filename=str(main_content_filename),
@@ -610,7 +619,8 @@ def assemble_or_queue(
                 _log.getLogger("assemble").warning(
                     "[assemble] Celery broker unreachable -> running inline fallback"
                 )
-                result = create_podcast_episode(
+                task_fn = _cast(_Any, create_podcast_episode)
+                result = task_fn(
                     episode_id=str(ep.id),
                     template_id=str(template_id),
                     main_content_filename=str(main_content_filename),
@@ -663,7 +673,8 @@ def assemble_or_queue(
                 try:
                     import logging as _log
                     _log.getLogger("assemble").warning("[assemble] No Celery workers detected -> running fallback inline")
-                    result = create_podcast_episode(
+                    task_fn = _cast(_Any, create_podcast_episode)
+                    result = task_fn(
                         episode_id=str(ep.id),
                         template_id=str(template_id),
                         main_content_filename=str(main_content_filename),
@@ -680,4 +691,6 @@ def assemble_or_queue(
                     pass
         if async_result is None:
             _raise_worker_unavailable()
-        return {"mode": "queued", "job_id": async_result.id, "episode_id": str(ep.id)}
+        from typing import cast as _cast, Any as _Any
+        _ar = _cast(_Any, async_result)
+        return {"mode": "queued", "job_id": _ar.id, "episode_id": str(ep.id)}
