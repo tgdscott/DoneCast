@@ -160,7 +160,19 @@ def update_episode_metadata(
 					cover_exists = True
 		except Exception:
 			pass
-		preferred_cover = getattr(ep_obj, 'remote_cover_url', None) or ep_obj.cover_path
+                remote_cover = getattr(ep_obj, 'remote_cover_url', None)
+                preferred_cover = ep_obj.cover_path or remote_cover
+                cover_url = None
+                if cover_exists and ep_obj.cover_path:
+                        cover_url = _cover_url_for(ep_obj.cover_path)
+                elif remote_cover:
+                        cover_url = _cover_url_for(remote_cover)
+                if not cover_exists and ep_obj.cover_path and not str(ep_obj.cover_path).lower().startswith(('http://','https://')):
+                        logger.warning(
+                                "[episodes.write] Missing mirrored cover for episode %s at %s",
+                                getattr(ep_obj, 'id', None),
+                                ep_obj.cover_path,
+                        )
 		stream_url = playback.get("stream_url")
 		final_audio_url = playback.get("final_audio_url")
 		playback_url = playback.get("playback_url")
@@ -191,7 +203,7 @@ def update_episode_metadata(
 			"status": derived_status,
 			"processed_at": ep_obj.processed_at.isoformat() if getattr(ep_obj, 'processed_at', None) else None,
 			"final_audio_url": final_audio_url,
-			"cover_url": _cover_url_for(preferred_cover),
+                        "cover_url": cover_url,
 			"description": getattr(ep_obj, 'show_notes', None) or "",
 			"tags": getattr(ep_obj, 'tags', lambda: [])(),
 			"is_explicit": bool(getattr(ep_obj, 'is_explicit', False)),
