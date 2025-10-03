@@ -16,7 +16,7 @@ __pycache__/
 logs.txt
 recent_logs*.txt
 .env
-.env.local
+.env.*
 *.coverage
 .pytest_cache/
 htmlcov/

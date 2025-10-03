@@ -95,10 +95,9 @@ gcloud-*
 # Build outputs, coverage, caches
 .cache/
 dist/
-node_modules/
 
 # Ignore environment for editors
 *.vsix
 
 # End of aggressive .gitignore
-node_modules
+
