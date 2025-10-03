@@ -70,14 +70,14 @@ def _load_inline_executor():
     if _INLINE_EXECUTOR is not None:
         return _INLINE_EXECUTOR
 
-    if create_podcast_episode is not None:
-        _INLINE_EXECUTOR = cast(Any, create_podcast_episode)
-        return _INLINE_EXECUTOR
-
-    for module_name in (
+    module_candidates = (
+        "worker.tasks.assembly.inline",
+        "backend.worker.tasks.assembly.inline",
         "worker.tasks.assembly.orchestrator",
         "backend.worker.tasks.assembly.orchestrator",
-    ):
+    )
+
+    for module_name in module_candidates:
         try:
             module = import_module(module_name)
         except Exception:
@@ -86,6 +86,10 @@ def _load_inline_executor():
         if callable(candidate):
             _INLINE_EXECUTOR = candidate
             return _INLINE_EXECUTOR
+
+    if create_podcast_episode is not None:
+        _INLINE_EXECUTOR = cast(Any, create_podcast_episode)
+        return _INLINE_EXECUTOR
 
     return None
 

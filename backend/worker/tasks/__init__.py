@@ -10,7 +10,12 @@ deployments keep working.
 
 from __future__ import annotations
 
-from .app import celery_app  # backwards-compatible import path
+try:
+    from .app import celery_app  # backwards-compatible import path
+except ModuleNotFoundError:
+    celery_app = None  # type: ignore[assignment]
+except Exception:
+    celery_app = None  # type: ignore[assignment]
 
 # Prefer re-exporting from the new modular implementations
 try:  # pragma: no cover - defensive import shim
