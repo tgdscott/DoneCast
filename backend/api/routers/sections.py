@@ -148,7 +148,7 @@ def ai_suggest_section(
             from . import ai_suggestions as _ai
             inp.transcript_path = (
                 _ai._discover_transcript_for_episode(session, str(inp.episode_id), getattr(inp, "hint", None))
-                or _ai._discover_or_materialize_transcript(str(inp.episode_id))
+                or _ai._discover_or_materialize_transcript(str(inp.episode_id), getattr(inp, "hint", None))
             )
         except Exception:
             inp.transcript_path = None

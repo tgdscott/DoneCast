@@ -81,3 +81,46 @@ def test_ai_endpoints_accept_missing_podcast(
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body[expected_key] == expected_value
+
+
+@pytest.mark.parametrize(
+    "endpoint, extra_payload",
+    [
+        ("/api/ai/title", {}),
+        ("/api/ai/notes", {}),
+        ("/api/ai/tags", {"tags_always_include": []}),
+    ],
+)
+def test_ai_endpoints_require_episode_specific_transcript(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    tmp_path,
+    endpoint: str,
+    extra_payload: dict,
+):
+    """Regression: ensure transcripts from other episodes are not reused."""
+
+    # Isolate transcript storage for this test run.
+    monkeypatch.setattr(ai_mod, "TRANSCRIPTS_DIR", tmp_path)
+    monkeypatch.setattr(ai_mod, "_discover_transcript_for_episode", lambda *_, **__: None)
+
+    # Seed an unrelated transcript that should not satisfy the request.
+    foreign_transcript = tmp_path / "foreign-episode.txt"
+    foreign_transcript.write_text("unrelated content", encoding="utf-8")
+
+    payload = {
+        "episode_id": str(ai_mod.uuid.uuid4()),
+        "transcript_path": None,
+        "hint": None,
+        "base_prompt": "",
+        "extra_instructions": None,
+    }
+    payload.update(extra_payload)
+
+    resp = client.post(endpoint, json=payload)
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    detail = body.get("detail")
+    if detail is None:
+        detail = body.get("error", {}).get("message")
+    assert detail == "TRANSCRIPT_NOT_READY"
