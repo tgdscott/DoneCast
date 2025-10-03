@@ -42,7 +42,35 @@ export function buildApiUrl(path) {
   const base = runtimeBase;
   if (!path) return base || '';
   if (/^https?:\/\//i.test(path)) return path; // already absolute
-  return base ? `${base}${path}` : path;
+
+  const rawPath = path;
+  const normalizedPath = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
+
+  if (!base) return rawPath;
+
+  const trimmedBase = base.replace(/\/+$/, '');
+
+  const baseHandlesApi = trimmedBase.endsWith('/api');
+  if (baseHandlesApi) {
+    if (normalizedPath === '/api') {
+      return trimmedBase;
+    }
+    if (normalizedPath === '/api/') {
+      return `${trimmedBase}/`;
+    }
+    if (normalizedPath.startsWith('/api/')) {
+      return `${trimmedBase}${normalizedPath.slice(4)}`;
+    }
+    if (normalizedPath.startsWith('/api?') || normalizedPath.startsWith('/api#') || normalizedPath.startsWith('/api&')) {
+      return `${trimmedBase}${normalizedPath.slice(4)}`;
+    }
+  }
+
+  if (normalizedPath === '/') {
+    return trimmedBase;
+  }
+
+  return `${trimmedBase}${normalizedPath}`;
 }
 
 async function req(path, opts = {}) {
