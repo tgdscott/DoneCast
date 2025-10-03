@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from math import ceil
@@ -42,6 +43,85 @@ def _raise_worker_unavailable() -> None:
             "message": "Episode assembly worker is not available. Please try again later or contact support.",
         },
     )
+
+
+def _should_auto_fallback() -> bool:
+    """Return True when the environment should execute assembly inline."""
+
+    try:
+        raw = (os.getenv("CELERY_AUTO_FALLBACK") or "").strip().lower()
+        if raw in {"1", "true", "yes", "on"}:
+            return True
+        env = (os.getenv("APP_ENV") or "dev").strip().lower()
+        return env in {"dev", "development", "local"}
+    except Exception:
+        return False
+
+
+def _run_inline_fallback(
+    *,
+    episode_id: Any,
+    template_id: str,
+    main_content_filename: str,
+    output_filename: str,
+    tts_values: Dict[str, Any],
+    episode_details: Dict[str, Any],
+    user_id: Any,
+    podcast_id: Any,
+    intents: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Attempt to execute episode assembly inline when workers are unavailable."""
+
+    try:
+        from typing import Any as _Any, cast as _cast
+
+        if create_podcast_episode is not None:
+            task_fn = _cast(_Any, create_podcast_episode)
+        else:
+            from worker.tasks.assembly.orchestrator import (  # type: ignore[import]
+                orchestrate_create_podcast_episode,
+            )
+
+            task_fn = orchestrate_create_podcast_episode
+
+        result = task_fn(
+            episode_id=str(episode_id),
+            template_id=str(template_id),
+            main_content_filename=str(main_content_filename),
+            output_filename=str(output_filename),
+            tts_values=tts_values or {},
+            episode_details=episode_details or {},
+            user_id=str(user_id),
+            podcast_id=str(podcast_id or ""),
+            intents=intents or None,
+            skip_charge=True,
+        )
+        return {
+            "mode": "fallback-inline",
+            "job_id": "fallback-inline",
+            "result": result,
+            "episode_id": str(episode_id),
+        }
+    except Exception:
+        logging.getLogger("assemble").exception(
+            "[assemble] Inline fallback execution failed", exc_info=True
+        )
+        return None
+
+
+def _can_run_inline() -> bool:
+    """Return True if an inline fallback implementation is importable."""
+
+    if create_podcast_episode is not None:
+        return True
+    try:
+        from worker.tasks.assembly.orchestrator import (  # type: ignore[import]
+            orchestrate_create_podcast_episode,
+        )
+
+        return callable(orchestrate_create_podcast_episode)
+    except Exception:
+        return False
 
 
 def _episodes_created_this_month(session: Session, user_id) -> int:
@@ -304,6 +384,8 @@ def assemble_or_queue(
     episode_details: Dict[str, Any],
     intents: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    auto_fallback = _should_auto_fallback()
+
     # Quota check (same logic as router but service-level)
     tier = getattr(current_user, 'tier', 'free')
     limits = TIER_LIMITS.get(tier, TIER_LIMITS['free'])
@@ -314,9 +396,10 @@ def assemble_or_queue(
             from fastapi import HTTPException
             raise HTTPException(status_code=402, detail="Monthly episode quota reached for your tier")
 
-    # Ensure the worker task module is available before performing any DB writes.
+    # Ensure the worker task module (or inline fallback) is available before performing DB writes.
     if create_podcast_episode is None:
-        _raise_worker_unavailable()
+        if not auto_fallback or not _can_run_inline():
+            _raise_worker_unavailable()
 
     # Prepare metadata and admin test-mode overrides
     ep_title = (episode_details.get("title") or output_filename or "").strip() or "Untitled Episode"
@@ -524,26 +607,22 @@ def assemble_or_queue(
             )
         except Exception:
             pass
-        from typing import cast as _cast, Any as _Any
-        task_fn = _cast(_Any, create_podcast_episode)
-        result = task_fn(
-            episode_id=str(ep.id),
-            template_id=str(template_id),
-            main_content_filename=str(main_content_filename),
-            output_filename=str(output_filename),
+        inline_result = _run_inline_fallback(
+            episode_id=ep.id,
+            template_id=template_id,
+            main_content_filename=main_content_filename,
+            output_filename=output_filename,
             tts_values=tts_values or {},
             episode_details=episode_details or {},
-            user_id=str(current_user.id),
-            podcast_id=str(getattr(ep, 'podcast_id', '') or ''),
-            intents=intents or None,
-            skip_charge=True,
+            user_id=getattr(current_user, "id", None),
+            podcast_id=getattr(ep, "podcast_id", None),
+            intents=intents,
         )
-        return {
-            "mode": "eager-inline",
-            "job_id": "eager-inline",
-            "result": result,
-            "episode_id": str(ep.id),
-        }
+        if inline_result:
+            inline_result["mode"] = "eager-inline"
+            inline_result["job_id"] = inline_result.get("job_id") or "eager-inline"
+            return inline_result
+        _raise_worker_unavailable()
     else:
         # Optional: Use Cloud Tasks HTTP dispatch instead of Celery when enabled.
         if os.getenv("USE_CLOUD_TASKS", "").strip().lower() in {"1", "true", "yes", "on"}:
@@ -595,9 +674,26 @@ def assemble_or_queue(
         # Attempt to enqueue on Celery broker. If the broker is unreachable or
         # misconfigured, gracefully fall back to inline execution so the request
         # does not hang in production.
+        if create_podcast_episode is None:
+            inline_result = _run_inline_fallback(
+                episode_id=ep.id,
+                template_id=template_id,
+                main_content_filename=main_content_filename,
+                output_filename=output_filename,
+                tts_values=tts_values or {},
+                episode_details=episode_details or {},
+                user_id=getattr(current_user, "id", None),
+                podcast_id=getattr(ep, "podcast_id", None),
+                intents=intents,
+            )
+            if inline_result:
+                return inline_result
+            _raise_worker_unavailable()
+
         async_result = None
         try:
-            from typing import cast as _cast, Any as _Any
+            from typing import Any as _Any, cast as _cast
+
             task_fn = _cast(_Any, create_podcast_episode)
             if not hasattr(task_fn, "delay"):
                 raise AttributeError("task missing delay attribute")
@@ -613,34 +709,23 @@ def assemble_or_queue(
                 intents=intents or None,
             )
         except Exception:
-            # Broker connection likely failed; run inline as a safe fallback.
-            try:
-                import logging as _log
-                _log.getLogger("assemble").warning(
-                    "[assemble] Celery broker unreachable -> running inline fallback"
-                )
-                task_fn = _cast(_Any, create_podcast_episode)
-                result = task_fn(
-                    episode_id=str(ep.id),
-                    template_id=str(template_id),
-                    main_content_filename=str(main_content_filename),
-                    output_filename=str(output_filename),
-                    tts_values=tts_values or {},
-                    episode_details=episode_details or {},
-                    user_id=str(current_user.id),
-                    podcast_id=str(getattr(ep, 'podcast_id', '') or ''),
-                    intents=intents or None,
-                    skip_charge=True,
-                )
-                return {
-                    "mode": "fallback-inline",
-                    "job_id": "fallback-inline",
-                    "result": result,
-                    "episode_id": str(ep.id),
-                }
-            except Exception:
-                # Fall through to return a generic queued response (unlikely path)
-                pass
+            logging.getLogger("assemble").warning(
+                "[assemble] Celery broker unreachable -> running inline fallback",
+                exc_info=True,
+            )
+            inline_result = _run_inline_fallback(
+                episode_id=ep.id,
+                template_id=template_id,
+                main_content_filename=main_content_filename,
+                output_filename=output_filename,
+                tts_values=tts_values or {},
+                episode_details=episode_details or {},
+                user_id=getattr(current_user, "id", None),
+                podcast_id=getattr(ep, "podcast_id", None),
+                intents=intents,
+            )
+            if inline_result:
+                return inline_result
         # Store job id in meta for diagnostics
         if async_result is not None:
             try:
@@ -658,7 +743,7 @@ def assemble_or_queue(
                 session.rollback()
 
         # Automatic dev/local fallback (or explicit env) if no workers respond
-        if os.getenv("CELERY_AUTO_FALLBACK", "").strip().lower() in {"1","true","yes","on"} or (os.getenv("APP_ENV","dev").lower() in {"dev","development","local"}):
+        if auto_fallback:
             no_workers = False
             if celery_app is None:
                 no_workers = True
@@ -670,27 +755,25 @@ def assemble_or_queue(
                 except Exception:
                     no_workers = True
             if no_workers:
-                try:
-                    import logging as _log
-                    _log.getLogger("assemble").warning("[assemble] No Celery workers detected -> running fallback inline")
-                    task_fn = _cast(_Any, create_podcast_episode)
-                    result = task_fn(
-                        episode_id=str(ep.id),
-                        template_id=str(template_id),
-                        main_content_filename=str(main_content_filename),
-                        output_filename=str(output_filename),
-                        tts_values=tts_values or {},
-                        episode_details=episode_details or {},
-                        user_id=str(current_user.id),
-                        podcast_id=str(getattr(ep, 'podcast_id', '') or ''),
-                        intents=intents or None,
-                        skip_charge=True,
-                    )
-                    return {"mode": "fallback-inline", "job_id": "fallback-inline", "result": result, "episode_id": str(ep.id)}
-                except Exception:
-                    pass
+                logging.getLogger("assemble").warning(
+                    "[assemble] No Celery workers detected -> running fallback inline"
+                )
+                inline_result = _run_inline_fallback(
+                    episode_id=ep.id,
+                    template_id=template_id,
+                    main_content_filename=main_content_filename,
+                    output_filename=output_filename,
+                    tts_values=tts_values or {},
+                    episode_details=episode_details or {},
+                    user_id=getattr(current_user, "id", None),
+                    podcast_id=getattr(ep, "podcast_id", None),
+                    intents=intents,
+                )
+                if inline_result:
+                    return inline_result
         if async_result is None:
             _raise_worker_unavailable()
-        from typing import cast as _cast, Any as _Any
+        from typing import Any as _Any, cast as _cast
+
         _ar = _cast(_Any, async_result)
         return {"mode": "queued", "job_id": _ar.id, "episode_id": str(ep.id)}
