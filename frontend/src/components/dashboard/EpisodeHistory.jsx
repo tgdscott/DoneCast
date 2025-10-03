@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
@@ -59,6 +59,21 @@ const formatPublishAt = (iso, { fallback = null, timezone } = {}) => {
   }
 };
 
+
+const canScheduleEpisode = (episode) => {
+  if (!episode) return false;
+  if (episode._scheduling) return false;
+  if (statusLabel(episode.status) !== 'processed') return false;
+  return !!episode.final_audio_exists;
+};
+
+const scheduleTooltip = (episode) => {
+  if (!episode) return 'Schedule unavailable';
+  if (episode._scheduling) return 'Scheduling in progress';
+  if (statusLabel(episode.status) !== 'processed') return 'Available after processing completes';
+  if (!episode.final_audio_exists) return 'Final audio not ready yet';
+  return 'Schedule future publication';
+};
 
 const deriveEpisodeHint = (episode) => {
   if (!episode) return null;
@@ -211,6 +226,7 @@ export default function EpisodeHistory({ token, onBack }) {
     }
   };
   const openSchedule = (ep) => {
+    if (!canScheduleEpisode(ep)) return;
     setScheduleEp(ep);
     setScheduleSubmitting(false);
     setScheduleError("");
@@ -804,45 +820,49 @@ export default function EpisodeHistory({ token, onBack }) {
                   Retry
                 </button>
               )}
-              {ep.status === 'processed' && (
-                <div className="absolute bottom-1 right-1 flex gap-1 items-center">
-                  {/* Cut for edits */}
-                  <button
-                    className="bg-white/85 hover:bg-white text-purple-700 border border-purple-300 rounded p-1 shadow-sm"
-                    title="Cut for edits"
-                    onClick={() => setFlubberEpId(prev => prev===ep.id? null : ep.id)}
-                  >
-                    <Scissors className="w-4 h-4" />
-                  </button>
-                  {/* Manual Editor */}
-                  <button
-                    className="bg-white/85 hover:bg-white text-blue-700 border border-blue-300 rounded p-1 shadow-sm"
-                    title="Open Manual Editor"
-                    onClick={() => setManualEpId(prev => prev===ep.id? null : ep.id)}
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                  {(ep.needs_republish || !!ep.publish_error) ? (
+              <div className="absolute bottom-1 right-1 flex gap-1 items-center">
+                {ep.status === 'processed' && (
+                  <>
+                    {/* Cut for edits */}
                     <button
-                      className="bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-medium px-2 py-1 rounded shadow disabled:opacity-60"
-                      onClick={() => doRepublish(ep)}
-                      title="Retry publishing to Spreaker"
-                      disabled={republishingId === ep.id}
-                    >{republishingId === ep.id ? 'Retrying…' : 'Retry Publish'}</button>
-                  ) : (
+                      className="bg-white/85 hover:bg-white text-purple-700 border border-purple-300 rounded p-1 shadow-sm"
+                      title="Cut for edits"
+                      onClick={() => setFlubberEpId(prev => prev===ep.id? null : ep.id)}
+                    >
+                      <Scissors className="w-4 h-4" />
+                    </button>
+                    {/* Manual Editor */}
                     <button
-                      className="bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-medium px-2 py-1 rounded shadow disabled:opacity-60"
-                      onClick={() => quickPublish(ep.id)}
-                      title="Publish now"
-                    >Publish</button>
-                  )}
-                  <button
-                    className="bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-medium px-2 py-1 rounded shadow disabled:opacity-60"
-                    onClick={() => openSchedule(ep)}
-                    title="Schedule future publication"
-                  >Schedule</button>
-                </div>
-              )}
+                      className="bg-white/85 hover:bg-white text-blue-700 border border-blue-300 rounded p-1 shadow-sm"
+                      title="Open Manual Editor"
+                      onClick={() => setManualEpId(prev => prev===ep.id? null : ep.id)}
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    {(ep.needs_republish || !!ep.publish_error) ? (
+                      <button
+                        className="bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-medium px-2 py-1 rounded shadow disabled:opacity-60"
+                        onClick={() => doRepublish(ep)}
+                        title="Retry publishing to Spreaker"
+                        disabled={republishingId === ep.id}
+                      >{republishingId === ep.id ? 'Retrying…' : 'Retry Publish'}</button>
+                    ) : (
+                      <button
+                        className="bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-medium px-2 py-1 rounded shadow disabled:opacity-60"
+                        onClick={() => quickPublish(ep.id)}
+                        title="Publish now"
+                      >Publish</button>
+                    )}
+                  </>
+                )}
+                <button
+                  className={`bg-purple-600 text-white text-[11px] font-medium px-2 py-1 rounded shadow transition disabled:opacity-60 disabled:cursor-not-allowed ${canScheduleEpisode(ep) ? 'hover:bg-purple-700' : 'bg-purple-500/80'}`}
+                  onClick={() => openSchedule(ep)}
+                  title={scheduleTooltip(ep)}
+                  disabled={!canScheduleEpisode(ep)}
+                  type="button"
+                >Schedule</button>
+              </div>
             </div>
             <CardHeader className="pb-2">
               <div className="flex items-start justify-between gap-2">
@@ -1012,12 +1032,13 @@ export default function EpisodeHistory({ token, onBack }) {
                   onClick={() => quickPublish(ep.id)}
                 >Publish</button>
               )}
-              {ep.status === 'processed' && (
-                <button
-                  className="ml-1 text-purple-600 hover:text-purple-700 text-xs underline"
-                  onClick={() => openSchedule(ep)}
-                >Schedule</button>
-              )}
+              <button
+                className={`ml-1 text-xs underline text-purple-600 ${canScheduleEpisode(ep) ? 'hover:text-purple-700' : 'opacity-60 cursor-not-allowed hover:text-purple-600'}`}
+                onClick={() => openSchedule(ep)}
+                disabled={!canScheduleEpisode(ep)}
+                title={scheduleTooltip(ep)}
+                type="button"
+              >Schedule</button>
             </div>
       {audioUrl && (
               <div className="col-span-12 mt-2">
@@ -1319,7 +1340,11 @@ export default function EpisodeHistory({ token, onBack }) {
                 <input type="time" step={300} className="border rounded px-2 py-1 text-sm" value={scheduleTime} onChange={e=>setScheduleTime(e.target.value)} />
               </div>
               <p className="text-[11px] text-gray-500">Must be at least 1 minute in the future. Local time is converted to exact UTC ISO for Spreaker.</p>
-              {scheduleError && <div className="text-red-600 text-xs">{scheduleError}</div>}
+              {scheduleError && (
+                <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+                  {scheduleError}
+                </div>
+              )}
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" size="sm" disabled={scheduleSubmitting} onClick={closeSchedule}>Cancel</Button>
