@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui
 import { Input } from '../ui/input';
 import { Checkbox } from '../ui/checkbox';
 import { AlertCircle, AlertTriangle, ArrowLeft, CheckCircle2, Loader2, Upload } from 'lucide-react';
-import { makeApi, buildApiUrl } from '@/lib/apiClient';
+import { uploadMediaDirect } from '@/lib/directUpload';
 import { useToast } from '@/hooks/use-toast';
 import { convertAudioFileToMp3IfBeneficial } from '@/lib/audioConversion';
 import usePublicConfig from '@/hooks/usePublicConfig';
@@ -154,42 +154,15 @@ export default function PreUploadManager({
       setError('Enter a friendly name for this episode before uploading.');
       return;
     }
-    const form = new FormData();
-    form.append('files', fileToSend);
-    form.append('friendly_names', JSON.stringify([trimmedFriendlyName]));
-    form.append('notify_when_ready', notify ? 'true' : 'false');
-    if (notify && email) form.append('notify_email', email);
-
-    const startBackgroundUpload = () => new Promise((resolve, reject) => {
-      try {
-        if (typeof XMLHttpRequest === 'undefined') {
-          const api = makeApi(token);
-          api.raw('/api/media/upload/main_content', { method: 'POST', body: form }).then(resolve).catch(reject);
-          return;
-        }
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', buildApiUrl('/api/media/upload/main_content'));
-        xhr.withCredentials = true;
-        if (token) { try { xhr.setRequestHeader('Authorization', `Bearer ${token}`); } catch {} }
-        xhr.responseType = 'json';
-        xhr.onerror = () => reject(new Error('Upload failed. Please try again.'));
-        xhr.onabort = () => reject(new Error('Upload cancelled'));
-        xhr.onload = () => {
-          const ok = xhr.status >= 200 && xhr.status < 300;
-          if (!ok) {
-            const payload = xhr.response ?? (() => { try { return JSON.parse(xhr.responseText || ''); } catch { return null; } })();
-            const msg = (payload && (payload.error || payload.detail || payload.message)) || `Upload failed with status ${xhr.status}`;
-            reject(new Error(msg));
-            return;
-          }
-          resolve(xhr.response);
-        };
-        xhr.send(form);
-      } catch (e) { reject(e); }
-    });
-
     toast({ title: 'Uploading in background', description: 'You can return to your dashboard. We\'ll email you when it\'s processed.' });
-    const p = startBackgroundUpload();
+    const p = uploadMediaDirect({
+      category: 'main_content',
+      file: fileToSend,
+      friendlyName: trimmedFriendlyName,
+      token,
+      notifyWhenReady: notify,
+      notifyEmail: notify ? email : undefined,
+    });
     p.then(() => { try { toast({ title: 'Upload received', description: 'Transcription has started.' }); } catch {}
       onUploaded();
     }).catch((err) => { try { toast({ variant: 'destructive', title: 'Upload failed', description: err?.message || 'Unable to upload audio.' }); } catch {} });
