@@ -16,7 +16,7 @@ from sqlmodel import select
 from api.core import crud
 from api.core.config import settings
 from api.core.paths import APP_ROOT as APP_ROOT_DIR
-from api.core.paths import MEDIA_DIR, WS_ROOT as PROJECT_ROOT
+from api.core.paths import MEDIA_DIR, WS_ROOT as PROJECT_ROOT, CLEANED_DIR
 from api.models.podcast import Episode, MediaCategory, MediaItem
 from api.services.audio.common import sanitize_filename
 
@@ -120,10 +120,12 @@ def _resolve_media_file(name: str) -> Optional[Path]:
 
     candidates = [
         PROJECT_ROOT / "media_uploads" / base,
+        PROJECT_ROOT / "cleaned_audio" / base,
         APP_ROOT_DIR / "media_uploads" / base,
         APP_ROOT_DIR.parent / "media_uploads" / base,
         MEDIA_DIR / base,
         MEDIA_DIR / "media_uploads" / base,
+        CLEANED_DIR / base,
     ]
 
     # To support sanitized filenames (e.g., whitespace/characters replaced) and
