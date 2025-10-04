@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { assetUrl } from '@/lib/apiClient.js';
 import { Play, Pause, CalendarClock, Trash2, Pencil, MoreHorizontal } from 'lucide-react';
 
 /**
@@ -11,6 +12,14 @@ import { Play, Pause, CalendarClock, Trash2, Pencil, MoreHorizontal } from 'luci
 export default function EpisodeHistoryPreview({ episodes, onEdit, onDelete, formatPublishAt }) {
   const [playingId, setPlayingId] = useState(null);
   const audioRefs = useRef({});
+
+  const resolveAssetUrl = (path) => {
+    if (!path || typeof path !== 'string') return path;
+    const trimmed = path.trim();
+    if (!trimmed) return trimmed;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed) || trimmed.startsWith('//')) return trimmed;
+    return assetUrl(trimmed);
+  };
 
   const togglePlay = (epId) => {
     if (playingId && playingId !== epId) {
@@ -33,7 +42,7 @@ export default function EpisodeHistoryPreview({ episodes, onEdit, onDelete, form
         <h3 className="text-lg font-semibold mb-3">New Grid Concept</h3>
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
           {episodes.slice(0,15).map(ep => {
-            const coverUrl = ep.cover_url || `/api/episodes/${ep.id}/cover`;
+            const coverUrl = resolveAssetUrl(ep.cover_url) || resolveAssetUrl(`/api/episodes/${ep.id}/cover`);
             return (
               <div key={ep.id} className="group relative rounded-lg overflow-hidden border bg-white shadow-sm hover:shadow-md transition-shadow">
                 <div className="aspect-square bg-gray-100 relative">
@@ -74,7 +83,7 @@ export default function EpisodeHistoryPreview({ episodes, onEdit, onDelete, form
                   </div>
                   <audio
                     ref={el => { if (el) audioRefs.current[ep.id] = el; }}
-                    src={ep.playback_url || ep.stream_url || ep.final_audio_url || ''}
+                    src={resolveAssetUrl(ep.playback_url || ep.stream_url || ep.final_audio_url || '') || ''}
                     preload="none"
                     onEnded={()=> setPlayingId(id => id===ep.id ? null : id)}
                     className="hidden"
@@ -115,7 +124,7 @@ export default function EpisodeHistoryPreview({ episodes, onEdit, onDelete, form
                   </div>
                   <audio
                     ref={el => { if (el) audioRefs.current[ep.id] = el; }}
-                    src={ep.playback_url || ep.stream_url || ep.final_audio_url || ''}
+                    src={resolveAssetUrl(ep.playback_url || ep.stream_url || ep.final_audio_url || '') || ''}
                     preload="none"
                     onEnded={()=> setPlayingId(id => id===ep.id ? null : id)}
                     className="hidden"

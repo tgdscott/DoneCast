@@ -22,7 +22,7 @@ import {
 } from "lucide-react"
 import { useState, useEffect, useRef, useMemo } from "react"
 import { useAuth } from "@/AuthContext.jsx"
-import { makeApi, buildApiUrl } from "@/lib/apiClient";
+import { makeApi, buildApiUrl, assetUrl } from "@/lib/apiClient.js";
 import { useBrand } from "@/brand/BrandContext.jsx";
 import Logo from "@/components/Logo.jsx";
 import DOMPurify from "dompurify";
@@ -48,6 +48,14 @@ const buildGoogleLoginUrl = () => {
     }
   }
   return url;
+};
+
+const resolveAssetUrl = (path) => {
+  if (!path || typeof path !== "string") return path;
+  const trimmed = path.trim();
+  if (!trimmed) return trimmed;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed) || trimmed.startsWith("//")) return trimmed;
+  return assetUrl(trimmed);
 };
 
 const LoginModal = ({ onClose }) => {
@@ -829,7 +837,7 @@ export default function PodcastPlusLanding() {
                   <Card key={ep.id} className="overflow-hidden">
                     <div className="h-40 bg-gray-100">
                       {ep.cover_url ? (
-                        <img src={ep.cover_url} alt={ep.title} className="w-full h-full object-cover" />
+                        <img src={resolveAssetUrl(ep.cover_url)} alt={ep.title} className="w-full h-full object-cover" />
                       ) : (
                         <div className="h-full flex items-center justify-center text-gray-400">No Cover</div>
                       )}
@@ -839,7 +847,7 @@ export default function PodcastPlusLanding() {
                     </CardHeader>
                     <CardContent>
                       <p className="text-sm text-gray-600 line-clamp-3 mb-2">{ep.description}</p>
-                      {ep.final_audio_url && <audio controls src={ep.final_audio_url} className="w-full" />}
+                      {ep.final_audio_url && <audio controls src={resolveAssetUrl(ep.final_audio_url)} className="w-full" />}
                     </CardContent>
                   </Card>
                 ))}

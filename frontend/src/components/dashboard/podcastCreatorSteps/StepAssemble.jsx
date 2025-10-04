@@ -1,8 +1,17 @@
 import React from 'react';
+import { assetUrl } from '@/lib/apiClient.js';
 import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Label } from '../../ui/label';
 import { Loader2 } from 'lucide-react';
+
+const resolveAssetUrl = (path) => {
+  if (!path || typeof path !== 'string') return path;
+  const trimmed = path.trim();
+  if (!trimmed) return trimmed;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed) || trimmed.startsWith('//')) return trimmed;
+  return assetUrl(trimmed);
+};
 
 export default function StepAssemble({
   assemblyComplete,
@@ -57,7 +66,7 @@ export default function StepAssemble({
           {assembledEpisode.final_audio_url && (
             <div className="mt-4">
               <Label>Listen to the final episode:</Label>
-              <audio controls src={assembledEpisode.final_audio_url} className="w-full mt-2">
+              <audio controls src={resolveAssetUrl(assembledEpisode.final_audio_url)} className="w-full mt-2">
                 Your browser does not support the audio element.
               </audio>
             </div>

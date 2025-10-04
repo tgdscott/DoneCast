@@ -7,7 +7,7 @@ import EpisodeHistoryPreview from './EpisodeHistoryPreview';
 import FlubberReview from './FlubberReview';
 import ManualEditorModal from './ManualEditorModal';
 import CoverCropper from './CoverCropper';
-import { makeApi, isApiError } from "@/lib/apiClient";
+import { makeApi, isApiError, assetUrl } from "@/lib/apiClient.js";
 import { useResolvedTimezone } from "@/hooks/useResolvedTimezone";
 import { formatInTimezone } from "@/lib/timezone";
 // ------------------------------
@@ -33,6 +33,13 @@ const normalizeDate = (iso) => {
   return isNaN(d.getTime()) ? null : d;
 };
 const episodeSortDate = (ep) => normalizeDate(ep.publish_at) || normalizeDate(ep.processed_at) || normalizeDate(ep.created_at) || new Date(0);
+const resolveAssetUrl = (path) => {
+  if (!path || typeof path !== 'string') return path;
+  const trimmed = path.trim();
+  if (!trimmed) return trimmed;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed) || trimmed.startsWith('//')) return trimmed;
+  return assetUrl(trimmed);
+};
 const isWithin24h = (iso) => {
   const d = normalizeDate(iso);
   if(!d) return false;
@@ -752,14 +759,11 @@ export default function EpisodeHistory({ token, onBack }) {
   const renderGrid = () => (
     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
       {displayEpisodes.map(ep => {
-        const coverUrl = ep.cover_url || `/api/episodes/${ep.id}/cover`;
+        const coverUrl = resolveAssetUrl(ep.cover_url) || resolveAssetUrl(`/api/episodes/${ep.id}/cover`);
         // Prioritize a direct public URL if the backend provides it.
         // Otherwise, fall back to existing stream/final URLs.
         let audioUrl = ep.public_url || ep.playback_url || ep.stream_url || ep.final_audio_url || '';
-        // Ensure relative paths are prefixed correctly.
-        if (audioUrl && !/^(https?:)?\/\//.test(audioUrl) && !audioUrl.startsWith('/')) {
-          audioUrl = `/${audioUrl}`;
-        }
+        audioUrl = resolveAssetUrl(audioUrl) || '';
   const missingAudio = audioUrl && ep.final_audio_exists === false && ep.playback_type !== 'stream';
   const showUnpublish = statusLabel(ep.status) === 'scheduled' || (statusLabel(ep.status) === 'published' && isWithin24h(ep.publish_at));
         // Heuristic: show Retry when status is error, or processing exceeds 1.25x duration (fallback 15min)
@@ -904,7 +908,7 @@ export default function EpisodeHistory({ token, onBack }) {
                 if (ep.meta_json) {
                   try {
                     const meta = typeof ep.meta_json === 'string' ? JSON.parse(ep.meta_json) : ep.meta_json;
-                    transcriptUrl = meta?.transcripts?.gcs_json || null;
+                    transcriptUrl = resolveAssetUrl(meta?.transcripts?.gcs_json || null) || null;
                   } catch {}
                 }
                 if (transcriptUrl) {
@@ -948,9 +952,7 @@ export default function EpisodeHistory({ token, onBack }) {
       </div>
       {displayEpisodes.map(ep => {
   let audioUrl = ep.playback_url || ep.stream_url || ep.final_audio_url || '';
-        if (audioUrl && !audioUrl.startsWith('http') && !audioUrl.startsWith('/')) {
-          audioUrl = `/${audioUrl}`;
-        }
+        audioUrl = resolveAssetUrl(audioUrl) || '';
   const showUnpublish = statusLabel(ep.status) === 'scheduled' || (statusLabel(ep.status) === 'published' && isWithin24h(ep.publish_at));
         let showRetry = false;
         {
@@ -973,7 +975,7 @@ export default function EpisodeHistory({ token, onBack }) {
               {ep.description && <span className="text-[11px] text-gray-500 line-clamp-1" title={ep.description}>{ep.description}</span>}
               {ep.has_transcript && ep.transcript_url && (
                 <a
-                  href={ep.transcript_url}
+                  href={resolveAssetUrl(ep.transcript_url)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-[11px] text-blue-600 hover:text-blue-700 underline mt-1"
@@ -1232,7 +1234,7 @@ export default function EpisodeHistory({ token, onBack }) {
                 <CoverCropper
                   ref={cropperRef}
                   sourceFile={editValues.cover_file}
-                  existingUrl={editing?.cover_url || (editing ? `/api/episodes/${editing.id}/cover` : null)}
+                  existingUrl={resolveAssetUrl(editing?.cover_url) || (editing ? resolveAssetUrl(`/api/episodes/${editing.id}/cover`) : null)}
                   value={editValues.cover_file ? editValues.image_crop : (editing?.image_crop || '')}
                   onChange={(c)=>setEditValues(v=>{
                     // Only store crop if a new file is selected; otherwise ignore (can't edit existing)
