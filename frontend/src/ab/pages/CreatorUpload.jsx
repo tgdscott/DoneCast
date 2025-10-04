@@ -7,6 +7,58 @@ import { uploadMediaDirect } from "@/lib/directUpload";
 import { fetchVoices as fetchElevenVoices } from "@/api/elevenlabs";
 import VoicePicker from "@/components/VoicePicker";
 
+const formatBytes = (bytes) => {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return null;
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const decimals = value >= 100 ? 0 : value >= 10 ? 1 : 2;
+  return `${value.toFixed(decimals)} ${units[unitIndex]}`;
+};
+
+const formatSpeed = (bytesPerSecond) => {
+  const size = formatBytes(bytesPerSecond);
+  return size ? `${size}/s` : null;
+};
+
+const formatEta = (seconds) => {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return null;
+  if (seconds < 1) return '<1s remaining';
+  const rounded = Math.round(seconds);
+  const hours = Math.floor(rounded / 3600);
+  const minutes = Math.floor((rounded % 3600) / 60);
+  const secs = rounded % 60;
+  if (hours > 0) {
+    if (minutes === 0) return `${hours}h remaining`;
+    return `${hours}h ${minutes}m remaining`;
+  }
+  if (minutes > 0) {
+    if (minutes >= 10) return `${minutes}m remaining`;
+    return `${minutes}m ${secs.toString().padStart(2, '0')}s remaining`;
+  }
+  return `${secs}s remaining`;
+};
+
+const formatProgressDetail = (loaded, total, speed, eta) => {
+  const parts = [];
+  const loadedLabel = formatBytes(loaded);
+  const totalLabel = formatBytes(total);
+  if (loadedLabel && totalLabel) {
+    parts.push(`${loadedLabel} of ${totalLabel}`);
+  } else if (loadedLabel) {
+    parts.push(loadedLabel);
+  }
+  const speedLabel = formatSpeed(speed);
+  if (speedLabel) parts.push(speedLabel);
+  const etaLabel = formatEta(eta);
+  if (etaLabel) parts.push(etaLabel);
+  return parts.join(' • ');
+};
+
 export default function CreatorUpload({ token, shows, uploads, setUploads, drafts, setDrafts, markUploadUsed, goFinalize, goCustomizeSegments }) {
   const [selectedShowId, setSelectedShowId] = useState(shows[0]?.id ?? "");
   const [selectedFileId, setSelectedFileId] = useState(uploads[0]?.id ?? null);
@@ -367,6 +419,10 @@ export default function CreatorUpload({ token, shows, uploads, setUploads, draft
           size: sizeLabel,
           status: 'uploading',
           progress: 1,
+          loadedBytes: 0,
+          totalBytes: typeof file.size === 'number' ? file.size : null,
+          bytesPerSecond: null,
+          etaSeconds: null,
           nickname: '',
           showId: selectedShowId,
           ttlDays: 14,
@@ -385,10 +441,17 @@ export default function CreatorUpload({ token, shows, uploads, setUploads, draft
         file,
         friendlyName: file.name,
         token,
-        onProgress: ({ percent }) => {
+        onProgress: ({ percent, loaded, total, bytesPerSecond, etaSeconds }) => {
           if (typeof percent !== 'number') return;
           const pct = Math.max(1, Math.min(99, Math.round(percent)));
-          setUploads(prev => prev.map(u => (u.id === tempId ? { ...u, progress: pct } : u)));
+          setUploads(prev => prev.map(u => (u.id === tempId ? {
+            ...u,
+            progress: pct,
+            loadedBytes: typeof loaded === 'number' ? loaded : u.loadedBytes,
+            totalBytes: typeof total === 'number' && total > 0 ? total : u.totalBytes,
+            bytesPerSecond: typeof bytesPerSecond === 'number' && Number.isFinite(bytesPerSecond) ? bytesPerSecond : u.bytesPerSecond,
+            etaSeconds: typeof etaSeconds === 'number' && Number.isFinite(etaSeconds) ? etaSeconds : null,
+          } : u)));
         },
       }).then((items) => {
         const si = Array.isArray(items) ? items[0] : items;
@@ -401,6 +464,10 @@ export default function CreatorUpload({ token, shows, uploads, setUploads, draft
             size: sizeLabel,
             status: 'done',
             progress: 100,
+            loadedBytes: typeof file.size === 'number' ? file.size : u.loadedBytes,
+            totalBytes: typeof file.size === 'number' ? file.size : u.totalBytes,
+            bytesPerSecond: null,
+            etaSeconds: null,
             nickname: '',
             showId: selectedShowId,
             ttlDays: 14,
@@ -418,11 +485,24 @@ export default function CreatorUpload({ token, shows, uploads, setUploads, draft
           resolve(newDraft);
           return;
         }
-        setUploads(prev => prev.map(u => (u.id === tempId ? { ...u, status: 'error', progress: 0 } : u)));
+        setUploads(prev => prev.map(u => (u.id === tempId ? {
+          ...u,
+          status: 'error',
+          progress: 0,
+          bytesPerSecond: null,
+          etaSeconds: null,
+        } : u)));
         resolve(null);
       }).catch((err) => {
         console.error(err);
-        setUploads(prev => prev.map(u => (u.id === tempId ? { ...u, status: 'error', progress: 0, error: err?.message || 'Upload failed' } : u)));
+        setUploads(prev => prev.map(u => (u.id === tempId ? {
+          ...u,
+          status: 'error',
+          progress: 0,
+          error: err?.message || 'Upload failed',
+          bytesPerSecond: null,
+          etaSeconds: null,
+        } : u)));
         resolve(null);
       });
     });
@@ -571,8 +651,16 @@ export default function CreatorUpload({ token, shows, uploads, setUploads, draft
                       return (d?.transcript === 'ready') ? 'Transcription Complete' : 'Transcription Pending';
                     })()}
                   </span>
-                  <div className="text-sm">
-                    {f.status === 'uploading' && <span>{f.progress}%</span>}
+                  <div className="text-right text-sm leading-tight">
+                    {f.status === 'uploading' && (
+                      <>
+                        <span>{f.progress}%</span>
+                        {(() => {
+                          const eta = formatEta(f.etaSeconds);
+                          return eta ? <div className="text-xs text-muted-foreground">{eta}</div> : null;
+                        })()}
+                      </>
+                    )}
                     {f.status === 'queued' && <span>Queued</span>}
                     {f.status === 'done' && <span className="text-green-700">Uploaded</span>}
                   </div>
@@ -586,9 +674,17 @@ export default function CreatorUpload({ token, shows, uploads, setUploads, draft
                 >Delete</button>
               </div>
               {f.status === 'uploading' && (
-                <div className="mt-2 h-2 rounded bg-muted">
-                  <div className="h-2 rounded bg-indigo-600" style={{ width: f.progress + '%' }} />
-                </div>
+                <>
+                  <div className="mt-2 h-2 rounded bg-muted">
+                    <div className="h-2 rounded bg-indigo-600" style={{ width: f.progress + '%' }} />
+                  </div>
+                  {(() => {
+                    const detail = formatProgressDetail(f.loadedBytes, f.totalBytes, f.bytesPerSecond, null);
+                    return detail ? (
+                      <div className="mt-1 text-xs text-muted-foreground">{detail}</div>
+                    ) : null;
+                  })()}
+                </>
               )}
               <div className="mt-2 grid sm:grid-cols-2 gap-2">
                 <label className="text-xs">
