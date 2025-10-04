@@ -282,8 +282,14 @@ export default function NewLanding() {
           </div>
 
           <div className="nl-hero-media">
-            <div className="nl-hero-frame">
-              <div className="nl-hero-placeholder">Immersive Studio Preview</div>
+            <figure className="nl-hero-frame">
+              <img
+                src="/modern-podcast-recording-studio-with-professional-.jpg"
+                alt="Modern podcast recording studio"
+                className="nl-hero-image"
+                loading="eager"
+              />
+              <span className="nl-hero-overlay" aria-hidden="true" />
               <div
                 className="nl-float-card"
                 style={{ background: 'hsla(0, 0%, 100%, 0.92)' }}
@@ -314,10 +320,45 @@ export default function NewLanding() {
                   <p className="text-sm text-muted-foreground">CDN Distribution</p>
                 </div>
               </div>
-            </div>
+            </figure>
           </div>
         </div>
       </header>
+
+      <section className="nl-section nl-section-highlight">
+        <div className="nl-container nl-split">
+          <div className="nl-split-media">
+            <figure className="nl-media-frame">
+              <img
+                src="/ai-podcast-editing-interface.jpg"
+                alt="AI-powered editing interface"
+                className="nl-media-image"
+                loading="lazy"
+              />
+              <span className="nl-media-overlay" aria-hidden="true" />
+            </figure>
+            <div className="nl-media-card">
+              <p className="font-semibold text-base">“This is the future of podcasting.”</p>
+              <p className="text-sm text-muted-foreground">What our beta testers are saying</p>
+            </div>
+          </div>
+          <div className="nl-split-content">
+            <div className="nl-pill">AI That Works For You</div>
+            <h2 className="nl-hero-title" style={{ fontSize: 'clamp(2.2rem, 4vw, 3.1rem)', marginBottom: '1.5rem' }}>
+              Edit in Real-Time While You Record
+            </h2>
+            <p className="nl-lead" style={{ marginBottom: '1.75rem' }}>
+              Our AI removes awkward pauses, balances audio levels, writes show notes, and creates marketing clips as you speak.
+              It&apos;s like having an entire production team behind the scenes—without the cost.
+            </p>
+            <ul className="nl-bullets">
+              <li>Smart cleanup removes filler words and background noise automatically</li>
+              <li>Live chapter markers and highlights created for every episode</li>
+              <li>Instant exports optimized for every major podcast platform</li>
+            </ul>
+          </div>
+        </div>
+      </section>
 
       <section className="nl-section nl-section-muted" id="about">
         <div className="nl-container">
@@ -336,17 +377,20 @@ export default function NewLanding() {
               <PillarCard key={pillar.title} {...pillar} />
             ))}
           </div>
-          <div className="nl-card" style={{ marginTop: '2.75rem' }}>
-            <div className="grid gap-6 md:grid-cols-[1.25fr_1fr] md:items-end">
-              <div>
-                <h3 className="text-2xl font-semibold mb-2">Your Voice. Your Vision. Your Control.</h3>
-                <p className="nl-lead">
-                  No middleman. No compromises. Just pure creative freedom. We built the workflow so you can focus on what you
-                  say—not how to edit it later.
-                </p>
-              </div>
-              <div className="nl-pill justify-center md:justify-end">Launch in hours, not weeks</div>
-            </div>
+          <div className="nl-media-highlight">
+            <figure className="nl-media-frame">
+              <img
+                src="/podcast-creator-workflow.jpg"
+                alt="Simple podcast creator workflow"
+                className="nl-media-image"
+                loading="lazy"
+              />
+              <span className="nl-media-overlay" aria-hidden="true" />
+              <figcaption className="nl-media-caption">
+                <h3>Your Voice. Your Vision. Your Control.</h3>
+                <p>No middleman. No compromises. Just pure creative freedom.</p>
+              </figcaption>
+            </figure>
           </div>
         </div>
       </section>
@@ -421,20 +465,26 @@ export default function NewLanding() {
               ))}
             </div>
           </div>
-          <div className="nl-card">
-            <h3 className="text-2xl font-semibold mb-3">“This is the future of podcasting.”</h3>
-            <p className="nl-lead">
-              What our beta testers are saying. Every workflow, every pixel, and every AI capability is designed to save you time
-              while elevating your storytelling.
-            </p>
-              <div className="nl-pill" style={{ marginTop: '1.75rem', justifyContent: 'center' }}>
-                Built with podcasters, for podcasters
-              </div>
+          <div className="nl-why-media">
+            <figure className="nl-media-frame">
+              <img
+                src="/podcast-success-dashboard.jpg"
+                alt="Podcast performance dashboard"
+                className="nl-media-image"
+                loading="lazy"
+              />
+              <span className="nl-media-overlay" aria-hidden="true" />
+            </figure>
+            <div className="nl-float-card nl-quote-card">
+              <p className="font-semibold text-base">“This is the future of podcasting.”</p>
+              <p className="text-sm text-muted-foreground">What our beta testers are saying</p>
+            </div>
           </div>
         </div>
       </section>
 
-      <section className="nl-section" style={{ position: 'relative', overflow: 'hidden' }}>
+      <section className="nl-section nl-section-cta" style={{ position: 'relative', overflow: 'hidden' }}>
+        <div className="nl-cta-pattern" aria-hidden="true" />
         <div className="nl-container" style={{ textAlign: 'center' }}>
           <div className="nl-pill" style={{ justifyContent: 'center', marginBottom: '1.5rem' }}>
             Ready when you are
