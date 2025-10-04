@@ -2,9 +2,9 @@
 
 import json
 from uuid import uuid4, UUID
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import os
 
@@ -21,6 +21,8 @@ from fastapi import (
 from sqlmodel import Session, select
 from sqlalchemy import func
 
+from pydantic import BaseModel
+
 from api.core.paths import MEDIA_DIR
 from api.models.podcast import MediaItem, MediaCategory, PodcastTemplate
 from api.models.transcription import TranscriptionWatch
@@ -29,6 +31,11 @@ from api.core.database import get_session
 from api.routers.auth import get_current_user
 from infrastructure.tasks_client import enqueue_http_task
 from infrastructure.gcs import upload_bytes, upload_fileobj, delete_gcs_blob
+
+try:  # Optional at import time; runtime will surface clear error if unavailable
+    from google.cloud import storage  # type: ignore
+except Exception:  # pragma: no cover - environment without google-cloud-storage
+    storage = None  # type: ignore
 
 from .schemas import MediaItemUpdate
 from .common import sanitize_name, copy_with_limit
@@ -42,6 +49,66 @@ except Exception:  # pragma: no cover
 router = APIRouter(prefix="/media", tags=["Media Library"])
 
 MEDIA_BUCKET = os.getenv("MEDIA_BUCKET")
+MB = 1024 * 1024
+
+CATEGORY_SIZE_LIMITS = {
+    MediaCategory.main_content: 1536 * MB,  # 1.5 GB
+    MediaCategory.intro: 50 * MB,
+    MediaCategory.outro: 50 * MB,
+    MediaCategory.music: 50 * MB,
+    MediaCategory.commercial: 50 * MB,
+    MediaCategory.sfx: 25 * MB,
+    MediaCategory.podcast_cover: 15 * MB,
+    MediaCategory.episode_cover: 15 * MB,
+}
+
+AUDIO_PREFIX = "audio/"
+IMAGE_PREFIX = "image/"
+CATEGORY_TYPE_PREFIX = {
+    MediaCategory.main_content: AUDIO_PREFIX,
+    MediaCategory.intro: AUDIO_PREFIX,
+    MediaCategory.outro: AUDIO_PREFIX,
+    MediaCategory.music: AUDIO_PREFIX,
+    MediaCategory.commercial: AUDIO_PREFIX,
+    MediaCategory.sfx: AUDIO_PREFIX,
+    MediaCategory.podcast_cover: IMAGE_PREFIX,
+    MediaCategory.episode_cover: IMAGE_PREFIX,
+}
+
+AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".webm", ".mp4"}
+IMAGE_EXTS = {".png", ".jpg", ".jpeg"}
+ENFORCE_UNIQUE = {
+    MediaCategory.intro,
+    MediaCategory.outro,
+    MediaCategory.sfx,
+}
+
+
+class PresignUploadRequest(BaseModel):
+    filename: str
+    content_type: Optional[str] = None
+
+
+class PresignUploadResponse(BaseModel):
+    upload_url: str
+    object_path: str
+    headers: Dict[str, str] = {}
+    expires_in_seconds: Optional[int] = None
+    max_bytes: Optional[int] = None
+
+
+class RegisterUploadItem(BaseModel):
+    object_path: str
+    friendly_name: Optional[str] = None
+    original_filename: Optional[str] = None
+    content_type: Optional[str] = None
+    size: Optional[int] = None
+
+
+class RegisterUploadsRequest(BaseModel):
+    uploads: List[RegisterUploadItem]
+    notify_when_ready: Optional[bool] = None
+    notify_email: Optional[str] = None
 
 def _is_dev_env() -> bool:
     val = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower()
@@ -56,6 +123,16 @@ def _require_bucket() -> str:
     if not bucket:
         raise HTTPException(status_code=500, detail="Media storage bucket is not configured. Set the MEDIA_BUCKET environment variable.")
     return bucket
+
+
+def _storage_client():
+    if storage is None:
+        raise HTTPException(status_code=500, detail="google-cloud-storage client is not available")
+    try:
+        return storage.Client()
+    except Exception as exc:  # pragma: no cover - client initialization failure is environment-specific
+        logging.exception("event=upload.presign_client_init_failed err=%s", exc)
+        raise HTTPException(status_code=500, detail="Unable to initialize Google Cloud Storage client")
 
 
 def parse_friendly_names(raw: str | None) -> list[str]:
@@ -73,6 +150,305 @@ def parse_friendly_names(raw: str | None) -> list[str]:
         if s.startswith("[") and s.endswith("]"):
             s = s[1:-1]
         return [p.strip() for p in s.split(",") if p.strip()]
+
+
+@router.post("/upload/{category}/presign", response_model=PresignUploadResponse)
+def create_presigned_upload(
+    category: MediaCategory,
+    req: PresignUploadRequest,
+    current_user: User = Depends(get_current_user),
+):
+    bucket_name = _require_bucket()
+    client = _storage_client()
+
+    requested_ct = (req.content_type or "").strip().lower()
+    type_prefix = CATEGORY_TYPE_PREFIX.get(category)
+    if type_prefix and requested_ct and not requested_ct.startswith(type_prefix):
+        # Permit opaque defaults when browsers omit specific content-types
+        if requested_ct not in {"", "application/octet-stream"}:
+            expected = "audio" if type_prefix == AUDIO_PREFIX else "image"
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid content type '{requested_ct}'. Expected {expected}/* for category '{category.value}'.",
+            )
+
+    safe_name = sanitize_name(req.filename or "upload") or "upload"
+    object_key = f"{current_user.id}/{category.value}/{uuid4().hex}_{safe_name}"
+
+    blob = client.bucket(bucket_name).blob(object_key)
+    ttl_minutes = int(os.getenv("GCS_SIGNED_URL_TTL_MIN", "15") or "15")
+    ttl_minutes = max(1, min(ttl_minutes, 1440))
+    expires = timedelta(minutes=ttl_minutes)
+    if requested_ct:
+        content_type = requested_ct
+    elif type_prefix == IMAGE_PREFIX:
+        content_type = "image/jpeg"
+    else:
+        content_type = "application/octet-stream"
+    if not content_type:
+        content_type = "application/octet-stream"
+
+    try:
+        upload_url = blob.generate_signed_url(
+            version="v4",
+            expiration=expires,
+            method="PUT",
+            content_type=content_type,
+        )
+    except Exception as exc:  # pragma: no cover - depends on cloud environment
+        logging.exception("event=upload.presign_failed err=%s", exc)
+        raise HTTPException(status_code=500, detail="Failed to generate upload URL")
+
+    headers: Dict[str, str] = {"Content-Type": content_type}
+    max_bytes = CATEGORY_SIZE_LIMITS.get(category, 50 * MB)
+
+    return PresignUploadResponse(
+        upload_url=upload_url,
+        object_path=f"gs://{bucket_name}/{object_key}",
+        headers=headers,
+        expires_in_seconds=int(expires.total_seconds()),
+        max_bytes=max_bytes,
+    )
+
+
+@router.post("/upload/{category}/register", response_model=List[MediaItem], status_code=status.HTTP_201_CREATED)
+def register_uploaded_media(
+    category: MediaCategory,
+    payload: RegisterUploadsRequest,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    uploads = payload.uploads or []
+    if not uploads:
+        raise HTTPException(status_code=400, detail="No uploads provided")
+
+    notify_requested = bool(payload.notify_when_ready)
+    notify_target = (payload.notify_email or "").strip()
+    if notify_requested and not notify_target:
+        try:
+            notify_target = (current_user.email or "").strip() if hasattr(current_user, "email") else ""
+        except Exception:
+            notify_target = ""
+    if notify_target and "@" not in notify_target:
+        notify_target = ""
+
+    def _queue_watch(filename: str, friendly: str) -> None:
+        if not filename or category != MediaCategory.main_content:
+            return
+
+        email_target = notify_target if notify_requested and notify_target else None
+        try:
+            existing_watch = session.exec(
+                select(TranscriptionWatch).where(
+                    TranscriptionWatch.user_id == current_user.id,
+                    TranscriptionWatch.filename == filename,
+                )
+            ).first()
+        except Exception:
+            existing_watch = None
+
+        friendly_clean = (friendly or "").strip() or Path(filename).stem
+
+        if existing_watch:
+            existing_watch.filename = filename
+            existing_watch.notify_email = email_target
+            existing_watch.friendly_name = friendly_clean
+            existing_watch.notified_at = None
+            existing_watch.last_status = "queued"
+            session.add(existing_watch)
+        else:
+            session.add(
+                TranscriptionWatch(
+                    user_id=current_user.id,
+                    filename=filename,
+                    friendly_name=friendly_clean,
+                    notify_email=email_target,
+                    last_status="queued",
+                    notified_at=None,
+                )
+            )
+
+    client = _storage_client()
+    default_bucket = _require_bucket()
+    max_bytes = CATEGORY_SIZE_LIMITS.get(category, 50 * MB)
+    type_prefix = CATEGORY_TYPE_PREFIX.get(category)
+    created_items: List[MediaItem] = []
+    pending_transcriptions: List[tuple[str, str]] = []
+    overwritten_blobs: List[tuple[str, str]] = []
+    batch_names_lower: set[str] = set()
+
+    for item in uploads:
+        object_path = (item.object_path or "").strip()
+        if not object_path.startswith("gs://"):
+            raise HTTPException(status_code=400, detail="object_path must start with gs://")
+        without_scheme = object_path[5:]
+        bucket_name, _, object_key = without_scheme.partition("/")
+        if not bucket_name or not object_key:
+            raise HTTPException(status_code=400, detail="Invalid object_path")
+        if bucket_name != default_bucket:
+            raise HTTPException(status_code=400, detail="Uploads must target the configured media bucket")
+        if not object_key.startswith(f"{current_user.id}/"):
+            raise HTTPException(status_code=403, detail="Uploads must be scoped to the requesting user")
+
+        blob = client.bucket(bucket_name).blob(object_key)
+        try:
+            blob.reload()
+        except Exception:
+            raise HTTPException(status_code=404, detail="Uploaded object not found. Please retry.")
+
+        file_size = int(getattr(blob, "size", 0) or 0)
+        if file_size <= 0:
+            raise HTTPException(status_code=400, detail="Uploaded object appears empty")
+        if file_size > max_bytes:
+            raise HTTPException(status_code=413, detail="File too large.")
+
+        actual_ct = (item.content_type or blob.content_type or "").strip().lower()
+        if type_prefix and actual_ct and not actual_ct.startswith(type_prefix):
+            if actual_ct not in {"", "application/octet-stream"}:
+                expected = "audio" if type_prefix == AUDIO_PREFIX else "image"
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid content type '{actual_ct}'. Expected {expected}/* for category '{category.value}'.",
+                )
+
+        original_name = item.original_filename or Path(object_key).name
+        default_friendly_name = " ".join(Path(original_name).stem.split("_")).title() or Path(object_key).stem
+        provided_clean = (item.friendly_name or "").strip()
+        if category == MediaCategory.main_content and not provided_clean:
+            raise HTTPException(status_code=400, detail="Friendly name is required when uploading episode audio.")
+
+        friendly_name = provided_clean or default_friendly_name
+        fn_norm = str(friendly_name).strip() or default_friendly_name
+        fn_key = fn_norm.lower()
+
+        existing_item = session.exec(
+            select(MediaItem)
+            .where(
+                MediaItem.user_id == current_user.id,
+                MediaItem.category == category,
+                func.lower(MediaItem.friendly_name) == fn_key,
+            )
+        ).first()
+
+        if existing_item is not None:
+            previous_uri = str(existing_item.filename or "").strip()
+            existing_item.filename = object_path
+            existing_item.content_type = actual_ct or None
+            existing_item.filesize = file_size
+            session.add(existing_item)
+            created_items.append(existing_item)
+            batch_names_lower.add(fn_key)
+            if previous_uri and previous_uri.startswith("gs://") and previous_uri != object_path:
+                prev_without_scheme = previous_uri[5:]
+                prev_bucket, _, prev_key = prev_without_scheme.partition("/")
+                if prev_bucket and prev_key:
+                    overwritten_blobs.append((prev_bucket, prev_key))
+            try:
+                _queue_watch(object_path, fn_norm)
+            except Exception:
+                pass
+            if category == MediaCategory.main_content:
+                pending_transcriptions.append((object_path, "overwrite"))
+        else:
+            if category in ENFORCE_UNIQUE:
+                if fn_key in batch_names_lower:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Duplicate name in upload: '{fn_norm}'. Each uploaded item must have a unique name.",
+                    )
+                batch_names_lower.add(fn_key)
+
+            media_item = MediaItem(
+                filename=object_path,
+                friendly_name=str(fn_norm),
+                content_type=(actual_ct or None),
+                filesize=file_size,
+                user_id=current_user.id,
+                category=category,
+            )
+            try:
+                if category == MediaCategory.main_content:
+                    from api.main import _compute_pt_expiry  # type: ignore
+
+                    now_utc = datetime.utcnow()
+                    media_item.expires_at = _compute_pt_expiry(now_utc)
+            except Exception:
+                pass
+
+            session.add(media_item)
+            created_items.append(media_item)
+            try:
+                _queue_watch(object_path, fn_norm)
+            except Exception:
+                pass
+            if category == MediaCategory.main_content:
+                pending_transcriptions.append((object_path, "new"))
+
+        try:
+            logging.info(
+                "event=upload.register user_id=%s category=%s object=%s size=%d content_type=%s",
+                current_user.id,
+                category.value,
+                object_path,
+                file_size,
+                actual_ct or "",
+            )
+        except Exception:
+            pass
+
+    try:
+        session.commit()
+    except Exception as db_err:
+        try:
+            session.rollback()
+        except Exception:
+            pass
+        logging.error("event=upload.register_db_failed err=%s items=%d", db_err, len(created_items))
+        raise HTTPException(status_code=500, detail="Failed to save uploaded media. Please retry.")
+
+    for item in created_items:
+        session.refresh(item)
+
+    for filename, context in pending_transcriptions:
+        safe_filename = (filename or "").strip()
+        if not safe_filename:
+            continue
+        context_suffix = " (overwrite)" if context == "overwrite" else ""
+        try:
+            logging.info(
+                "event=upload.enqueue attempt=true%s filename=%s cfg_project=%s cfg_loc=%s cfg_queue=%s cfg_base=%s dev=%s",
+                context_suffix,
+                safe_filename,
+                os.getenv("GOOGLE_CLOUD_PROJECT"),
+                os.getenv("TASKS_LOCATION"),
+                os.getenv("TASKS_QUEUE"),
+                os.getenv("TASKS_URL_BASE"),
+                _is_dev_env(),
+            )
+            task = enqueue_http_task("/api/tasks/transcribe", {"filename": safe_filename})
+            logging.info(
+                "event=upload.enqueue ok=true%s filename=%s task_name=%s",
+                context_suffix,
+                safe_filename,
+                task.get("name"),
+            )
+        except Exception as enqueue_err:
+            logging.warning(
+                "event=upload.enqueue ok=false%s filename=%s err=%s hint=%s",
+                context_suffix,
+                safe_filename,
+                enqueue_err,
+                f"Check Cloud Tasks config GOOGLE_CLOUD_PROJECT={os.getenv('GOOGLE_CLOUD_PROJECT')} TASKS_LOCATION={os.getenv('TASKS_LOCATION')} TASKS_QUEUE={os.getenv('TASKS_QUEUE')} TASKS_URL_BASE={os.getenv('TASKS_URL_BASE')} (dev={_is_dev_env()})",
+            )
+
+    for bucket_name, object_key in overwritten_blobs:
+        try:
+            if bucket_name and object_key:
+                delete_gcs_blob(bucket_name, object_key)
+        except Exception:
+            pass
+
+    return created_items
 
 
 @router.post("/upload/{category}", response_model=List[MediaItem], status_code=status.HTTP_201_CREATED)
@@ -95,9 +471,9 @@ async def upload_media_files(
     - For main_content, assigns expires_at and fires async transcription task
     """
     created_items: List[MediaItem] = []
-    pending_transcriptions: list[tuple[str, str]] = []  # (filename, context)
+    pending_transcriptions: List[tuple[str, str]] = []  # (filename, context)
     # Track gs:// objects created in this request so we can delete them on DB failure
-    uploaded_objects: list[tuple[str, str]] = []  # (bucket, key)
+    uploaded_objects: List[tuple[str, str]] = []  # (bucket, key)
     names = parse_friendly_names(friendly_names)
 
     # When uploading the primary episode audio, a human-friendly label must be
@@ -164,34 +540,6 @@ async def upload_media_files(
     # Track duplicates within this request batch
     batch_names_lower: set[str] = set()
 
-    MB = 1024 * 1024
-    CATEGORY_SIZE_LIMITS = {
-        MediaCategory.main_content: 1536 * MB,  # 1.5 GB
-        MediaCategory.intro: 50 * MB,
-        MediaCategory.outro: 50 * MB,
-        MediaCategory.music: 50 * MB,
-        MediaCategory.commercial: 50 * MB,
-        MediaCategory.sfx: 25 * MB,
-        MediaCategory.podcast_cover: 15 * MB,
-        MediaCategory.episode_cover: 15 * MB,
-    }
-
-    AUDIO_PREFIX = "audio/"
-    IMAGE_PREFIX = "image/"
-    CATEGORY_TYPE_PREFIX = {
-        MediaCategory.main_content: AUDIO_PREFIX,
-        MediaCategory.intro: AUDIO_PREFIX,
-        MediaCategory.outro: AUDIO_PREFIX,
-        MediaCategory.music: AUDIO_PREFIX,
-        MediaCategory.commercial: AUDIO_PREFIX,
-        MediaCategory.sfx: AUDIO_PREFIX,
-        MediaCategory.podcast_cover: IMAGE_PREFIX,
-        MediaCategory.episode_cover: IMAGE_PREFIX,
-    }
-
-    AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".webm", ".mp4"}
-    IMAGE_EXTS = {".png", ".jpg", ".jpeg"}
-
     def _validate_meta(f: UploadFile, cat: MediaCategory) -> None:
         ct = (getattr(f, "content_type", None) or "").lower()
         type_prefix = CATEGORY_TYPE_PREFIX.get(cat)
@@ -241,12 +589,6 @@ async def upload_media_files(
 
         # Only enforce uniqueness for specific library categories. For episode/podcast covers
         # and main content, duplicates are allowed.
-        ENFORCE_UNIQUE = {
-            MediaCategory.intro,
-            MediaCategory.outro,
-            MediaCategory.sfx,
-        }
-
         # Prepare upload environment
         max_bytes = CATEGORY_SIZE_LIMITS.get(category, 50 * MB)
         default_bucket = _require_bucket()

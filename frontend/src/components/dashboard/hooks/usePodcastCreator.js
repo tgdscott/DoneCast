@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from '@/hooks/use-toast';
-import { makeApi, buildApiUrl, coerceArray } from '@/lib/apiClient';
+import { makeApi, coerceArray } from '@/lib/apiClient';
+import { uploadMediaDirect } from '@/lib/directUpload';
 import { fetchVoices as fetchElevenVoices } from '@/api/elevenlabs';
 import { useAuth } from '@/AuthContext.jsx';
 
@@ -961,68 +962,19 @@ export default function usePodcastCreator({
     setStatusMessage('Uploading audio file...');
     setError('');
 
-    const formData = new FormData();
-    formData.append('files', file);
-    formData.append('friendly_names', JSON.stringify([file.name]));
-
-    const authToken = token || (() => { try { return localStorage.getItem('authToken'); } catch { return null; } })();
-
-    const performUpload = () => new Promise((resolve, reject) => {
-      try {
-        if (typeof XMLHttpRequest === 'undefined') {
-          const api = makeApi(token);
-          api.raw('/api/media/upload/main_content', { method: 'POST', body: formData })
-            .then(resolve)
-            .catch(reject);
-          return;
-        }
-        const xhr = new XMLHttpRequest();
-        uploadXhrRef.current = xhr;
-        xhr.open('POST', buildApiUrl('/api/media/upload/main_content'));
-        xhr.withCredentials = true;
-        if (authToken) {
-          xhr.setRequestHeader('Authorization', `Bearer ${authToken}`);
-        }
-        xhr.responseType = 'json';
-        xhr.upload.onprogress = (event) => {
-          if (!event.lengthComputable) return;
-          const pct = Math.min(100, Math.round((event.loaded / event.total) * 100));
-          setUploadProgress(pct);
-        };
-        xhr.onerror = () => {
-          reject(new Error('Upload failed. Please try again.'));
-        };
-        xhr.onload = () => {
-          uploadXhrRef.current = null;
-          const safeResponse = (() => {
-            if (xhr.response != null) return xhr.response;
-            try {
-              return JSON.parse(xhr.responseText || '');
-            } catch (_) {
-              return null;
-            }
-          })();
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve(safeResponse);
-            return;
-          }
-          const message = (safeResponse && (safeResponse.error || safeResponse.detail || safeResponse.message))
-            || `Upload failed with status ${xhr.status}`;
-          reject(new Error(message));
-        };
-        xhr.onabort = () => {
-          uploadXhrRef.current = null;
-          reject(new Error('Upload cancelled'));
-        };
-        xhr.send(formData);
-      } catch (err) {
-        reject(err);
-      }
-    });
-
     try {
-      const result = await performUpload();
-      const entries = Array.isArray(result) ? result : (result?.files || []);
+      const entries = await uploadMediaDirect({
+        category: 'main_content',
+        file,
+        friendlyName: file.name,
+        token,
+        onProgress: ({ percent }) => {
+          if (typeof percent === 'number') setUploadProgress(percent);
+        },
+        onXhrCreate: (xhr) => {
+          uploadXhrRef.current = xhr;
+        },
+      });
       const fname = entries[0]?.filename;
       setUploadedFilename(fname);
       try {
@@ -1039,6 +991,7 @@ export default function usePodcastCreator({
       } catch {}
       setUploadProgress(null);
     } finally {
+      uploadXhrRef.current = null;
       setIsUploading(false);
       setTimeout(() => setUploadProgress(null), 400);
     }

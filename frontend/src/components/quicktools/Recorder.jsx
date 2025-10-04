@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { ArrowLeft, Mic, Square, Loader2, CheckCircle } from "lucide-react";
 import { makeApi } from "@/lib/apiClient";
+import { uploadMediaDirect } from "@/lib/directUpload";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Recorder({ onBack, token, onFinish, onSaved, source="A" }) {
@@ -587,13 +588,13 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source="A" 
   setSavedDisplayName(filenameWithExt);
       // Build File from Blob so server receives a filename with extension
       const file = new File([audioBlob], filenameWithExt, { type: mimeType || audioBlob.type || "audio/webm" });
-      const form = new FormData();
-      form.append("files", file);
-      form.append("friendly_names", JSON.stringify([baseName]));
-      const api = makeApi(token);
-  const res = await api.raw("/api/media/upload/main_content", { method: "POST", body: form });
-  const arr = Array.isArray(res) ? res : (res && res.data ? res.data : null);
-  const first = Array.isArray(arr) ? arr[0] : null;
+      const uploaded = await uploadMediaDirect({
+        category: 'main_content',
+        file,
+        friendlyName: baseName,
+        token,
+      });
+      const first = Array.isArray(uploaded) ? uploaded[0] : null;
       const stored = first && (first.filename || first.name || first.stored_name);
       if (!stored) throw new Error("Upload response missing filename");
       setServerFilename(stored);

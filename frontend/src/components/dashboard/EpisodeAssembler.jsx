@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { ArrowLeft, Loader2 } from "lucide-react"
 import { useState, useEffect } from "react"
 import { makeApi, isApiError } from "@/lib/apiClient"
+import { uploadMediaDirect } from "@/lib/directUpload"
 
 export default function EpisodeAssembler({ templates, onBack, token }) {
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
@@ -53,12 +54,18 @@ export default function EpisodeAssembler({ templates, onBack, token }) {
     setError('');
     setAssembledEpisode(null);
     setStatusMessage('Step 1/2: Uploading main content audio...');
-    const formData = new FormData();
-    formData.append("files", mainContentFile);
     try {
       const api = makeApi(token);
-      const uploadResult = await api.raw('/api/media/upload/main_content', { method: 'POST', body: formData });
-      const uploadedFilename = uploadResult[0].filename;
+      const uploadResult = await uploadMediaDirect({
+        category: 'main_content',
+        file: mainContentFile,
+        friendlyName: mainContentFile.name,
+        token,
+      });
+      const uploadedFilename = uploadResult?.[0]?.filename;
+      if (!uploadedFilename) {
+        throw new Error('Upload did not return a filename.');
+      }
       setStatusMessage(`Step 2/2: Assembling episode... This may take a moment.`);
       const assembleResult = await api.post('/api/episodes/assemble', {
         template_id: selectedTemplateId,
