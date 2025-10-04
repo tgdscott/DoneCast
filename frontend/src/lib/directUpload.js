@@ -27,6 +27,10 @@ function uploadWithXmlHttpRequest(url, file, headers = {}, { onProgress, signal,
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    const startTime = Date.now();
+    let lastLoaded = 0;
+    let lastTime = startTime;
+    let smoothedSpeed = null;
     let abortHandler;
     try {
       xhr.open('PUT', url);
@@ -64,12 +68,63 @@ function uploadWithXmlHttpRequest(url, file, headers = {}, { onProgress, signal,
 
     xhr.upload.onprogress = (event) => {
       if (!event || typeof onProgress !== 'function') return;
+      const now = Date.now();
+      const elapsedSeconds = (now - startTime) / 1000;
+
+      let bytesPerSecond = null;
+      let etaSeconds = null;
+
+      if (elapsedSeconds > 0 && event.loaded >= 0) {
+        const averageSpeed = event.loaded / elapsedSeconds;
+        if (Number.isFinite(averageSpeed) && averageSpeed > 0) {
+          bytesPerSecond = averageSpeed;
+        }
+      }
+
+      const deltaTime = (now - lastTime) / 1000;
+      const deltaLoaded = event.loaded - lastLoaded;
+      if (deltaTime > 0 && deltaLoaded >= 0) {
+        const instantSpeed = deltaLoaded / deltaTime;
+        if (Number.isFinite(instantSpeed) && instantSpeed > 0) {
+          smoothedSpeed = smoothedSpeed == null
+            ? instantSpeed
+            : (smoothedSpeed * 0.7) + (instantSpeed * 0.3);
+        }
+      }
+
+      if (smoothedSpeed == null && bytesPerSecond) {
+        smoothedSpeed = bytesPerSecond;
+      }
+
+      if (smoothedSpeed && event.lengthComputable && event.total > event.loaded) {
+        const remaining = event.total - event.loaded;
+        const eta = remaining / smoothedSpeed;
+        if (Number.isFinite(eta) && eta >= 0) {
+          etaSeconds = eta;
+        }
+      }
+
+      lastLoaded = event.loaded;
+      lastTime = now;
+
       if (!event.lengthComputable) {
-        onProgress({ loaded: event.loaded, total: event.total, percent: null });
+        onProgress({
+          loaded: event.loaded,
+          total: event.total,
+          percent: null,
+          bytesPerSecond: smoothedSpeed || bytesPerSecond || null,
+          etaSeconds,
+        });
         return;
       }
       const percent = event.total > 0 ? Math.min(100, Math.round((event.loaded / event.total) * 100)) : null;
-      onProgress({ loaded: event.loaded, total: event.total, percent });
+      onProgress({
+        loaded: event.loaded,
+        total: event.total,
+        percent,
+        bytesPerSecond: smoothedSpeed || bytesPerSecond || null,
+        etaSeconds,
+      });
     };
 
     xhr.onerror = () => {
