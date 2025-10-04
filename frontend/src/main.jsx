@@ -14,6 +14,8 @@ import TermsOfUse from '@/pages/TermsOfUse.jsx';
 import Verify from '@/pages/Verify.jsx';
 import Pricing from '@/pages/Pricing.jsx';
 import PodcastWebsiteBuilder from '@/pages/PodcastWebsiteBuilder.jsx';
+import NewLanding from '@/pages/NewLanding.jsx';
+import InDevelopment from '@/pages/InDevelopment.jsx';
 import { AuthProvider } from './AuthContext.jsx';
 import { BrandProvider } from './brand/BrandContext.jsx';
 import { ComfortProvider } from './ComfortContext.jsx';
@@ -89,7 +91,9 @@ try {
 }
 
 const router = createBrowserRouter([
-  { path: '/', element: <AppWithToasterWrapper />, errorElement: <ErrorPage /> },
+  { path: '/', element: <NewLanding /> },
+  { path: '/app', element: <AppWithToasterWrapper />, errorElement: <ErrorPage /> },
+  { path: '/app/*', element: <AppWithToasterWrapper />, errorElement: <ErrorPage /> },
   { path: '/admin', element: <AppWithToasterWrapper />, errorElement: <ErrorPage /> },
   { path: '/admin/*', element: <AppWithToasterWrapper />, errorElement: <ErrorPage /> },
   { path: '/dashboard', element: <AppWithToasterWrapper />, errorElement: <ErrorPage /> },
@@ -104,6 +108,7 @@ const router = createBrowserRouter([
   { path: '/pricing', element: <Pricing /> },
   { path: '/subscriptions', element: <Pricing /> },
   { path: '/docs/podcast-website-builder', element: <PodcastWebsiteBuilder /> },
+  { path: '/in-development', element: <InDevelopment /> },
   // Fallback 404 for any unknown route
   { path: '*', element: <NotFound /> },
 ]);
