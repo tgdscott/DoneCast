@@ -212,30 +212,16 @@ html.dark .nl-button-outline:hover {
   box-shadow: 0 25px 60px -35px rgba(15, 163, 177, 0.65);
 }
 
-.nl-hero-frame::before {
-  content: "";
+.nl-hero-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.nl-hero-overlay {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, hsla(185, 84%, 38%, 0.15), transparent 55%);
-}
-
-.nl-hero-placeholder {
-  width: 82%;
-  max-width: 440px;
-  aspect-ratio: 4 / 3;
-  border-radius: 18px;
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.85), rgba(243, 250, 255, 0.6));
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
-  display: grid;
-  place-items: center;
-  font-weight: 600;
-  color: hsl(var(--primary));
-  position: relative;
-}
-
-html.dark .nl-hero-placeholder {
-  background: linear-gradient(145deg, rgba(17, 24, 39, 0.95), rgba(30, 41, 59, 0.9));
-  color: hsla(185, 84%, 85%, 1);
+  background: linear-gradient(180deg, hsla(185, 84%, 38%, 0.3), transparent 55%);
 }
 
 .nl-float-card {
@@ -270,6 +256,99 @@ html.dark .nl-float-card {
   border-radius: 14px;
   display: grid;
   place-items: center;
+}
+
+.nl-section-highlight {
+  background: linear-gradient(135deg, hsla(185, 84%, 38%, 0.08), hsla(43, 100%, 51%, 0.05));
+}
+
+.nl-split {
+  display: grid;
+  gap: clamp(2.5rem, 4vw, 4rem);
+}
+
+@media (min-width: 992px) {
+  .nl-split {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: center;
+  }
+}
+
+.nl-split-media {
+  position: relative;
+  display: grid;
+  gap: 1.5rem;
+}
+
+.nl-media-frame {
+  position: relative;
+  border-radius: 26px;
+  overflow: hidden;
+  box-shadow: 0 25px 60px -35px rgba(15, 163, 177, 0.65);
+}
+
+.nl-media-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.nl-media-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, hsla(185, 84%, 38%, 0.25), transparent 60%);
+}
+
+.nl-media-card {
+  position: absolute;
+  bottom: -22px;
+  right: clamp(1rem, 4vw, 2.5rem);
+  padding: 1.4rem;
+  border-radius: 18px;
+  border: 1px solid hsl(var(--border));
+  background: hsla(0, 0%, 100%, 0.95);
+  box-shadow: 0 18px 35px -28px rgba(15, 163, 177, 0.6);
+  max-width: min(240px, 80%);
+}
+
+html.dark .nl-media-card {
+  background: hsla(240, 10%, 8%, 0.9);
+}
+
+@media (max-width: 639px) {
+  .nl-media-card {
+    position: relative;
+    bottom: unset;
+    right: unset;
+    margin: 0 auto;
+  }
+}
+
+.nl-split-content {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.nl-bullets {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.85rem;
+  font-size: 1rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.nl-bullets li::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: hsl(var(--primary));
+  display: inline-block;
+  margin-right: 0.6rem;
+  transform: translateY(-1px);
 }
 
 /* Sections */
@@ -414,6 +493,77 @@ html.dark .nl-card {
   color: hsl(var(--primary));
 }
 
+.nl-media-highlight {
+  margin-top: clamp(2.5rem, 5vw, 3.5rem);
+}
+
+.nl-media-highlight .nl-media-frame {
+  min-height: 340px;
+}
+
+.nl-media-caption {
+  position: absolute;
+  inset: auto clamp(1.5rem, 3vw, 2.5rem) clamp(1.5rem, 3vw, 2.5rem) clamp(1.5rem, 3vw, 2.5rem);
+  padding: 1.5rem;
+  border-radius: 18px;
+  background: hsla(220, 18%, 12%, 0.82);
+  color: white;
+  box-shadow: 0 18px 35px -28px rgba(15, 163, 177, 0.55);
+}
+
+.nl-media-caption h3 {
+  font-size: clamp(1.35rem, 2vw, 1.7rem);
+  font-weight: 700;
+  margin-bottom: 0.65rem;
+}
+
+.nl-media-caption p {
+  margin: 0;
+  font-size: 1rem;
+  color: hsla(0, 0%, 100%, 0.85);
+}
+
+html.dark .nl-media-caption {
+  background: hsla(240, 10%, 8%, 0.88);
+  color: hsl(var(--foreground));
+}
+
+html.dark .nl-media-caption p {
+  color: hsl(var(--muted-foreground));
+}
+
+@media (max-width: 639px) {
+  .nl-media-caption {
+    position: relative;
+    inset: unset;
+    margin: 1.25rem;
+  }
+}
+
+.nl-why-media {
+  position: relative;
+  display: inline-block;
+}
+
+.nl-why-media .nl-media-frame {
+  min-height: 320px;
+}
+
+.nl-quote-card {
+  bottom: -26px;
+  left: clamp(1rem, 4vw, 2.5rem);
+  max-width: 260px;
+}
+
+@media (max-width: 639px) {
+  .nl-quote-card {
+    position: relative;
+    bottom: unset;
+    left: unset;
+    margin-top: 1.5rem;
+  }
+}
+
 .nl-footer {
   background: hsla(0, 0%, 100%, 0.9);
   border-top: 1px solid hsl(var(--border));
@@ -480,4 +630,48 @@ html.dark .nl-footer {
   color: hsl(var(--muted-foreground));
   line-height: 1.75;
   text-wrap: pretty;
+}
+
+.nl-section-cta {
+  background: linear-gradient(135deg, hsla(185, 84%, 38%, 0.12), hsla(43, 100%, 51%, 0.12));
+  color: hsl(var(--primary-foreground));
+}
+
+.nl-section-cta .nl-hero-title span {
+  color: inherit;
+}
+
+.nl-section-cta .nl-button-outline {
+  border-color: hsla(0, 0%, 100%, 0.6) !important;
+  color: inherit;
+}
+
+.nl-section-cta .nl-button-outline:hover {
+  background: hsla(0, 0%, 100%, 0.12);
+}
+
+.nl-cta-pattern {
+  position: absolute;
+  inset: 0;
+  background-image: url('/abstract-podcast-waveform-pattern.jpg');
+  background-size: cover;
+  background-position: center;
+  opacity: 0.18;
+}
+
+.nl-section-cta .nl-pill,
+.nl-section-cta .nl-lead,
+.nl-section-cta .nl-hero-actions .nl-button,
+.nl-section-cta .nl-hero-actions .nl-button-outline,
+.nl-section-cta .text-muted-foreground {
+  color: inherit;
+}
+
+.nl-section-cta .nl-button {
+  background: hsla(0, 0%, 100%, 0.9);
+  color: hsl(var(--foreground));
+}
+
+.nl-section-cta .nl-button:hover {
+  background: hsla(0, 0%, 100%, 1);
 }
