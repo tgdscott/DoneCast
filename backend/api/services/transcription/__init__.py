@@ -10,15 +10,16 @@ working by providing the original helper functions and exporting the nested
 modules.
 """
 
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import json
 import logging
 import os
 import uuid
 
 from ...core.paths import MEDIA_DIR, TRANSCRIPTS_DIR
-from .watchers import notify_watchers_processed, mark_watchers_failed
+from .watchers import notify_watchers_processed, mark_watchers_failed, _candidate_filenames
 from ..audio.common import sanitize_filename
 
 
@@ -92,6 +93,171 @@ def _download_gcs_to_media(gcs_uri: str) -> str:
     blob = bucket.blob(key)
     blob.download_to_filename(str(dst_path))
     return dst_name
+
+
+def _store_media_transcript_metadata(
+    filename: str,
+    *,
+    stem: Optional[str] = None,
+    safe_stem: Optional[str] = None,
+    bucket: Optional[str] = None,
+    key: Optional[str] = None,
+    gcs_uri: Optional[str] = None,
+    gcs_url: Optional[str] = None,
+) -> None:
+    """Persist transcript metadata for a media upload for future reuse."""
+
+    cleaned = (filename or "").strip()
+    if not cleaned:
+        return
+
+    payload: Dict[str, Any] = {}
+    if stem:
+        payload["stem"] = stem
+    if safe_stem:
+        payload["bucket_stem"] = safe_stem
+    if bucket:
+        payload["gcs_bucket"] = bucket
+    if key:
+        payload["gcs_key"] = key
+    if gcs_uri:
+        payload["gcs_json"] = gcs_uri
+    if gcs_url:
+        payload.setdefault("gcs_url", gcs_url)
+
+    if not payload:
+        return
+
+    try:
+        from sqlmodel import Session, select
+
+        from api.core import database as db
+        from api.models.podcast import MediaItem
+        from api.models.transcription import MediaTranscript
+    except Exception:
+        logging.getLogger("transcription").warning(
+            "[transcription] Unable to import dependencies for transcript persistence", exc_info=True
+        )
+        return
+
+    candidates = _candidate_filenames(cleaned)
+    if cleaned not in candidates:
+        candidates.insert(0, cleaned)
+
+    try:
+        with Session(db.engine) as session:
+            media_item = session.exec(
+                select(MediaItem).where(MediaItem.filename.in_(candidates))
+            ).first()
+            media_item_id = getattr(media_item, "id", None) if media_item else None
+
+            existing = session.exec(
+                select(MediaTranscript).where(MediaTranscript.filename.in_(candidates))
+            ).all()
+
+            target = None
+            for record in existing:
+                if str(record.filename).strip() == cleaned:
+                    target = record
+                    break
+            if target is None and existing:
+                target = existing[0]
+
+            serialized = json.dumps(payload)
+            now = datetime.utcnow()
+
+            if target is not None:
+                target.filename = cleaned
+                target.transcript_meta_json = serialized
+                target.updated_at = now
+                if media_item_id:
+                    target.media_item_id = media_item_id
+                session.add(target)
+            else:
+                session.add(
+                    MediaTranscript(
+                        media_item_id=media_item_id,
+                        filename=cleaned,
+                        transcript_meta_json=serialized,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+
+            session.commit()
+    except Exception:
+        logging.getLogger("transcription").warning(
+            "[transcription] Failed to persist media transcript metadata for %s", cleaned, exc_info=True
+        )
+
+
+def load_media_transcript_metadata_for_filename(session, filename: str) -> Dict[str, Any] | None:
+    """Fetch stored transcript metadata for the provided media filename."""
+
+    if session is None:
+        return None
+
+    cleaned = (filename or "").strip()
+    if not cleaned:
+        return None
+
+    candidates = _candidate_filenames(cleaned)
+    if cleaned not in candidates:
+        candidates.insert(0, cleaned)
+
+    try:
+        from api.models.transcription import MediaTranscript
+        from sqlmodel import select
+    except Exception:
+        return None
+
+    try:
+        records = session.exec(
+            select(MediaTranscript).where(MediaTranscript.filename.in_(candidates))
+        ).all()
+    except Exception:
+        return None
+
+    target_stem = None
+    try:
+        target_stem = Path(cleaned).stem
+    except Exception:
+        target_stem = cleaned
+
+    if (not records) and target_stem:
+        try:
+            all_records = session.exec(select(MediaTranscript)).all()
+        except Exception:
+            all_records = []
+        normalized_target = str(target_stem or "").strip().lower()
+        for record in all_records:
+            try:
+                payload = json.loads(record.transcript_meta_json or "{}")
+            except Exception:
+                continue
+            candidates_stem = {
+                str(payload.get("stem") or "").strip().lower(),
+                str(payload.get("bucket_stem") or "").strip().lower(),
+            }
+            if normalized_target and normalized_target in candidates_stem:
+                records = [record]
+                break
+
+    if not records:
+        return None
+
+    preferred = None
+    for record in records:
+        if str(record.filename).strip() == cleaned:
+            preferred = record
+            break
+    if preferred is None:
+        preferred = records[0]
+
+    try:
+        return json.loads(preferred.transcript_meta_json or "{}")
+    except Exception:
+        return None
 
 
 def _read_existing_transcript_for(filename: str) -> List[Dict[str, Any]] | None:
@@ -170,6 +336,8 @@ def transcribe_media_file(filename: str) -> List[Dict[str, Any]]:
             # Upload permanently to GCS in a deterministic location: transcripts/{safe_stem}.json
             gcs_url = None
             gcs_uri = None
+            bucket = None
+            key = None
             try:
                 bucket = _resolve_transcripts_bucket()
                 from ...infrastructure.gcs import upload_bytes  # type: ignore
@@ -192,6 +360,21 @@ def transcribe_media_file(filename: str) -> List[Dict[str, Any]]:
                     exc_info=True,
                 )
                 raise
+
+            try:
+                _store_media_transcript_metadata(
+                    filename,
+                    stem=stem,
+                    safe_stem=safe_stem,
+                    bucket=bucket,
+                    key=key,
+                    gcs_uri=gcs_uri,
+                    gcs_url=gcs_url,
+                )
+            except Exception:
+                logging.warning(
+                    "[transcription] Failed to record media transcript metadata for %s", filename, exc_info=True
+                )
 
             # Record the GCS key on the episode for deterministic reuse during assembly
             try:
@@ -270,6 +453,7 @@ __all__ = [
     "TranscriptionError",
     "get_word_timestamps",
     "transcribe_media_file",
+    "load_media_transcript_metadata_for_filename",
     "assemblyai_client",
     "transcription_runner",
 ]

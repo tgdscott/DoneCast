@@ -17,6 +17,7 @@ from api.core.paths import MEDIA_DIR
 from api.models.podcast import Episode
 from api.models.settings import AppSetting
 from api.services.billing import usage as usage_svc
+from api.services.transcription import load_media_transcript_metadata_for_filename
 
 try:  # Optional dependency: Celery worker package is not always installed
     from worker.tasks import create_podcast_episode, celery_app  # type: ignore
@@ -142,6 +143,41 @@ def _can_run_inline() -> bool:
     """Return True if an inline fallback implementation is importable."""
 
     return _load_inline_executor() is not None
+
+
+def _merge_transcript_metadata_from_upload(
+    session: Session,
+    meta: Dict[str, Any],
+    main_content_filename: str,
+) -> Dict[str, Any]:
+    """Augment episode meta with persisted transcript metadata for the upload."""
+
+    if not isinstance(meta, dict):
+        meta = {}
+
+    try:
+        stored = load_media_transcript_metadata_for_filename(session, main_content_filename)
+    except Exception:
+        stored = None
+
+    if not stored:
+        return meta
+
+    transcripts_meta = meta.get("transcripts")
+    if not isinstance(transcripts_meta, dict):
+        transcripts_meta = {}
+
+    merged = dict(transcripts_meta)
+    for key, value in stored.items():
+        if key not in merged or merged.get(key) in (None, "", [], False):
+            merged[key] = value
+
+    if merged:
+        meta["transcripts"] = merged
+        if not meta.get("transcript_stem") and stored.get("stem"):
+            meta["transcript_stem"] = stored.get("stem")
+
+    return meta
 
 
 def _episodes_created_this_month(session: Session, user_id) -> int:
@@ -603,6 +639,7 @@ def assemble_or_queue(
             meta["episode_details"] = episode_details
         if intents:
             meta["intents"] = intents
+        meta = _merge_transcript_metadata_from_upload(session, meta, str(main_content_filename))
         ep.meta_json = _json.dumps(meta)
         session.add(ep)
         session.commit()
