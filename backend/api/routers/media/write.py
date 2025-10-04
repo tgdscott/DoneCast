@@ -156,6 +156,7 @@ def parse_friendly_names(raw: str | None) -> list[str]:
 def create_presigned_upload(
     category: MediaCategory,
     req: PresignUploadRequest,
+    request: Request,
     current_user: User = Depends(get_current_user),
 ):
     bucket_name = _require_bucket()
@@ -188,16 +189,32 @@ def create_presigned_upload(
     if not content_type:
         content_type = "application/octet-stream"
 
+    origin_header = (request.headers.get("origin") or "").strip()
+    allowed_origin = None
+    if origin_header:
+        allowed_origin = origin_header
+    else:
+        env_origin = (os.getenv("MEDIA_DIRECT_UPLOAD_ORIGIN") or "").strip()
+        if env_origin:
+            allowed_origin = env_origin
+
     try:
-        upload_url = blob.generate_signed_url(
-            version="v4",
-            expiration=expires,
-            method="PUT",
+        upload_url = blob.create_resumable_upload_session(
             content_type=content_type,
+            origin=allowed_origin,
         )
     except Exception as exc:  # pragma: no cover - depends on cloud environment
-        logging.exception("event=upload.presign_failed err=%s", exc)
-        raise HTTPException(status_code=500, detail="Failed to generate upload URL")
+        logging.exception("event=upload.presign_resumable_failed err=%s", exc)
+        try:
+            upload_url = blob.generate_signed_url(
+                version="v4",
+                expiration=expires,
+                method="PUT",
+                content_type=content_type,
+            )
+        except Exception as fallback_exc:  # pragma: no cover - depends on cloud environment
+            logging.exception("event=upload.presign_failed err=%s", fallback_exc)
+            raise HTTPException(status_code=500, detail="Failed to generate upload URL")
 
     headers: Dict[str, str] = {"Content-Type": content_type}
     max_bytes = CATEGORY_SIZE_LIMITS.get(category, 50 * MB)
