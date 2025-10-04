@@ -28,7 +28,16 @@ except Exception as _exc:  # pragma: no cover - best effort import guard
 else:
     ai_enhancer = _ai_enhancer  # type: ignore[assignment]
     _AI_IMPORT_ERROR = None
-from api.services.audio.orchestrator_steps import detect_and_prepare_ai_commands
+try:
+    from api.services.audio.orchestrator_steps import (
+        detect_and_prepare_ai_commands as _detect_and_prepare_ai_commands,
+    )
+except Exception as _orc_exc:  # pragma: no cover - optional dependency guard
+    detect_and_prepare_ai_commands = None  # type: ignore[assignment]
+    _ORCHESTRATOR_IMPORT_ERROR = _orc_exc
+else:
+    detect_and_prepare_ai_commands = _detect_and_prepare_ai_commands  # type: ignore[assignment]
+    _ORCHESTRATOR_IMPORT_ERROR = None
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from api.services import ai_enhancer as _ai_enhancer_typing
@@ -41,6 +50,7 @@ _LOG = logging.getLogger(__name__)
 _AI_IMPORT_LOGGED = False
 _AIEnhancerError = getattr(ai_enhancer, "AIEnhancerError", Exception)
 _AUDIO_IMPORT_LOGGED = False
+_ORCHESTRATOR_IMPORT_LOGGED = False
 
 
 def _require_ai_enhancer():
@@ -73,6 +83,25 @@ def _require_audio_segment() -> "AudioSegment":
             detail="Intern audio processing is not available right now. Please install pydub/ffmpeg.",
         )
     return AudioSegment
+
+
+def _require_detect_and_prepare_ai_commands():
+    global _ORCHESTRATOR_IMPORT_LOGGED
+    if detect_and_prepare_ai_commands is None:
+        if not _ORCHESTRATOR_IMPORT_LOGGED:
+            if _ORCHESTRATOR_IMPORT_ERROR:
+                _LOG.error("[intern] orchestrator steps unavailable: %s", _ORCHESTRATOR_IMPORT_ERROR)
+            else:
+                _LOG.error("[intern] orchestrator steps module missing")
+            _ORCHESTRATOR_IMPORT_LOGGED = True
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Intern AI command preparation is not available right now. "
+                "Please install the audio orchestrator dependencies and try again."
+            ),
+        )
+    return detect_and_prepare_ai_commands
 
 
 def _resolve_media_path(filename: str) -> Path:
@@ -151,8 +180,9 @@ def _detect_commands(
     log: List[str] = []
     cleanup = _default_cleanup_options(cleanup_options)
     words_path = str(transcript_path) if transcript_path else None
+    detector = _require_detect_and_prepare_ai_commands()
     try:
-        _mutable, _cfg, ai_cmds, _intern_count, _flubber_count = detect_and_prepare_ai_commands(
+        _mutable, _cfg, ai_cmds, _intern_count, _flubber_count = detector(
             words,
             cleanup,
             words_path,
