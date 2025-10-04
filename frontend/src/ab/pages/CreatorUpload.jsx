@@ -2,8 +2,8 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { useAbDrafts } from "../store/useAbDrafts";
 import { abApi } from "../lib/abApi";
-import { assetUrl } from "@/lib/apiClient.js";
 import { makeApi, buildApiUrl } from "@/lib/apiClient.js";
+import { uploadMediaDirect } from "@/lib/directUpload";
 import { fetchVoices as fetchElevenVoices } from "@/api/elevenlabs";
 import VoicePicker from "@/components/VoicePicker";
 
@@ -380,63 +380,51 @@ export default function CreatorUpload({ token, shows, uploads, setUploads, draft
         setUploads(prev => prev.map(u => (u.id === tempId || (serverId && u.id === serverId)) ? { ...u, durationSec: sec } : u));
       });
 
-      const url = assetUrl(`/api/media/upload/main_content`);
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', url);
-      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      uploadMediaDirect({
+        category: 'main_content',
+        file,
+        friendlyName: file.name,
+        token,
+        onProgress: ({ percent }) => {
+          if (typeof percent !== 'number') return;
+          const pct = Math.max(1, Math.min(99, Math.round(percent)));
+          setUploads(prev => prev.map(u => (u.id === tempId ? { ...u, progress: pct } : u)));
+        },
+      }).then((items) => {
+        const si = Array.isArray(items) ? items[0] : items;
+        if (si && si.id) {
+          serverId = si.id;
+          setUploads(prev => prev.map(u => (u.id === tempId ? {
+            id: si.id,
+            fileName: file.name,
+            serverFilename: si.filename,
+            size: sizeLabel,
+            status: 'done',
+            progress: 100,
+            nickname: '',
+            showId: selectedShowId,
+            ttlDays: 14,
+            durationSec: measuredDuration ?? u.durationSec ?? null,
+          } : u)));
 
-      xhr.upload.onprogress = (evt) => {
-        if (!evt.lengthComputable) return;
-        const pct = Math.max(1, Math.min(99, Math.round((evt.loaded / evt.total) * 100)));
-        setUploads(prev => prev.map(u => u.id === tempId ? { ...u, progress: pct } : u));
-      };
-
-      xhr.onreadystatechange = () => {
-        if (xhr.readyState !== 4) return;
-        try {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            const items = JSON.parse(xhr.responseText || '[]');
-            const si = Array.isArray(items) ? items[0] : items;
-            if (si && si.id) {
-              // Replace temp item with real server item
-              serverId = si.id;
-              setUploads(prev => prev.map(u => u.id === tempId ? {
-                id: si.id,
-                fileName: file.name,
-                serverFilename: si.filename,
-                size: sizeLabel,
-                status: 'done',
-                progress: 100,
-                nickname: '',
-                showId: selectedShowId,
-                ttlDays: 14,
-                durationSec: measuredDuration ?? u.durationSec ?? null,
-              } : u));
-
-              // Create a draft for this upload
-              const newDraft = {
-                id: `d_${si.id}`,
-                title: (si.friendly_name || si.filename || file.name).replace(/\.[a-z0-9]+$/i, ''),
-                fileId: si.id,
-                transcript: 'processing',
-                hint: (si.filename || file.name).replace(/\.[a-z0-9]+$/i, ''),
-              };
-              setDrafts(prev => prev.concat([newDraft]));
-              resolve(newDraft);
-              return;
-            }
-          }
-        } catch {}
-        // Error path
-        setUploads(prev => prev.map(u => u.id === tempId ? { ...u, status: 'error', progress: 0 } : u));
+          const newDraft = {
+            id: `d_${si.id}`,
+            title: (si.friendly_name || si.filename || file.name).replace(/\.[a-z0-9]+$/i, ''),
+            fileId: si.id,
+            transcript: 'processing',
+            hint: (si.filename || file.name).replace(/\.[a-z0-9]+$/i, ''),
+          };
+          setDrafts(prev => prev.concat([newDraft]));
+          resolve(newDraft);
+          return;
+        }
+        setUploads(prev => prev.map(u => (u.id === tempId ? { ...u, status: 'error', progress: 0 } : u)));
         resolve(null);
-      };
-
-      const fd = new FormData();
-      fd.append('files', file);
-      // Optional friendly names array for parity
-      try { fd.append('friendly_names', JSON.stringify([file.name])); } catch {}
-      xhr.send(fd);
+      }).catch((err) => {
+        console.error(err);
+        setUploads(prev => prev.map(u => (u.id === tempId ? { ...u, status: 'error', progress: 0, error: err?.message || 'Upload failed' } : u)));
+        resolve(null);
+      });
     });
 
     // Sequential uploads to keep UI/order predictable
