@@ -621,7 +621,23 @@ def prepare_transcript_context(
                     exc_info=True,
                 )
 
-            episode.working_audio_name = dest.name
+            try:
+                project_uploads_dir = PROJECT_ROOT / "media_uploads"
+                project_uploads_dir.mkdir(parents=True, exist_ok=True)
+                project_mirror_dest = project_uploads_dir / src.name
+                if dest.exists() and project_mirror_dest.resolve() != dest.resolve():
+                    shutil.copyfile(dest, project_mirror_dest)
+                    logging.info(
+                        "[assemble] Mirrored cleaned audio into WS_ROOT/media_uploads: %s",
+                        project_mirror_dest,
+                    )
+            except Exception:
+                logging.warning(
+                    "[assemble] Failed to mirror cleaned audio into WS_ROOT/media_uploads",
+                    exc_info=True,
+                )
+
+            episode.working_audio_name = Path(dest).name
             session.add(episode)
             session.commit()
         except Exception:
