@@ -30,7 +30,7 @@ import {
   DollarSign,
   Globe2,
 } from "lucide-react";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 
 import { makeApi, coerceArray } from "@/lib/apiClient";
 import { useAuth } from "@/AuthContext";
@@ -130,6 +130,12 @@ export default function PodcastPlusDashboard() {
   const [preuploadItems, setPreuploadItems] = useState([]);
   const [preuploadLoading, setPreuploadLoading] = useState(false);
   const [preuploadError, setPreuploadError] = useState(null);
+  const preuploadFetchedOnceRef = useRef(false);
+  const previousPreuploadContextRef = useRef({ view: currentView, mode: creatorMode });
+
+  const resetPreuploadFetchedFlag = useCallback(() => {
+    preuploadFetchedOnceRef.current = false;
+  }, []);
 
   const proEligibleTiers = useMemo(() => new Set(['pro', 'enterprise', 'business', 'team', 'agency']), []);
   const normalizedTier = (user?.tier || '').toLowerCase();
@@ -208,8 +214,14 @@ export default function PodcastPlusDashboard() {
       return [];
     } finally {
       setPreuploadLoading(false);
+      preuploadFetchedOnceRef.current = true;
     }
   }, [token]);
+
+  const requestPreuploadRefresh = useCallback(async () => {
+    resetPreuploadFetchedFlag();
+    return refreshPreuploads();
+  }, [resetPreuploadFetchedFlag, refreshPreuploads]);
 
   const handleTourCallback = (data) => {
     const { status } = data;
@@ -297,20 +309,35 @@ export default function PodcastPlusDashboard() {
   useEffect(() => {
     if (!token) return;
     if (currentView === 'episodeStart' || currentView === 'preuploadUpload') {
-      refreshPreuploads();
+      requestPreuploadRefresh();
     }
-  }, [token, currentView, refreshPreuploads]);
+  }, [token, currentView, requestPreuploadRefresh]);
   useEffect(() => {
     if (!token) return;
     if (
       currentView === 'createEpisode' &&
       creatorMode === 'preuploaded' &&
       !preuploadLoading &&
-      preuploadItems.length === 0
+      preuploadItems.length === 0 &&
+      !preuploadFetchedOnceRef.current
     ) {
       refreshPreuploads();
     }
   }, [token, currentView, creatorMode, preuploadLoading, preuploadItems.length, refreshPreuploads]);
+
+  useEffect(() => {
+    const previous = previousPreuploadContextRef.current;
+    const wasInPreupload =
+      previous.view === 'createEpisode' && previous.mode === 'preuploaded';
+    const isInPreupload =
+      currentView === 'createEpisode' && creatorMode === 'preuploaded';
+
+    if (wasInPreupload && !isInPreupload) {
+      resetPreuploadFetchedFlag();
+    }
+
+    previousPreuploadContextRef.current = { view: currentView, mode: creatorMode };
+  }, [currentView, creatorMode, resetPreuploadFetchedFlag]);
   // When navigating back to the Dashboard view, refresh data so cards reflect latest state
   useEffect(() => {
     if (token && currentView === 'dashboard') {
@@ -452,7 +479,11 @@ export default function PodcastPlusDashboard() {
             loading={preuploadLoading}
             hasReadyAudio={hasReadyAudio}
             errorMessage={preuploadError || ''}
-            onRetry={() => { try { refreshPreuploads(); } catch {} }}
+            onRetry={() => {
+              try {
+                requestPreuploadRefresh();
+              } catch {}
+            }}
             onBack={handleBackToDashboard}
             onChooseRecord={() => {
               setCreatorMode('standard');
@@ -462,8 +493,9 @@ export default function PodcastPlusDashboard() {
               setCreatorMode('preuploaded');
               setPreselectedMainFilename(null);
               setPreselectedTranscriptReady(false);
+              resetPreuploadFetchedFlag();
               if (!preuploadLoading && preuploadItems.length === 0) {
-                try { await refreshPreuploads(); } catch {}
+                try { await requestPreuploadRefresh(); } catch {}
               }
               setCurrentView('createEpisode');
             }}
@@ -477,7 +509,7 @@ export default function PodcastPlusDashboard() {
             onBack={() => setCurrentView('episodeStart')}
             onDone={handleBackToDashboard}
             defaultEmail={user?.email || ''}
-            onUploaded={refreshPreuploads}
+            onUploaded={requestPreuploadRefresh}
           />
         );
       case 'templateManager':
@@ -496,7 +528,7 @@ export default function PodcastPlusDashboard() {
             creatorMode={creatorMode}
             preuploadedItems={preuploadItems}
             preuploadedLoading={preuploadLoading}
-            onRefreshPreuploaded={refreshPreuploads}
+            onRefreshPreuploaded={requestPreuploadRefresh}
             preselectedStartStep={creatorMode === 'preuploaded' ? 1 : undefined}
             onRequestUpload={() => {
               setCreatorMode('standard');
@@ -588,7 +620,7 @@ export default function PodcastPlusDashboard() {
                               setPreselectedMainFilename(null);
                               setPreselectedTranscriptReady(false);
                               setCurrentView('episodeStart');
-                              refreshPreuploads();
+                              requestPreuploadRefresh();
                             }}
                           >
                             <Plus className="w-4 h-4 mr-2" />
