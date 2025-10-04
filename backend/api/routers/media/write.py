@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 from api.core.paths import MEDIA_DIR
 from api.models.podcast import MediaItem, MediaCategory, PodcastTemplate
-from api.models.transcription import TranscriptionWatch
+from api.models.transcription import TranscriptionWatch, MediaTranscript
 from api.models.user import User
 from api.core.database import get_session
 from api.routers.auth import get_current_user
@@ -992,6 +992,13 @@ def delete_media_item(
                 file_path.unlink()
             except Exception:
                 pass
+
+    # Clean up any transcripts tied to this media item to avoid foreign key violations
+    transcripts = session.exec(
+        select(MediaTranscript).where(MediaTranscript.media_item_id == media_item.id)
+    ).all()
+    for transcript in transcripts:
+        session.delete(transcript)
 
     session.delete(media_item)
     session.commit()
