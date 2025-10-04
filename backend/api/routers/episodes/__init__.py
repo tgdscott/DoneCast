@@ -1,4 +1,8 @@
 from fastapi import APIRouter
+import logging
+from importlib import import_module
+
+log = logging.getLogger(__name__)
 
 # Aggregator router: parent provides '/episodes' prefix
 router = APIRouter(prefix="/episodes", tags=["episodes"])
@@ -9,9 +13,32 @@ from .write import router as write_router
 from .assemble import router as assemble_router
 from .precheck import router as precheck_router
 from .publish import router as publish_router
-from .jobs import router as jobs_router
-from .edit import router as edit_router
-from .retry import router as retry_router
+def _load_optional_router(name: str):
+    """Best-effort loader for optional episode subrouters."""
+
+    try:
+        module = import_module(f".{name}", __name__)
+    except Exception as exc:
+        log.warning(
+            "Episodes optional router '%s' unavailable; skipping. %s",
+            name,
+            exc,
+            exc_info=True,
+        )
+        return None
+
+    router_obj = getattr(module, "router", None)
+    if router_obj is None:
+        log.warning(
+            "Episodes optional router '%s' missing 'router' attribute; skipping.",
+            name,
+        )
+    return router_obj
+
+
+jobs_router = _load_optional_router("jobs")
+edit_router = _load_optional_router("edit")
+retry_router = _load_optional_router("retry")
 
 # Register the assemble router before the generic read/write routers so the
 # static path (/episodes/assemble) is not shadowed by parameterised routes such
@@ -24,9 +51,12 @@ from .retry import router as retry_router
 router.include_router(assemble_router)
 router.include_router(precheck_router)
 router.include_router(publish_router)
-router.include_router(jobs_router)
-router.include_router(edit_router)
-router.include_router(retry_router)
+if jobs_router is not None:
+    router.include_router(jobs_router)
+if edit_router is not None:
+    router.include_router(edit_router)
+if retry_router is not None:
+    router.include_router(retry_router)
 router.include_router(read_router)
 router.include_router(write_router)
 
