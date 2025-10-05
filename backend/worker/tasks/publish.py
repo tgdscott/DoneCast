@@ -228,6 +228,8 @@ def publish_episode_to_spreaker_task(
             tags=tags_arg,
             explicit=explicit_arg,
             transcript_url=transcript_url,
+            season_number=getattr(episode, "season_number", None),
+            episode_number=getattr(episode, "episode_number", None),
         )
 
         if not ok:
@@ -276,7 +278,11 @@ def publish_episode_to_spreaker_task(
                 try:
                     ep_id = str(result["episode_id"])
                     ok_upd, upd_resp = client.update_episode(
-                        ep_id, publish_state="unpublished", transcript_url=transcript_url
+                        ep_id,
+                        publish_state="unpublished",
+                        transcript_url=transcript_url,
+                        season_number=getattr(episode, "season_number", None),
+                        episode_number=getattr(episode, "episode_number", None),
                     )
                     logging.info(
                         "[publish] enforced private via update ok=%s", ok_upd
@@ -314,7 +320,11 @@ def publish_episode_to_spreaker_task(
                         )
                         if not ok_img:
                             ok_upd_img, _ = client.update_episode(
-                                ep_id, image_file=image_file_path, debug_try_all=True
+                                ep_id,
+                                image_file=image_file_path,
+                                debug_try_all=True,
+                                season_number=getattr(episode, "season_number", None),
+                                episode_number=getattr(episode, "episode_number", None),
                             )
                             logging.info(
                                 "[publish] fallback image update via update_episode ok=%s",

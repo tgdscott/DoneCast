@@ -258,6 +258,8 @@ class SpreakerClient:
         tags: Optional[str] = None,
         explicit: Optional[bool] = None,
         transcript_url: Optional[str] = None,
+        season_number: Optional[int] = None,
+        episode_number: Optional[int] = None,
     ) -> Tuple[bool, Any]:
         """Upload an episode to Spreaker with robust fallbacks.
 
@@ -278,6 +280,16 @@ class SpreakerClient:
             base_data["explicit"] = "true" if explicit else "false"
         if transcript_url:
             base_data["transcript_url"] = transcript_url
+        if season_number is not None:
+            try:
+                base_data["season_number"] = int(season_number)
+            except (TypeError, ValueError):
+                pass
+        if episode_number is not None:
+            try:
+                base_data["episode_number"] = int(episode_number)
+            except (TypeError, ValueError):
+                pass
 
         # Visibility variants
         vis_from_state = "PUBLIC"
@@ -376,6 +388,8 @@ class SpreakerClient:
         transcript_url: Optional[str] = None,
         debug_try_all: bool = False,
         force_all_fields: bool = False,
+        season_number: Optional[int] = None,
+        episode_number: Optional[int] = None,
     ) -> Tuple[bool, Any]:
         """Update existing episode metadata on Spreaker.
 
@@ -400,6 +414,16 @@ class SpreakerClient:
                 data["visibility"] = "PUBLIC"
         if transcript_url is not None:
             data["transcript_url"] = transcript_url
+        if season_number is not None:
+            try:
+                data["season_number"] = int(season_number)
+            except (TypeError, ValueError):
+                pass
+        if episode_number is not None:
+            try:
+                data["episode_number"] = int(episode_number)
+            except (TypeError, ValueError):
+                pass
         files = None
         fh = None
         if image_file and os.path.isfile(image_file):
