@@ -475,6 +475,43 @@ def download_bytes(bucket_name: str, key: str) -> Optional[bytes]:
     return download_gcs_bytes(bucket_name, key)
 
 
+def blob_exists(bucket_name: str, blob_name: str) -> Optional[bool]:
+    """Return ``True`` when a blob exists, ``False`` when confirmed missing."""
+
+    if not bucket_name or not blob_name:
+        return False
+
+    client = _get_gcs_client()
+    should_fallback = False
+
+    if client:
+        try:
+            bucket = client.bucket(bucket_name)
+            blob = bucket.blob(blob_name)
+            return bool(blob.exists())
+        except Exception as exc:
+            if _should_fallback(bucket_name, exc):
+                should_fallback = True
+            else:
+                logger.debug(
+                    "Failed to probe gs://%s/%s existence: %s",
+                    bucket_name,
+                    blob_name,
+                    exc,
+                )
+                return None
+    else:
+        should_fallback = _should_fallback(bucket_name)
+
+    if not should_fallback:
+        return None
+
+    try:
+        return _local_media_path(blob_name).exists()
+    except Exception:
+        return None
+
+
 def delete_gcs_blob(bucket_name: str, blob_name: str) -> None:
     """Delete a blob from a GCS bucket, ignoring failures in development."""
 
