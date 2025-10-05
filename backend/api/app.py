@@ -116,6 +116,7 @@ app.add_middleware(
 
 # --- Deferred Startup Tasks -------------------------------------------------
 import threading, time as _time
+from pathlib import Path as _Path
 
 def _launch_startup_tasks() -> None:
     """Run additive migrations & housekeeping in background.
@@ -127,14 +128,24 @@ def _launch_startup_tasks() -> None:
     skip = (os.getenv("SKIP_STARTUP_MIGRATIONS") or "").lower() in {"1","true","yes","on"}
     mode = (os.getenv("STARTUP_TASKS_MODE") or "async").lower()
     blocking_flag = (os.getenv("BLOCKING_STARTUP_TASKS") or "").lower() in {"1","true","yes","on"}
+    sentinel_path = _Path(os.getenv("STARTUP_SENTINEL_PATH", "/tmp/ppp_startup_done"))
+    single = (os.getenv("SINGLE_STARTUP_TASKS") or "1").lower() in {"1","true","yes","on"}
     if skip:
         log.warning("[deferred-startup] SKIP_STARTUP_MIGRATIONS=1 -> skipping run_startup_tasks()")
+        return
+    if single and sentinel_path.exists():
+        log.info("[deferred-startup] Sentinel %s exists -> skipping startup tasks", sentinel_path)
         return
     if blocking_flag or mode == "sync":
         log.info("[deferred-startup] Running startup tasks synchronously (blocking mode)")
         try:
             run_startup_tasks()
             log.info("[deferred-startup] Startup tasks complete (sync)")
+            if single:
+                try:
+                    sentinel_path.write_text(str(int(_time.time())))
+                except Exception:
+                    pass
         except Exception as e:  # pragma: no cover
             log.exception("[deferred-startup] Startup tasks failed (sync): %s", e)
         return
@@ -145,6 +156,11 @@ def _launch_startup_tasks() -> None:
             run_startup_tasks()
             elapsed = _time.time() - start_ts
             log.info("[deferred-startup] Startup tasks complete in %.2fs", elapsed)
+            if single:
+                try:
+                    sentinel_path.write_text(str(int(_time.time())))
+                except Exception:
+                    pass
         except Exception as e:  # pragma: no cover
             log.exception("[deferred-startup] Startup tasks failed: %s", e)
     try:
