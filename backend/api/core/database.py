@@ -1,8 +1,10 @@
 from sqlmodel import create_engine, SQLModel, Session
 from sqlalchemy.event import listen
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError as SAOperationalError
 import logging
 import os
+import time
 from urllib.parse import quote_plus
 
 # Ensure models are imported so SQLModel metadata is populated
@@ -15,7 +17,43 @@ from ..models import transcription as _transcription_models  # noqa: F401
 from pathlib import Path
 from .config import settings
 
+try:  # psycopg3 OperationalError class (matches engine errors on Cloud SQL)
+    from psycopg import OperationalError as PsycopgOperationalError  # type: ignore
+except Exception:  # pragma: no cover - psycopg import may vary in tests
+    PsycopgOperationalError = None  # type: ignore
+
 log = logging.getLogger(__name__)
+
+
+def _int_from_env(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):  # pragma: no cover - defensive against bad configs
+        log.warning("[db] Invalid integer for %s=%s; using default %s", name, value, default)
+        return default
+
+
+def _float_from_env(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):  # pragma: no cover - defensive against bad configs
+        log.warning("[db] Invalid float for %s=%s; using default %.2f", name, value, default)
+        return default
+
+
+_DEFAULT_DB_CONNECT_ATTEMPTS = max(_int_from_env("DB_CONNECT_MAX_ATTEMPTS", 8), 1)
+_DEFAULT_DB_CONNECT_INITIAL_SECONDS = max(_float_from_env("DB_CONNECT_RETRY_INITIAL_SECONDS", 0.5), 0.0)
+_DEFAULT_DB_CONNECT_MAX_SECONDS = max(_float_from_env("DB_CONNECT_RETRY_MAX_SECONDS", 5.0), 0.0)
+
+_RETRYABLE_DB_EXC = (SAOperationalError,)
+if PsycopgOperationalError:  # pragma: no cover - depends on driver import style
+    _RETRYABLE_DB_EXC = _RETRYABLE_DB_EXC + (PsycopgOperationalError,)  # type: ignore[operator]
 
 
 def _is_truthy(value: str | None) -> bool:
@@ -220,7 +258,69 @@ def _ensure_template_new_columns():
         log.error(f"[migrate] PodcastTemplate column introspection failed: {e}")
 
 
+def _should_retry_db_error(exc: Exception) -> bool:
+    if isinstance(exc, _RETRYABLE_DB_EXC):
+        return True
+    orig = getattr(exc, "orig", None)
+    if orig and isinstance(orig, _RETRYABLE_DB_EXC):
+        return True
+
+    message = str(exc).lower()
+    retry_tokens = (
+        "connection refused",
+        "connection timed out",
+        "could not connect",
+        "timeout expired",
+        "server closed the connection",
+        "no such file or directory",
+        "server is closed",
+    )
+    return any(token in message for token in retry_tokens)
+
+
+def _wait_for_db_connection(
+    max_attempts: int = _DEFAULT_DB_CONNECT_ATTEMPTS,
+    initial_delay: float = _DEFAULT_DB_CONNECT_INITIAL_SECONDS,
+    max_delay: float = _DEFAULT_DB_CONNECT_MAX_SECONDS,
+) -> None:
+    if max_attempts <= 1:
+        # Single attempt requested (or misconfigured) – perform a direct probe.
+        max_attempts = 1
+
+    attempt = 0
+    delay = max(initial_delay, 0.0)
+
+    while True:
+        attempt += 1
+        try:
+            with engine.connect() as conn:
+                conn.exec_driver_sql("SELECT 1")
+            if attempt > 1:
+                log.info("[db] Connection succeeded on attempt %s", attempt)
+            return
+        except Exception as exc:  # pragma: no cover - exercised in deployment envs
+            if not _should_retry_db_error(exc) or attempt >= max_attempts:
+                log.error(
+                    "[db] Database connection attempt %s/%s failed: %s", attempt, max_attempts, exc
+                )
+                raise
+
+            sleep_for = min(max(delay, 0.0), max_delay)
+            if sleep_for <= 0:
+                sleep_for = 0.5
+            log.warning(
+                "[db] Database connection attempt %s/%s failed (%s); retrying in %.1fs",
+                attempt,
+                max_attempts,
+                exc,
+                sleep_for,
+            )
+            time.sleep(sleep_for)
+            delay = min(delay * 2 if delay > 0 else 1.0, max_delay)
+
+
 def create_db_and_tables():
+    _wait_for_db_connection()
     SQLModel.metadata.create_all(engine)
     _ensure_episode_new_columns()
     _ensure_podcast_new_columns()
