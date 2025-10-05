@@ -1,5 +1,5 @@
-import React from 'react';
-import { Link } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   ArrowRight,
   Globe,
@@ -14,6 +14,7 @@ import {
   Zap,
 } from 'lucide-react';
 import './new-landing.css';
+import LoginModal from '@/components/LoginModal.jsx';
 
 const heroMeta = [
   { icon: <Sparkles size={18} />, text: 'Anyone can do this' },
@@ -221,8 +222,41 @@ const FooterColumn = ({ title, links }) => (
 );
 
 export default function NewLanding() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(() => searchParams.get('login') === '1');
+
+  useEffect(() => {
+    const shouldOpen = searchParams.get('login') === '1';
+    setIsLoginModalOpen(shouldOpen);
+  }, [searchParams]);
+
+  const openLoginModal = () => {
+    setIsLoginModalOpen(true);
+    if (searchParams.get('login') === '1') {
+      return;
+    }
+    const next = new URLSearchParams(searchParams);
+    next.set('login', '1');
+    setSearchParams(next, { replace: true });
+  };
+
+  const closeLoginModal = () => {
+    setIsLoginModalOpen(false);
+    if (searchParams.get('login') !== '1') {
+      return;
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete('login');
+    if (next.toString()) {
+      setSearchParams(next, { replace: true });
+    } else {
+      setSearchParams({}, { replace: true });
+    }
+  };
+
   return (
     <div className="new-landing">
+      {isLoginModalOpen && <LoginModal onClose={closeLoginModal} />}
       <nav className="nl-nav">
         <div className="nl-container">
           <div className="nl-nav-inner">
@@ -238,9 +272,9 @@ export default function NewLanding() {
               <a href="#about">About</a>
             </div>
             <div className="nl-nav-cta">
-              <Link to="/app" className="nl-button-outline">
+              <button type="button" className="nl-button-outline" onClick={openLoginModal}>
                 Log In
-              </Link>
+              </button>
               <Link to="/onboarding" className="nl-button">
                 Start Free Trial
               </Link>
