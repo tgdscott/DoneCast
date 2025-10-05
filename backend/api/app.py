@@ -3,7 +3,7 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -87,8 +87,8 @@ try:
 except Exception as _warm_err:  # pragma: no cover
     log.warning("[startup] Password hash warmup skipped: %s", _warm_err)
 
-# DB/tables and additive migrations
-run_startup_tasks()
+# (Deferred) DB/tables and additive migrations now run in a background thread
+# to avoid blocking Cloud Run from detecting the listening port.
 
 # --- Middleware ---
 from starlette.middleware.sessions import SessionMiddleware
@@ -114,10 +114,100 @@ app.add_middleware(
     allow_credentials=True,
 )
 
-# Global preflight handler to satisfy browser CORS checks on any path.
+# --- Deferred Startup Tasks -------------------------------------------------
+import threading, time as _time
+
+def _launch_startup_tasks() -> None:
+    """Run additive migrations & housekeeping in background.
+
+    Environment controls:
+      SKIP_STARTUP_MIGRATIONS=1 -> skip entirely
+      BLOCKING_STARTUP_TASKS=1 or STARTUP_TASKS_MODE=sync -> run inline (legacy behavior)
+    """
+    skip = (os.getenv("SKIP_STARTUP_MIGRATIONS") or "").lower() in {"1","true","yes","on"}
+    mode = (os.getenv("STARTUP_TASKS_MODE") or "async").lower()
+    blocking_flag = (os.getenv("BLOCKING_STARTUP_TASKS") or "").lower() in {"1","true","yes","on"}
+    if skip:
+        log.warning("[deferred-startup] SKIP_STARTUP_MIGRATIONS=1 -> skipping run_startup_tasks()")
+        return
+    if blocking_flag or mode == "sync":
+        log.info("[deferred-startup] Running startup tasks synchronously (blocking mode)")
+        try:
+            run_startup_tasks()
+            log.info("[deferred-startup] Startup tasks complete (sync)")
+        except Exception as e:  # pragma: no cover
+            log.exception("[deferred-startup] Startup tasks failed (sync): %s", e)
+        return
+    def _runner():
+        start_ts = _time.time()
+        try:
+            log.info("[deferred-startup] Background startup tasks begin")
+            run_startup_tasks()
+            elapsed = _time.time() - start_ts
+            log.info("[deferred-startup] Startup tasks complete in %.2fs", elapsed)
+        except Exception as e:  # pragma: no cover
+            log.exception("[deferred-startup] Startup tasks failed: %s", e)
+    try:
+        thread = threading.Thread(target=_runner, name="startup-tasks", daemon=True)
+        thread.start()
+        log.info("[deferred-startup] Launched background thread for startup tasks (thread=%s)", thread.name)
+    except Exception as e:  # pragma: no cover
+        log.exception("[deferred-startup] Could not launch background startup tasks: %s", e)
+
+@app.on_event("startup")
+async def _kickoff_background_startup():  # type: ignore
+    _launch_startup_tasks()
+
+# Global preflight handler to satisfy browser CORS checks on any path and
+# defensively apply CORS headers even if Starlette's CORSMiddleware misses
+# an edge-case (e.g. complex job_id paths, proxies stripping headers, etc.).
 @app.options("/{path:path}")
-def cors_preflight_handler(path: str):
-    return Response(status_code=204)
+def cors_preflight_handler(path: str, request: Request):  # type: ignore[override]
+    origin = request.headers.get("origin") or ""
+    requested_headers = request.headers.get("Access-Control-Request-Headers") or request.headers.get("access-control-request-headers")
+
+    # Build a permissive (but restricted to our allowlist / known suffixes) selection.
+    allowed_list = settings.cors_allowed_origin_list
+    chosen = None
+    if origin:
+        o = origin.rstrip('/')
+        if o in allowed_list:
+            chosen = o
+        else:
+            # Suffix fallback for apex / subdomain variants we trust.
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(o)
+                host = (parsed.hostname or "").lower()
+                if host:
+                    for suffix in ("podcastplusplus.com", "getpodcastplus.com"):
+                        if host == suffix or host.endswith(f".{suffix}"):
+                            chosen = f"{parsed.scheme}://{parsed.netloc}"
+                            break
+            except Exception:  # pragma: no cover - defensive
+                chosen = None
+
+    resp = Response(status_code=204)
+    if chosen:
+        resp.headers['Access-Control-Allow-Origin'] = chosen
+        resp.headers.setdefault('Access-Control-Allow-Credentials', 'true')
+        # Make sure caching layers vary on Origin so we don't leak headers
+        vary_existing = resp.headers.get('Vary')
+        vary_vals = [] if not vary_existing else [v.strip() for v in vary_existing.split(',') if v.strip()]
+        for v in ("Origin", "Referer"):
+            if v not in vary_vals:
+                vary_vals.append(v)
+        if vary_vals:
+            resp.headers['Vary'] = ", ".join(vary_vals)
+
+    resp.headers.setdefault("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
+    if requested_headers:
+        resp.headers['Access-Control-Allow-Headers'] = requested_headers
+    else:
+        resp.headers.setdefault("Access-Control-Allow-Headers", "*")
+    # Short TTL for preflight cache; browsers will revalidate occasionally.
+    resp.headers.setdefault("Access-Control-Max-Age", "600")
+    return resp
 
 # Security / request-id middleware
 from api.middleware.request_id import RequestIDMiddleware

@@ -85,6 +85,47 @@ async def login_google(request: Request):
         backend_base = settings.OAUTH_BACKEND_BASE or "https://api.podcastplusplus.com"
         redirect_uri = f"{backend_base.rstrip('/')}/api/auth/google/callback"
 
+    # In local dev with a frontend proxy (Vite on :5173) the dynamic base may resolve
+    # to 127.0.0.1:5173, while the Google Console is typically configured with
+    # http://127.0.0.1:8000/api/auth/google/callback. That mismatch produces a
+    # "redirect_uri_mismatch" error after the user selects an account. If the operator
+    # has provided OAUTH_BACKEND_BASE or GOOGLE_REDIRECT_URI, prefer that host:port
+    # when it differs from the computed base AND both are loopback/local. This keeps
+    # production behavior (public domains) unaffected while smoothing local dev.
+    try:
+        import urllib.parse as _urlp
+        configured_redirect = (getattr(settings, 'GOOGLE_REDIRECT_URI', '') or '').strip()
+        backend_base = (settings.OAUTH_BACKEND_BASE or '').strip()
+        # Normalize configured redirect host
+        configured_host = None
+        if configured_redirect.endswith('/api/auth/google/callback'):
+            parsed_conf = _urlp.urlparse(configured_redirect)
+            if parsed_conf.scheme and parsed_conf.netloc:
+                configured_host = f"{parsed_conf.scheme}://{parsed_conf.netloc}".rstrip('/')
+        elif backend_base:
+            # Fall back to backend base if explicit redirect isn't set
+            parsed_bb = _urlp.urlparse(backend_base)
+            if parsed_bb.scheme and parsed_bb.netloc:
+                configured_host = f"{parsed_bb.scheme}://{parsed_bb.netloc}".rstrip('/')
+        if configured_host:
+            dyn_parsed = _urlp.urlparse(redirect_uri)
+            dyn_host = f"{dyn_parsed.scheme}://{dyn_parsed.netloc}".rstrip('/') if dyn_parsed.scheme and dyn_parsed.netloc else None
+            def _is_local_host(h: str | None) -> bool:
+                if not h:
+                    return False
+                name = h.split('://',1)[-1].split(':',1)[0]
+                if name in {'localhost', '127.0.0.1', '0.0.0.0'}:
+                    return True
+                try:
+                    import ipaddress as _ip
+                    return _ip.ip_address(name).is_loopback
+                except Exception:
+                    return False
+            if dyn_host and dyn_host != configured_host and _is_local_host(dyn_host) and _is_local_host(configured_host):
+                redirect_uri = f"{configured_host}/api/auth/google/callback"
+    except Exception:  # pragma: no cover - defensive path
+        pass
+
     dry_run = request.query_params.get("dry_run") or request.query_params.get("debug")
     frontend_hint = request.query_params.get("return_to") or request.query_params.get("redirect_to")
     if not frontend_hint:
@@ -183,31 +224,42 @@ async def auth_google_callback(request: Request, db_session: Session = Depends(g
     if not google_user_id:
         log.warning("Google userinfo missing stable subject identifier for email %s", user_email)
 
-    user = crud.get_user_by_email(session=db_session, email=user_email)
+    try:
+        user = crud.get_user_by_email(session=db_session, email=user_email)
 
-    if not user:
-        user_create = UserCreate(
-            email=user_email,
-            password=str(uuid4()),
-            google_id=google_user_id,
-        )
-        try:
-            admin_settings = load_admin_settings(db_session)
-            user_create.is_active = bool(getattr(admin_settings, "default_user_active", True))
-        except Exception:
-            user_create.is_active = True
-        user = crud.create_user(session=db_session, user_create=user_create)
+        if not user:
+            user_create = UserCreate(
+                email=user_email,
+                password=str(uuid4()),
+                google_id=google_user_id,
+            )
+            try:
+                admin_settings = load_admin_settings(db_session)
+                user_create.is_active = bool(getattr(admin_settings, "default_user_active", True))
+            except Exception:
+                user_create.is_active = True
+            user = crud.create_user(session=db_session, user_create=user_create)
 
-    if is_admin_email(user.email):
-        user.is_admin = True
+        if is_admin_email(user.email):
+            user.is_admin = True
 
-    if google_user_id and not user.google_id:
-        user.google_id = google_user_id
+        if google_user_id and not user.google_id:
+            user.google_id = google_user_id
 
-    user.last_login = datetime.utcnow()
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
+        user.last_login = datetime.utcnow()
+        db_session.add(user)
+        db_session.commit()
+        db_session.refresh(user)
+    except Exception as db_exc:  # pragma: no cover - defensive logging path
+        # Common root causes observed in production: transient Cloud SQL connectivity
+        # issues or missing DATABASE_URL configuration during cold starts. We do not
+        # surface raw DB errors to the browser (which would 500 the OAuth popup and
+        # confuse users); instead return a 503 so the frontend can retry gracefully.
+        log.exception("Google OAuth callback failed while persisting user '%s'", user_email)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service temporarily unavailable (database). Please retry in a moment.",
+        ) from db_exc
 
     access_token = create_access_token({"sub": user.email})
 
@@ -252,9 +304,14 @@ async def auth_google_callback(request: Request, db_session: Session = Depends(g
         except Exception:
             frontend_base = "https://podcastplusplus.com"
     frontend_base = frontend_base.rstrip("/")
-    frontend_url = f"{frontend_base}/#access_token={access_token}&token_type=bearer"
+    # Prefer landing users inside the app area immediately after OAuth instead of
+    # dropping them on the marketing page. Admins still go to /admin, regular
+    # users to /dashboard. Hash fragment preserves existing token capture logic.
     if user.is_admin:
-        frontend_url = f"{frontend_base}/admin#access_token={access_token}&token_type=bearer"
+        target_path = "/admin"
+    else:
+        target_path = "/dashboard"
+    frontend_url = f"{frontend_base}{target_path}#access_token={access_token}&token_type=bearer"
 
     return RedirectResponse(url=frontend_url)
 

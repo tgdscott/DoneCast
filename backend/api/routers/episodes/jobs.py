@@ -24,6 +24,17 @@ def get_job_status(job_id: str, session: Session = Depends(get_session)):
 
     Mirrors behavior of the existing endpoint in episodes_read.get_job_status.
     """
+    original_job_id = job_id
+    # Support Cloud Tasks style resource names passed directly from the
+    # frontend (these contain forward slashes). We only want the final
+    # task identifier segment for Celery lookups.
+    if "/" in job_id:
+        parts = [p for p in job_id.split('/') if p]
+        if parts:
+            job_id = parts[-1]
+    if job_id != original_job_id:
+        logger.debug("[episodes.jobs] Normalized job_id '%s' -> '%s'", original_job_id, job_id)
+
     raw = _svc_jobs.get_status(job_id)
     status_val = raw.get("raw_status", "PENDING")
     result = raw.get("raw_result")

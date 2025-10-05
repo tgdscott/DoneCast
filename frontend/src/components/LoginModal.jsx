@@ -11,15 +11,28 @@ import { X } from 'lucide-react';
 const apiUrl = (path) => buildApiUrl(path);
 
 const buildGoogleLoginUrl = () => {
-  let url = buildApiUrl('/api/auth/login/google');
-  if (!url) {
-    url = '/api/auth/login/google';
-  }
-  if (!/^https?:\/\//i.test(url)) {
-    if (!url.startsWith('/')) {
-      url = `/${url}`;
+  // Start with buildApiUrl so production / non-proxied environments work seamlessly.
+  let url = buildApiUrl('/api/auth/login/google') || '/api/auth/login/google';
+
+  // If buildApiUrl returned a relative path (dev proxy case), decide whether to
+  // upgrade to an absolute API origin to avoid redirect_uri mismatches.
+  const isAbsolute = /^https?:\/\//i.test(url);
+  if (!isAbsolute) {
+    if (!url.startsWith('/')) url = `/${url}`;
+    if (typeof window !== 'undefined') {
+      const loc = window.location;
+      const host = (loc && loc.host) || '';
+      // When running the frontend dev server (port 5173), Google console usually has
+      // callback configured for backend port 8000. Force absolute API origin so
+      // Google's redirect_uri matches what FastAPI reports.
+      if (/^127\.0\.0\.1:5173$/.test(host) || /^localhost:5173$/.test(host)) {
+        // Use same protocol (normally http in local dev)
+        const proto = (loc && loc.protocol) || 'http:';
+        url = `${proto}//127.0.0.1:8000${url}`;
+      }
     }
   }
+
   if (typeof window !== 'undefined') {
     const origin = window.location?.origin ? window.location.origin.replace(/\/+$/, '') : '';
     if (origin) {

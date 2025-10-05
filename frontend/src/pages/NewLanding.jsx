@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '@/AuthContext.jsx';
 import {
   ArrowRight,
   Globe,
@@ -224,6 +225,17 @@ const FooterColumn = ({ title, links }) => (
 export default function NewLanding() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(() => searchParams.get('login') === '1');
+  const navigate = useNavigate();
+  const { isAuthenticated, hydrated } = useAuth();
+
+  // If a user is already authenticated (e.g., after OAuth redirect or returning visit),
+  // move them into the application dashboard automatically instead of showing marketing.
+  useEffect(() => {
+    if (hydrated && isAuthenticated) {
+      // Avoid redirect loop if already on dashboard route (shouldn't happen here though)
+      navigate('/dashboard', { replace: true });
+    }
+  }, [hydrated, isAuthenticated, navigate]);
 
   useEffect(() => {
     const shouldOpen = searchParams.get('login') === '1';
