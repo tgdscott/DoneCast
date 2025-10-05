@@ -49,6 +49,14 @@ export function buildApiUrl(path) {
   if (!base) return rawPath;
 
   const trimmedBase = base.replace(/\/+$/, '');
+  const assetPrefixes = ['/static', '/media', '/storage', '/final'];
+  const isAssetPath = assetPrefixes.some((prefix) =>
+    normalizedPath === prefix ||
+    normalizedPath.startsWith(`${prefix}/`) ||
+    normalizedPath.startsWith(`${prefix}?`) ||
+    normalizedPath.startsWith(`${prefix}#`) ||
+    normalizedPath.startsWith(`${prefix}&`)
+  );
 
   const baseHandlesApi = trimmedBase.endsWith('/api');
   if (baseHandlesApi) {
@@ -63,6 +71,17 @@ export function buildApiUrl(path) {
     }
     if (normalizedPath.startsWith('/api?') || normalizedPath.startsWith('/api#') || normalizedPath.startsWith('/api&')) {
       return `${trimmedBase}${normalizedPath.slice(4)}`;
+    }
+
+    if (isAssetPath) {
+      const rootBase = trimmedBase.slice(0, -4); // strip trailing "/api"
+      if (!rootBase) {
+        return normalizedPath;
+      }
+      if (normalizedPath === '/') {
+        return rootBase;
+      }
+      return `${rootBase}${normalizedPath}`;
     }
   }
 
