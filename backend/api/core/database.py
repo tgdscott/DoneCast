@@ -1,3 +1,6 @@
+from contextlib import contextmanager
+from typing import Iterator
+
 from sqlmodel import create_engine, SQLModel, Session
 from sqlalchemy.event import listen
 from sqlalchemy import text
@@ -348,4 +351,18 @@ CREATE TABLE appsetting (
 def get_session():
     with Session(engine) as session:
         yield session
+
+
+@contextmanager
+def session_scope() -> Iterator[Session]:
+    """Provide a context manager for DB sessions outside FastAPI dependencies."""
+
+    session = Session(engine)
+    try:
+        yield session
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 

@@ -4,11 +4,10 @@ import os
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlmodel import select, Session as _Session
 from sqlmodel import select
 from sqlalchemy import inspect, text
 
-from api.core.database import get_session, engine, create_db_and_tables
+from api.core.database import engine, create_db_and_tables, session_scope
 from api.core.config import settings
 from api.models.podcast import Episode, Podcast
 from api.core.logging import get_logger
@@ -23,59 +22,53 @@ log: logging.Logger = get_logger("api.startup_tasks")
 
 def _normalize_episode_paths() -> None:
     """Ensure Episode paths store only basenames for local files."""
-    session: _Session = next(get_session())
     try:
-        q = select(Episode).limit(5000)
-        eps = session.exec(q).all()
-        changed = 0
-        for e in eps:
-            c = False
-            if e.final_audio_path:
-                base = os.path.basename(str(e.final_audio_path))
-                if base != e.final_audio_path:
-                    e.final_audio_path = base
-                    c = True
-            if e.cover_path and not str(e.cover_path).lower().startswith(("http://", "https://")):
-                base = os.path.basename(str(e.cover_path))
-                if base != e.cover_path:
-                    e.cover_path = base
-                    c = True
-            if c:
-                session.add(e)
-                changed += 1
-        if changed:
-            session.commit()
+        with session_scope() as session:
+            q = select(Episode).limit(5000)
+            eps = session.exec(q).all()
+            changed = 0
+            for e in eps:
+                c = False
+                if e.final_audio_path:
+                    base = os.path.basename(str(e.final_audio_path))
+                    if base != e.final_audio_path:
+                        e.final_audio_path = base
+                        c = True
+                if e.cover_path and not str(e.cover_path).lower().startswith(("http://", "https://")):
+                    base = os.path.basename(str(e.cover_path))
+                    if base != e.cover_path:
+                        e.cover_path = base
+                        c = True
+                if c:
+                    session.add(e)
+                    changed += 1
+            if changed:
+                session.commit()
     except Exception as e:
-        session.rollback()
         log.warning("_normalize_episode_paths failed: %s", e)
-    finally:
-        session.close()
 
 
 def _normalize_podcast_covers() -> None:
     """Ensure Podcast.cover_path stores only a basename if it's a local path."""
-    session: _Session = next(get_session())
     try:
-        q = select(Podcast).limit(5000)
-        pods = session.exec(q).all()
-        changed = 0
-        for p in pods:
-            try:
-                if p.cover_path and not str(p.cover_path).lower().startswith(("http://", "https://")):
-                    base = os.path.basename(str(p.cover_path))
-                    if base != p.cover_path:
-                        p.cover_path = base
-                        session.add(p)
-                        changed += 1
-            except Exception as e:
-                log.debug("skip normalize podcast cover for id=%s: %s", getattr(p, "id", "?"), e)
-        if changed:
-            session.commit()
+        with session_scope() as session:
+            q = select(Podcast).limit(5000)
+            pods = session.exec(q).all()
+            changed = 0
+            for p in pods:
+                try:
+                    if p.cover_path and not str(p.cover_path).lower().startswith(("http://", "https://")):
+                        base = os.path.basename(str(p.cover_path))
+                        if base != p.cover_path:
+                            p.cover_path = base
+                            session.add(p)
+                            changed += 1
+                except Exception as e:
+                    log.debug("skip normalize podcast cover for id=%s: %s", getattr(p, "id", "?"), e)
+            if changed:
+                session.commit()
     except Exception as e:
-        session.rollback()
         log.warning("_normalize_podcast_covers failed: %s", e)
-    finally:
-        session.close()
 
 
 def _ensure_user_subscription_column() -> None:
@@ -362,30 +355,27 @@ def _compute_pt_expiry(created_at_utc: datetime, days: int = 14) -> datetime:
 
 def _backfill_mediaitem_expires_at() -> None:
     """Set expires_at for media items missing it (idempotent)."""
-    session: _Session = next(get_session())
     try:
-        from api.models.podcast import MediaItem, MediaCategory
+        with session_scope() as session:
+            from api.models.podcast import MediaItem, MediaCategory
 
-        q = select(MediaItem).filter((MediaItem.expires_at == None)).limit(5000)  # type: ignore
-        items = session.exec(q).all()
-        changed = 0
-        for m in items:
-            try:
-                if getattr(m, "category", None) == getattr(MediaCategory, "main_content", None):
-                    ca = getattr(m, "created_at", None) or datetime.utcnow()
-                    m.expires_at = _compute_pt_expiry(ca)
-                    session.add(m)
-                    changed += 1
-            except Exception:
-                continue
-        if changed:
-            session.commit()
-            log.info("[migrate] Backfilled expires_at for %s media items", changed)
+            q = select(MediaItem).filter((MediaItem.expires_at == None)).limit(5000)  # type: ignore
+            items = session.exec(q).all()
+            changed = 0
+            for m in items:
+                try:
+                    if getattr(m, "category", None) == getattr(MediaCategory, "main_content", None):
+                        ca = getattr(m, "created_at", None) or datetime.utcnow()
+                        m.expires_at = _compute_pt_expiry(ca)
+                        session.add(m)
+                        changed += 1
+                except Exception:
+                    continue
+            if changed:
+                session.commit()
+                log.info("[migrate] Backfilled expires_at for %s media items", changed)
     except Exception as e:
-        session.rollback()
         log.warning("_backfill_mediaitem_expires_at failed: %s", e)
-    finally:
-        session.close()
 
 def _ensure_user_terms_columns() -> None:
     """Ensure columns for tracking terms acceptance exist across engines."""
