@@ -1,9 +1,8 @@
 from fastapi import APIRouter, Request, HTTPException
 import os, stripe, json, datetime, logging
-from ..core.database import get_session
+from ..core.database import session_scope
 from ..core import crud
 from ..core.constants import ALLOWED_PLANS
-from sqlmodel import Session
 from ..models.user import User
 from ..models.notification import Notification
 from ..core.config import settings
@@ -41,8 +40,7 @@ async def stripe_webhook(request: Request):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Webhook error: {e}")
 
-    session: Session = next(get_session())
-    try:
+    with session_scope() as session:
         kind = event['type']
         data = event['data']['object']
         if kind.startswith('customer.subscription.'):
@@ -168,5 +166,3 @@ async def stripe_webhook(request: Request):
         else:
             logger.debug("Ignoring Stripe event type: %s", kind)
         return {"received": True}
-    finally:
-        session.close()
