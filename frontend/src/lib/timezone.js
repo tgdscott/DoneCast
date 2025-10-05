@@ -26,13 +26,40 @@ export const detectDeviceTimezone = (fallback = DEFAULT_TIMEZONE) => {
   }
 };
 
+const FALLBACK_TIMEZONES = new Set([
+  'UTC',
+  'ETC/UTC',
+  'ETC/UCT',
+  'ETC/UNIVERSAL',
+  'ETC/ZULU',
+  'ETC/GMT',
+  'ETC/GMT+0',
+  'ETC/GMT-0',
+  'ETC/GREENWICH',
+  'GMT',
+  'UCT',
+  'UNIVERSAL',
+  'ZULU',
+]);
+
+const isFallbackTimezone = (tz) => {
+  const candidate = ensureString(tz);
+  if (!candidate) return false;
+  return FALLBACK_TIMEZONES.has(candidate.trim().toUpperCase());
+};
+
 export const resolveUserTimezone = (...candidates) => {
+  let fallbackTimezone = null;
   for (const candidate of candidates) {
-    if (isValidTimezone(candidate)) {
-      return candidate.trim();
+    if (!isValidTimezone(candidate)) continue;
+    const trimmed = candidate.trim();
+    if (isFallbackTimezone(trimmed)) {
+      if (!fallbackTimezone) fallbackTimezone = trimmed;
+      continue;
     }
+    return trimmed;
   }
-  return DEFAULT_TIMEZONE;
+  return fallbackTimezone || DEFAULT_TIMEZONE;
 };
 
 export const ensureDate = (value) => {
