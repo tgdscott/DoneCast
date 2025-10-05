@@ -275,6 +275,8 @@ def update_episode_metadata(
             send_publish_state = publish_state is not None
             send_tags = ('tags' in payload)
             send_explicit = ('is_explicit' in payload)
+            send_season = ('season_number' in payload) and getattr(ep, 'season_number', None) is not None
+            send_episode = ('episode_number' in payload) and getattr(ep, 'episode_number', None) is not None
             tags_arg = None
             if send_tags:
                 try:
@@ -295,6 +297,8 @@ def update_episode_metadata(
                 tags=tags_arg,
                 explicit=explicit_arg,
                 image_file=img_path,
+                season_number=ep.season_number if send_season else None,
+                episode_number=ep.episode_number if send_episode else None,
             )
             if not ok:
                 try:
@@ -335,6 +339,8 @@ def update_episode_metadata(
                             ("tags", send_tags),
                             ("explicit", send_explicit),
                             ("image_file", bool(img_path)),
+                            ("season_number", send_season),
+                            ("episode_number", send_episode),
                         ] if sent
                     ]
                 }
