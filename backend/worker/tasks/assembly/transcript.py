@@ -27,6 +27,11 @@ except Exception:  # pragma: no cover
 
 from .media import MediaContext, _resolve_media_file
 
+try:  # Heavy dependency; optional for local dev/test
+    from infrastructure import gcs as gcs_utils  # type: ignore
+except Exception:  # pragma: no cover - fallback when GCS helpers unavailable
+    gcs_utils = None  # type: ignore
+
 
 @dataclass
 class TranscriptContext:
@@ -635,6 +640,70 @@ def prepare_transcript_context(
                 logging.warning(
                     "[assemble] Failed to mirror cleaned audio into WS_ROOT/media_uploads",
                     exc_info=True,
+                )
+
+            gcs_uri = None
+            gcs_key = None
+            bucket = (os.getenv("MEDIA_BUCKET") or "").strip()
+            if bucket and dest.exists() and gcs_utils and hasattr(gcs_utils, "upload_fileobj"):
+                try:
+                    user_part = str(getattr(episode, "user_id", "") or "").strip()
+                    if not user_part:
+                        user_part = "shared"
+                    gcs_key = "/".join(
+                        part.strip("/")
+                        for part in (user_part, "cleaned_audio", dest.name)
+                        if part
+                    )
+                    with open(dest, "rb") as fh:
+                        gcs_uri = gcs_utils.upload_fileobj(  # type: ignore[attr-defined]
+                            bucket,
+                            gcs_key,
+                            fh,
+                            content_type="audio/mpeg",
+                        )
+                    if isinstance(gcs_uri, str):
+                        logging.info(
+                            "[assemble] Uploaded cleaned audio to persistent storage: %s",
+                            gcs_uri,
+                        )
+                except Exception:
+                    logging.warning(
+                        "[assemble] Failed to upload cleaned audio to persistent storage",
+                        exc_info=True,
+                    )
+                    gcs_uri = None
+                    gcs_key = None
+
+            try:
+                meta = (
+                    json.loads(getattr(episode, "meta_json", "{}") or "{}")
+                    if getattr(episode, "meta_json", None)
+                    else {}
+                )
+            except Exception:
+                meta = {}
+
+            try:
+                meta["cleaned_audio"] = dest.name
+                if gcs_uri:
+                    sources = meta.get("cleaned_audio_sources")
+                    if not isinstance(sources, dict):
+                        sources = {}
+                    # Preserve user-provided aliases while ensuring we always have at least one key
+                    primary_key = next(iter(sources.keys()), "primary")
+                    sources[primary_key] = gcs_uri
+                    meta["cleaned_audio_sources"] = sources
+                    if isinstance(gcs_uri, str) and gcs_uri.startswith("gs://"):
+                        meta["cleaned_audio_gcs_uri"] = gcs_uri
+                    if gcs_key:
+                        meta["cleaned_audio_bucket_key"] = gcs_key
+                    if bucket:
+                        meta["cleaned_audio_bucket"] = bucket
+                episode.meta_json = json.dumps(meta)
+            except Exception:
+                logging.warning(
+                    "[assemble] Failed to persist cleaned audio metadata", exc_info=True
                 )
 
             episode.working_audio_name = Path(dest).name

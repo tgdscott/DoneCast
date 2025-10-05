@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -392,6 +393,20 @@ def resolve_media_context(
     except Exception:
         pass
     try:
+        meta_dict = (
+            json.loads(getattr(episode, "meta_json", "{}") or "{}")
+            if getattr(episode, "meta_json", None)
+            else {}
+        )
+    except Exception:
+        meta_dict = {}
+    try:
+        cleaned_meta_name = meta_dict.get("cleaned_audio")
+        if isinstance(cleaned_meta_name, str) and cleaned_meta_name:
+            base_stems.append(Path(cleaned_meta_name).stem)
+    except Exception:
+        pass
+    try:
         if output_filename:
             base_stems.append(Path(output_filename).stem)
     except Exception:
@@ -406,52 +421,114 @@ def resolve_media_context(
     except Exception:
         pass
 
-    base_audio_name = getattr(episode, "working_audio_name", None) or main_content_filename
-    source_audio_path = _resolve_media_file(base_audio_name) or (
-        PROJECT_ROOT / "media_uploads" / Path(str(base_audio_name)).name
-    )
+    stored_working = getattr(episode, "working_audio_name", None)
+
+    candidate_names: list[str] = []
+
+    def _add_candidate(value: Optional[str]) -> None:
+        try:
+            candidate = str(value or "").strip()
+        except Exception:
+            candidate = ""
+        if not candidate:
+            return
+        if candidate not in candidate_names:
+            candidate_names.append(candidate)
 
     try:
-        if source_audio_path and Path(str(source_audio_path)).exists():
-            promoted = _ensure_media_dir_copy(Path(str(source_audio_path)))
+        logging.info("[assemble] episode meta snapshot: %s", meta_dict)
+    except Exception:
+        pass
+
+    _add_candidate(stored_working if isinstance(stored_working, str) else None)
+    _add_candidate(meta_dict.get("cleaned_audio") if isinstance(meta_dict.get("cleaned_audio"), str) else None)
+
+    sources_meta = meta_dict.get("cleaned_audio_sources")
+    if isinstance(sources_meta, dict):
+        for value in sources_meta.values():
+            if isinstance(value, str):
+                _add_candidate(value)
+
+    for key_name in ("cleaned_audio_gcs_uri", "cleaned_audio_gcs_url"):
+        hint = meta_dict.get(key_name)
+        if isinstance(hint, str):
+            _add_candidate(hint)
+
+    bucket_hint = (
+        meta_dict.get("cleaned_audio_bucket")
+        if isinstance(meta_dict.get("cleaned_audio_bucket"), str)
+        else None
+    )
+    bucket_hint = (bucket_hint or os.getenv("MEDIA_BUCKET") or "").strip()
+    key_hint = meta_dict.get("cleaned_audio_bucket_key")
+    if bucket_hint and isinstance(key_hint, str) and key_hint.strip():
+        normalized_key = key_hint.strip().lstrip("/")
+        _add_candidate(f"gs://{bucket_hint}/{normalized_key}")
+
+    _add_candidate(main_content_filename)
+
+    base_audio_name = Path(str(main_content_filename)).name if main_content_filename else ""
+    source_audio_path: Optional[Path] = None
+
+    try:
+        logging.info("[assemble] audio resolution candidates: %s", candidate_names)
+    except Exception:
+        pass
+
+    for candidate in candidate_names:
+        resolved = _resolve_media_file(candidate)
+        if resolved and Path(str(resolved)).exists():
+            promoted = _ensure_media_dir_copy(Path(str(resolved)))
             if promoted and promoted.exists():
                 source_audio_path = promoted
                 base_audio_name = promoted.name
-                if getattr(episode, "working_audio_name", None) != promoted.name:
-                    episode.working_audio_name = promoted.name
+            else:
+                source_audio_path = Path(str(resolved))
+                base_audio_name = source_audio_path.name
+            if candidate != main_content_filename:
+                try:
+                    episode.working_audio_name = base_audio_name
                     session.add(episode)
                     session.commit()
-    except Exception:
-        session.rollback()
+                except Exception:
+                    session.rollback()
+            break
 
-    try:
-        if (not source_audio_path) or (not Path(str(source_audio_path)).exists()):
-            basename = Path(str(base_audio_name)).name
+    if (not source_audio_path) or (not Path(str(source_audio_path)).exists()):
+        basename = Path(str(base_audio_name or main_content_filename)).name
+        gcs_uri = None
+        try:
+            query = select(MediaItem).where(MediaItem.user_id == UUID(user_id))
+            query = query.where(MediaItem.category == MediaCategory.main_content)
+            for item in session.exec(query).all():
+                filename = str(getattr(item, "filename", "") or "")
+                if filename.startswith("gs://") and filename.rstrip().lower().endswith("/" + basename.lower()):
+                    gcs_uri = filename
+                    break
+        except Exception:
             gcs_uri = None
-            try:
-                query = select(MediaItem).where(MediaItem.user_id == UUID(user_id))
-                query = query.where(MediaItem.category == MediaCategory.main_content)
-                for item in session.exec(query).all():
-                    filename = str(getattr(item, "filename", "") or "")
-                    if filename.startswith("gs://") and filename.rstrip().lower().endswith("/" + basename.lower()):
-                        gcs_uri = filename
-                        break
-            except Exception:
-                gcs_uri = None
-            if gcs_uri:
-                logging.info("[assemble] downloading main content from GCS: %s", gcs_uri)
-                download = _resolve_media_file(gcs_uri)
-                if download and Path(str(download)).exists():
+        if gcs_uri:
+            logging.info("[assemble] downloading main content from GCS: %s", gcs_uri)
+            download = _resolve_media_file(gcs_uri)
+            if download and Path(str(download)).exists():
+                promoted = _ensure_media_dir_copy(Path(str(download)))
+                if promoted and promoted.exists():
+                    source_audio_path = promoted
+                    base_audio_name = promoted.name
+                else:
                     source_audio_path = Path(str(download))
-                    base_audio_name = Path(str(download)).name
-                    try:
-                        episode.working_audio_name = base_audio_name
-                        session.add(episode)
-                        session.commit()
-                    except Exception:
-                        session.rollback()
-    except Exception:
-        pass
+                    base_audio_name = source_audio_path.name
+                try:
+                    episode.working_audio_name = base_audio_name
+                    session.add(episode)
+                    session.commit()
+                except Exception:
+                    session.rollback()
+
+    if (not source_audio_path) or (not Path(str(source_audio_path)).exists()):
+        fallback_name = Path(str(main_content_filename)).name
+        source_audio_path = (PROJECT_ROOT / "media_uploads" / fallback_name).resolve()
+        base_audio_name = fallback_name
 
     try:
         logging.info(
