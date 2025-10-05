@@ -147,27 +147,39 @@ def publish(session: Session, current_user, episode_id: UUID, derived_show_id: s
         result = _task.apply(args=(), kwargs=task_kwargs)
         return {"job_id": "eager", "result": getattr(result, 'result', None)}
 
+    auto_fallback = os.getenv("CELERY_AUTO_FALLBACK", "").strip().lower() in {"1", "true", "yes", "on"}
+    env = os.getenv("APP_ENV", "dev").strip().lower()
+    should_probe_workers = _celery is not None and (auto_fallback or env in {"dev", "development", "local"})
+    worker_diag: Optional[str] = None
+    if should_probe_workers:
+        try:
+            ping = _celery.control.ping(timeout=1)
+            if not ping:
+                worker_diag = "control.ping returned no replies"
+        except Exception as exc:
+            worker_diag = f"control.ping raised {exc.__class__.__name__}: {exc}"
+
+    if worker_diag is not None:
+        logger.warning(
+            "[publish] No Celery workers detected; executing inline fallback (%s)",
+            worker_diag,
+        )
+        inline_result = _run_inline_publish()
+        inline_result["worker_status"] = {"available": False, "detail": worker_diag}
+        return inline_result
+
     try:
         from typing import cast as _cast, Any as _Any
         _task = _cast(_Any, publish_episode_to_spreaker_task)
         async_result = _task.apply_async(kwargs=task_kwargs)
-    except Exception:
+    except Exception as exc:
         logger.warning("[publish] Celery enqueue failed; running inline", exc_info=True)
-        return _run_inline_publish()
-
-    auto_fallback = os.getenv("CELERY_AUTO_FALLBACK", "").strip().lower() in {"1", "true", "yes", "on"}
-    env = os.getenv("APP_ENV", "dev").strip().lower()
-    if (auto_fallback or env in {"dev", "development", "local"}) and _celery is not None:
-        needs_fallback = False
-        try:
-            ping = _celery.control.ping(timeout=1)
-            if not ping:
-                needs_fallback = True
-        except Exception:
-            needs_fallback = True
-        if needs_fallback:
-            logger.warning("[publish] No Celery workers detected; executing inline fallback")
-            return _run_inline_publish()
+        inline_result = _run_inline_publish()
+        inline_result.setdefault(
+            "worker_status",
+            {"available": False, "detail": f"apply_async failed: {exc}"},
+        )
+        return inline_result
 
     return {"job_id": async_result.id}
 
