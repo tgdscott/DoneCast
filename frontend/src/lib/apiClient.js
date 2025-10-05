@@ -59,6 +59,7 @@ export function buildApiUrl(path) {
   );
 
   const baseHandlesApi = trimmedBase.endsWith('/api');
+  const isAbsoluteBase = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(trimmedBase);
   if (baseHandlesApi) {
     if (normalizedPath === '/api') {
       return trimmedBase;
@@ -74,6 +75,9 @@ export function buildApiUrl(path) {
     }
 
     if (isAssetPath) {
+      if (!isAbsoluteBase) {
+        return `${trimmedBase}${normalizedPath}`;
+      }
       const rootBase = trimmedBase.slice(0, -4); // strip trailing "/api"
       if (!rootBase) {
         return normalizedPath;
