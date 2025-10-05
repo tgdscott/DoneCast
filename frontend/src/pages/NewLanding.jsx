@@ -276,7 +276,7 @@ export default function NewLanding() {
               <span className="nl-brand-icon">
                 <Radio size={22} />
               </span>
-              PodcastPlusPlus
+              Podcast Plus Plus
             </div>
             <div className="nl-nav-links">
               <a href="#features">Features</a>
@@ -305,8 +305,8 @@ export default function NewLanding() {
               Professional Podcasting <span>For Everyone</span>
             </h1>
             <p className="nl-hero-description">
-              No experience needed. No technical skills required. No age limit. Just you and your voice. PodcastPlusPlus
-              makes professional podcasting so easy, it\'s faster and cheaper than hiring someone else to do it.
+              No experience needed. No technical skills required. No age limit. Just your voice and our patent-pending technology. PodcastPlusPlus
+              makes professional podcasting so easy, it's faster and cheaper than hiring someone else to do it.
             </p>
             <div className="nl-hero-actions">
               <Link to="/onboarding" className="nl-button">
@@ -394,13 +394,13 @@ export default function NewLanding() {
               Edit in Real-Time While You Record
             </h2>
             <p className="nl-lead" style={{ marginBottom: '1.75rem' }}>
-              Our AI removes awkward pauses, balances audio levels, writes show notes, and creates marketing clips as you speak.
+              Our AI removes awkward pauses, balances audio levels, writes show notes, and adds start-of-the-art features all as you speak.
               It&apos;s like having an entire production team behind the scenes—without the cost.
             </p>
             <ul className="nl-bullets">
-              <li>Smart cleanup removes filler words and background noise automatically</li>
-              <li>Live chapter markers and highlights created for every episode</li>
-              <li>Instant exports optimized for every major podcast platform</li>
+              <li>Smart cleanup removes filler words and awkward silence automatically</li>
+              <li>Automatically generate show notes and SEO tags for every episode</li>
+              <li>Our one-stop shop lets you take care of everything in just a few clicks.</li>
             </ul>
           </div>
         </div>
@@ -414,7 +414,7 @@ export default function NewLanding() {
             </h2>
             <p>
               Why pay someone else when you can do it yourself—faster, cheaper, and with complete creative control?
-              PodcastPlusPlus is so intuitive that publishing your podcast takes less time and effort than explaining it to
+              Podcast Plus Plus is so intuitive that publishing your podcast takes less time and effort than explaining it to
               someone else.
             </p>
           </div>
@@ -499,7 +499,7 @@ export default function NewLanding() {
         <div className="nl-container grid gap-10 lg:grid-cols-2 lg:items-center">
           <div>
             <h2 className="nl-hero-title" style={{ fontSize: 'clamp(2.2rem, 4vw, 3.2rem)', marginBottom: '1.5rem' }}>
-              Why <span>PodcastPlusPlus</span>?
+              Why <span>Podcast Plus Plus</span>?
             </h2>
             <p className="nl-lead" style={{ marginBottom: '2rem' }}>
               We've built something truly special here. Technology that doesn't exist anywhere else. A platform that makes the
@@ -539,7 +539,7 @@ export default function NewLanding() {
             Ready to Take Your Podcast to the Next Level?
           </h2>
           <p className="nl-lead" style={{ margin: '0 auto 2.25rem', maxWidth: '560px', color: 'hsl(var(--foreground) / 0.85)' }}>
-            Join the next generation of podcasters who are building their audience with PodcastPlusPlus.
+            Join the next generation of podcasters who are building their audience with Podcast Plus Plus.
           </p>
           <div className="nl-hero-actions" style={{ justifyContent: 'center' }}>
             <Link to="/onboarding" className="nl-button" style={{ fontSize: '1.05rem', padding: '0.85rem 2.3rem' }}>
@@ -568,7 +568,7 @@ export default function NewLanding() {
                 <span className="nl-brand-icon">
                   <Radio size={20} />
                 </span>
-                PodcastPlusPlus
+                Podcast Plus Plus
               </div>
               <p className="nl-lead" style={{ fontSize: '0.95rem' }}>
                 Professional podcast hosting for the modern creator.
@@ -578,7 +578,7 @@ export default function NewLanding() {
               <FooterColumn key={column.title} {...column} />
             ))}
           </div>
-          <div className="nl-footer-meta">&copy; {new Date().getFullYear()} PodcastPlusPlus. All rights reserved.</div>
+          <div className="nl-footer-meta">&copy; {new Date().getFullYear()} Podcast Plus Plus. All rights reserved.</div>
         </div>
       </footer>
     </div>

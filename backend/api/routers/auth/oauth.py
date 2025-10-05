@@ -31,6 +31,7 @@ log = logging.getLogger(__name__)
 
 
 FRONTEND_BASE_SESSION_KEY = "oauth_frontend_base"
+FRONTEND_PATH_SESSION_KEY = "oauth_frontend_path"
 
 
 def _normalize_frontend_base(value: str | None) -> str | None:
@@ -128,6 +129,8 @@ async def login_google(request: Request):
 
     dry_run = request.query_params.get("dry_run") or request.query_params.get("debug")
     frontend_hint = request.query_params.get("return_to") or request.query_params.get("redirect_to")
+    # Optional deep-link path to restore after OAuth (relative path only)
+    raw_path = request.query_params.get("return_path") or ""
     if not frontend_hint:
         frontend_hint = request.headers.get("origin") or ""
     if not frontend_hint:
@@ -140,6 +143,26 @@ async def login_google(request: Request):
             request.session[FRONTEND_BASE_SESSION_KEY] = normalized_hint
         else:
             request.session.pop(FRONTEND_BASE_SESSION_KEY, None)
+        # Store sanitized path if provided (avoid open redirect by forcing leading slash and stripping scheme/host)
+        if raw_path:
+            from urllib.parse import urlparse as _up
+            if len(raw_path) > 512:
+                raw_path = raw_path[:512]
+            # If the path accidentally includes full URL, extract path+query
+            if '://' in raw_path:
+                try:
+                    parsed_rp = _up(raw_path)
+                    rp_candidate = (parsed_rp.path or '/') + (f"?{parsed_rp.query}" if parsed_rp.query else '')
+                    raw_path = rp_candidate
+                except Exception:
+                    raw_path = '/'
+            if not raw_path.startswith('/'):
+                raw_path = '/' + raw_path.split('/',1)[-1]
+            if '\r' in raw_path or '\n' in raw_path:
+                raw_path = '/'
+            request.session[FRONTEND_PATH_SESSION_KEY] = raw_path
+        else:
+            request.session.pop(FRONTEND_PATH_SESSION_KEY, None)
     except Exception:
         pass
 
@@ -267,6 +290,10 @@ async def auth_google_callback(request: Request, db_session: Session = Depends(g
         session_frontend_base = request.session.pop(FRONTEND_BASE_SESSION_KEY, None)
     except Exception:
         session_frontend_base = None
+    try:
+        session_frontend_path = request.session.pop(FRONTEND_PATH_SESSION_KEY, None)
+    except Exception:
+        session_frontend_path = None
 
     # Prefer any loopback/private base we captured during the login redirect
     # (e.g., http://127.0.0.1:5173 while running Vite). This keeps local dev
@@ -307,11 +334,16 @@ async def auth_google_callback(request: Request, db_session: Session = Depends(g
     # Prefer landing users inside the app area immediately after OAuth instead of
     # dropping them on the marketing page. Admins still go to /admin, regular
     # users to /dashboard. Hash fragment preserves existing token capture logic.
-    if user.is_admin:
-        target_path = "/admin"
+    if session_frontend_path and isinstance(session_frontend_path, str) and session_frontend_path.startswith('/'):
+        target_path = session_frontend_path
     else:
-        target_path = "/dashboard"
-    frontend_url = f"{frontend_base}{target_path}#access_token={access_token}&token_type=bearer"
+        if user.is_admin:
+            target_path = "/admin"
+        else:
+            target_path = "/dashboard"
+    # Append access token as hash fragment preserving any existing fragment
+    fragment_prefix = '#' if '#' not in target_path else ''
+    frontend_url = f"{frontend_base}{target_path}{fragment_prefix}#access_token={access_token}&token_type=bearer"
 
     return RedirectResponse(url=frontend_url)
 
