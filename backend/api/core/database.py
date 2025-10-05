@@ -1,9 +1,10 @@
 from contextlib import contextmanager
 from typing import Iterator
 
-from sqlmodel import create_engine, SQLModel, Session
-from sqlalchemy.event import listen
+from sqlmodel import SQLModel, Session, create_engine
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
+from sqlalchemy.event import listen
 from sqlalchemy.exc import OperationalError as SAOperationalError
 import logging
 import os
@@ -80,52 +81,32 @@ if _FORCE_SQLITE and settings.INSTANCE_CONNECTION_NAME:
         settings.INSTANCE_CONNECTION_NAME,
     )
 
-_INSTANCE_CONNECTION_NAME = settings.INSTANCE_CONNECTION_NAME if not _FORCE_SQLITE else ""
-IS_CLOUD_SQL = bool(_INSTANCE_CONNECTION_NAME)
+_INSTANCE_CONNECTION_NAME = settings.INSTANCE_CONNECTION_NAME.strip() if not _FORCE_SQLITE else ""
+_DATABASE_URL = (settings.DATABASE_URL or "").strip()
+if _FORCE_SQLITE and _DATABASE_URL:
+    log.info("[db] Forcing SQLite (test/dev override); ignoring DATABASE_URL configuration")
+    _DATABASE_URL = ""
+
+_HAS_DISCRETE_DB_CONFIG = all(
+    getattr(settings, key, "").strip() for key in ("DB_USER", "DB_PASS", "DB_NAME")
+)
+
 DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT", "5432")
 
-if IS_CLOUD_SQL:
-    db_user = settings.DB_USER
-    db_pass = settings.DB_PASS
-    db_name = settings.DB_NAME
-    instance_connection = _INSTANCE_CONNECTION_NAME
-    # Prefer TCP when DB_HOST is provided (recommended on Windows with Cloud SQL Proxy)
-    if DB_HOST:
-        password = quote_plus(db_pass)
-        engine = create_engine(
-            f"postgresql+psycopg://{db_user}:{password}@{DB_HOST}:{DB_PORT}/{db_name}",
-            pool_pre_ping=True,
-            pool_size=int(os.getenv("DB_POOL_SIZE", 5)),
-            max_overflow=int(os.getenv("DB_MAX_OVERFLOW", 0)),
-            pool_recycle=int(os.getenv("DB_POOL_RECYCLE", 180)),
-            pool_timeout=int(os.getenv("DB_POOL_TIMEOUT", 30)),
-            future=True,
-        )
-        log.info("[db] Using Cloud SQL via TCP %s:%s for instance %s", DB_HOST, DB_PORT, instance_connection)
-    else:
-        db_socket_dir = os.getenv("DB_SOCKET_DIR", "/cloudsql")
-        socket_path = f"{db_socket_dir}/{instance_connection}"
-        # psycopg connection via Cloud SQL unix socket (Linux/Cloud Run)
-        password = quote_plus(db_pass)
-        engine = create_engine(
-            f"postgresql+psycopg://{db_user}:{password}@/{db_name}?host={socket_path}&port=5432",
-            pool_pre_ping=True,
-            pool_size=int(os.getenv("DB_POOL_SIZE", 5)),
-            max_overflow=int(os.getenv("DB_MAX_OVERFLOW", 0)),
-            pool_recycle=int(os.getenv("DB_POOL_RECYCLE", 180)),
-            pool_timeout=int(os.getenv("DB_POOL_TIMEOUT", 30)),
-            future=True,
-        )
-        log.info("[db] Using Cloud SQL via Unix socket %s", socket_path)
-else:
-    _DB_PATH: Path = Path(os.getenv("SQLITE_PATH", "/tmp/ppp.db")).resolve()
-    _DEFAULT_SQLITE_URL = f"sqlite:///{_DB_PATH.as_posix()}"
-    engine = create_engine(
-        _DEFAULT_SQLITE_URL,
+_POOL_KWARGS = {
+    "pool_pre_ping": True,
+    "pool_size": int(os.getenv("DB_POOL_SIZE", 5)),
+    "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", 0)),
+    "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", 180)),
+    "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", 30)),
+    "future": True,
+}
+
+def _create_sqlite_engine(url: str):
+    engine_ = create_engine(
+        url,
         echo=False,
-        # check_same_thread False allows usage across threads (uvicorn workers, threadpools)
-        # timeout gives sqlite time to wait on locks before failing
         connect_args={
             "check_same_thread": False,
             "timeout": float(os.getenv("SQLITE_TIMEOUT_SECONDS", "60")),
@@ -133,41 +114,87 @@ else:
     )
 
     def _sqlite_pragmas(dbapi_connection, connection_record):
-        """Set recommended SQLite PRAGMAs for concurrency and integrity.
-
-        - foreign_keys=ON ensures FK constraints
-        - journal_mode=WAL allows readers during writes
-        - synchronous=NORMAL balances durability/perf with WAL
-        - busy_timeout waits for locks before raising OperationalError
-        """
+        """Set recommended SQLite PRAGMAs for concurrency and integrity."""
         try:
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
             try:
                 cursor.execute("PRAGMA journal_mode=WAL")
             except Exception:
-                # Not critical if WAL cannot be set (older sqlite)
                 pass
             try:
                 cursor.execute("PRAGMA synchronous=NORMAL")
             except Exception:
                 pass
             try:
-                # default 5000 ms; can be overridden via env var
                 busy_ms = int(float(os.getenv("SQLITE_BUSY_TIMEOUT_MS", "15000")))
                 cursor.execute(f"PRAGMA busy_timeout={busy_ms}")
             except Exception:
                 pass
             cursor.close()
         except Exception:
-            # Best-effort; if PRAGMAs fail we proceed with defaults
             pass
 
-    listen(engine, "connect", _sqlite_pragmas)
+    listen(engine_, "connect", _sqlite_pragmas)
+    return engine_
+
+
+if _DATABASE_URL:
+    try:
+        parsed_url = make_url(_DATABASE_URL)
+        backend_name = parsed_url.get_backend_name()
+    except Exception:
+        parsed_url = None
+        backend_name = ""
+
+    if backend_name == "sqlite":
+        engine = _create_sqlite_engine(_DATABASE_URL)
+        sqlite_path = parsed_url.database if parsed_url is not None else _DATABASE_URL
+        log.info("[db] Using SQLite via DATABASE_URL override (path=%s)", sqlite_path)
+    else:
+        engine = create_engine(_DATABASE_URL, **_POOL_KWARGS)
+        driver = parsed_url.drivername if parsed_url is not None else "unknown"
+        log.info("[db] Using DATABASE_URL for engine (driver=%s)", driver)
+
+elif _INSTANCE_CONNECTION_NAME and _HAS_DISCRETE_DB_CONFIG and not _FORCE_SQLITE:
+    db_user = settings.DB_USER.strip()
+    db_pass = settings.DB_PASS.strip()
+    db_name = settings.DB_NAME.strip()
+    instance_connection = _INSTANCE_CONNECTION_NAME
+    password = quote_plus(db_pass)
+
+    if DB_HOST:
+        engine = create_engine(
+            f"postgresql+psycopg://{db_user}:{password}@{DB_HOST}:{DB_PORT}/{db_name}",
+            **_POOL_KWARGS,
+        )
+        log.info(
+            "[db] Using Cloud SQL via TCP %s:%s for instance %s", DB_HOST, DB_PORT, instance_connection
+        )
+    else:
+        db_socket_dir = os.getenv("DB_SOCKET_DIR", "/cloudsql")
+        socket_path = f"{db_socket_dir}/{instance_connection}"
+        engine = create_engine(
+            f"postgresql+psycopg://{db_user}:{password}@/{db_name}?host={socket_path}&port=5432",
+            **_POOL_KWARGS,
+        )
+        log.info("[db] Using Cloud SQL via Unix socket %s", socket_path)
+else:
+    if _INSTANCE_CONNECTION_NAME and not _HAS_DISCRETE_DB_CONFIG:
+        log.warning(
+            "[db] INSTANCE_CONNECTION_NAME provided without DB_USER/DB_PASS/DB_NAME; falling back to SQLite"
+        )
+    _DB_PATH: Path = Path(os.getenv("SQLITE_PATH", "/tmp/ppp.db")).resolve()
+    _DEFAULT_SQLITE_URL = f"sqlite:///{_DB_PATH.as_posix()}"
+    engine = _create_sqlite_engine(_DEFAULT_SQLITE_URL)
+    log.info("[db] Using SQLite database at %s", _DB_PATH)
 
 
 def _is_sqlite_engine() -> bool:
-    return not IS_CLOUD_SQL
+    try:
+        return engine.url.get_backend_name() == "sqlite"
+    except Exception:
+        return False
 
 
 def _ensure_episode_new_columns():
