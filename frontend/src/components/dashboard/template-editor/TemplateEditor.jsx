@@ -19,6 +19,9 @@ import GenerateVoiceDialog from "./GenerateVoiceDialog";
 import {
   AI_DEFAULT,
   DEFAULT_VOLUME_LEVEL,
+  segmentIcons,
+  sourceIcons,
+  sourceIconColors,
   volumeLevelToDb,
 } from "./constants";
 
@@ -834,6 +837,14 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
     const uploadInputRef = useRef(null);
     const [isUploading, setIsUploading] = useState(false);
     const [cooldown, setCooldown] = useState(0); // seconds remaining on 30s cooldown after creation
+    const supportsPerEpisodeTts = segment.segment_type !== 'commercial';
+
+    useEffect(() => {
+        if (!supportsPerEpisodeTts && segment?.source?.source_type === 'tts') {
+            onSourceChange(segment.id, { source_type: 'static', filename: segment?.source?.filename || '' });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [supportsPerEpisodeTts, segment?.source?.source_type, segment?.source?.filename, segment.id]);
 
     useEffect(() => {
         if (!justCreatedTs) { setCooldown(0); return; }
@@ -868,6 +879,9 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
     }, [segment?.source?.voice_id, token]);
 
     const handleSourceChangeLocal = (field, value) => {
+        if (field === 'source_type' && value === 'tts' && !supportsPerEpisodeTts) {
+            return;
+        }
         const newSource = { ...segment.source, [field]: value };
         // When changing source type, reset relevant fields
         if (field === 'source_type') {
@@ -941,8 +955,12 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
 
     // Detect legacy source types: old 'tts' with inline script/prompt or 'ai_generated'
     const legacySourceType = segment?.source?.source_type;
-    const isLegacy = (legacySourceType === 'ai_generated') ||
-        (legacySourceType === 'tts' && (typeof segment?.source?.script === 'string' || typeof segment?.source?.prompt === 'string'));
+    const hasLegacyScript = typeof segment?.source?.script === 'string' && segment?.source?.script.trim().length > 0;
+    const hasLegacyPrompt = typeof segment?.source?.prompt === 'string' && segment?.source?.prompt.trim().length > 0;
+    const hasModernPrompt = typeof segment?.source?.text_prompt === 'string' && segment?.source?.text_prompt.trim().length > 0;
+    const isLegacy = supportsPerEpisodeTts && ((legacySourceType === 'ai_generated') ||
+        (legacySourceType === 'tts' && (hasLegacyScript || hasLegacyPrompt) && !hasModernPrompt));
+    const currentSourceType = supportsPerEpisodeTts ? (legacySourceType || 'static') : 'static';
 
     return (
         <Card className={`transition-shadow ${isDragging ? 'shadow-2xl scale-105' : 'shadow-md'}`}>
@@ -992,20 +1010,36 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
                     <Label className="text-sm font-medium text-gray-600 flex items-center gap-1">Audio Source<HelpCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" title="Choose between existing audio files or per-episode AI voice prompts." /></Label>
                     <div className="flex items-center gap-3 mt-1">
                         <div className="flex-1">
-                            <Select value={segment?.source?.source_type || 'static'} onValueChange={(v) => handleSourceChangeLocal('source_type', v)}>
+                            <Select value={currentSourceType} onValueChange={(v) => handleSourceChangeLocal('source_type', v)}>
                                 <SelectTrigger className="w-full mt-1">
                                     <SelectValue placeholder="Select source type..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="static">{sourceIcons.static} Audio file (upload or choose)</SelectItem>
-                                    <SelectItem value="tts">{sourceIcons.tts} Per episode AI voice</SelectItem>
+                                    <SelectItem value="static">
+                                        {(() => {
+                                            const Icon = sourceIcons.static;
+                                            const colorClass = sourceIconColors.static || "";
+                                            return <Icon className={`w-4 h-4 mr-2 ${colorClass}`} />;
+                                        })()} Audio file (upload or choose)
+                                    </SelectItem>
+                                    {supportsPerEpisodeTts && (
+                                        <SelectItem value="tts">
+                                            {(() => {
+                                                const Icon = sourceIcons.tts;
+                                                const colorClass = sourceIconColors.tts || "";
+                                                return <Icon className={`w-4 h-4 mr-2 ${colorClass}`} />;
+                                            })()} Per episode AI voice
+                                        </SelectItem>
+                                    )}
                                 </SelectContent>
                             </Select>
                         </div>
-                        <Button type="button" variant="outline" onClick={() => onOpenTTS()} disabled={cooldown > 0}>
-                            <Mic className="w-4 h-4 mr-2" />
-                            {cooldown > 0 ? `Generate with AI voice (${cooldown}s)` : 'Generate with AI voice (one-time)'}
-                        </Button>
+                        {supportsPerEpisodeTts && (
+                            <Button type="button" variant="outline" onClick={() => onOpenTTS()} disabled={cooldown > 0}>
+                                <Mic className="w-4 h-4 mr-2" />
+                                {cooldown > 0 ? `Generate with AI voice (${cooldown}s)` : 'Generate with AI voice (one-time)'}
+                            </Button>
+                        )}
                         {justCreatedTs && cooldown > 0 && (
                             <span className="text-xs text-muted-foreground" title="We saved the last AI voice clip in your Media. Reuse it or wait a moment before creating another.">
                                 Recently created — reuse the saved file or wait a moment.
@@ -1017,7 +1051,7 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
                     </div>
                 </div>
                 <div>
-                    {segment?.source?.source_type === 'static' && (
+                    {currentSourceType === 'static' && (
                         <div>
                             <Label>Audio File</Label>
                             <div className="flex items-center gap-2 mt-1">
@@ -1044,7 +1078,7 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
                             </div>
                         </div>
                     )}
-                    {segment?.source?.source_type === 'tts' && (
+                    {supportsPerEpisodeTts && segment?.source?.source_type === 'tts' && (
                         <div className="space-y-3">
                             <div>
                                 <Label>Prompt Label (shown during episode creation)</Label>
