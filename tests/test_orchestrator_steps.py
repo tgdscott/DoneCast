@@ -136,3 +136,27 @@ def test_do_export_shape_and_logs(monkeypatch, log):
     assert any('Saved cleaned content' in s for s in log)
     assert any('[FINAL_MIX]' in s for s in log)
     assert any('[TRANSCRIPTS]' in s for s in log)
+
+
+def test_streaming_mix_buffer_lazy_allocation():
+    buf = steps._StreamingMixBuffer(
+        frame_rate=44100,
+        channels=2,
+        sample_width=2,
+        initial_duration_ms=60000,
+    )
+
+    # Initial allocation is deferred until audio is mixed.
+    assert len(buf._buffer) == 0
+
+    seg = steps.AudioSegment.silent(duration=1000, frame_rate=44100)
+    buf.overlay(seg, 0)
+
+    # After overlaying one second of stereo 16-bit audio we expect
+    # frame_rate * seconds * channels * sample_width bytes.
+    expected = 44100 * 1 * 2 * 2
+    assert len(buf._buffer) == expected
+
+    out = buf.to_segment()
+    assert isinstance(out, steps.AudioSegment)
+    assert len(out) >= 1000

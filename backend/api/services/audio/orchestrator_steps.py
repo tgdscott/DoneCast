@@ -87,9 +87,16 @@ class _StreamingMixBuffer:
         self.frame_rate = max(1, int(frame_rate))
         self.channels = max(1, int(channels))
         self.sample_width = max(1, int(sample_width))
-        initial_frames = self._ms_to_frames(initial_duration_ms)
-        self._buffer = bytearray(initial_frames * self.channels * self.sample_width)
-        self._max_frame = initial_frames
+        # Delay allocating the backing store until we actually mix audio. Large
+        # episodes (60+ minutes) can require hundreds of megabytes of PCM data;
+        # eagerly reserving the full duration caused Cloud Run instances to run
+        # out of memory before mixing even started. Track the requested duration
+        # so we can pad with silence when exporting, but start with an empty
+        # buffer.
+        self._buffer = bytearray()
+        self._capacity_frames = 0
+        self._min_frame = self._ms_to_frames(initial_duration_ms)
+        self._final_frame = self._min_frame
 
     def _ms_to_frames(self, ms: int) -> int:
         if ms <= 0:
@@ -102,12 +109,17 @@ class _StreamingMixBuffer:
         return int(math.floor(ms * self.frame_rate / 1000.0))
 
     def _ensure_capacity(self, end_frame: int) -> None:
-        if end_frame <= self._max_frame:
+        if end_frame <= self._capacity_frames:
             return
         needed_bytes = end_frame * self.channels * self.sample_width
         if needed_bytes > len(self._buffer):
-            self._buffer.extend(b"\x00" * (needed_bytes - len(self._buffer)))
-        self._max_frame = end_frame
+            try:
+                self._buffer.extend(b"\x00" * (needed_bytes - len(self._buffer)))
+            except MemoryError as exc:
+                raise MemoryError(
+                    f"streaming mix buffer cannot allocate {needed_bytes} bytes"
+                ) from exc
+        self._capacity_frames = end_frame
 
     def overlay(self, segment: AudioSegment, position_ms: int) -> None:
         seg = (
@@ -129,9 +141,15 @@ class _StreamingMixBuffer:
             existing = existing + b"\x00" * (len(raw) - len(existing))
         mixed = audioop.add(existing, raw, self.sample_width)
         self._buffer[start_byte:end_byte] = mixed
+        self._final_frame = max(self._final_frame, end_frame)
 
     def to_segment(self) -> AudioSegment:
-        data = bytes(self._buffer[: self._max_frame * self.channels * self.sample_width])
+        target_frames = max(self._final_frame, self._min_frame)
+        if target_frames > self._capacity_frames:
+            self._ensure_capacity(target_frames)
+        data = bytes(
+            self._buffer[: target_frames * self.channels * self.sample_width]
+        )
         return AudioSegment(
             data=data,
             sample_width=self.sample_width,
