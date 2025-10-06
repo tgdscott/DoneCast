@@ -1,7 +1,6 @@
 from __future__ import annotations
 import logging
 import os
-import sys
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -117,10 +116,7 @@ app.add_middleware(
 
 # --- Deferred Startup Tasks -------------------------------------------------
 import threading, time as _time
-
-_STARTUP_TASKS_LOCK = threading.Lock()
-_STARTUP_TASKS_STARTED = False
-_STARTUP_TASKS_DONE = threading.Event()
+from pathlib import Path as _Path
 
 def _launch_startup_tasks() -> None:
     """Run additive migrations & housekeeping in background.
@@ -130,31 +126,28 @@ def _launch_startup_tasks() -> None:
       BLOCKING_STARTUP_TASKS=1 or STARTUP_TASKS_MODE=sync -> run inline (legacy behavior)
     """
     skip = (os.getenv("SKIP_STARTUP_MIGRATIONS") or "").lower() in {"1","true","yes","on"}
-    default_mode = "sync" if _IS_DEV else "async"
-    mode = (os.getenv("STARTUP_TASKS_MODE") or default_mode).lower()
+    mode = (os.getenv("STARTUP_TASKS_MODE") or "async").lower()
     blocking_flag = (os.getenv("BLOCKING_STARTUP_TASKS") or "").lower() in {"1","true","yes","on"}
-
-    with _STARTUP_TASKS_LOCK:
-        global _STARTUP_TASKS_STARTED
-        if _STARTUP_TASKS_STARTED:
-            if skip:
-                _STARTUP_TASKS_DONE.set()
-            return
-        _STARTUP_TASKS_STARTED = True
-
+    sentinel_path = _Path(os.getenv("STARTUP_SENTINEL_PATH", "/tmp/ppp_startup_done"))
+    single = (os.getenv("SINGLE_STARTUP_TASKS") or "1").lower() in {"1","true","yes","on"}
     if skip:
         log.warning("[deferred-startup] SKIP_STARTUP_MIGRATIONS=1 -> skipping run_startup_tasks()")
-        _STARTUP_TASKS_DONE.set()
+        return
+    if single and sentinel_path.exists():
+        log.info("[deferred-startup] Sentinel %s exists -> skipping startup tasks", sentinel_path)
         return
     if blocking_flag or mode == "sync":
         log.info("[deferred-startup] Running startup tasks synchronously (blocking mode)")
         try:
             run_startup_tasks()
             log.info("[deferred-startup] Startup tasks complete (sync)")
+            if single:
+                try:
+                    sentinel_path.write_text(str(int(_time.time())))
+                except Exception:
+                    pass
         except Exception as e:  # pragma: no cover
             log.exception("[deferred-startup] Startup tasks failed (sync): %s", e)
-        finally:
-            _STARTUP_TASKS_DONE.set()
         return
     def _runner():
         start_ts = _time.time()
@@ -163,25 +156,22 @@ def _launch_startup_tasks() -> None:
             run_startup_tasks()
             elapsed = _time.time() - start_ts
             log.info("[deferred-startup] Startup tasks complete in %.2fs", elapsed)
+            if single:
+                try:
+                    sentinel_path.write_text(str(int(_time.time())))
+                except Exception:
+                    pass
         except Exception as e:  # pragma: no cover
             log.exception("[deferred-startup] Startup tasks failed: %s", e)
-        finally:
-            _STARTUP_TASKS_DONE.set()
     try:
         thread = threading.Thread(target=_runner, name="startup-tasks", daemon=True)
         thread.start()
         log.info("[deferred-startup] Launched background thread for startup tasks (thread=%s)", thread.name)
     except Exception as e:  # pragma: no cover
         log.exception("[deferred-startup] Could not launch background startup tasks: %s", e)
-        _STARTUP_TASKS_DONE.set()
 
 @app.on_event("startup")
 async def _kickoff_background_startup():  # type: ignore
-    _launch_startup_tasks()
-
-
-if os.getenv("PYTEST_CURRENT_TEST") or "pytest" in sys.modules:
-    log.info("[deferred-startup] Pytest detected; running startup tasks eagerly")
     _launch_startup_tasks()
 
 # Global preflight handler to satisfy browser CORS checks on any path and

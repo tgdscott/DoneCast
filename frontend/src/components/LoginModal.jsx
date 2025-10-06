@@ -34,10 +34,16 @@ const buildGoogleLoginUrl = () => {
   }
 
   if (typeof window !== 'undefined') {
-    const origin = window.location?.origin ? window.location.origin.replace(/\/+$/, '') : '';
+    const loc = window.location;
+    const origin = loc?.origin ? loc.origin.replace(/\/+$/, '') : '';
+    // Preserve current path (without hash) so post-OAuth flow can land where user began.
+    const rawPath = (loc?.pathname || '/') + (loc?.search || '');
+    // Basic sanitization: limit length & ensure leading slash
+    let cleanedPath = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
+    if (cleanedPath.length > 512) cleanedPath = cleanedPath.slice(0, 512);
     if (origin) {
       const sep = url.includes('?') ? '&' : '?';
-      url = `${url}${sep}return_to=${encodeURIComponent(origin)}`;
+      url = `${url}${sep}return_to=${encodeURIComponent(origin)}&return_path=${encodeURIComponent(cleanedPath)}`;
     }
   }
   return url;

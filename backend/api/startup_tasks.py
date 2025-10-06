@@ -19,12 +19,43 @@ except Exception:  # pragma: no cover
 
 log: logging.Logger = get_logger("api.startup_tasks")
 
+# --- Environment-driven startup behavior ------------------------------------
+_HEAVY_FLAG = (os.getenv("STARTUP_HEAVY_TASKS") or "off").strip().lower()
+# Modes: off, on, auto. auto => enable in non-production envs only.
+_APP_ENV = (os.getenv("APP_ENV") or os.getenv("ENV") or "dev").lower()
+if _HEAVY_FLAG == "auto":
+    _HEAVY_ENABLED = _APP_ENV not in {"prod", "production", "staging", "stage"}
+else:
+    _HEAVY_ENABLED = _HEAVY_FLAG in {"1", "true", "yes", "on"}
 
-def _normalize_episode_paths() -> None:
+try:
+    _ROW_LIMIT = int(os.getenv("STARTUP_ROW_LIMIT", "1000"))
+    if _ROW_LIMIT <= 0:
+        _ROW_LIMIT = 1000
+except Exception:
+    _ROW_LIMIT = 1000
+
+def _timing(label: str):
+    """Context manager for timing blocks with consistent logging."""
+    from contextlib import contextmanager
+    import time as _t
+    @contextmanager
+    def _cm():
+        start = _t.time()
+        try:
+            yield
+        finally:
+            dur = _t.time() - start
+            log.info("[startup] %s completed in %.2fs", label, dur)
+    return _cm()
+
+
+def _normalize_episode_paths(limit: int | None = None) -> None:
     """Ensure Episode paths store only basenames for local files."""
     try:
         with session_scope() as session:
-            q = select(Episode).limit(5000)
+            _limit = limit or _ROW_LIMIT
+            q = select(Episode).limit(_limit)
             eps = session.exec(q).all()
             changed = 0
             for e in eps:
@@ -48,11 +79,12 @@ def _normalize_episode_paths() -> None:
         log.warning("_normalize_episode_paths failed: %s", e)
 
 
-def _normalize_podcast_covers() -> None:
+def _normalize_podcast_covers(limit: int | None = None) -> None:
     """Ensure Podcast.cover_path stores only a basename if it's a local path."""
     try:
         with session_scope() as session:
-            q = select(Podcast).limit(5000)
+            _limit = limit or _ROW_LIMIT
+            q = select(Podcast).limit(_limit)
             pods = session.exec(q).all()
             changed = 0
             for p in pods:
@@ -353,13 +385,13 @@ def _compute_pt_expiry(created_at_utc: datetime, days: int = 14) -> datetime:
     return expiry_pt.astimezone(ZoneInfo("UTC") if ZoneInfo else timezone.utc)
 
 
-def _backfill_mediaitem_expires_at() -> None:
+def _backfill_mediaitem_expires_at(limit: int | None = None) -> None:
     """Set expires_at for media items missing it (idempotent)."""
     try:
         with session_scope() as session:
             from api.models.podcast import MediaItem, MediaCategory
-
-            q = select(MediaItem).filter((MediaItem.expires_at == None)).limit(5000)  # type: ignore
+            _limit = limit or _ROW_LIMIT
+            q = select(MediaItem).filter((MediaItem.expires_at == None)).limit(_limit)  # type: ignore
             items = session.exec(q).all()
             changed = 0
             for m in items:
@@ -411,19 +443,42 @@ def _ensure_user_terms_columns() -> None:
 
 
 def run_startup_tasks() -> None:
-    """Create tables and run all additive/idempotent startup tasks."""
-    try:
-        create_db_and_tables()
-    except Exception as e:
-        log.error("[startup] create_db_and_tables failed (continuing): %s", e)
+    """Perform lightweight startup + optionally heavy normalization/backfill.
 
-    _normalize_episode_paths()
-    _normalize_podcast_covers()
-    _ensure_user_admin_column()
-    _ensure_primary_admin()
-    _ensure_user_terms_columns()
-    _ensure_user_subscription_column()
-    _backfill_mediaitem_expires_at()
+    Heavy tasks are gated by STARTUP_HEAVY_TASKS env flag (on/off/auto) and
+    use STARTUP_ROW_LIMIT to cap per-start scans. Default is OFF in prod.
+    """
+    log.info("[startup] begin (env=%s heavy=%s row_limit=%s)", _APP_ENV, _HEAVY_ENABLED, _ROW_LIMIT)
+
+    with _timing("create_db_and_tables"):
+        try:
+            create_db_and_tables()
+        except Exception as e:
+            log.error("[startup] create_db_and_tables failed (continuing): %s", e)
+
+    # Always-on lightweight additive steps
+    with _timing("ensure_user_admin_column"):
+        _ensure_user_admin_column()
+    with _timing("ensure_primary_admin"):
+        _ensure_primary_admin()
+    with _timing("ensure_user_terms_columns"):
+        _ensure_user_terms_columns()
+    with _timing("ensure_user_subscription_column"):
+        _ensure_user_subscription_column()
+
+    if not _HEAVY_ENABLED:
+        log.info("[startup] heavy tasks disabled (STARTUP_HEAVY_TASKS=%s)", _HEAVY_FLAG)
+        return
+
+    # Heavy / potentially slow tasks
+    with _timing("normalize_episode_paths"):
+        _normalize_episode_paths()
+    with _timing("normalize_podcast_covers"):
+        _normalize_podcast_covers()
+    with _timing("backfill_mediaitem_expires_at"):
+        _backfill_mediaitem_expires_at()
+
+    log.info("[startup] heavy tasks complete")
 
 
 __all__ = [
