@@ -287,9 +287,15 @@ export default function NewLanding() {
               <button type="button" className="nl-button-outline" onClick={openLoginModal}>
                 Log In
               </button>
-              <Link to="/onboarding" className="nl-button">
-                Start Free Trial
-              </Link>
+              {isAuthenticated ? (
+                <Link to="/onboarding" className="nl-button">
+                  Start Free Trial
+                </Link>
+              ) : (
+                <button type="button" className="nl-button" onClick={openLoginModal}>
+                  Start Free Trial
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -309,10 +315,17 @@ export default function NewLanding() {
               makes professional podcasting so easy, it's faster and cheaper than hiring someone else to do it.
             </p>
             <div className="nl-hero-actions">
-              <Link to="/onboarding" className="nl-button">
-                Start Your Free Trial
-                <ArrowRight size={18} />
-              </Link>
+              {isAuthenticated ? (
+                <Link to="/onboarding" className="nl-button">
+                  Start Your Free Trial
+                  <ArrowRight size={18} />
+                </Link>
+              ) : (
+                <button type="button" className="nl-button" onClick={openLoginModal}>
+                  Start Your Free Trial
+                  <ArrowRight size={18} />
+                </button>
+              )}
               <Link to="/in-development" className="nl-button-outline">
                 <Play size={16} /> Watch Demo
               </Link>

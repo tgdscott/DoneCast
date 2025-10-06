@@ -204,11 +204,24 @@ async def assemble_episode_task(request: Request, x_tasks_auth: str | None = Hea
     except ValidationError as ve:
         raise HTTPException(status_code=400, detail=f"invalid payload: {ve}")
 
-    # Execute asynchronously in background thread to prevent HTTP timeout
+    # Execute asynchronously in separate PROCESS (not thread) to prevent GIL blocking
+    # Threading doesn't work for CPU-intensive tasks in Python - it blocks the event loop
     def _run_assembly():
         try:
-            from worker.tasks import create_podcast_episode  # lazy import
-            log.info("event=tasks.assemble.start episode_id=%s", payload.episode_id)
+            # Re-import in child process (multiprocessing requires this)
+            import sys
+            import logging
+            from worker.tasks import create_podcast_episode
+            
+            # Configure logging in child process
+            logging.basicConfig(
+                level=logging.INFO,
+                format='[%(asctime)s] %(levelname)s %(name)s: %(message)s',
+                stream=sys.stdout
+            )
+            log = logging.getLogger("tasks.assemble.worker")
+            
+            log.info("event=tasks.assemble.start episode_id=%s pid=%s", payload.episode_id, os.getpid())
             result = create_podcast_episode(
                 episode_id=payload.episode_id,
                 template_id=payload.template_id,
@@ -222,16 +235,18 @@ async def assemble_episode_task(request: Request, x_tasks_auth: str | None = Hea
             )
             log.info("event=tasks.assemble.done episode_id=%s result=%s", payload.episode_id, result)
         except Exception as exc:  # pragma: no cover - defensive
+            import logging
+            log = logging.getLogger("tasks.assemble.worker")
             log.exception("event=tasks.assemble.error episode_id=%s err=%s", payload.episode_id, exc)
 
-    import threading
-    thread = threading.Thread(
+    import multiprocessing
+    process = multiprocessing.Process(
         target=_run_assembly,
         name=f"assemble-{payload.episode_id}",
         daemon=True,
     )
-    thread.start()
-    log.info("event=tasks.assemble.dispatched episode_id=%s thread=%s", payload.episode_id, thread.name)
+    process.start()
+    log.info("event=tasks.assemble.dispatched episode_id=%s pid=%s", payload.episode_id, process.pid)
     
     # Return immediately with 202 Accepted
     return {"ok": True, "status": "processing", "episode_id": payload.episode_id}

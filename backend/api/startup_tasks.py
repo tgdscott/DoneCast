@@ -442,6 +442,41 @@ def _ensure_user_terms_columns() -> None:
             log.warning("[migrate] Unable to ensure user terms columns (%s): %s", backend, exc)
 
 
+def _kill_zombie_assembly_processes() -> None:
+    """Kill any orphaned assembly worker processes from previous restarts.
+    
+    This prevents zombie processes from blocking the event loop.
+    """
+    try:
+        import psutil
+        current_pid = os.getpid()
+        killed = 0
+        
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                if proc.pid == current_pid:
+                    continue
+                    
+                cmdline = proc.info.get('cmdline') or []
+                cmdline_str = ' '.join(cmdline)
+                
+                # Look for assembly worker processes
+                if 'assemble' in cmdline_str.lower() and 'python' in cmdline_str.lower():
+                    log.warning("[startup] Killing zombie assembly process: pid=%s cmd=%s", 
+                              proc.pid, cmdline_str[:100])
+                    proc.kill()
+                    killed += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+                
+        if killed > 0:
+            log.info("[startup] Killed %d zombie assembly process(es)", killed)
+    except ImportError:
+        log.debug("[startup] psutil not available; skipping zombie process cleanup")
+    except Exception as e:
+        log.warning("[startup] Zombie process cleanup failed: %s", e)
+
+
 def run_startup_tasks() -> None:
     """Perform lightweight startup + optionally heavy normalization/backfill.
 
@@ -449,6 +484,10 @@ def run_startup_tasks() -> None:
     use STARTUP_ROW_LIMIT to cap per-start scans. Default is OFF in prod.
     """
     log.info("[startup] begin (env=%s heavy=%s row_limit=%s)", _APP_ENV, _HEAVY_ENABLED, _ROW_LIMIT)
+
+    # Kill any zombie processes from previous crashes/restarts
+    with _timing("kill_zombie_processes"):
+        _kill_zombie_assembly_processes()
 
     with _timing("create_db_and_tables"):
         try:
