@@ -220,8 +220,31 @@ async def upload_media_files(
 
         friendly_name = names[i] if i < len(names) and names[i].strip() else default_friendly_name
 
+        # Upload to GCS for persistence (intro/outro/music/sfx/commercial)
+        gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+        final_filename = safe_filename  # Will be replaced with gs:// URL if GCS upload succeeds
+        if gcs_bucket and category in (
+            MediaCategory.intro,
+            MediaCategory.outro,
+            MediaCategory.music,
+            MediaCategory.sfx,
+            MediaCategory.commercial,
+        ):
+            try:
+                from infrastructure import gcs
+                gcs_key = f"{current_user.id.hex}/{category.value}/{safe_filename}"
+                with open(file_path, "rb") as f:
+                    gcs_url = gcs.upload_fileobj(gcs_bucket, gcs_key, f, content_type=final_content_type or "audio/mpeg")
+                
+                # Store GCS URL instead of local filename for persistence
+                if gcs_url and gcs_url.startswith("gs://"):
+                    final_filename = gcs_url
+            except Exception as e:
+                # Log warning but continue with local-only storage (will work until container restart)
+                print(f"[media.upload] Warning: Failed to upload {category.value} to GCS: {e}")
+
         media_item = MediaItem(
-            filename=safe_filename,
+            filename=final_filename,
             friendly_name=friendly_name,
             content_type=final_content_type,
             filesize=bytes_written,
