@@ -98,6 +98,7 @@ export default function usePodcastCreator({
   const [coverMode, setCoverMode] = useState('crop');
   const [isUploadingCover, setIsUploadingCover] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null);
+  const [uploadStats, setUploadStats] = useState(null); // Track upload speed, ETA, bytes
   const [audioDurationSec, setAudioDurationSec] = useState(null);
 
   useEffect(() => {
@@ -959,6 +960,7 @@ export default function usePodcastCreator({
     intentsPromptedRef.current = false; // new file -> prompt again in Step 2
     setIsUploading(true);
     setUploadProgress(0);
+    setUploadStats(null);
     setStatusMessage('Uploading audio file...');
     setError('');
 
@@ -968,8 +970,9 @@ export default function usePodcastCreator({
         file,
         friendlyName: file.name,
         token,
-        onProgress: ({ percent }) => {
+        onProgress: ({ percent, loaded, total, bytesPerSecond, etaSeconds }) => {
           if (typeof percent === 'number') setUploadProgress(percent);
+          setUploadStats({ loaded, total, bytesPerSecond, etaSeconds });
         },
         onXhrCreate: (xhr) => {
           uploadXhrRef.current = xhr;
@@ -990,10 +993,14 @@ export default function usePodcastCreator({
         localStorage.removeItem('ppp_uploaded_filename');
       } catch {}
       setUploadProgress(null);
+      setUploadStats(null);
     } finally {
       uploadXhrRef.current = null;
       setIsUploading(false);
-      setTimeout(() => setUploadProgress(null), 400);
+      setTimeout(() => {
+        setUploadProgress(null);
+        setUploadStats(null);
+      }, 400);
     }
   };
 
@@ -2053,6 +2060,7 @@ export default function usePodcastCreator({
     handleFileChange,
     handlePreuploadedSelect,
     uploadProgress,
+    uploadStats,
     handleCoverFileSelected,
     handleUploadProcessedCover,
     handleTtsChange,

@@ -3,6 +3,7 @@ import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { FileAudio, Loader2, Mic, Upload, ArrowLeft, Lightbulb, AlertTriangle } from 'lucide-react';
 import { formatDisplayName } from '@/lib/displayNames';
+import { formatBytes, formatSpeed, formatEta, formatProgressDetail } from '@/lib/uploadProgress';
 
 // Inline intent questions were removed in favor of the floating modal.
 
@@ -11,6 +12,7 @@ export default function StepUploadAudio({
   uploadedFilename,
   isUploading,
   uploadProgress = null,
+  uploadStats = null,
   onFileChange,
   fileInputRef,
   onBack,
@@ -129,6 +131,11 @@ export default function StepUploadAudio({
               style={{ width: `${Math.max(5, Math.min(100, Number(uploadProgress) || 5))}%` }}
             />
           </div>
+          {uploadStats && (
+            <div className="mt-2 text-xs text-slate-600">
+              {formatProgressDetail(uploadStats.loaded, uploadStats.total, uploadStats.bytesPerSecond, uploadStats.etaSeconds)}
+            </div>
+          )}
         </div>
       )}
       <Card className="border border-slate-200 bg-slate-50" data-tour-id="episode-upload-guide">

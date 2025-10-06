@@ -1,4 +1,5 @@
 import json
+import os
 from uuid import uuid4, UUID
 from typing import List, Optional
 from pathlib import Path
@@ -121,6 +122,29 @@ async def upload_media_files(
 			finally:
 				pass
 			raise HTTPException(status_code=500, detail="Failed to save uploaded file.")
+
+		# Upload to GCS for persistence (intro/outro/music/sfx/commercial)
+		gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+		if gcs_bucket and category in (
+			MediaCategory.intro,
+			MediaCategory.outro,
+			MediaCategory.music,
+			MediaCategory.sfx,
+			MediaCategory.commercial,
+		):
+			try:
+				from infrastructure import gcs
+				gcs_key = f"{current_user.id.hex}/media/{category.value}/{safe_filename}"
+				with open(file_path, "rb") as f:
+					gcs_url = gcs.upload_fileobj(gcs_bucket, gcs_key, f, content_type=file.content_type or "audio/mpeg")
+				
+				# Store GCS URL instead of local filename for persistence
+				if gcs_url and gcs_url.startswith("gs://"):
+					safe_filename = gcs_url
+					log.info("[upload.gcs] %s uploaded: %s", category.value, gcs_url)
+			except Exception as e:
+				log.warning("[upload.gcs] Failed to upload %s to GCS: %s", category.value, e)
+				# Continue with local-only storage (will work until container restart)
 
                 provided_name = names[i] if i < len(names) else None
                 provided_clean = str(provided_name).strip() if provided_name is not None else ""

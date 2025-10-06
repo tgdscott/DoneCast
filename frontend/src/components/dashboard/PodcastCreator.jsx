@@ -66,6 +66,7 @@ export default function PodcastCreator({
     handleFileChange,
     handlePreuploadedSelect,
     fileInputRef,
+    uploadStats,
     mediaLibrary,
     ttsValues,
     handleTtsChange,
@@ -344,6 +345,7 @@ export default function PodcastCreator({
             uploadedFilename={uploadedFilename}
             isUploading={isUploading}
             uploadProgress={uploadProgress}
+            uploadStats={uploadStats}
             onFileChange={handleFileChange}
             fileInputRef={fileInputRef}
             onBack={() => setCurrentStep(1)}

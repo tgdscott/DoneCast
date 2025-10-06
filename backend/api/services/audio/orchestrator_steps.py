@@ -1076,29 +1076,61 @@ def build_template_and_final_mix_step(
                 pass
         elif source and source.get('source_type') == 'static':
             raw_name = (source.get('filename') or '')
-            static_path = MEDIA_DIR / raw_name
-            if static_path.exists():
-                audio = AudioSegment.from_file(static_path)
+            
+            # Handle GCS URLs (intro/outro/music/sfx uploaded via media library)
+            if raw_name.startswith("gs://"):
+                import tempfile
+                from infrastructure import gcs
+                temp_path = None
                 try:
-                    log.append(f"[TEMPLATE_STATIC_OK] seg_id={seg.get('id')} file={static_path.name} len_ms={len(audio)}")
-                except Exception:
-                    pass
-            else:
-                alt = _resolve_media_file(raw_name)
-                if alt and alt.exists():
-                    try:
-                        audio = AudioSegment.from_file(alt)
-                        log.append(f"[TEMPLATE_STATIC_RESOLVED] seg_id={seg.get('id')} requested={raw_name} -> {alt.name} len_ms={len(audio)}")
-                    except Exception as e:
+                    # Parse gs://bucket/key format
+                    gcs_str = raw_name[5:]  # Remove "gs://"
+                    bucket, key = gcs_str.split("/", 1)
+                    
+                    # Download to temp file
+                    temp_fd, temp_path = tempfile.mkstemp(suffix=".mp3")
+                    os.close(temp_fd)
+                    
+                    with open(temp_path, "wb") as f:
+                        blob = gcs.get_blob(bucket, key)
+                        f.write(blob.download_as_bytes())
+                    
+                    audio = AudioSegment.from_file(temp_path)
+                    log.append(f"[TEMPLATE_STATIC_GCS_OK] seg_id={seg.get('id')} gcs={raw_name} len_ms={len(audio)}")
+                except Exception as e:
+                    log.append(f"[TEMPLATE_STATIC_GCS_ERROR] seg_id={seg.get('id')} gcs={raw_name} error={type(e).__name__}: {e}")
+                finally:
+                    if temp_path and os.path.exists(temp_path):
                         try:
-                            log.append(f"[TEMPLATE_STATIC_RESOLVE_ERROR] {type(e).__name__}: {e}")
+                            os.unlink(temp_path)
                         except Exception:
                             pass
-                if not audio:
+            
+            # Handle local files (backward compatibility)
+            else:
+                static_path = MEDIA_DIR / raw_name
+                if static_path.exists():
+                    audio = AudioSegment.from_file(static_path)
                     try:
-                        log.append(f"[TEMPLATE_STATIC_MISSING] seg_id={seg.get('id')} file={raw_name}")
+                        log.append(f"[TEMPLATE_STATIC_OK] seg_id={seg.get('id')} file={static_path.name} len_ms={len(audio)}")
                     except Exception:
                         pass
+                else:
+                    alt = _resolve_media_file(raw_name)
+                    if alt and alt.exists():
+                        try:
+                            audio = AudioSegment.from_file(alt)
+                            log.append(f"[TEMPLATE_STATIC_RESOLVED] seg_id={seg.get('id')} requested={raw_name} -> {alt.name} len_ms={len(audio)}")
+                        except Exception as e:
+                            try:
+                                log.append(f"[TEMPLATE_STATIC_RESOLVE_ERROR] {type(e).__name__}: {e}")
+                            except Exception:
+                                pass
+                    if not audio:
+                        try:
+                            log.append(f"[TEMPLATE_STATIC_MISSING] seg_id={seg.get('id')} file={raw_name}")
+                        except Exception:
+                            pass
         elif source and source.get('source_type') == 'tts':
             script = tts_overrides.get(str(seg.get('id')), source.get('script') or '')
             script = str(script or '')
