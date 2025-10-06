@@ -249,26 +249,40 @@ def _generate_signed_url(
                     logger.info("No private key available; using public URL for GET (bucket is publicly readable)")
                     return f"https://storage.googleapis.com/{bucket_name}/{key}"
                 else:
-                    # Write operation: MUST use IAM signing
+                    # Write operation: MUST use IAM signing with custom signer
                     logger.info("No private key available; using IAM-based signing for %s", method)
                     try:
-                        from google.auth import compute_engine
+                        from google.auth import compute_engine, iam
                         from google.auth.transport import requests as auth_requests
                         
-                        # Get the service account email from compute engine metadata
+                        # Get compute engine credentials
                         credentials = compute_engine.Credentials()
-                        auth_req = auth_requests.Request()
-                        credentials.refresh(auth_req)
-                        service_account_email = credentials.service_account_email
                         
-                        # Use IAM-based signing
-                        return blob.generate_signed_url(
-                            **kwargs,
-                            service_account_email=service_account_email,
-                            access_token=credentials.token
+                        # Create IAM signer that uses the IAM Credentials API
+                        # This signs blobs using the service account without needing the private key
+                        request = auth_requests.Request()
+                        signer = iam.Signer(
+                            request=request,
+                            credentials=credentials,
+                            service_account_email=None  # Will auto-detect from credentials
                         )
+                        
+                        # Generate signed URL using the IAM signer
+                        from google.cloud.storage._signing import generate_signed_url_v4
+                        
+                        signed_url = generate_signed_url_v4(
+                            credentials=signer,
+                            resource=f"/{bucket_name}/{key}",
+                            expiration=expires,
+                            api_access_endpoint="https://storage.googleapis.com",
+                            method=method,
+                            headers={"Content-Type": content_type} if content_type else None,
+                        )
+                        
+                        return signed_url
+                        
                     except Exception as iam_err:
-                        logger.error("IAM-based signing failed: %s", iam_err)
+                        logger.error("IAM-based signing failed: %s", iam_err, exc_info=True)
                         raise RuntimeError(f"Cannot generate signed {method} URL without private key or IAM access") from iam_err
             else:
                 raise
