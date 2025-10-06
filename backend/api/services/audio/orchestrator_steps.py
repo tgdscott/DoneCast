@@ -98,6 +98,7 @@ def _format_ms(ms: int) -> str:
 
 
 MAX_MIX_BUFFER_BYTES = _parse_int_env("CLOUDPOD_MAX_MIX_BUFFER_BYTES", 512 * 1024 * 1024)
+BACKGROUND_LOOP_CHUNK_MS = 30_000  # mix background music in 30s chunks to cap allocations
 
 
 class TemplateTimelineTooLargeError(RuntimeError):
@@ -253,6 +254,58 @@ class _StreamingMixBuffer:
             frame_rate=self.frame_rate,
             channels=self.channels,
         )
+
+
+# --- Mix-time helpers for background loops ---
+def _loop_chunk(seg: AudioSegment, duration_ms: int) -> AudioSegment:
+    if duration_ms <= 0:
+        return AudioSegment.silent(duration=0)
+    seg_len = len(seg)
+    if seg_len <= 0:
+        return AudioSegment.silent(duration=duration_ms)
+    repeat = int(math.ceil(float(duration_ms) / float(seg_len)))
+    if repeat <= 1:
+        return seg[:duration_ms]
+    looped = seg * repeat
+    return looped[:duration_ms]
+
+
+def _envelope_factor(
+    at_ms: int, total_ms: int, fade_in_ms: int, fade_out_ms: int
+) -> float:
+    if total_ms <= 0:
+        return 0.0
+    at_ms = max(0, min(total_ms, at_ms))
+    if fade_in_ms > 0 and at_ms < fade_in_ms:
+        return max(0.0, min(1.0, at_ms / float(fade_in_ms)))
+    if fade_out_ms > 0 and at_ms > total_ms - fade_out_ms:
+        remaining = total_ms - at_ms
+        return max(0.0, min(1.0, remaining / float(fade_out_ms)))
+    return 1.0
+
+
+def _factor_to_db(factor: float) -> float:
+    if factor <= 0.0:
+        return -120.0
+    return 20.0 * math.log10(factor)
+
+
+def _apply_gain_ramp(segment: AudioSegment, start_factor: float, end_factor: float) -> AudioSegment:
+    start_factor = max(0.0, min(1.0, start_factor))
+    end_factor = max(0.0, min(1.0, end_factor))
+    if abs(start_factor - end_factor) < 1e-6:
+        if abs(start_factor - 1.0) < 1e-6:
+            return segment
+        gain_db = _factor_to_db(start_factor)
+        if abs(gain_db) < 1e-6:
+            return segment
+        return segment.apply_gain(gain_db)
+    return segment.fade(
+        from_gain=_factor_to_db(start_factor),
+        to_gain=_factor_to_db(end_factor),
+        start=0,
+        end=len(segment),
+    )
 
 
 # --- Shared small helpers (kept local to match orchestrator behavior) ---
@@ -1243,16 +1296,6 @@ def build_template_and_final_mix_step(
             mix_buffer.overlay(_aud, _st, label=str(label))
 
     try:
-        def _loop_to_duration(seg, dur_ms: int):
-            if dur_ms <= 0:
-                return AudioSegment.silent(duration=0)
-            if len(seg) == 0:
-                return AudioSegment.silent(duration=dur_ms)
-            out = seg
-            while len(out) < dur_ms:
-                out = out + seg
-            return out[:dur_ms]
-
         def _apply(
             bg_seg: AudioSegment,
             start_ms: int,
@@ -1266,13 +1309,6 @@ def build_template_and_final_mix_step(
             dur = max(0, end_ms - start_ms)
             if dur <= 0:
                 return
-            m = _loop_to_duration(bg_seg, dur)
-            try:
-                if vol_db is not None:
-                    m_seg: AudioSegment = cast(AudioSegment, m)
-                    m = m_seg.apply_gain(float(vol_db))
-            except Exception:
-                pass
             try:
                 fi = max(0, int(fade_in_ms or 0))
                 fo = max(0, int(fade_out_ms or 0))
@@ -1284,19 +1320,61 @@ def build_template_and_final_mix_step(
                     else:
                         fi = 0
                         fo = max(0, dur - 1)
-                if fi > 0:
-                    m_seg2: AudioSegment = cast(AudioSegment, m)
-                    m = m_seg2.fade_in(fi)
-                if fo > 0:
-                    m_seg3: AudioSegment = cast(AudioSegment, m)
-                    m = m_seg3.fade_out(fo)
+            except Exception:
+                fi = max(0, int(fade_in_ms or 0))
+                fo = max(0, int(fade_out_ms or 0))
+
+            base_seg = cast(AudioSegment, bg_seg)
+            if len(base_seg) <= 0:
+                return
+            try:
+                if vol_db is not None:
+                    base_seg = base_seg.apply_gain(float(vol_db))
             except Exception:
                 pass
-            mix_buffer.overlay(
-                cast(AudioSegment, m),
-                start_ms,
-                label=f"background:{label}",
-            )
+
+            remaining = dur
+            chunk_offset = 0
+            chunk_limit = max(1000, int(BACKGROUND_LOOP_CHUNK_MS))
+            while remaining > 0:
+                chunk_ms = min(chunk_limit, remaining)
+                chunk = _loop_chunk(base_seg, chunk_ms)
+                if len(chunk) <= 0:
+                    break
+
+                boundaries = [0, len(chunk)]
+                fi_boundary = fi - chunk_offset
+                if fi > 0 and 0 < fi_boundary < len(chunk):
+                    boundaries.append(int(fi_boundary))
+                fo_start = dur - fo
+                fo_boundary = fo_start - chunk_offset
+                if fo > 0 and 0 < fo_boundary < len(chunk):
+                    boundaries.append(int(fo_boundary))
+                boundaries = sorted({int(max(0, min(len(chunk), b))) for b in boundaries})
+
+                for idx in range(len(boundaries) - 1):
+                    sub_start = boundaries[idx]
+                    sub_end = boundaries[idx + 1]
+                    if sub_end <= sub_start:
+                        continue
+                    sub = chunk[sub_start:sub_end]
+                    global_start = chunk_offset + sub_start
+                    start_factor = _envelope_factor(global_start, dur, fi, fo)
+                    end_factor = _envelope_factor(global_start + len(sub), dur, fi, fo)
+                    if not (
+                        abs(start_factor - 1.0) < 1e-6 and abs(end_factor - 1.0) < 1e-6
+                    ):
+                        sub = _apply_gain_ramp(sub, start_factor, end_factor)
+                    mix_buffer.overlay(
+                        cast(AudioSegment, sub),
+                        start_ms + global_start,
+                        label=f"background:{label}",
+                    )
+
+                chunk_offset += len(chunk)
+                remaining -= len(chunk)
+                if len(chunk) < chunk_ms:
+                    break
             try:
                 log.append(f"[MUSIC_RULE_APPLY] label={label} pos_ms={start_ms} dur_ms={dur} vol_db={vol_db} fade_in_ms={fade_in_ms} fade_out_ms={fade_out_ms}")
             except Exception:
