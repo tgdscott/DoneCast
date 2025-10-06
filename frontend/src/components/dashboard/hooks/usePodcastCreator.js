@@ -1770,6 +1770,10 @@ export default function usePodcastCreator({
     }));
   }, [currentStep, uploadedFile, uploadedFilename, testMode]);
 
+  // Extract episode ID to prevent re-triggering when episode object changes
+  const assembledEpisodeId = assembledEpisode?.id;
+  const assembledEpisodeSpreakerIdExists = Boolean(assembledEpisode?.spreaker_episode_id);
+
   useEffect(() => {
     if(!assemblyComplete || !autoPublishPending || !assembledEpisode) return;
     
@@ -1827,9 +1831,10 @@ export default function usePodcastCreator({
       } finally { setIsPublishing(false); setAutoPublishPending(false); }
     })();
   // CRITICAL: Only trigger when assembly completes and autopublish flag is set
+  // Use assembledEpisodeId (string) instead of assembledEpisode (object) to prevent re-triggers on object changes
   // Do NOT include scheduleDate/scheduleTime as dependencies or we'll publish multiple times!
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assemblyComplete, autoPublishPending, assembledEpisode]);
+  }, [assemblyComplete, autoPublishPending, assembledEpisodeId, assembledEpisodeSpreakerIdExists]);
 
   const handlePublishInternal = async ({ scheduleEnabled, publish_at, publish_at_local }) => {
     let showId = selectedSpreakerShow;
