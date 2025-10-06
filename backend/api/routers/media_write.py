@@ -227,6 +227,34 @@ async def upload_media_files(
 	return created_items
 
 
+@router.get("/", response_model=List[MediaItem])
+async def list_user_media(
+	session: Session = Depends(get_session),
+	current_user: User = Depends(get_current_user)
+):
+	"""Retrieve the current user's media library, filtering out main content and covers.
+
+	Only return items in categories: intro, outro, music, sfx, commercial.
+	"""
+	from sqlalchemy import text as _sa_text
+	allowed = [
+		MediaCategory.intro,
+		MediaCategory.outro,
+		MediaCategory.music,
+		MediaCategory.sfx,
+		MediaCategory.commercial,
+	]
+	statement = (
+		select(MediaItem)
+		.where(
+			MediaItem.user_id == current_user.id,
+			MediaItem.category.in_(allowed),  # type: ignore[attr-defined]
+		)
+		.order_by(_sa_text("created_at DESC"))
+	)
+	return session.exec(statement).all()
+
+
 @router.put("/{media_id}", response_model=MediaItem)
 async def update_media_item_name(
 	media_id: UUID,
