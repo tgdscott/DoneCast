@@ -338,10 +338,23 @@ async def delete_media_item(
     if not media_item:
         raise HTTPException(status_code=404, detail="Media item not found or you don't have permission to delete it.")
 
+    # Delete related records first to avoid foreign key violations
+    try:
+        # Delete any transcripts referencing this media item
+        from ..models.transcription import MediaTranscript
+        transcript_stmt = select(MediaTranscript).where(MediaTranscript.media_item_id == media_id)
+        transcripts = session.exec(transcript_stmt).all()
+        for transcript in transcripts:
+            session.delete(transcript)
+    except Exception:
+        pass  # Table might not exist in some environments
+
+    # Delete the file from disk
     file_path = MEDIA_DIR / media_item.filename
     if file_path.exists():
         file_path.unlink()
-        
+    
+    # Now delete the media item
     session.delete(media_item)
     session.commit()
     
