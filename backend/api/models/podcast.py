@@ -280,6 +280,8 @@ class Episode(SQLModel, table=True):
     # GCS retention for 7-day grace period (kept after assembly/schedule until 7 days post-publish)
     gcs_audio_path: Optional[str] = Field(default=None, description="GCS path (gs://...) for assembled audio during retention period")
     gcs_cover_path: Optional[str] = Field(default=None, description="GCS path (gs://...) for episode cover during retention period")
+    # Numbering conflict flag (soft warning, doesn't block assembly/update)
+    has_numbering_conflict: bool = Field(default=False, description="True if season+episode number duplicates exist in this podcast")
     # Publish failure diagnostics
     spreaker_publish_error: Optional[str] = Field(default=None, description="Short error label from last Spreaker publish attempt")
     spreaker_publish_error_detail: Optional[str] = Field(default=None, description="Detailed error payload / message from last attempt")

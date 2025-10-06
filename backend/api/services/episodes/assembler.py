@@ -440,6 +440,51 @@ def assemble_or_queue(
     episode_details: Dict[str, Any],
     intents: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    # FIRST: Check if user has existing numbering conflicts that need resolution
+    # Block NEW episode creation until conflicts are resolved
+    try:
+        from sqlmodel import select
+        from api.models.podcast import Episode as EpisodeModel
+        
+        conflicted = session.exec(
+            select(EpisodeModel)
+            .where(EpisodeModel.user_id == current_user.id)
+            .where(EpisodeModel.has_numbering_conflict == True)  # noqa: E712
+        ).all()
+        
+        if conflicted:
+            from fastapi import HTTPException
+            # Group by podcast and season/episode number for clear error message
+            conflicts_by_key = {}
+            for ep in conflicted:
+                key = (ep.podcast_id, ep.season_number, ep.episode_number)
+                if key not in conflicts_by_key:
+                    conflicts_by_key[key] = []
+                conflicts_by_key[key].append({
+                    "id": str(ep.id),
+                    "title": ep.title,
+                    "season": ep.season_number,
+                    "episode": ep.episode_number
+                })
+            
+            # Flatten for error response
+            conflict_list = []
+            for episodes in conflicts_by_key.values():
+                conflict_list.extend(episodes)
+            
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "RESOLVE_DUPLICATE_NUMBERING",
+                    "message": "You have episodes with duplicate season/episode numbers. Please resolve these conflicts before creating new episodes.",
+                    "conflicts": conflict_list[:20]  # Limit to first 20 for sanity
+                }
+            )
+    except HTTPException:
+        raise  # Re-raise the 409
+    except Exception:
+        logging.exception("Failed to check for numbering conflicts; proceeding")
+    
     auto_fallback = _should_auto_fallback()
     inline_available = _can_run_inline()
 
@@ -571,12 +616,31 @@ def assemble_or_queue(
             ep.status = "processing"  # type: ignore[assignment]
         except Exception:
             pass
-    # Uniqueness pre-check if both numbers present
+    # Uniqueness pre-check if both numbers present - WARN but DON'T BLOCK
     try:
         if ep.podcast_id and ep.season_number is not None and ep.episode_number is not None:
             if repo.episode_exists_with_number(session, ep.podcast_id, ep.season_number, ep.episode_number):
-                from fastapi import HTTPException
-                raise HTTPException(status_code=409, detail="Episode numbering already in use for this podcast")
+                logging.warning(
+                    "Episode S%sE%s numbering conflict detected for podcast %s (episode %s) - allowing assembly but flagging",
+                    ep.season_number, ep.episode_number, ep.podcast_id, ep.id
+                )
+                # Flag this episode and find all duplicates to flag them too
+                ep.has_numbering_conflict = True
+                try:
+                    from sqlmodel import select
+                    from api.models.podcast import Episode as EpisodeModel
+                    duplicates = session.exec(
+                        select(EpisodeModel)
+                        .where(EpisodeModel.podcast_id == ep.podcast_id)
+                        .where(EpisodeModel.season_number == ep.season_number)
+                        .where(EpisodeModel.episode_number == ep.episode_number)
+                        .where(EpisodeModel.id != ep.id)
+                    ).all()
+                    for dup in duplicates:
+                        dup.has_numbering_conflict = True
+                        session.add(dup)
+                except Exception:
+                    logging.exception("Failed to flag duplicate episodes")
     except Exception:
         pass
     # Tags / explicit

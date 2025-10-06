@@ -187,6 +187,10 @@ def _ensure_user_subscription_column() -> None:
                 conn.exec_driver_sql("ALTER TABLE episode ADD COLUMN gcs_cover_path VARCHAR NULL")
                 log.info("[migrate] Added episode.gcs_cover_path")
 
+            if "has_numbering_conflict" not in cols_ep:
+                conn.exec_driver_sql("ALTER TABLE episode ADD COLUMN has_numbering_conflict BOOLEAN DEFAULT FALSE")
+                log.info("[migrate] Added episode.has_numbering_conflict")
+
             if "created_at" not in cols_ep:
                 conn.exec_driver_sql("ALTER TABLE episode ADD COLUMN created_at TIMESTAMP NULL")
                 log.info("[migrate] Added episode.created_at")

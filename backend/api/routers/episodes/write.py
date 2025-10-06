@@ -129,15 +129,25 @@ def update_episode_metadata(
     if changed and ("season_number" in payload or "episode_number" in payload):
         try:
             if ep.podcast_id and ep.season_number is not None and ep.episode_number is not None:
-                dup = session.exec(
+                # Check for duplicates but DON'T block - just flag for warning
+                duplicates = session.exec(
                     select(Episode)
                     .where(Episode.podcast_id == ep.podcast_id, Episode.season_number == ep.season_number, Episode.episode_number == ep.episode_number)
                     .where(Episode.id != ep.id)
-                ).first()
-                if dup:
-                    raise HTTPException(status_code=409, detail="Episode numbering already in use for this podcast")
-        except HTTPException:
-            raise
+                ).all()
+                if duplicates:
+                    # Mark all conflicting episodes (including this one) with warning flag
+                    logger.warning(
+                        "Episode S%sE%s numbering conflict detected for podcast %s (episode %s)",
+                        ep.season_number, ep.episode_number, ep.podcast_id, ep.id
+                    )
+                    ep.has_numbering_conflict = True
+                    for dup in duplicates:
+                        dup.has_numbering_conflict = True
+                        session.add(dup)
+                else:
+                    # No conflict - clear flag if it was set
+                    ep.has_numbering_conflict = False
         except Exception:
             logger.exception("uniqueness check on update failed; proceeding")
 
