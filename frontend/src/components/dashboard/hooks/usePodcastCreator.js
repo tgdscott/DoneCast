@@ -363,7 +363,10 @@ export default function usePodcastCreator({
     }
   }, [scheduleDate, scheduleTime]);
 
-  const requireIntern = capabilities.has_elevenlabs || capabilities.has_google_tts;
+  // Intern should always be available (can generate show notes even without TTS)
+  // TTS generation will be conditional on has_elevenlabs || has_google_tts
+  const requireIntern = true; // Always enable intern detection and show notes
+  const canGenerateInternAudio = capabilities.has_elevenlabs || capabilities.has_google_tts;
   const requireSfx = capabilities.has_any_sfx_triggers;
 
   const intentVisibility = {
