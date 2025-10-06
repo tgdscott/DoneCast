@@ -18,6 +18,7 @@ from api.models.podcast import MediaCategory, MediaItem
 # re-exports process_and_assemble_episode from its __init__.py.
 from api.services import audio as audio_processor
 from api.core.paths import WS_ROOT as PROJECT_ROOT, FINAL_DIR, MEDIA_DIR
+from infrastructure import gcs
 
 from . import billing, media, transcript
 
@@ -327,6 +328,23 @@ def _finalize_episode(
 
     episode.final_audio_path = final_basename
 
+    # Upload final audio to GCS for 7-day retention (survives container restarts)
+    try:
+        user_id = str(episode.user_id)
+        episode_id = str(episode.id)
+        gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+        
+        # Upload audio file
+        audio_src = fallback_candidate if fallback_candidate and fallback_candidate.is_file() else None
+        if audio_src:
+            gcs_audio_key = f"{user_id}/episodes/{episode_id}/audio/{final_basename}"
+            with open(audio_src, "rb") as f:
+                gcs_audio_url = gcs.upload_fileobj(gcs_bucket, gcs_audio_key, f, content_type="audio/mpeg")  # type: ignore[attr-defined]
+            episode.gcs_audio_path = gcs_audio_url
+            logging.info("[assemble] Uploaded audio to %s", gcs_audio_url)
+    except Exception:
+        logging.warning("[assemble] Failed to upload audio to GCS (will rely on local files)", exc_info=True)
+
     cover_value = media_context.cover_image_path
     if cover_value:
         cover_str = str(cover_value)
@@ -349,6 +367,22 @@ def _finalize_episode(
                         cover_path = dest_cover
                     media_context.cover_image_path = str(cover_path)
                 episode.cover_path = cover_name
+                
+                # Upload cover to GCS for 7-day retention
+                try:
+                    user_id = str(episode.user_id)
+                    episode_id = str(episode.id)
+                    gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+                    gcs_cover_key = f"{user_id}/episodes/{episode_id}/cover/{cover_name}"
+                    
+                    with open(cover_path, "rb") as f:
+                        cover_ext = cover_name.lower().split(".")[-1]
+                        content_type = f"image/{cover_ext}" if cover_ext in ("jpg", "jpeg", "png", "gif") else "image/jpeg"
+                        gcs_cover_url = gcs.upload_fileobj(gcs_bucket, gcs_cover_key, f, content_type=content_type)  # type: ignore[attr-defined]
+                    episode.gcs_cover_path = gcs_cover_url
+                    logging.info("[assemble] Uploaded cover to %s", gcs_cover_url)
+                except Exception:
+                    logging.warning("[assemble] Failed to upload cover to GCS (will rely on local files)", exc_info=True)
             except Exception:
                 logging.warning(
                     "[assemble] Failed to persist cover image locally", exc_info=True

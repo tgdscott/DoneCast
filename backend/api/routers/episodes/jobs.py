@@ -107,7 +107,10 @@ def get_job_status(job_id: str, session: Session = Depends(get_session)):
             "title": ep.title,
             "description": ep.show_notes or "",
             "final_audio_url": playback.get("playback_url"),
-            "cover_url": (_cover_url_for(getattr(ep, 'remote_cover_url', None)) or _cover_url_for(ep.cover_path)),
+            "cover_url": (
+                _cover_url_for(getattr(ep, 'remote_cover_url', None)) or 
+                _cover_url_for(ep.cover_path, gcs_path=getattr(ep, 'gcs_cover_path', None))
+            ),
             "status": _status_value(ep.status),
             "using_spreaker_audio": bool(playback.get("prefer_remote_audio")),
         }
@@ -159,7 +162,10 @@ def get_job_status(job_id: str, session: Session = Depends(get_session)):
                         "title": target.title,
                         "description": target.show_notes or "",
                         "final_audio_url": playback.get("playback_url"),
-                        "cover_url": (_cover_url_for(getattr(target, 'remote_cover_url', None)) or _cover_url_for(target.cover_path)),
+                        "cover_url": (
+                            _cover_url_for(getattr(target, 'remote_cover_url', None)) or 
+                            _cover_url_for(target.cover_path, gcs_path=getattr(target, 'gcs_cover_path', None))
+                        ),
                         "status": _status_value(target.status),
                         "using_spreaker_audio": bool(playback.get("prefer_remote_audio")),
                     },

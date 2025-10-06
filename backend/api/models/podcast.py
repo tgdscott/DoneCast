@@ -277,6 +277,9 @@ class Episode(SQLModel, table=True):
     spreaker_episode_id: Optional[str] = Field(default=None)
     is_published_to_spreaker: bool = Field(default=False)
     remote_cover_url: Optional[str] = Field(default=None, description="Spreaker-hosted cover image URL after publish")
+    # GCS retention for 7-day grace period (kept after assembly/schedule until 7 days post-publish)
+    gcs_audio_path: Optional[str] = Field(default=None, description="GCS path (gs://...) for assembled audio during retention period")
+    gcs_cover_path: Optional[str] = Field(default=None, description="GCS path (gs://...) for episode cover during retention period")
     # Publish failure diagnostics
     spreaker_publish_error: Optional[str] = Field(default=None, description="Short error label from last Spreaker publish attempt")
     spreaker_publish_error_detail: Optional[str] = Field(default=None, description="Detailed error payload / message from last attempt")

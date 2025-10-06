@@ -179,6 +179,14 @@ def _ensure_user_subscription_column() -> None:
                 conn.exec_driver_sql("ALTER TABLE episode ADD COLUMN remote_cover_url VARCHAR NULL")
                 log.info("[migrate] Added episode.remote_cover_url")
 
+            if "gcs_audio_path" not in cols_ep:
+                conn.exec_driver_sql("ALTER TABLE episode ADD COLUMN gcs_audio_path VARCHAR NULL")
+                log.info("[migrate] Added episode.gcs_audio_path")
+
+            if "gcs_cover_path" not in cols_ep:
+                conn.exec_driver_sql("ALTER TABLE episode ADD COLUMN gcs_cover_path VARCHAR NULL")
+                log.info("[migrate] Added episode.gcs_cover_path")
+
             if "created_at" not in cols_ep:
                 conn.exec_driver_sql("ALTER TABLE episode ADD COLUMN created_at TIMESTAMP NULL")
                 log.info("[migrate] Added episode.created_at")

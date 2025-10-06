@@ -24,12 +24,33 @@ def _final_url_for(path: Optional[str]) -> Optional[str]:
     return f"/static/final/{base}"
 
 
-def _cover_url_for(path: Optional[str]) -> Optional[str]:
+def _cover_url_for(path: Optional[str], *, gcs_path: Optional[str] = None) -> Optional[str]:
+    """Generate cover URL with priority: GCS > remote > local.
+    
+    Args:
+        path: Local path or remote URL (legacy)
+        gcs_path: GCS path (gs://...) if available
+    """
+    # Priority 1: GCS URL (survives container restarts)
+    if gcs_path and str(gcs_path).startswith("gs://"):
+        try:
+            from infrastructure.gcs import get_signed_url
+            gcs_str = str(gcs_path)[5:]  # Remove "gs://"
+            parts = gcs_str.split("/", 1)
+            if len(parts) == 2:
+                bucket, key = parts
+                return get_signed_url(bucket, key, expiration=3600)
+        except Exception:
+            pass  # Fall through to path-based resolution
+    
+    # Priority 2: Remote URL (Spreaker hosted)
     if not path:
         return None
     p = str(path)
     if p.lower().startswith(("http://", "https://")):
         return p
+    
+    # Priority 3: Local file
     return f"/static/media/{os.path.basename(p)}"
 
 
@@ -93,24 +114,48 @@ def _local_final_candidates(path: Optional[str]) -> list[Path]:
 def compute_playback_info(episode: Any, *, now: Optional[datetime] = None) -> dict[str, Any]:
     """Determine playback preference between local and Spreaker audio.
 
+    Priority order for audio URLs:
+    1. GCS URL (gcs_audio_path) - survives container restarts
+    2. Local file (final_audio_path) - dev only
+    3. Spreaker stream URL - published episodes
+
     Applies a 7-day grace period after publish where local audio remains the
     primary source, unless the local asset is missing. Returns keys compatible
     with existing episode serializers.
     """
 
     now_utc = _as_utc(now) or datetime.now(timezone.utc)
-    final_path = getattr(episode, "final_audio_path", None)
-    local_candidates = _local_final_candidates(final_path)
+    
+    # Priority 1: Check GCS URL (survives container restarts)
+    gcs_audio_path = getattr(episode, "gcs_audio_path", None)
+    final_audio_url = None
     local_final_exists = False
-    for cand in local_candidates:
+    
+    if gcs_audio_path and str(gcs_audio_path).startswith("gs://"):
         try:
-            if cand.is_file():
-                local_final_exists = True
-                break
+            from infrastructure.gcs import get_signed_url
+            # Parse gs://bucket/key format
+            gcs_str = str(gcs_audio_path)[5:]  # Remove "gs://"
+            parts = gcs_str.split("/", 1)
+            if len(parts) == 2:
+                bucket, key = parts
+                final_audio_url = get_signed_url(bucket, key, expiration=3600)
+                local_final_exists = True  # Treat GCS as "available"
         except Exception:
-            continue
-
-    final_audio_url = _final_url_for(final_path) if local_final_exists else None
+            pass  # Fall back to local file check
+    
+    # Priority 2: Check local file (dev mode)
+    if not final_audio_url:
+        final_path = getattr(episode, "final_audio_path", None)
+        local_candidates = _local_final_candidates(final_path)
+        for cand in local_candidates:
+            try:
+                if cand.is_file():
+                    local_final_exists = True
+                    final_audio_url = _final_url_for(final_path)
+                    break
+            except Exception:
+                continue
 
     stream_url = None
     try:
