@@ -573,13 +573,13 @@ async def presign_upload(
     request: PresignRequest,
     current_user: User = Depends(get_current_user)
 ):
-    """Generate a presigned URL for direct GCS upload.
+    """Generate a resumable upload URL for direct GCS upload.
     
-    Returns a signed URL that allows the client to upload directly to GCS,
-    bypassing the API server and Cloud Run's 32MB request body limit.
+    Uses GCS resumable upload API which doesn't require signed URLs.
+    This bypasses Cloud Run's 32MB request body limit.
     """
-    from infrastructure import gcs
     import uuid
+    from google.cloud import storage
     
     # Generate unique object path in user's media directory
     user_id = current_user.id.hex
@@ -590,26 +590,32 @@ async def presign_upload(
     # Get GCS bucket name from environment
     gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
     
-    # Generate signed URL for PUT upload (valid for 60 minutes)
     try:
-        upload_url = gcs.make_signed_url(
-            gcs_bucket,
-            object_path,
-            minutes=60,
-            method="PUT",
-            content_type=request.content_type
+        # Use GCS client to create a resumable upload URL
+        # This doesn't require signing - it uses the service account's credentials directly
+        client = storage.Client()
+        bucket = client.bucket(gcs_bucket)
+        blob = bucket.blob(object_path)
+        
+        # Create resumable upload session
+        # This returns a URL that can be used for PUT without signing
+        url = blob.create_resumable_upload_session(
+            content_type=request.content_type,
+            timeout=3600  # 1 hour timeout
+        )
+        
+        return PresignResponse(
+            upload_url=url,
+            object_path=object_path,
+            headers={"Content-Type": request.content_type}
         )
     except Exception as e:
+        import logging
+        logging.getLogger("api.media").error(f"Failed to create resumable upload session: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to generate upload URL: {str(e)}"
         )
-    
-    return PresignResponse(
-        upload_url=upload_url,
-        object_path=object_path,
-        headers={"Content-Type": request.content_type}
-    )
 
 @router.post("/upload/{category}/register", response_model=List[MediaItem])
 async def register_upload(
