@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useCallback } from "react";
 import { cn } from "@/lib/utils";
 
 // Compliant Google sign-in button per branding guidelines:
@@ -9,8 +9,34 @@ import { cn } from "@/lib/utils";
 // - Minimum touch target 48x48px achieved via padding/height
 
 export default function GoogleSignInButton({ href, className, ...props }) {
+  const handleClick = useCallback(
+    (event) => {
+      event.preventDefault();
+      if (!href) return;
+
+      try {
+        if (typeof window !== "undefined" && window?.location) {
+          window.location.assign(href);
+          return;
+        }
+      } catch (error) {
+        // If window.location.assign fails (very unusual), fall through to a hard navigation.
+      }
+
+      if (typeof window !== "undefined") {
+        window.location.href = href;
+      }
+    },
+    [href],
+  );
+
   return (
-    <a href={href} className={cn("block", className)} {...props}>
+    <button
+      type="button"
+      onClick={handleClick}
+      className={cn("block w-full", className)}
+      {...props}
+    >
       <div
         className={cn(
           "w-full inline-flex items-center justify-center gap-2", // 8px gap between G and text
@@ -19,7 +45,6 @@ export default function GoogleSignInButton({ href, className, ...props }) {
           "px-4 h-12", // 48px height target
           "transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#1a73e8]/40",
         )}
-        role="button"
         aria-label="Sign in with Google"
         style={{ borderColor: "#dadce0" }}
       >
@@ -33,6 +58,6 @@ export default function GoogleSignInButton({ href, className, ...props }) {
         />
         <span className="text-sm font-medium" style={{ color: "#3c4043" }}>Sign in with Google</span>
       </div>
-    </a>
+    </button>
   );
 }
