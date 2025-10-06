@@ -1,3 +1,4 @@
+import json
 import types
 from pathlib import Path
 
@@ -160,3 +161,52 @@ def test_streaming_mix_buffer_lazy_allocation():
     out = buf.to_segment()
     assert isinstance(out, steps.AudioSegment)
     assert len(out) >= 1000
+
+
+def test_streaming_mix_buffer_limit(monkeypatch):
+    monkeypatch.setattr(steps, "MAX_MIX_BUFFER_BYTES", 1024, raising=False)
+    seg = steps.AudioSegment.silent(duration=1000, frame_rate=44100)
+    buf = steps._StreamingMixBuffer(
+        frame_rate=44100,
+        channels=2,
+        sample_width=2,
+    )
+
+    with pytest.raises(steps.TemplateTimelineTooLargeError):
+        buf.overlay(seg, 0, label="content")
+
+
+def test_build_mix_rejects_huge_timeline(monkeypatch, log):
+    monkeypatch.setattr(steps, "MAX_MIX_BUFFER_BYTES", 1024, raising=False)
+    monkeypatch.setattr(steps, "match_target_dbfs", lambda audio, *_, **__: audio)
+
+    template = types.SimpleNamespace(
+        segments_json=json.dumps(
+            [
+                {
+                    "id": "content",
+                    "segment_type": "content",
+                }
+            ]
+        ),
+        background_music_rules_json="[]",
+        timing_json=json.dumps({"content_start_offset_s": 120.0}),
+    )
+    cleaned_audio = steps.AudioSegment.silent(duration=1000, frame_rate=44100)
+
+    with pytest.raises(steps.TemplateTimelineTooLargeError):
+        steps.build_template_and_final_mix_step(
+            template,
+            cleaned_audio,
+            "cleaned_content.mp3",
+            Path("cleaned/cleaned_content.mp3"),
+            "episode.mp3",
+            {},
+            "elevenlabs",
+            None,
+            "episode",
+            None,
+            log,
+        )
+
+    assert any("[TEMPLATE_TIMELINE_TOO_LARGE]" in entry for entry in log)

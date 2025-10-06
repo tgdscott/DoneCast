@@ -68,6 +68,83 @@ CLEANED_DIR = _CLEANED_DIR
 TRANSCRIPTS_DIR = _TRANSCRIPTS_DIR
 WS_ROOT = _WS_ROOT
 
+def _parse_int_env(name: str, default: int) -> int:
+    try:
+        raw = os.environ.get(name)
+        if raw is None:
+            return default
+        value = int(str(raw).strip())
+        if value <= 0:
+            return default
+        return value
+    except Exception:
+        return default
+
+
+def _format_bytes(num: int) -> str:
+    units = ["bytes", "KiB", "MiB", "GiB", "TiB"]
+    n = float(num)
+    for unit in units:
+        if n < 1024.0 or unit == units[-1]:
+            if unit == "bytes":
+                return f"{int(n)} {unit}"
+            return f"{n:.1f} {unit}"
+        n /= 1024.0
+    return f"{n:.1f} {units[-1]}"
+
+
+def _format_ms(ms: int) -> str:
+    return _fmt_ts(max(0.0, ms) / 1000.0)
+
+
+MAX_MIX_BUFFER_BYTES = _parse_int_env("CLOUDPOD_MAX_MIX_BUFFER_BYTES", 512 * 1024 * 1024)
+
+
+class TemplateTimelineTooLargeError(RuntimeError):
+    """Raised when template offsets require an impractically large mix timeline."""
+
+
+def _estimate_mix_bytes(duration_ms: int, frame_rate: int, channels: int, sample_width: int) -> int:
+    if duration_ms <= 0:
+        return 0
+    frames = int(math.ceil(duration_ms * frame_rate / 1000.0))
+    return frames * max(1, channels) * max(1, sample_width)
+
+
+def _raise_timeline_limit(
+    *,
+    duration_ms: int,
+    bytes_needed: int,
+    limit_bytes: int,
+    placements: List[Tuple[dict, AudioSegment, int, int]],
+) -> None:
+    label = None
+    start_ms = 0
+    end_ms = duration_ms
+    if placements:
+        seg, _aud, st_ms, en_ms = max(placements, key=lambda item: item[3])
+        label = str(
+            seg.get("name")
+            or seg.get("title")
+            or (seg.get("source") or {}).get("label")
+            or (seg.get("source") or {}).get("filename")
+            or seg.get("segment_type")
+            or "segment"
+        )
+        start_ms = st_ms
+        end_ms = en_ms
+    msg = (
+        "Template timeline requires "
+        f"{_format_bytes(bytes_needed)} of PCM (> {_format_bytes(limit_bytes)} limit) "
+        f"for a {_format_ms(duration_ms)} mix."
+    )
+    if label is not None:
+        msg += (
+            f" Longest placement '{label}' spans {_format_ms(start_ms)}–{_format_ms(end_ms)}."
+        )
+    msg += " Adjust template offsets or shorten background rules to continue."
+    raise TemplateTimelineTooLargeError(msg)
+
 
 class _StreamingMixBuffer:
     """Accumulate overlays directly into a mutable PCM buffer.
@@ -83,10 +160,12 @@ class _StreamingMixBuffer:
         sample_width: int,
         *,
         initial_duration_ms: int = 0,
+        limit_bytes: Optional[int] = None,
     ) -> None:
         self.frame_rate = max(1, int(frame_rate))
         self.channels = max(1, int(channels))
         self.sample_width = max(1, int(sample_width))
+        self._limit_bytes = int(limit_bytes or MAX_MIX_BUFFER_BYTES)
         # Delay allocating the backing store until we actually mix audio. Large
         # episodes (60+ minutes) can require hundreds of megabytes of PCM data;
         # eagerly reserving the full duration caused Cloud Run instances to run
@@ -112,6 +191,13 @@ class _StreamingMixBuffer:
         if end_frame <= self._capacity_frames:
             return
         needed_bytes = end_frame * self.channels * self.sample_width
+        if needed_bytes > self._limit_bytes:
+            raise TemplateTimelineTooLargeError(
+                (
+                    "Mix buffer requires "
+                    f"{_format_bytes(needed_bytes)} (> {_format_bytes(self._limit_bytes)})"
+                )
+            )
         if needed_bytes > len(self._buffer):
             try:
                 self._buffer.extend(b"\x00" * (needed_bytes - len(self._buffer)))
@@ -121,7 +207,7 @@ class _StreamingMixBuffer:
                 ) from exc
         self._capacity_frames = end_frame
 
-    def overlay(self, segment: AudioSegment, position_ms: int) -> None:
+    def overlay(self, segment: AudioSegment, position_ms: int, *, label: str = "segment") -> None:
         seg = (
             segment.set_frame_rate(self.frame_rate)
             .set_channels(self.channels)
@@ -134,7 +220,18 @@ class _StreamingMixBuffer:
         start_byte = start_frame * self.channels * self.sample_width
         frames = len(raw) // (self.channels * self.sample_width)
         end_frame = start_frame + frames
-        self._ensure_capacity(end_frame)
+        try:
+            self._ensure_capacity(end_frame)
+        except TemplateTimelineTooLargeError as exc:
+            start_ms = int(start_frame * 1000.0 / self.frame_rate)
+            end_ms = int(end_frame * 1000.0 / self.frame_rate)
+            raise TemplateTimelineTooLargeError(
+                (
+                    f"Mix placement '{label}' spanning {_format_ms(start_ms)}–{_format_ms(end_ms)} "
+                    "exceeds the configured mix buffer limit. "
+                    "Reduce template offsets or shorten background music spans."
+                )
+            ) from exc
         end_byte = start_byte + len(raw)
         existing = bytes(self._buffer[start_byte:end_byte])
         if len(existing) < len(raw):
@@ -1106,6 +1203,27 @@ def build_template_and_final_mix_step(
         pass
 
     total_duration_ms = pos_ms if pos_ms > 0 else max(1, len(stitched_content))
+    estimated_bytes = _estimate_mix_bytes(
+        total_duration_ms,
+        cleaned_audio.frame_rate,
+        cleaned_audio.channels,
+        cleaned_audio.sample_width,
+    )
+    if estimated_bytes > MAX_MIX_BUFFER_BYTES:
+        try:
+            log.append(
+                "[TEMPLATE_TIMELINE_TOO_LARGE] "
+                f"duration_ms={total_duration_ms} bytes_needed={estimated_bytes} "
+                f"limit={MAX_MIX_BUFFER_BYTES}"
+            )
+        except Exception:
+            pass
+        _raise_timeline_limit(
+            duration_ms=total_duration_ms,
+            bytes_needed=estimated_bytes,
+            limit_bytes=MAX_MIX_BUFFER_BYTES,
+            placements=placements,
+        )
     mix_buffer = _StreamingMixBuffer(
         cleaned_audio.frame_rate,
         cleaned_audio.channels,
@@ -1114,7 +1232,15 @@ def build_template_and_final_mix_step(
     )
     for _seg, _aud, _st, _en in placements:
         if len(_aud) > 0:
-            mix_buffer.overlay(_aud, _st)
+            label = (
+                _seg.get("name")
+                or _seg.get("title")
+                or (_seg.get("source") or {}).get("label")
+                or (_seg.get("source") or {}).get("filename")
+                or _seg.get("segment_type")
+                or "segment"
+            )
+            mix_buffer.overlay(_aud, _st, label=str(label))
 
     try:
         def _loop_to_duration(seg, dur_ms: int):
@@ -1166,7 +1292,11 @@ def build_template_and_final_mix_step(
                     m = m_seg3.fade_out(fo)
             except Exception:
                 pass
-            mix_buffer.overlay(cast(AudioSegment, m), start_ms)
+            mix_buffer.overlay(
+                cast(AudioSegment, m),
+                start_ms,
+                label=f"background:{label}",
+            )
             try:
                 log.append(f"[MUSIC_RULE_APPLY] label={label} pos_ms={start_ms} dur_ms={dur} vol_db={vol_db} fade_in_ms={fade_in_ms} fade_out_ms={fade_out_ms}")
             except Exception:
