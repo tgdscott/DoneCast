@@ -1772,13 +1772,19 @@ export default function usePodcastCreator({
       return;
     }
     if(publishMode === 'draft'){ setAutoPublishPending(false); setStatusMessage('Draft created (processing complete).'); return; }
-    let scheduleEnabled = publishMode === 'schedule';
+    
+    // Capture schedule values at the moment autopublish triggers (don't re-trigger on date/time changes)
+    const capturedPublishMode = publishMode;
+    const capturedScheduleDate = scheduleDate;
+    const capturedScheduleTime = scheduleTime;
+    
+    let scheduleEnabled = capturedPublishMode === 'schedule';
     let publish_at=null, publish_at_local=null;
     if(scheduleEnabled){
-      const dt = new Date(`${scheduleDate}T${scheduleTime}:00`);
+      const dt = new Date(`${capturedScheduleDate}T${capturedScheduleTime}:00`);
       if(!isNaN(dt.getTime()) && dt.getTime() > Date.now()+9*60000){
         publish_at = dt.toISOString().replace(/\.\d{3}Z$/, 'Z');
-        publish_at_local = `${scheduleDate} ${scheduleTime}`;
+        publish_at_local = `${capturedScheduleDate} ${capturedScheduleTime}`;
       } else {
         toast({ variant: 'destructive', title: 'Schedule invalid', description: 'Falling back to draft.' });
         setAutoPublishPending(false); return;
@@ -1790,7 +1796,10 @@ export default function usePodcastCreator({
         await handlePublishInternal({ scheduleEnabled, publish_at, publish_at_local });
       } finally { setIsPublishing(false); setAutoPublishPending(false); }
     })();
-  }, [assemblyComplete, autoPublishPending, assembledEpisode, publishMode, scheduleDate, scheduleTime]);
+  // CRITICAL: Only trigger when assembly completes and autopublish flag is set
+  // Do NOT include scheduleDate/scheduleTime as dependencies or we'll publish multiple times!
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assemblyComplete, autoPublishPending, assembledEpisode]);
 
   const handlePublishInternal = async ({ scheduleEnabled, publish_at, publish_at_local }) => {
     let showId = selectedSpreakerShow;
