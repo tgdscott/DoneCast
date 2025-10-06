@@ -575,12 +575,40 @@ async def presign_upload(
 ):
     """Generate a presigned URL for direct GCS upload.
     
-    NOTE: Currently returns a placeholder since GCS presigned URLs for uploads
-    are not yet implemented. Frontend should fall back to standard upload.
+    Returns a signed URL that allows the client to upload directly to GCS,
+    bypassing the API server and Cloud Run's 32MB request body limit.
     """
-    raise HTTPException(
-        status_code=501,
-        detail="Direct GCS upload not yet implemented. Use standard POST /api/media/upload/{category} instead."
+    from infrastructure import gcs
+    import uuid
+    
+    # Generate unique object path in user's media directory
+    user_id = current_user.id.hex
+    file_ext = Path(request.filename).suffix.lower()
+    unique_name = f"{uuid.uuid4().hex}{file_ext}"
+    object_path = f"{user_id}/{category.value}/{unique_name}"
+    
+    # Get GCS bucket name from environment
+    gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+    
+    # Generate signed URL for PUT upload (valid for 60 minutes)
+    try:
+        upload_url = gcs.make_signed_url(
+            gcs_bucket,
+            object_path,
+            minutes=60,
+            method="PUT",
+            content_type=request.content_type
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate upload URL: {str(e)}"
+        )
+    
+    return PresignResponse(
+        upload_url=upload_url,
+        object_path=object_path,
+        headers={"Content-Type": request.content_type}
     )
 
 @router.post("/upload/{category}/register", response_model=List[MediaItem])
@@ -592,9 +620,72 @@ async def register_upload(
 ):
     """Register uploaded files in the database after direct GCS upload.
     
-    NOTE: Currently not implemented since presign is not available.
+    Verifies the files exist in GCS and creates MediaItem records.
     """
-    raise HTTPException(
-        status_code=501,
-        detail="Direct GCS upload registration not yet implemented. Use standard POST /api/media/upload/{category} instead."
-    )
+    from infrastructure import gcs
+    import logging
+    
+    log = logging.getLogger("api.media")
+    gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+    created_items = []
+    
+    for upload_item in request.uploads:
+        try:
+            # Verify object exists in GCS
+            object_exists = gcs.blob_exists(gcs_bucket, upload_item.object_path)
+            if not object_exists:
+                log.warning(f"Object not found in GCS: {upload_item.object_path}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Upload verification failed: file not found at {upload_item.object_path}"
+                )
+            
+            # Use provided file size (we don't have a get_size function)
+            file_size = upload_item.size or 0
+            
+            # Create MediaItem record
+            gcs_url = f"gs://{gcs_bucket}/{upload_item.object_path}"
+            friendly_name = upload_item.friendly_name
+            if not friendly_name:
+                # Extract from original filename if provided
+                if upload_item.original_filename:
+                    friendly_name = Path(upload_item.original_filename).stem
+                else:
+                    friendly_name = "upload"
+            
+            media_item = MediaItem(
+                filename=gcs_url,  # Store gs:// URL for persistence
+                category=category,
+                friendly_name=friendly_name,
+                content_type=upload_item.content_type,
+                filesize=file_size,  # MediaItem uses 'filesize' not 'size'
+                user_id=current_user.id
+            )
+            session.add(media_item)
+            session.commit()
+            session.refresh(media_item)
+            created_items.append(media_item)
+            
+            log.info(f"Registered direct upload: {media_item.id} -> {gcs_url}")
+            
+            # Trigger transcription if requested and category is main_content
+            if request.notify_when_ready and category == MediaCategory.main_content:
+                try:
+                    # Import lazily to avoid circular import
+                    from worker.tasks import transcribe_media_file  # type: ignore
+                    # Pass the original filename from the object path for transcription
+                    transcribe_media_file.delay(Path(upload_item.object_path).name)
+                    log.info(f"Scheduled transcription for media_id={media_item.id}")
+                except Exception as trans_err:
+                    log.warning(f"Failed to schedule transcription: {trans_err}")
+        
+        except HTTPException:
+            raise
+        except Exception as e:
+            log.exception(f"Failed to register upload: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to register upload: {str(e)}"
+            )
+    
+    return created_items
