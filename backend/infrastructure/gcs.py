@@ -239,43 +239,11 @@ def _generate_signed_url(
             # Try standard signing first (works with service account keys)
             return blob.generate_signed_url(**kwargs)
         except AttributeError as e:
-            # Fallback: Use IAM-based signing for Cloud Run default credentials
-            # This uses the IAMCredentials API instead of local private keys
+            # Cloud Run uses Compute Engine credentials without private keys
+            # Since ppp-media-us-west1 bucket is publicly readable, just return public URL
             if "private key" in str(e).lower():
-                logger.info("Using IAM-based signing (no private key available)")
-                try:
-                    from google.auth import iam
-                    from google.auth.transport import requests as google_requests
-                    
-                    # Get the service account email from credentials
-                    if hasattr(_gcs_credentials, 'service_account_email'):
-                        signer_email = _gcs_credentials.service_account_email
-                    else:
-                        # For Compute Engine credentials, use the default service account
-                        import google.auth
-                        _, project = google.auth.default()
-                        # Cloud Run service accounts are in format: PROJECT_NUMBER-compute@developer.gserviceaccount.com
-                        # We'll let generate_signed_url figure it out, or make objects public
-                        logger.warning("Cannot determine service account email; falling back to public URL")
-                        # Return public URL instead
-                        return f"https://storage.googleapis.com/{bucket_name}/{key}"
-                    
-                    # Create a signer using IAM
-                    auth_request = google_requests.Request()
-                    signing_credentials = iam.Signer(
-                        auth_request,
-                        _gcs_credentials,
-                        signer_email
-                    )
-                    
-                    # Generate signed URL with IAM signer
-                    kwargs["credentials"] = signing_credentials
-                    return blob.generate_signed_url(**kwargs)
-                except Exception as iam_error:
-                    logger.error("IAM-based signing failed: %s", iam_error, exc_info=True)
-                    # Final fallback: return public URL (requires objects to be publicly readable)
-                    logger.warning("Falling back to public URL for gs://%s/%s", bucket_name, key)
-                    return f"https://storage.googleapis.com/{bucket_name}/{key}"
+                logger.info("No private key available; using public URL (bucket is publicly readable)")
+                return f"https://storage.googleapis.com/{bucket_name}/{key}"
             else:
                 raise
                 

@@ -1087,18 +1087,23 @@ def build_template_and_final_mix_step(
                     gcs_str = raw_name[5:]  # Remove "gs://"
                     bucket, key = gcs_str.split("/", 1)
                     
-                    # Download to temp file
+                    # Download bytes from GCS
+                    file_bytes = gcs.download_bytes(bucket, key)
+                    if not file_bytes:
+                        raise RuntimeError(f"Failed to download from GCS: {raw_name}")
+                    
+                    # Write to temp file for pydub
                     temp_fd, temp_path = tempfile.mkstemp(suffix=".mp3")
                     os.close(temp_fd)
                     
                     with open(temp_path, "wb") as f:
-                        blob = gcs.get_blob(bucket, key)
-                        f.write(blob.download_as_bytes())
+                        f.write(file_bytes)
                     
                     audio = AudioSegment.from_file(temp_path)
                     log.append(f"[TEMPLATE_STATIC_GCS_OK] seg_id={seg.get('id')} gcs={raw_name} len_ms={len(audio)}")
                 except Exception as e:
                     log.append(f"[TEMPLATE_STATIC_GCS_ERROR] seg_id={seg.get('id')} gcs={raw_name} error={type(e).__name__}: {e}")
+                    audio = None
                 finally:
                     if temp_path and os.path.exists(temp_path):
                         try:
