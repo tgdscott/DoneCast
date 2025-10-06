@@ -95,6 +95,7 @@ dashboard_router       = _safe_import("api.routers.dashboard")
 recurring              = _safe_import("api.routers.recurring")
 assemblyai_router      = _safe_import("api.routers.assemblyai_webhook")
 media_upload_alias     = _safe_import("api.routers.media_upload_alias")
+assistant_router       = _safe_import("api.routers.assistant")
 
 def _maybe(app: FastAPI, r, prefix: str = "/api"):
     if r is not None:
@@ -116,6 +117,8 @@ def attach_routers(app: FastAPI) -> dict:
     availability['media_upload_alias'] = media_upload_alias is not None
     _maybe(app, gcs_uploads)
     availability['gcs_uploads'] = gcs_uploads is not None
+    _maybe(app, assistant_router)
+    availability['assistant'] = assistant_router is not None
 
     # The rest (best-effort)
     _maybe(app, episodes)

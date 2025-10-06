@@ -28,3 +28,4 @@ authlib
 google-cloud-aiplatform
 google-cloud-tasks
 psutil>=5.9.0
+openai>=1.0.0
