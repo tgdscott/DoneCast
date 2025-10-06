@@ -173,41 +173,131 @@ export async function uploadMediaDirect({
   const api = apiClient || makeApi(token);
   const contentType = (file.type || '').trim() || 'application/octet-stream';
 
-  const presign = await api.post(`/api/media/upload/${category}/presign`, {
-    filename: file.name || 'upload',
-    content_type: contentType,
-  });
+  let presign;
+  let useDirectUpload = true;
 
-  const uploadUrl = presign?.upload_url || presign?.uploadUrl;
-  const objectPath = presign?.object_path || presign?.objectPath;
-  const headers = presign?.headers || {};
-
-  if (!uploadUrl || !objectPath) {
-    throw new Error('Failed to obtain upload URL');
+  // Try presign endpoint - if it returns 501, fall back to standard upload
+  try {
+    presign = await api.post(`/api/media/upload/${category}/presign`, {
+      filename: file.name || 'upload',
+      content_type: contentType,
+    });
+  } catch (err) {
+    // If presign endpoint returns 501 (Not Implemented), fall back to standard upload
+    if (err?.response?.status === 501 || err?.status === 501) {
+      useDirectUpload = false;
+    } else {
+      throw err; // Re-throw other errors
+    }
   }
 
-  await uploadWithXmlHttpRequest(uploadUrl, file, headers, { onProgress, signal, onXhrCreate });
+  if (useDirectUpload) {
+    // Direct GCS upload path
+    const uploadUrl = presign?.upload_url || presign?.uploadUrl;
+    const objectPath = presign?.object_path || presign?.objectPath;
+    const headers = presign?.headers || {};
 
-  const registerPayload = {
-    uploads: [
-      {
-        object_path: objectPath,
-        friendly_name: friendlyName,
-        original_filename: file.name || friendlyName || 'upload',
-        content_type: contentType,
-        size: typeof file.size === 'number' ? file.size : undefined,
-      },
-    ],
-  };
+    if (!uploadUrl || !objectPath) {
+      throw new Error('Failed to obtain upload URL');
+    }
 
-  if (notifyWhenReady !== undefined) {
-    registerPayload.notify_when_ready = !!notifyWhenReady;
+    await uploadWithXmlHttpRequest(uploadUrl, file, headers, { onProgress, signal, onXhrCreate });
+
+    const registerPayload = {
+      uploads: [
+        {
+          object_path: objectPath,
+          friendly_name: friendlyName,
+          original_filename: file.name || friendlyName || 'upload',
+          content_type: contentType,
+          size: typeof file.size === 'number' ? file.size : undefined,
+        },
+      ],
+    };
+
+    if (notifyWhenReady !== undefined) {
+      registerPayload.notify_when_ready = !!notifyWhenReady;
+    }
+    if (notifyEmail) {
+      registerPayload.notify_email = notifyEmail;
+    }
+
+    const registered = await api.post(`/api/media/upload/${category}/register`, registerPayload);
+    return toArray(registered);
+  } else {
+    // Fallback to standard multipart/form-data upload
+    const formData = new FormData();
+    formData.append('files', file);
+    
+    const friendlyNamesArray = [friendlyName || file.name || 'upload'];
+    formData.append('friendly_names', JSON.stringify(friendlyNamesArray));
+    
+    if (notifyWhenReady !== undefined) {
+      formData.append('notify_when_ready', notifyWhenReady ? 'true' : 'false');
+    }
+    if (notifyEmail) {
+      formData.append('notify_email', notifyEmail);
+    }
+
+    // For standard upload, we need to use XMLHttpRequest to track progress
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      
+      if (signal) {
+        if (signal.aborted) {
+          reject(signal.reason || new DOMException('Upload aborted', 'AbortError'));
+          return;
+        }
+        const abortHandler = () => {
+          try { xhr.abort(); } catch (_) { /* ignore */ }
+          reject(signal.reason || new DOMException('Upload aborted', 'AbortError'));
+        };
+        signal.addEventListener('abort', abortHandler, { once: true });
+      }
+
+      if (onXhrCreate && typeof onXhrCreate === 'function') {
+        try { onXhrCreate(xhr); } catch (_) { /* ignore */ }
+      }
+
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable && onProgress) {
+          const percent = (e.loaded / e.total) * 100;
+          onProgress({ percent, loaded: e.loaded, total: e.total });
+        }
+      });
+
+      xhr.addEventListener('load', () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const result = JSON.parse(xhr.responseText);
+            resolve(toArray(result));
+          } catch (err) {
+            reject(new Error('Failed to parse upload response'));
+          }
+        } else {
+          reject(new Error(`Upload failed with status ${xhr.status}`));
+        }
+      });
+
+      xhr.addEventListener('error', () => {
+        reject(new Error('Upload failed due to network error'));
+      });
+
+      xhr.addEventListener('abort', () => {
+        reject(new DOMException('Upload aborted', 'AbortError'));
+      });
+
+      // Get the base URL and token
+      const baseUrl = api.defaults?.baseURL || '';
+      const authToken = token || api.defaults?.headers?.common?.Authorization?.replace('Bearer ', '');
+      
+      xhr.open('POST', `${baseUrl}/api/media/upload/${category}`);
+      if (authToken) {
+        xhr.setRequestHeader('Authorization', `Bearer ${authToken}`);
+      }
+      
+      xhr.send(formData);
+    });
   }
-  if (notifyEmail) {
-    registerPayload.notify_email = notifyEmail;
-  }
-
-  const registered = await api.post(`/api/media/upload/${category}/register`, registerPayload);
-  return toArray(registered);
 }
 
