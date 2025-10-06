@@ -176,7 +176,8 @@ async def assemble_episode_task(request: Request, x_tasks_auth: str | None = Hea
       - In non-dev, require X-Tasks-Auth to match TASKS_AUTH env var.
 
     Behavior:
-      - Process synchronously within the request so Cloud Tasks observes success/failure.
+      - Process ASYNCHRONOUSLY in a background thread to avoid HTTP timeout
+      - Returns immediately with 202 Accepted
       - The underlying function is the same implementation used by Celery tasks.
     """
     if not _IS_DEV:
@@ -203,22 +204,35 @@ async def assemble_episode_task(request: Request, x_tasks_auth: str | None = Hea
     except ValidationError as ve:
         raise HTTPException(status_code=400, detail=f"invalid payload: {ve}")
 
-    # Execute synchronously inside the request
-    try:
-        from worker.tasks import create_podcast_episode  # lazy import
-        result = create_podcast_episode(
-            episode_id=payload.episode_id,
-            template_id=payload.template_id,
-            main_content_filename=payload.main_content_filename,
-            output_filename=payload.output_filename or "",
-            tts_values=payload.tts_values or {},
-            episode_details=payload.episode_details or {},
-            user_id=payload.user_id,
-            podcast_id=payload.podcast_id or "",
-            intents=payload.intents or None,
-        )
-        return {"ok": True, "result": result}
-    except Exception as exc:  # pragma: no cover - defensive
-        log.exception("event=tasks.assemble.error err=%s", exc)
-        raise HTTPException(status_code=500, detail="assembly-failed")
+    # Execute asynchronously in background thread to prevent HTTP timeout
+    def _run_assembly():
+        try:
+            from worker.tasks import create_podcast_episode  # lazy import
+            log.info("event=tasks.assemble.start episode_id=%s", payload.episode_id)
+            result = create_podcast_episode(
+                episode_id=payload.episode_id,
+                template_id=payload.template_id,
+                main_content_filename=payload.main_content_filename,
+                output_filename=payload.output_filename or "",
+                tts_values=payload.tts_values or {},
+                episode_details=payload.episode_details or {},
+                user_id=payload.user_id,
+                podcast_id=payload.podcast_id or "",
+                intents=payload.intents or None,
+            )
+            log.info("event=tasks.assemble.done episode_id=%s result=%s", payload.episode_id, result)
+        except Exception as exc:  # pragma: no cover - defensive
+            log.exception("event=tasks.assemble.error episode_id=%s err=%s", payload.episode_id, exc)
+
+    import threading
+    thread = threading.Thread(
+        target=_run_assembly,
+        name=f"assemble-{payload.episode_id}",
+        daemon=True,
+    )
+    thread.start()
+    log.info("event=tasks.assemble.dispatched episode_id=%s thread=%s", payload.episode_id, thread.name)
+    
+    # Return immediately with 202 Accepted
+    return {"ok": True, "status": "processing", "episode_id": payload.episode_id}
 

@@ -178,7 +178,15 @@ steps:
             --project=$PROJECT_ID \
             --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$BUILD_ID \
             --region=${_REGION} \
-            --platform=managed
+            --platform=managed \
+            --timeout=3600 \
+            --cpu=2 \
+            --memory=4Gi \
+            --min-instances=1 \
+            --max-instances=10 \
+            --concurrency=80 \
+            --no-cpu-throttling \
+            --execution-environment=gen2
         }
 
         # Retry deploy to handle transient API errors
