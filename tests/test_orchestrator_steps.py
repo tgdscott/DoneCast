@@ -1,3 +1,4 @@
+import json
 import types
 from pathlib import Path
 
@@ -160,3 +161,134 @@ def test_streaming_mix_buffer_lazy_allocation():
     out = buf.to_segment()
     assert isinstance(out, steps.AudioSegment)
     assert len(out) >= 1000
+
+
+def test_streaming_mix_buffer_limit(monkeypatch):
+    monkeypatch.setattr(steps, "MAX_MIX_BUFFER_BYTES", 1024, raising=False)
+    seg = steps.AudioSegment.silent(duration=1000, frame_rate=44100)
+    buf = steps._StreamingMixBuffer(
+        frame_rate=44100,
+        channels=2,
+        sample_width=2,
+    )
+
+    with pytest.raises(steps.TemplateTimelineTooLargeError):
+        buf.overlay(seg, 0, label="content")
+
+
+def test_build_mix_rejects_huge_timeline(monkeypatch, log):
+    monkeypatch.setattr(steps, "MAX_MIX_BUFFER_BYTES", 1024, raising=False)
+    monkeypatch.setattr(steps, "match_target_dbfs", lambda audio, *_, **__: audio)
+
+    template = types.SimpleNamespace(
+        segments_json=json.dumps(
+            [
+                {
+                    "id": "content",
+                    "segment_type": "content",
+                }
+            ]
+        ),
+        background_music_rules_json="[]",
+        timing_json=json.dumps({"content_start_offset_s": 120.0}),
+    )
+    cleaned_audio = steps.AudioSegment.silent(duration=1000, frame_rate=44100)
+
+    with pytest.raises(steps.TemplateTimelineTooLargeError):
+        steps.build_template_and_final_mix_step(
+            template,
+            cleaned_audio,
+            "cleaned_content.mp3",
+            Path("cleaned/cleaned_content.mp3"),
+            "episode.mp3",
+            {},
+            "elevenlabs",
+            None,
+            "episode",
+            None,
+            log,
+    )
+
+    assert any("[TEMPLATE_TIMELINE_TOO_LARGE]" in entry for entry in log)
+
+
+def test_background_music_streams_in_chunks(monkeypatch, log, tmp_path):
+    calls = []
+    orig_overlay = steps._StreamingMixBuffer.overlay
+
+    def spy_overlay(self, segment, position_ms, *, label="segment"):
+        calls.append((len(segment), position_ms, label))
+        return orig_overlay(self, segment, position_ms, label=label)
+
+    monkeypatch.setattr(steps._StreamingMixBuffer, "overlay", spy_overlay)
+    monkeypatch.setattr(steps, "BACKGROUND_LOOP_CHUNK_MS", 5000, raising=False)
+    monkeypatch.setattr(steps, "OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(steps, "MEDIA_DIR", tmp_path)
+    monkeypatch.setattr(steps, "match_target_dbfs", lambda audio, *_, **__: audio)
+    monkeypatch.setattr(steps, "normalize_master", lambda *a, **k: None)
+    monkeypatch.setattr(steps, "mux_tracks", lambda *a, **k: None)
+    monkeypatch.setattr(steps, "write_derivatives", lambda *a, **k: {})
+    monkeypatch.setattr(steps, "embed_metadata", lambda *a, **k: None)
+    monkeypatch.setattr(steps.AudioSegment, "export", lambda self, *a, **k: None, raising=False)
+
+    background_audio = steps.AudioSegment.silent(duration=1200, frame_rate=44100)
+
+    def fake_from_file(path):
+        return background_audio
+
+    monkeypatch.setattr(steps.AudioSegment, "from_file", fake_from_file)
+
+    music_path = steps.MEDIA_DIR / "bg.mp3"
+    music_path.parent.mkdir(parents=True, exist_ok=True)
+    music_path.write_bytes(b"stub")
+
+    template = types.SimpleNamespace(
+        segments_json=json.dumps([
+            {
+                "id": "content",
+                "segment_type": "content",
+            }
+        ]),
+        background_music_rules_json=json.dumps(
+            [
+                {
+                    "music_filename": "bg.mp3",
+                    "apply_to_segments": ["content"],
+                    "start_offset_s": 0,
+                    "end_offset_s": 0,
+                    "fade_in_s": 0.5,
+                    "fade_out_s": 0.5,
+                    "volume_db": -3.0,
+                }
+            ]
+        ),
+        timing_json=json.dumps({}),
+    )
+
+    cleaned_audio = steps.AudioSegment.silent(duration=20_000, frame_rate=44100)
+
+    final_path, placements = steps.build_template_and_final_mix_step(
+        template,
+        cleaned_audio,
+        "cleaned_content.mp3",
+        tmp_path / "cleaned_content.mp3",
+        "episode.mp3",
+        {},
+        "elevenlabs",
+        None,
+        "episode",
+        None,
+        log,
+    )
+
+    assert final_path.name.endswith(".mp3")
+    assert placements
+
+    background_calls = [c for c in calls if c[2].startswith("background:")]
+    assert background_calls, "expected background overlays to be invoked"
+    max_chunk = max(length for length, _pos, _label in background_calls)
+    assert max_chunk <= 5000
+
+    positions = [pos for _length, pos, label in background_calls]
+    assert min(positions) == 0
+    assert max(positions) >= 15_000
