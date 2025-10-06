@@ -22,3 +22,8 @@ class NotificationPublic(SQLModel):
     body: Optional[str] = None
     created_at: datetime
     read_at: Optional[datetime] = None
+
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.replace(tzinfo=None).isoformat() + 'Z' if v else None
+        }
