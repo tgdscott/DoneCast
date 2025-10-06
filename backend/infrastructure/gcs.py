@@ -238,12 +238,38 @@ def _generate_signed_url(
         try:
             # Try standard signing first (works with service account keys)
             return blob.generate_signed_url(**kwargs)
-        except AttributeError as e:
+        except (AttributeError, ValueError) as e:
             # Cloud Run uses Compute Engine credentials without private keys
-            # Since ppp-media-us-west1 bucket is publicly readable, just return public URL
-            if "private key" in str(e).lower():
-                logger.info("No private key available; using public URL (bucket is publicly readable)")
-                return f"https://storage.googleapis.com/{bucket_name}/{key}"
+            # For read operations (GET), we can return public URL since bucket is publicly readable
+            # For write operations (PUT/POST), we MUST use IAM-based signing
+            error_str = str(e).lower()
+            if "private key" in error_str or "signer" in error_str:
+                if method.upper() == "GET":
+                    # Read-only: public URL works
+                    logger.info("No private key available; using public URL for GET (bucket is publicly readable)")
+                    return f"https://storage.googleapis.com/{bucket_name}/{key}"
+                else:
+                    # Write operation: MUST use IAM signing
+                    logger.info("No private key available; using IAM-based signing for %s", method)
+                    try:
+                        from google.auth import compute_engine
+                        from google.auth.transport import requests as auth_requests
+                        
+                        # Get the service account email from compute engine metadata
+                        credentials = compute_engine.Credentials()
+                        auth_req = auth_requests.Request()
+                        credentials.refresh(auth_req)
+                        service_account_email = credentials.service_account_email
+                        
+                        # Use IAM-based signing
+                        return blob.generate_signed_url(
+                            **kwargs,
+                            service_account_email=service_account_email,
+                            access_token=credentials.token
+                        )
+                    except Exception as iam_err:
+                        logger.error("IAM-based signing failed: %s", iam_err)
+                        raise RuntimeError(f"Cannot generate signed {method} URL without private key or IAM access") from iam_err
             else:
                 raise
                 
