@@ -3,9 +3,10 @@ import json
 from uuid import uuid4
 import subprocess
 import os
+from collections import defaultdict
 from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Form
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 from uuid import UUID
 from pathlib import Path
 from sqlmodel import Session, select
@@ -13,9 +14,14 @@ from sqlalchemy import text as _sa_text
 from sqlalchemy import desc as _sa_desc
 
 from ..models.podcast import MediaItem, MediaCategory
+from ..models.transcription import TranscriptionWatch
 from ..models.user import User
 from ..core.database import get_session
+from ..core.paths import TRANSCRIPTS_DIR
 from api.routers.auth import get_current_user
+from api.routers.ai_suggestions import _gather_user_sfx_entries
+from api.services.audio.transcript_io import load_transcript_json
+from api.services.intent_detection import analyze_intents, get_user_commands
 
 router = APIRouter(
     prefix="/media",
@@ -409,3 +415,173 @@ async def preview_media(
     if resolve:
         return JSONResponse({"url": rel})
     return RedirectResponse(url=rel)
+
+# Schemas for main content endpoints
+class MainContentItem(BaseModel):
+    id: UUID
+    filename: str
+    friendly_name: Optional[str] = None
+    created_at: Optional[str] = None
+    expires_at: Optional[str] = None
+    transcript_ready: bool = False
+    intents: Dict = {}
+    notify_pending: bool = False
+    duration_seconds: Optional[float] = None
+
+class PresignRequest(BaseModel):
+    filename: str
+    content_type: str = "audio/mpeg"
+
+class PresignResponse(BaseModel):
+    upload_url: str
+    object_path: str
+    headers: Dict[str, str] = {}
+
+class RegisterUploadItem(BaseModel):
+    object_path: str
+    friendly_name: Optional[str] = None
+    original_filename: Optional[str] = None
+    content_type: Optional[str] = None
+    size: Optional[int] = None
+
+class RegisterRequest(BaseModel):
+    uploads: List[RegisterUploadItem]
+    notify_when_ready: bool = False
+    notify_email: Optional[str] = None
+
+def _resolve_transcript_path(filename: str) -> Path:
+    stem = Path(filename).stem
+    candidates = [
+        TRANSCRIPTS_DIR / f"{stem}.json",
+        TRANSCRIPTS_DIR / f"{stem}.words.json",
+        TRANSCRIPTS_DIR / f"{stem}.original.json",
+        TRANSCRIPTS_DIR / f"{stem}.original.words.json",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+def _compute_duration(words) -> Optional[float]:
+    try:
+        last_end = 0.0
+        for word in words or []:
+            try:
+                end = float(word.get("end") or word.get("end_time") or 0.0)
+            except Exception:
+                end = 0.0
+            if end > last_end:
+                last_end = end
+        return last_end if last_end > 0 else None
+    except Exception:
+        return None
+
+@router.get("/main-content", response_model=List[MainContentItem])
+async def list_main_content_uploads(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Return main content uploads along with transcript/intents metadata."""
+    stmt = (
+        select(MediaItem)
+        .where(
+            MediaItem.user_id == current_user.id,
+            MediaItem.category == MediaCategory.main_content,
+        )
+        .order_by(_sa_text("created_at DESC"))
+    )
+    uploads = session.exec(stmt).all()
+
+    watch_map: Dict[str, List[TranscriptionWatch]] = defaultdict(list)
+    try:
+        watch_stmt = select(TranscriptionWatch).where(TranscriptionWatch.user_id == current_user.id)
+        for watch in session.exec(watch_stmt):
+            watch_map[str(watch.filename)].append(watch)
+    except Exception:
+        watch_map = defaultdict(list)
+
+    intents_cache: Dict[str, Dict] = {}
+    try:
+        commands_cfg = get_user_commands(current_user)
+        sfx_entries = list(_gather_user_sfx_entries(session, current_user))
+    except Exception:
+        commands_cfg = {}
+        sfx_entries = []
+
+    results: List[MainContentItem] = []
+    for item in uploads:
+        filename = str(item.filename)
+        transcript_path = _resolve_transcript_path(filename)
+        ready = transcript_path.exists()
+        if not ready:
+            try:
+                wlist = watch_map.get(filename, [])
+                if any(getattr(w, "notified_at", None) is not None for w in wlist):
+                    ready = True
+            except Exception:
+                pass
+        intents = {}
+        duration = None
+        if ready:
+            try:
+                words = load_transcript_json(transcript_path)
+            except Exception:
+                words = []
+            if words:
+                key = transcript_path.as_posix()
+                if key in intents_cache:
+                    intents = intents_cache[key]
+                else:
+                    intents = analyze_intents(words, commands_cfg, sfx_entries)
+                    intents_cache[key] = intents
+                duration = _compute_duration(words)
+
+        pending = any(w.notified_at is None for w in watch_map.get(filename, []))
+
+        results.append(
+            MainContentItem(
+                id=item.id,
+                filename=filename,
+                friendly_name=item.friendly_name,
+                created_at=item.created_at.isoformat() if item.created_at else None,
+                expires_at=item.expires_at.isoformat() if item.expires_at else None,
+                transcript_ready=ready,
+                intents=intents or {},
+                notify_pending=pending,
+                duration_seconds=duration,
+            )
+        )
+
+    return results
+
+@router.post("/upload/{category}/presign", response_model=PresignResponse)
+async def presign_upload(
+    category: MediaCategory,
+    request: PresignRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """Generate a presigned URL for direct GCS upload.
+    
+    NOTE: Currently returns a placeholder since GCS presigned URLs for uploads
+    are not yet implemented. Frontend should fall back to standard upload.
+    """
+    raise HTTPException(
+        status_code=501,
+        detail="Direct GCS upload not yet implemented. Use standard POST /api/media/upload/{category} instead."
+    )
+
+@router.post("/upload/{category}/register", response_model=List[MediaItem])
+async def register_upload(
+    category: MediaCategory,
+    request: RegisterRequest,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Register uploaded files in the database after direct GCS upload.
+    
+    NOTE: Currently not implemented since presign is not available.
+    """
+    raise HTTPException(
+        status_code=501,
+        detail="Direct GCS upload registration not yet implemented. Use standard POST /api/media/upload/{category} instead."
+    )
