@@ -340,3 +340,72 @@ async def delete_media_item(
     session.commit()
     
     return None
+
+@router.get("/preview")
+async def preview_media(
+    id: Optional[str] = None,
+    path: Optional[str] = None,
+    resolve: bool = False,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Return a temporary URL (or redirect) to preview a media item.
+    
+    Args:
+        id: MediaItem UUID to preview
+        path: Direct gs:// path or local filename (alternative to id)
+        resolve: If true, return JSON {url} instead of redirect
+    """
+    from fastapi.responses import JSONResponse, RedirectResponse
+    
+    item: Optional[MediaItem] = None
+    if id:
+        try:
+            uid = UUID(id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid id")
+        item = session.get(MediaItem, uid)
+        if not item or item.user_id != current_user.id:
+            raise HTTPException(status_code=404, detail="Not found")
+        path = item.filename
+    
+    if not path:
+        raise HTTPException(status_code=400, detail="Missing id or path")
+    
+    # Handle GCS URLs
+    if path.startswith("gs://"):
+        p = path[5:]
+        bucket, _, key = p.partition("/")
+        if not bucket or not key:
+            raise HTTPException(status_code=400, detail="Invalid gs path")
+        try:
+            from infrastructure import gcs
+            url = gcs.make_signed_url(bucket, key, minutes=int(os.getenv("GCS_SIGNED_URL_TTL_MIN", "10")))
+        except Exception as ex:
+            raise HTTPException(status_code=500, detail=f"Failed to sign URL: {ex}")
+        
+        if resolve:
+            return JSONResponse({"url": url})
+        return RedirectResponse(url=url)
+    
+    # Handle local files (development fallback)
+    filename = path.lstrip("/\\")
+    try:
+        media_root = MEDIA_DIR.resolve()
+    except Exception:
+        media_root = MEDIA_DIR
+    
+    try:
+        candidate = (MEDIA_DIR / filename).resolve(strict=False)
+        if not candidate.is_relative_to(media_root):
+            raise HTTPException(status_code=403, detail="Path traversal not allowed")
+        if not candidate.exists():
+            raise HTTPException(status_code=404, detail="File not found")
+    except Exception as ex:
+        raise HTTPException(status_code=404, detail=str(ex))
+    
+    # For local files, return a relative API path
+    rel = f"/api/media/files/{filename}"
+    if resolve:
+        return JSONResponse({"url": rel})
+    return RedirectResponse(url=rel)
