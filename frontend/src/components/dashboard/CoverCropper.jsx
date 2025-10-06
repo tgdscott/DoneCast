@@ -19,6 +19,9 @@ const CoverCropper = forwardRef(function CoverCropper({ sourceFile, existingUrl,
   const [mode, setMode] = useState(()=>{
     try { return localStorage.getItem('ppp_cover_mode') || 'crop'; } catch { return 'crop'; }
   }); // 'crop' | 'pad'
+  const [paddingColor, setPaddingColor] = useState(()=>{
+    try { return localStorage.getItem('ppp_cover_padding_color') || 'white'; } catch { return 'white'; }
+  }); // 'white' | 'black'
   const [dragging, setDragging] = useState(false);
   const dragOffset = useRef({ dx: 0, dy: 0 });
   const lastEmitted = useRef(null);
@@ -152,8 +155,8 @@ const CoverCropper = forwardRef(function CoverCropper({ sourceFile, existingUrl,
       const ctx = canvas.getContext('2d');
       if (mode === 'pad') {
         const full = Math.max(dims.w, dims.h);
-        // white background
-        ctx.fillStyle = '#FFFFFF';
+        // Use selected padding color
+        ctx.fillStyle = paddingColor === 'black' ? '#000000' : '#FFFFFF';
         ctx.fillRect(0,0,200,200);
         const scale = 200 / full;
         const offsetX = (full - dims.w) / 2;
@@ -179,8 +182,8 @@ const CoverCropper = forwardRef(function CoverCropper({ sourceFile, existingUrl,
     const canvas = document.createElement('canvas');
     canvas.width = outSize; canvas.height = outSize;
     const ctx = canvas.getContext('2d');
-    // Always paint a white background so JPEG has no transparency artifacts
-    ctx.fillStyle = '#FFFFFF';
+    // Paint selected padding color background for JPEG
+    ctx.fillStyle = paddingColor === 'black' ? '#000000' : '#FFFFFF';
     ctx.fillRect(0,0,outSize,outSize);
 
     if (mode === 'pad') {
@@ -210,6 +213,7 @@ const CoverCropper = forwardRef(function CoverCropper({ sourceFile, existingUrl,
   }), [exportSquareBlob, mode]);
 
   useEffect(()=>{ onModeChange?.(mode); try { localStorage.setItem('ppp_cover_mode', mode); } catch {} },[mode,onModeChange]);
+  useEffect(()=>{ try { localStorage.setItem('ppp_cover_padding_color', paddingColor); } catch {} },[paddingColor]);
 
   return (
     <div className="space-y-2">
@@ -254,6 +258,16 @@ const CoverCropper = forwardRef(function CoverCropper({ sourceFile, existingUrl,
             <button type="button" disabled={disabled || !sourceFile} onClick={()=>setMode('pad')} className={`px-2 py-1 rounded border ${mode==='pad'?'bg-blue-600 text-white border-blue-600':'bg-white'} ${!sourceFile?'opacity-40 cursor-not-allowed':''}`}>Pad</button>
             <span className="text-gray-500">Mode</span>
           </div>
+          {mode==='pad' && sourceFile && (
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] uppercase tracking-wide text-gray-500">Padding Color</label>
+              <div className="flex items-center gap-2 text-[11px]">
+                <button type="button" disabled={disabled} onClick={()=>setPaddingColor('white')} className={`px-2 py-1 rounded border ${paddingColor==='white'?'bg-blue-600 text-white border-blue-600':'bg-white border-gray-300'} ${disabled?'opacity-40 cursor-not-allowed':''}`}>White</button>
+                <button type="button" disabled={disabled} onClick={()=>setPaddingColor('black')} className={`px-2 py-1 rounded border bg-black text-white ${paddingColor==='black'?'ring-2 ring-blue-500':'border-gray-300'} ${disabled?'opacity-40 cursor-not-allowed':''}`}>Black</button>
+              </div>
+              <div className="text-[11px] text-gray-500">Entire image will be centered on {paddingColor} square ({Math.max(dims.w,dims.h)}px).</div>
+            </div>
+          )}
           {mode==='crop' && sourceFile && (
             <div className="flex flex-col gap-1">
               <label className="text-[10px] uppercase tracking-wide text-gray-500">Crop Size (pixels)</label>
@@ -267,9 +281,6 @@ const CoverCropper = forwardRef(function CoverCropper({ sourceFile, existingUrl,
               />
               <div className="text-[11px] text-gray-500">{Math.round(crop.size)}px square • Drag box to reposition.</div>
             </div>
-          )}
-          {mode==='pad' && sourceFile && (
-            <div className="text-[11px] text-gray-500">Entire image will be centered on white square ({Math.max(dims.w,dims.h)}px).</div>
           )}
         </div>
       )}

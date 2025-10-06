@@ -31,3 +31,139 @@ export function getTimezonesWithOffsets() {
   const now = Date.now();
   return TIMEZONES.map(tz => ({ tz, label: `${tz} (${formatOffset(tz)})` }));
 }
+
+/**
+ * Curated timezone options with user-friendly labels (major cities and regions).
+ * This provides a more manageable list for the settings dropdown.
+ */
+export const TIMEZONE_OPTIONS = [
+  // North America - Pacific
+  { value: 'America/Los_Angeles', label: 'Pacific Time (Los Angeles)' },
+  { value: 'America/Vancouver', label: 'Pacific Time (Vancouver)' },
+  { value: 'America/Tijuana', label: 'Pacific Time (Tijuana)' },
+  
+  // North America - Mountain
+  { value: 'America/Denver', label: 'Mountain Time (Denver)' },
+  { value: 'America/Phoenix', label: 'Mountain Time - Arizona (Phoenix)' },
+  { value: 'America/Edmonton', label: 'Mountain Time (Edmonton)' },
+  { value: 'America/Chihuahua', label: 'Mountain Time (Chihuahua)' },
+  
+  // North America - Central
+  { value: 'America/Chicago', label: 'Central Time (Chicago)' },
+  { value: 'America/Mexico_City', label: 'Central Time (Mexico City)' },
+  { value: 'America/Winnipeg', label: 'Central Time (Winnipeg)' },
+  
+  // North America - Eastern
+  { value: 'America/New_York', label: 'Eastern Time (New York)' },
+  { value: 'America/Toronto', label: 'Eastern Time (Toronto)' },
+  { value: 'America/Detroit', label: 'Eastern Time (Detroit)' },
+  
+  // North America - Atlantic
+  { value: 'America/Halifax', label: 'Atlantic Time (Halifax)' },
+  { value: 'America/Puerto_Rico', label: 'Atlantic Time (Puerto Rico)' },
+  
+  // North America - Alaska & Hawaii
+  { value: 'America/Anchorage', label: 'Alaska Time (Anchorage)' },
+  { value: 'Pacific/Honolulu', label: 'Hawaii Time (Honolulu)' },
+  
+  // Europe - Western
+  { value: 'Europe/London', label: 'UK Time (London)' },
+  { value: 'Europe/Dublin', label: 'Irish Time (Dublin)' },
+  { value: 'Europe/Lisbon', label: 'Western Europe (Lisbon)' },
+  
+  // Europe - Central
+  { value: 'Europe/Paris', label: 'Central Europe (Paris)' },
+  { value: 'Europe/Berlin', label: 'Central Europe (Berlin)' },
+  { value: 'Europe/Madrid', label: 'Central Europe (Madrid)' },
+  { value: 'Europe/Rome', label: 'Central Europe (Rome)' },
+  { value: 'Europe/Amsterdam', label: 'Central Europe (Amsterdam)' },
+  { value: 'Europe/Brussels', label: 'Central Europe (Brussels)' },
+  { value: 'Europe/Vienna', label: 'Central Europe (Vienna)' },
+  { value: 'Europe/Stockholm', label: 'Central Europe (Stockholm)' },
+  { value: 'Europe/Zurich', label: 'Central Europe (Zurich)' },
+  
+  // Europe - Eastern
+  { value: 'Europe/Athens', label: 'Eastern Europe (Athens)' },
+  { value: 'Europe/Helsinki', label: 'Eastern Europe (Helsinki)' },
+  { value: 'Europe/Istanbul', label: 'Turkey (Istanbul)' },
+  { value: 'Europe/Bucharest', label: 'Eastern Europe (Bucharest)' },
+  { value: 'Europe/Kiev', label: 'Eastern Europe (Kyiv)' },
+  
+  // Europe - Moscow
+  { value: 'Europe/Moscow', label: 'Moscow Time (Moscow)' },
+  
+  // Asia - Middle East
+  { value: 'Asia/Dubai', label: 'Gulf Time (Dubai)' },
+  { value: 'Asia/Tehran', label: 'Iran Time (Tehran)' },
+  { value: 'Asia/Jerusalem', label: 'Israel Time (Jerusalem)' },
+  { value: 'Asia/Riyadh', label: 'Arabia Time (Riyadh)' },
+  
+  // Asia - South
+  { value: 'Asia/Kolkata', label: 'India Time (Mumbai/Kolkata)' },
+  { value: 'Asia/Karachi', label: 'Pakistan Time (Karachi)' },
+  { value: 'Asia/Dhaka', label: 'Bangladesh Time (Dhaka)' },
+  
+  // Asia - Southeast
+  { value: 'Asia/Bangkok', label: 'Indochina Time (Bangkok)' },
+  { value: 'Asia/Singapore', label: 'Singapore Time (Singapore)' },
+  { value: 'Asia/Jakarta', label: 'Western Indonesia (Jakarta)' },
+  { value: 'Asia/Manila', label: 'Philippine Time (Manila)' },
+  { value: 'Asia/Ho_Chi_Minh', label: 'Indochina Time (Ho Chi Minh City)' },
+  
+  // Asia - East
+  { value: 'Asia/Hong_Kong', label: 'Hong Kong Time (Hong Kong)' },
+  { value: 'Asia/Shanghai', label: 'China Time (Shanghai/Beijing)' },
+  { value: 'Asia/Taipei', label: 'Taiwan Time (Taipei)' },
+  { value: 'Asia/Seoul', label: 'Korea Time (Seoul)' },
+  { value: 'Asia/Tokyo', label: 'Japan Time (Tokyo)' },
+  
+  // Australia & Pacific
+  { value: 'Australia/Perth', label: 'Australian Western Time (Perth)' },
+  { value: 'Australia/Adelaide', label: 'Australian Central Time (Adelaide)' },
+  { value: 'Australia/Darwin', label: 'Australian Central Time (Darwin)' },
+  { value: 'Australia/Brisbane', label: 'Australian Eastern Time (Brisbane)' },
+  { value: 'Australia/Sydney', label: 'Australian Eastern Time (Sydney)' },
+  { value: 'Australia/Melbourne', label: 'Australian Eastern Time (Melbourne)' },
+  { value: 'Pacific/Auckland', label: 'New Zealand Time (Auckland)' },
+  { value: 'Pacific/Fiji', label: 'Fiji Time (Fiji)' },
+  
+  // South America
+  { value: 'America/Sao_Paulo', label: 'Brazil Time (São Paulo)' },
+  { value: 'America/Argentina/Buenos_Aires', label: 'Argentina Time (Buenos Aires)' },
+  { value: 'America/Santiago', label: 'Chile Time (Santiago)' },
+  { value: 'America/Lima', label: 'Peru Time (Lima)' },
+  { value: 'America/Bogota', label: 'Colombia Time (Bogotá)' },
+  { value: 'America/Caracas', label: 'Venezuela Time (Caracas)' },
+  
+  // Africa
+  { value: 'Africa/Cairo', label: 'Egypt Time (Cairo)' },
+  { value: 'Africa/Lagos', label: 'West Africa Time (Lagos)' },
+  { value: 'Africa/Johannesburg', label: 'South Africa Time (Johannesburg)' },
+  { value: 'Africa/Nairobi', label: 'East Africa Time (Nairobi)' },
+  
+  // UTC
+  { value: 'UTC', label: 'UTC (Coordinated Universal Time)' },
+];
+
+/**
+ * Get a user-friendly timezone label from IANA timezone string.
+ * Falls back to the raw timezone if not found in our curated list.
+ */
+export const getTimezoneLabel = (timezone) => {
+  if (!timezone) return null;
+  const option = TIMEZONE_OPTIONS.find(opt => opt.value === timezone);
+  return option ? option.label : timezone;
+};
+
+/**
+ * Detect the device timezone and return both the IANA string and friendly label.
+ */
+export const detectDeviceTimezoneInfo = () => {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const label = getTimezoneLabel(tz) || `${tz} (${formatOffset(tz)})`;
+    return { value: tz, label };
+  } catch {
+    return { value: 'UTC', label: 'UTC (Coordinated Universal Time)' };
+  }
+};

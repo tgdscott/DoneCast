@@ -266,7 +266,8 @@ async def patch_user_prefs(
         changed = True
     if payload.timezone is not None:
         tz = payload.timezone.strip()
-        if tz and tz != "UTC" and "/" not in tz:
+        # Allow "device" as special value for auto-detection, or standard IANA format
+        if tz and tz != "UTC" and tz != "device" and "/" not in tz:
             raise HTTPException(status_code=400, detail="Invalid timezone format")
         current_user.timezone = tz or None
         changed = True

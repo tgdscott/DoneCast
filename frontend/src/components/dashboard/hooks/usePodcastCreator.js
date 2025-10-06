@@ -80,6 +80,7 @@ export default function usePodcastCreator({
   const [scheduleTime, setScheduleTime] = useState('');
   const [autoPublishPending, setAutoPublishPending] = useState(false);
   const [lastAutoPublishedEpisodeId, setLastAutoPublishedEpisodeId] = useState(null);
+  const publishingTriggeredRef = useRef(false); // Track if publishing already triggered for current episode
   const [transcriptReady, setTranscriptReady] = useState(false);
   const [transcriptPath, setTranscriptPath] = useState(null);
   const resetTranscriptState = useCallback(() => {
@@ -879,7 +880,7 @@ export default function usePodcastCreator({
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [jobId, token, expectedEpisodeId, publishMode]);
+  }, [jobId, token, expectedEpisodeId]);
 
   const steps = useMemo(() => {
     const stepTwoTitle = creatorMode === 'preuploaded' ? 'Choose Audio' : 'Upload Audio';
@@ -1391,6 +1392,7 @@ export default function usePodcastCreator({
     setAssembledEpisode(null);
     setAutoPublishPending(false);
     setExpectedEpisodeId(null);
+    publishingTriggeredRef.current = false; // Reset for new episode
     setIsAssembling(true);
     setStatusMessage('Assembling your episode...');
     setError('');
@@ -1770,11 +1772,36 @@ export default function usePodcastCreator({
 
   useEffect(() => {
     if(!assemblyComplete || !autoPublishPending || !assembledEpisode) return;
+    
+    // Guard 1: Check if publishing already triggered for this episode
+    if(publishingTriggeredRef.current && assembledEpisode?.id === lastAutoPublishedEpisodeId){
+      setAutoPublishPending(false);
+      return;
+    }
+    
+    // Guard 2: Check if episode already published to Spreaker (has spreaker_episode_id)
+    if(assembledEpisode?.spreaker_episode_id){
+      console.log('[Publishing Guard] Episode already has Spreaker ID:', assembledEpisode.spreaker_episode_id);
+      setAutoPublishPending(false);
+      publishingTriggeredRef.current = false; // Reset for next episode
+      return;
+    }
+    
+    // Guard 3: Legacy check
     if(lastAutoPublishedEpisodeId && assembledEpisode.id === lastAutoPublishedEpisodeId){
       setAutoPublishPending(false);
       return;
     }
-    if(publishMode === 'draft'){ setAutoPublishPending(false); setStatusMessage('Draft created (processing complete).'); return; }
+    
+    if(publishMode === 'draft'){ 
+      setAutoPublishPending(false); 
+      setStatusMessage('Draft created (processing complete).'); 
+      publishingTriggeredRef.current = false; // Reset for next episode
+      return; 
+    }
+    
+    // Set flag IMMEDIATELY before async operation to prevent race conditions
+    publishingTriggeredRef.current = true;
     
     // Capture schedule values at the moment autopublish triggers (don't re-trigger on date/time changes)
     const capturedPublishMode = publishMode;

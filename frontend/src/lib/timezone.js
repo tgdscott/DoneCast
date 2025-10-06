@@ -51,6 +51,10 @@ const isFallbackTimezone = (tz) => {
 export const resolveUserTimezone = (...candidates) => {
   let fallbackTimezone = null;
   for (const candidate of candidates) {
+    // Handle special "device" value by detecting device timezone
+    if (candidate === 'device') {
+      return detectDeviceTimezone(DEFAULT_TIMEZONE);
+    }
     if (!isValidTimezone(candidate)) continue;
     const trimmed = candidate.trim();
     if (isFallbackTimezone(trimmed)) {

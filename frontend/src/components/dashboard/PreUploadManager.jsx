@@ -154,19 +154,44 @@ export default function PreUploadManager({
       setError('Enter a friendly name for this episode before uploading.');
       return;
     }
-    toast({ title: 'Uploading in background', description: 'You can return to your dashboard. We\'ll email you when it\'s processed.' });
-    const p = uploadMediaDirect({
-      category: 'main_content',
-      file: fileToSend,
-      friendlyName: trimmedFriendlyName,
-      token,
-      notifyWhenReady: notify,
-      notifyEmail: notify ? email : undefined,
-    });
-    p.then(() => { try { toast({ title: 'Upload received', description: 'Transcription has started.' }); } catch {}
+    
+    setUploading(true);
+    setUploadProgress(0);
+    setError('');
+    
+    try {
+      await uploadMediaDirect({
+        category: 'main_content',
+        file: fileToSend,
+        friendlyName: trimmedFriendlyName,
+        token,
+        notifyWhenReady: notify,
+        notifyEmail: notify ? email : undefined,
+        onProgress: ({ percent }) => {
+          if (typeof percent === 'number') {
+            setUploadProgress(Math.min(99, Math.max(0, Math.round(percent))));
+          }
+        },
+      });
+      
+      setUploadProgress(100);
+      toast({ title: 'Upload complete!', description: 'Transcription has started. We\'ll email you when it\'s ready.' });
       onUploaded();
-    }).catch((err) => { try { toast({ variant: 'destructive', title: 'Upload failed', description: err?.message || 'Unable to upload audio.' }); } catch {} });
-    onDone();
+      
+      // Close modal after short delay so user sees completion
+      setTimeout(() => {
+        onDone();
+      }, 1500);
+    } catch (err) {
+      setUploading(false);
+      setUploadProgress(null);
+      setError(err?.message || 'Upload failed. Please try again.');
+      toast({ 
+        variant: 'destructive', 
+        title: 'Upload failed', 
+        description: err?.message || 'Unable to upload audio.' 
+      });
+    }
   };
 
   const handleSubmit = async (event) => {
@@ -321,16 +346,18 @@ export default function PreUploadManager({
             )}
 
             <div className="flex justify-between">
-              <Button type="button" variant="ghost" onClick={onDone}>
+              <Button type="button" variant="ghost" onClick={onDone} disabled={uploading}>
                 Return to dashboard
               </Button>
-              <Button type="submit" disabled={!friendlyName.trim() || (!hasFile && !converting)}>
+              <Button type="submit" disabled={!friendlyName.trim() || (!hasFile && !converting) || uploading}>
                 {converting ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : uploading ? (
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                 ) : (
                   <Upload className="w-4 h-4 mr-2" />
                 )}
-                {converting ? 'Preparing…' : 'Upload and return'}
+                {converting ? 'Preparing…' : uploading ? `Uploading… ${uploadProgress || 0}%` : 'Upload and return'}
               </Button>
             </div>
           </form>
