@@ -342,8 +342,20 @@ async def auth_google_callback(request: Request, db_session: Session = Depends(g
         else:
             target_path = "/dashboard"
     # Append access token as hash fragment preserving any existing fragment
-    fragment_prefix = '#' if '#' not in target_path else ''
-    frontend_url = f"{frontend_base}{target_path}{fragment_prefix}#access_token={access_token}&token_type=bearer"
+    # Ensure we append the token as a single fragment. Previous logic produced a
+    # double '##' when target_path lacked an existing hash (e.g. /dashboard##access_token=...)
+    # which broke frontend token extraction (became key name '#access_token').
+    if '#' in target_path:
+        # target_path already contains a fragment; append using '&'
+        base_out = f"{frontend_base}{target_path}"
+        if base_out.endswith('#'):
+            # Degenerate case: fragment marker present but empty
+            frontend_url = f"{base_out}access_token={access_token}&token_type=bearer"
+        else:
+            join_char = '&' if not base_out.endswith(('&', '?')) else ''
+            frontend_url = f"{base_out}{join_char}access_token={access_token}&token_type=bearer"
+    else:
+        frontend_url = f"{frontend_base}{target_path}#access_token={access_token}&token_type=bearer"
 
     return RedirectResponse(url=frontend_url)
 

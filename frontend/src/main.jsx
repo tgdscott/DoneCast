@@ -74,7 +74,12 @@ try {
     sessionStorage.setItem('ppp_tab_id', Math.random().toString(36).slice(2));
   }
   if (window.location.hash && window.location.hash.includes('access_token=')) {
-    const params = new URLSearchParams(window.location.hash.substring(1));
+    // Normalize any accidental double-hash (e.g. '##access_token=...') produced by
+    // older backend redirect logic. Browsers preserve the literal sequence so we
+    // strip leading '#' characters beyond the first.
+    let rawHash = window.location.hash;
+    while (rawHash.startsWith('##')) rawHash = rawHash.slice(1);
+    const params = new URLSearchParams(rawHash.substring(1));
     const accessToken = params.get('access_token');
     if (accessToken) {
       // Persist for subsequent tabs
