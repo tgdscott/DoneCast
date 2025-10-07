@@ -220,9 +220,66 @@ def compute_playback_info(episode: Any, *, now: Optional[datetime] = None) -> di
     }
 
 
+def compute_cover_info(episode: Any, *, now: Optional[datetime] = None) -> dict[str, Any]:
+    """Determine cover preference between GCS, local, and Spreaker cover.
+
+    Priority order for cover URLs within 7-day window:
+    1. GCS URL (gcs_cover_path) - original cover during retention
+    2. Local file (cover_path)
+    3. Spreaker cover URL (remote_cover_url)
+
+    After 7 days: Uses Spreaker cover (remote_cover_url) if available.
+
+    Returns dict with 'cover_url' key compatible with existing serializers.
+    """
+    now_utc = _as_utc(now) or datetime.now(timezone.utc)
+    
+    # Get cover fields from episode
+    gcs_cover_path = getattr(episode, "gcs_cover_path", None)
+    cover_path = getattr(episode, "cover_path", None)
+    remote_cover_url = getattr(episode, "remote_cover_url", None)
+    
+    status_str = _status_value(getattr(episode, "status", None))
+    publish_at = _as_utc(getattr(episode, "publish_at", None))
+    
+    # Determine if within 7-day window
+    within_7days = False
+    if publish_at and status_str in ("published", "scheduled"):
+        # Only apply grace period after actual publish time
+        if now_utc >= publish_at:
+            days_since_publish = (now_utc - publish_at).days
+            within_7days = days_since_publish < 7
+    
+    # Build cover URL based on priority
+    cover_url = None
+    cover_source = "none"
+    
+    if within_7days and gcs_cover_path:
+        # Within 7 days: prioritize GCS original
+        cover_url = _cover_url_for(None, gcs_path=gcs_cover_path)
+        cover_source = "gcs"
+    
+    if not cover_url and cover_path:
+        # Fall back to local/remote cover_path
+        cover_url = _cover_url_for(cover_path)
+        cover_source = "local"
+    
+    if not cover_url and remote_cover_url:
+        # Fall back to Spreaker hosted cover
+        cover_url = _cover_url_for(remote_cover_url)
+        cover_source = "remote"
+    
+    return {
+        "cover_url": cover_url,
+        "cover_source": cover_source,
+        "within_7day_window": within_7days,
+    }
+
+
 __all__ = [
     "_final_url_for",
     "_cover_url_for",
     "_status_value",
     "compute_playback_info",
+    "compute_cover_info",
 ]
