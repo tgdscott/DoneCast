@@ -150,6 +150,23 @@ async def create_tts_media(
     except Exception:
         pass
 
+    # Upload to GCS for persistence (intro/outro categories need to survive container restarts)
+    import os as _os
+    gcs_bucket = _os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+    final_filename = filename  # Will be replaced with gs:// URL if GCS upload succeeds
+    if gcs_bucket and body.category in ("intro", "outro", "music", "sfx", "commercial"):
+        try:
+            from infrastructure import gcs
+            gcs_key = f"media/{current_user.id.hex}/{body.category.value}/{filename}"
+            with open(out_path, "rb") as f:
+                gcs_url = gcs.upload_fileobj(gcs_bucket, gcs_key, f, content_type="audio/mpeg")
+            if gcs_url:
+                final_filename = gcs_url
+                log.info(f"[tts] Uploaded {body.category.value} to GCS: {gcs_url}")
+        except Exception as e:
+            log.warning(f"[tts] Failed to upload {body.category.value} to GCS: {e}")
+            # Fallback to local filename - non-fatal in dev
+
     # Friendly name fallback
     if body.friendly_name and body.friendly_name.strip():
         friendly_name = body.friendly_name.strip()
@@ -173,7 +190,7 @@ async def create_tts_media(
         pass
 
     item = MediaItem(
-        filename=filename,
+        filename=final_filename,  # Use GCS URL if uploaded, otherwise local filename
         friendly_name=friendly_name,
         category=body.category,
         content_type="audio/mpeg",
