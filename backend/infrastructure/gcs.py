@@ -9,6 +9,7 @@ the rest of the application can continue to function.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -20,13 +21,47 @@ try:  # pragma: no cover - the dependency is optional for local development
     from google.api_core import exceptions as gcs_exceptions
     from google.auth.exceptions import DefaultCredentialsError
     from google.cloud import storage
+    from google.oauth2 import service_account
 except ImportError:  # pragma: no cover - handled at runtime by fallbacks
     gcs_exceptions = None  # type: ignore[assignment]
     DefaultCredentialsError = None  # type: ignore[assignment]
     storage = None  # type: ignore[assignment]
+    service_account = None  # type: ignore[assignment]
 
 
 logger = logging.getLogger(__name__)
+
+# Cached signing credentials
+_SIGNING_CREDENTIALS = None
+
+
+def _get_signing_credentials():
+    """Load service account credentials for signing URLs from Secret Manager."""
+    global _SIGNING_CREDENTIALS
+    
+    if _SIGNING_CREDENTIALS is not None:
+        return _SIGNING_CREDENTIALS
+    
+    try:
+        from google.cloud import secretmanager
+        
+        # Load the signing key from Secret Manager
+        client = secretmanager.SecretManagerServiceClient()
+        project_id = os.getenv("GCP_PROJECT", "podcast612")
+        secret_name = f"projects/{project_id}/secrets/gcs-signer-key/versions/latest"
+        
+        response = client.access_secret_version(request={"name": secret_name})
+        key_json = response.payload.data.decode("UTF-8")
+        key_dict = json.loads(key_json)
+        
+        # Create credentials from the service account key
+        credentials = service_account.Credentials.from_service_account_info(key_dict)
+        _SIGNING_CREDENTIALS = credentials
+        logger.info("Loaded signing credentials from Secret Manager")
+        return credentials
+    except Exception as e:
+        logger.warning(f"Failed to load signing credentials: {e}")
+        return None
 
 
 # Cached media root used for local development fallbacks.

@@ -573,14 +573,14 @@ async def presign_upload(
     request: PresignRequest,
     current_user: User = Depends(get_current_user)
 ):
-    """Generate a presigned URL for direct GCS upload using POST policy.
+    """Generate a presigned URL for direct GCS upload.
     
-    Uses GCS POST policy which is more browser-friendly than resumable uploads.
+    Uses service account key from Secret Manager to sign URLs.
     This bypasses Cloud Run's 32MB request body limit.
     """
     import uuid
     from google.cloud import storage
-    from datetime import datetime, timedelta
+    from datetime import timedelta
     
     # Generate unique object path in user's media directory
     user_id = current_user.id.hex
@@ -592,14 +592,22 @@ async def presign_upload(
     gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
     
     try:
-        # Use GCS client to generate a v4 signed URL for PUT
-        # This uses the service account's token-based credentials
-        client = storage.Client()
+        # Get signing credentials from Secret Manager
+        from infrastructure.gcs import _get_signing_credentials
+        credentials = _get_signing_credentials()
+        
+        if credentials is None:
+            raise HTTPException(
+                status_code=501,
+                detail="Direct upload not available, use standard upload"
+            )
+        
+        # Create storage client with signing credentials
+        client = storage.Client(credentials=credentials)
         bucket = client.bucket(gcs_bucket)
         blob = bucket.blob(object_path)
         
         # Generate signed URL for PUT operation
-        # With newer google-cloud-storage, this works with token-based auth
         url = blob.generate_signed_url(
             version="v4",
             expiration=timedelta(hours=1),
@@ -612,6 +620,8 @@ async def presign_upload(
             object_path=object_path,
             headers={"Content-Type": request.content_type}
         )
+    except HTTPException:
+        raise
     except Exception as e:
         import logging
         logging.getLogger("api.media").error(f"Failed to generate signed URL: {e}", exc_info=True)
