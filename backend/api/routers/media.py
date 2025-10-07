@@ -494,7 +494,37 @@ async def list_main_content_uploads(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
-    """Return main content uploads along with transcript/intents metadata."""
+    """Return main content uploads along with transcript/intents metadata.
+    
+    Excludes uploads that are already used in published/scheduled episodes to prevent
+    duplicate episode creation from the same source file. Files remain available for
+    7 days after publish for editing purposes but don't appear in new episode creation.
+    """
+    from api.models.podcast import Episode, EpisodeStatus
+    
+    # Get list of working_audio_name values from episodes that are published or scheduled
+    # These files should not appear in the "Choose Processed Audio" list
+    # Published = status is "published", Scheduled = status is "processed" with future publish_at
+    try:
+        published_episodes = session.exec(
+            select(Episode).where(
+                Episode.user_id == current_user.id,
+                Episode.working_audio_name != None
+            )
+        ).all()
+        
+        published_files = set()
+        for ep in published_episodes:
+            # Include if published, or if processed with a scheduled publish date
+            if ep.status == EpisodeStatus.published:
+                if ep.working_audio_name:
+                    published_files.add(str(ep.working_audio_name))
+            elif ep.status == EpisodeStatus.processed and ep.publish_at:
+                if ep.working_audio_name:
+                    published_files.add(str(ep.working_audio_name))
+    except Exception:
+        published_files = set()
+    
     stmt = (
         select(MediaItem)
         .where(
@@ -503,7 +533,10 @@ async def list_main_content_uploads(
         )
         .order_by(_sa_text("created_at DESC"))
     )
-    uploads = session.exec(stmt).all()
+    all_uploads = session.exec(stmt).all()
+    
+    # Filter out files that are already used in published/scheduled episodes
+    uploads = [u for u in all_uploads if str(u.filename) not in published_files]
 
     watch_map: Dict[str, List[TranscriptionWatch]] = defaultdict(list)
     try:
