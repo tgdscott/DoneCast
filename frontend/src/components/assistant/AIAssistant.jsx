@@ -102,6 +102,37 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
     return () => clearTimeout(timer);
   }, [onboardingMode, currentStep, currentStepData, token, user]);
   
+  // Listen for manual "Need Help?" button clicks
+  useEffect(() => {
+    const handleOpenAssistant = () => {
+      setIsOpen(true);
+      // If in onboarding mode and no messages yet, trigger help immediately
+      if (onboardingMode && currentStep && messages.length === 0) {
+        (async () => {
+          try {
+            const response = await makeApi(token).post('/api/assistant/onboarding-help', {
+              step: currentStep,
+              data: currentStepData,
+            });
+            if (response.message) {
+              setMessages([{
+                role: 'assistant',
+                content: response.message,
+                suggestions: response.suggestions,
+                timestamp: new Date(),
+              }]);
+            }
+          } catch (error) {
+            console.error('Failed to get onboarding help:', error);
+          }
+        })();
+      }
+    };
+    
+    window.addEventListener('ppp:open-ai-assistant', handleOpenAssistant);
+    return () => window.removeEventListener('ppp:open-ai-assistant', handleOpenAssistant);
+  }, [onboardingMode, currentStep, currentStepData, token, messages.length]);
+  
   // Monitor for user being stuck
   useEffect(() => {
     // Track page actions (you'd call this from other components)
@@ -259,10 +290,14 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
       
       {/* Chat Widget - Responsive sizing to avoid covering content */}
       {isOpen ? (
-        <div className={`fixed bottom-6 right-6 bg-white border border-gray-300 rounded-lg shadow-2xl z-50 flex flex-col
+        <div className={`fixed bg-white border border-gray-300 rounded-lg shadow-2xl flex flex-col
+          ${onboardingMode 
+            ? 'bottom-6 right-6 z-[60]' // Higher z-index for onboarding, positioned right
+            : 'bottom-6 right-6 z-50'
+          }
           ${isMinimized 
             ? 'w-80 h-14' 
-            : 'w-96 max-w-[calc(100vw-3rem)] h-[600px] max-h-[min(600px,calc(100vh-8rem))] sm:max-h-[min(600px,calc(100vh-200px))]'
+            : 'w-96 max-w-[calc(100vw-3rem)] h-[500px] max-h-[min(500px,calc(100vh-10rem))]'
           }`}>
           
           {/* Header */}

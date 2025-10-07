@@ -195,19 +195,18 @@ export default function Onboarding() {
   };
 
   const importFlowSteps = useMemo(() => ([
-    { id: 'rss', title: 'Import from RSS', description: 'Paste your feed URL.' },
-    { id: 'confirm', title: 'Confirm import', description: "We'll mirror your setup and assets." },
-    { id: 'importing', title: 'Importing...', description: 'Fetching episodes and metadata.' },
-    { id: 'analyze', title: 'Analyzing', description: "We'll bring over what we can, and you can tidy later." },
-    { id: 'assets', title: 'Assets', description: "We'll bring over what we can, and you can tidy later." },
-    { id: 'importSuccess', title: 'Imported', description: 'Your show is now in Podcast Plus Plus.' },
+    { id: 'rss', title: 'Import from RSS' },
+    { id: 'confirm', title: 'Confirm import' },
+    { id: 'importing', title: 'Importing...' },
+    { id: 'analyze', title: 'Analyzing' },
+    { id: 'assets', title: 'Assets' },
+    { id: 'importSuccess', title: 'Import complete!' },
   ]), []);
 
   const newFlowSteps = useMemo(() => {
     const nameStep = {
       id: 'yourName',
       title: 'What can we call you?',
-      description: 'First name required; last name optional. You can update this later in Settings.',
       validate: async () => {
         const fn = (firstName || '').trim();
         const ln = (lastName || '').trim();
@@ -238,24 +237,23 @@ export default function Onboarding() {
     const choosePathStep = {
       id: 'choosePath',
       title: 'Do you have an existing podcast?',
-      description: 'Start fresh, or import an existing show if you already have one.',
     };
 
     const newSteps = [
       nameStep,
       choosePathStep,
-      { id: 'showDetails', title: 'About your show', description: "Tell us the name and what it's about. You can change this later." },
-      { id: 'format', title: 'Format', description: 'How will most episodes feel?' },
-  { id: 'coverArt', title: 'Podcast Cover Art (optional)', description: "Upload your podcast cover art. A square picture at least 1400 pixels wide works best. If you don't have one yet, you can skip this for now." },
+      { id: 'showDetails', title: 'About your show' },
+      { id: 'format', title: 'Format' },
+      { id: 'coverArt', title: 'Podcast Cover Art (optional)' },
       // Optional interstitial: show a one-off page when jumping here after import
       ...(showSkipNotice ? [{ id: 'skipNotice', title: 'Skipping ahead', description: "We imported your show. We'll jump to Step 6 so you can finish setup." }] : []),
-  { id: 'introOutro', title: 'Intro & Outro', description: 'Create simple intro/outro audio now, or upload files if you have them.' },
-  ...(needsTtsReview ? [{ id: 'ttsReview', title: 'Review your intro & outro', description: 'Please review these and make sure they are okay.' }] : []),
-      { id: 'music', title: 'Music (optional)', description: 'Pick intro/outro music (optional).' },
-      { id: 'spreaker', title: 'Connect to Podcast Host', description: "We partner with Spreaker to host your podcast." },
-  { id: 'publishCadence', title: 'How often will you publish?', description: 'We ask to help keep you on track for publishing consistently' },
-  { id: 'publishSchedule', title: 'Publishing days', description: 'Pick your publishing days/dates. You can change this later.' },
-      { id: 'finish', title: 'Finish', description: 'Nice work. You can publish now or explore your dashboard.' },
+      { id: 'introOutro', title: 'Intro & Outro' },
+      ...(needsTtsReview ? [{ id: 'ttsReview', title: 'Review your intro & outro', description: 'Please review these and make sure they are okay.' }] : []),
+      { id: 'music', title: 'Music (optional)' },
+      { id: 'spreaker', title: 'Connect to Podcast Host' },
+      { id: 'publishCadence', title: 'How often will you publish?' },
+      { id: 'publishSchedule', title: 'Publishing days' },
+      { id: 'finish', title: 'All done!' },
     ];
 
     // If we launched from Podcast Manager, the user's name is already known; remove that step

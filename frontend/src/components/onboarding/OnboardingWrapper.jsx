@@ -338,25 +338,39 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
                 ))}
               </ol>
             </nav>
-            <div className="flex items-center gap-2">
-              {StepIcon ? (
-                <StepIcon className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
-              ) : (
-                <span className="inline-block h-5 w-5" aria-hidden="true" />
-              )}
-              <h2
-                ref={headingRef}
-                tabIndex={-1}
-                className="text-lg md:text-xl font-medium flex items-center gap-2"
-              >
-                {`Step ${index + 1}: ${step?.title || ''}`}
-                {/* Visible Saved cue (aria-hidden) */}
-                {savedVisible && (
-                  <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" aria-hidden="true">
-                    <CheckCircle2 className="h-3.5 w-3.5" /> Saved
-                  </span>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                {StepIcon ? (
+                  <StepIcon className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+                ) : (
+                  <span className="inline-block h-5 w-5" aria-hidden="true" />
                 )}
-              </h2>
+                <h2
+                  ref={headingRef}
+                  tabIndex={-1}
+                  className="text-lg md:text-xl font-medium flex items-center gap-2"
+                >
+                  {`Step ${index + 1}: ${step?.title || ''}`}
+                  {/* Visible Saved cue (aria-hidden) */}
+                  {savedVisible && (
+                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" aria-hidden="true">
+                      <CheckCircle2 className="h-3.5 w-3.5" /> Saved
+                    </span>
+                  )}
+                </h2>
+              </div>
+              {/* AI Assistant Help Button */}
+              <button
+                onClick={() => {
+                  // Trigger AI Assistant to open (via custom event)
+                  window.dispatchEvent(new CustomEvent('ppp:open-ai-assistant'));
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-md transition-colors"
+                title="Get help from AI Assistant"
+              >
+                <HelpCircle className="h-4 w-4" />
+                <span className="hidden sm:inline">Need help?</span>
+              </button>
             </div>
             {step?.description && (
               <p className="text-muted-foreground">{step.description}</p>
