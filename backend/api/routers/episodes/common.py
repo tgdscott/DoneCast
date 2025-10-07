@@ -21,7 +21,9 @@ def _final_url_for(path: Optional[str]) -> Optional[str]:
             return f"/static/media/{base}"
     except Exception:
         pass
-    return f"/static/final/{base}"
+    # Don't return URL if file doesn't exist - return None instead
+    # This prevents 404 errors on episode history page
+    return None
 
 
 def _cover_url_for(path: Optional[str], *, gcs_path: Optional[str] = None) -> Optional[str]:
