@@ -263,9 +263,9 @@ async def upload_media_files(
         # Kick off immediate background transcription for main content uploads
         try:
             if category == MediaCategory.main_content:
-                # Import lazily to avoid circular import at startup
-                from worker.tasks import transcribe_media_file  # type: ignore
-                transcribe_media_file.delay(safe_filename)
+                # Use Cloud Tasks to schedule transcription
+                from infrastructure.tasks_client import enqueue_http_task  # type: ignore
+                enqueue_http_task("/api/tasks/transcribe", {"filename": safe_filename})
         except Exception:
             # Non-fatal; upload should still succeed
             pass
@@ -691,10 +691,11 @@ async def register_upload(
             # Trigger transcription if requested and category is main_content
             if request.notify_when_ready and category == MediaCategory.main_content:
                 try:
-                    # Import lazily to avoid circular import
-                    from worker.tasks import transcribe_media_file  # type: ignore
+                    # Use Cloud Tasks to schedule transcription
+                    from infrastructure.tasks_client import enqueue_http_task  # type: ignore
                     # Pass the original filename from the object path for transcription
-                    transcribe_media_file.delay(Path(upload_item.object_path).name)
+                    filename = Path(upload_item.object_path).name
+                    enqueue_http_task("/api/tasks/transcribe", {"filename": filename})
                     log.info(f"Scheduled transcription for media_id={media_item.id}")
                 except Exception as trans_err:
                     log.warning(f"Failed to schedule transcription: {trans_err}")
