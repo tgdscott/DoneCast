@@ -11,6 +11,7 @@ import OnboardingDemo from '@/pages/OnboardingDemo.jsx';
 import Onboarding from '@/pages/Onboarding.jsx';
 import PrivacyPolicy from '@/pages/PrivacyPolicy.jsx';
 import TermsOfUse from '@/pages/TermsOfUse.jsx';
+import Legal from '@/pages/Legal.jsx';
 import Verify from '@/pages/Verify.jsx';
 import Pricing from '@/pages/Pricing.jsx';
 import PodcastWebsiteBuilder from '@/pages/PodcastWebsiteBuilder.jsx';
@@ -109,6 +110,7 @@ const router = createBrowserRouter([
   { path: '/error', element: <ErrorPage /> },
   { path: '/privacy', element: <PrivacyPolicy /> },
   { path: '/terms', element: <TermsOfUse /> },
+  { path: '/legal', element: <Legal /> },
   { path: '/verify', element: <Verify /> },
   { path: '/pricing', element: <Pricing /> },
   { path: '/subscriptions', element: <Pricing /> },

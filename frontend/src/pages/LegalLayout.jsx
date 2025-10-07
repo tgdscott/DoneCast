@@ -35,6 +35,9 @@ export default function LegalLayout({ title, description, html }) {
             <a href="/terms" className="transition-colors hover:text-slate-700">
               Terms of Use
             </a>
+            <a href="/legal" className="transition-colors hover:text-slate-700">
+              Legal
+            </a>
           </nav>
         </div>
       </footer>
