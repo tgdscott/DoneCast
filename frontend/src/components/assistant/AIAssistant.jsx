@@ -411,16 +411,95 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
           )}
         </div>
       ) : (
-        /* Floating Button */
-        <button
-          onClick={() => setIsOpen(true)}
-          className="fixed bottom-6 right-6 w-14 h-14 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-full shadow-lg hover:shadow-xl transition-all hover:scale-110 z-50 flex items-center justify-center"
-        >
-          <MessageCircle className="w-6 h-6" />
-          {guidanceStatus?.is_new_user && (
-            <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full animate-pulse"></span>
+        /* AI Assistant Character (Clippy-style) */
+        <div className="fixed bottom-6 right-6 z-50">
+          {/* Speech Bubble - Shows when proactive help is available */}
+          {proactiveHelp && (
+            <div className="absolute bottom-20 right-0 mb-2 animate-bounce-gentle">
+              <div className="relative bg-white border-2 border-purple-400 rounded-2xl shadow-xl p-4 max-w-xs">
+                {/* Speech bubble tail */}
+                <div className="absolute bottom-[-10px] right-8 w-0 h-0 border-l-[10px] border-l-transparent border-r-[10px] border-r-transparent border-t-[10px] border-t-purple-400"></div>
+                <div className="absolute bottom-[-7px] right-[33px] w-0 h-0 border-l-[8px] border-l-transparent border-r-[8px] border-r-transparent border-t-[8px] border-t-white"></div>
+                
+                {/* Message content */}
+                <p className="text-sm text-gray-800 mb-3">{proactiveHelp}</p>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={acceptProactiveHelp}
+                    className="px-3 py-1 bg-purple-600 text-white text-xs rounded-full hover:bg-purple-700 transition-colors"
+                  >
+                    Help me!
+                  </button>
+                  <button
+                    onClick={dismissProactiveHelp}
+                    className="px-3 py-1 bg-gray-200 text-gray-700 text-xs rounded-full hover:bg-gray-300 transition-colors"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
-        </button>
+          
+          {/* AI Character - Clickable mascot */}
+          <button
+            onClick={() => setIsOpen(true)}
+            className="relative w-24 h-24 transition-all hover:scale-110 focus:outline-none focus:ring-4 focus:ring-purple-400 rounded-full"
+            title="Click me for help!"
+          >
+            {/* Character SVG */}
+            <svg viewBox="0 0 200 200" className="w-full h-full drop-shadow-xl">
+              {/* Shadow */}
+              <ellipse cx="100" cy="180" rx="60" ry="10" fill="#D8D8E8" opacity="0.4"/>
+              
+              {/* Body */}
+              <ellipse cx="100" cy="150" rx="70" ry="35" fill="#8B5CF6"/>
+              
+              {/* Head */}
+              <circle cx="100" cy="100" r="55" fill="url(#gradient-head)"/>
+              <defs>
+                <linearGradient id="gradient-head" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#A855F7"/>
+                  <stop offset="100%" stopColor="#D946EF"/>
+                </linearGradient>
+              </defs>
+              
+              {/* Headphones */}
+              <path d="M 45 90 Q 40 100 45 110" stroke="#8B5CF6" strokeWidth="8" fill="none" strokeLinecap="round"/>
+              <path d="M 155 90 Q 160 100 155 110" stroke="#8B5CF6" strokeWidth="8" fill="none" strokeLinecap="round"/>
+              <ellipse cx="40" cy="100" rx="12" ry="18" fill="#C084FC"/>
+              <ellipse cx="160" cy="100" rx="12" ry="18" fill="#C084FC"/>
+              <path d="M 50 70 Q 100 50 150 70" stroke="#8B5CF6" strokeWidth="10" fill="none" strokeLinecap="round"/>
+              
+              {/* Eyes */}
+              <ellipse cx="80" cy="95" rx="12" ry="16" fill="white"/>
+              <ellipse cx="120" cy="95" rx="12" ry="16" fill="white"/>
+              <circle cx="80" cy="98" r="7" fill="#2D3748"/>
+              <circle cx="120" cy="98" r="7" fill="#2D3748"/>
+              <circle cx="82" cy="96" r="3" fill="white"/> {/* Eye shine */}
+              <circle cx="122" cy="96" r="3" fill="white"/>
+              
+              {/* Eyebrows */}
+              <path d="M 68 80 Q 80 75 90 78" stroke="#8B5CF6" strokeWidth="3" fill="none" strokeLinecap="round"/>
+              <path d="M 110 78 Q 120 75 132 80" stroke="#8B5CF6" strokeWidth="3" fill="none" strokeLinecap="round"/>
+              
+              {/* Happy smile */}
+              <path d="M 75 115 Q 100 125 125 115" stroke="#8B5CF6" strokeWidth="3" fill="none" strokeLinecap="round"/>
+              
+              {/* Idea lightbulb */}
+              <circle cx="50" cy="40" r="12" fill="#FFA726" opacity="0.9"/>
+              <path d="M 48 52 L 48 56 L 52 56 L 52 52 Z" fill="#9C27B0"/>
+              <path d="M 45 38 L 43 35" stroke="#FFA726" strokeWidth="2" strokeLinecap="round"/>
+              <path d="M 55 38 L 57 35" stroke="#FFA726" strokeWidth="2" strokeLinecap="round"/>
+              <path d="M 50 30 L 50 27" stroke="#FFA726" strokeWidth="2" strokeLinecap="round"/>
+            </svg>
+            
+            {/* Notification badge for new users */}
+            {guidanceStatus?.is_new_user && (
+              <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full animate-pulse border-2 border-white flex items-center justify-center text-white text-xs font-bold">!</span>
+            )}
+          </button>
+        </div>
       )}
     </>
   );
