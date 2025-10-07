@@ -362,6 +362,8 @@ Current Context:
 - Action: {conversation.current_action or 'browsing'}
 """
 
+    # Note: onboarding context will be passed in request.context, handled in chat endpoint
+    
     # Add guidance context if available
     if guidance:
         onboarding_status = []
@@ -457,6 +459,39 @@ async def chat_with_assistant(
         
         # Build full prompt with system instructions + conversation history + new message
         system_prompt = _get_system_prompt(current_user, conversation, guidance)
+        
+        # Add onboarding context if present
+        if request.context and request.context.get('onboarding_mode'):
+            step = request.context.get('onboarding_step', 'unknown')
+            system_prompt += f"\n\n🎓 ONBOARDING MODE - User is on step: '{step}'"
+            system_prompt += "\nYour role: Guide them through onboarding with SHORT (2-3 sentences), friendly help."
+            system_prompt += "\nBe encouraging and patient. This is their first time!"
+            
+            # Add step-specific context
+            step_data = request.context.get('onboarding_data', {})
+            formData = step_data.get('formData', {}) if step_data else {}
+            
+            if step == 'yourName':
+                system_prompt += "\n- Step: Getting user's name (required for personalization)"
+            elif step == 'showDetails':
+                system_prompt += "\n- Step: Creating podcast name and description"
+                if formData.get('podcastName'):
+                    system_prompt += f"\n- They're naming it: '{formData['podcastName']}'"
+            elif step == 'format':
+                system_prompt += "\n- Step: Choosing podcast format (solo, interview, panel, etc.)"
+            elif step == 'coverArt':
+                system_prompt += "\n- Step: Uploading cover art (optional, can skip)"
+                system_prompt += "\n- Tip: Recommend 1400x1400px square image"
+            elif step == 'introOutro':
+                system_prompt += "\n- Step: Creating intro/outro audio (TTS or upload)"
+            elif step == 'music':
+                system_prompt += "\n- Step: Choosing background music (optional)"
+            elif step == 'spreaker':
+                system_prompt += "\n- Step: Connecting to Spreaker podcast hosting"
+            elif step == 'publishCadence':
+                system_prompt += "\n- Step: Setting publishing frequency"
+            elif step == 'publishSchedule':
+                system_prompt += "\n- Step: Picking specific days/dates to publish"
         
         # Format conversation history
         conversation_text = f"{system_prompt}\n\n===== Conversation History =====\n"
@@ -693,6 +728,74 @@ async def track_milestone(
     session.commit()
     
     return {"milestone": milestone, "tracked": True}
+
+
+@router.post("/onboarding-help")
+async def get_onboarding_help(
+    step: str = Body(..., embed=True),
+    data: Optional[Dict[str, Any]] = Body(None, embed=True),
+    current_user: User = Depends(get_current_user),
+):
+    """Get proactive help message for current onboarding step."""
+    
+    # Step-specific proactive help messages
+    help_messages = {
+        'yourName': {
+            'message': "I see you're starting your podcast journey! First, let's get your name so I can personalize your experience. Just your first name is required.",
+            'suggestions': ["Why do you need my name?", "Can I change this later?"]
+        },
+        'choosePath': {
+            'message': "Do you already have a podcast, or are you starting fresh? If you have an existing show, I can import it for you!",
+            'suggestions': ["What can you import?", "I'm starting new"]
+        },
+        'showDetails': {
+            'message': "Time to name your podcast! Pick something memorable and descriptive. I can help you brainstorm if you'd like.",
+            'suggestions': ["Help me brainstorm a name", "What makes a good description?", "Can I change this later?"]
+        },
+        'format': {
+            'message': "What style will most of your episodes be? Solo, interview, panel discussion, or something else? This helps me set up your templates.",
+            'suggestions': ["What's the difference?", "Does this affect my episodes?"]
+        },
+        'coverArt': {
+            'message': "Let's add your podcast cover art! Upload a square image (at least 1400x1400 pixels). Don't have one yet? You can skip this and add it later.",
+            'suggestions': ["What size should it be?", "Where can I get cover art made?", "Can I skip this?"]
+        },
+        'introOutro': {
+            'message': "Now let's create your intro and outro! I can generate audio using text-to-speech, or you can upload pre-recorded files if you have them.",
+            'suggestions': ["What should I say in my intro?", "How long should these be?", "Can I use music?"]
+        },
+        'music': {
+            'message': "Want to add background music to your intro and outro? Pick from our library, or skip this if you prefer. You can always add music later!",
+            'suggestions': ["What music do you have?", "Can I upload my own?", "Skip this for now"]
+        },
+        'spreaker': {
+            'message': "Almost done! To publish your podcast, we partner with Spreaker for hosting. Click the button below to connect your account (or create a free one).",
+            'suggestions': ["What is Spreaker?", "Is this required?", "How much does it cost?"]
+        },
+        'publishCadence': {
+            'message': "How often will you publish new episodes? Pick a schedule you can realistically maintain - consistency matters more than frequency!",
+            'suggestions': ["What do most podcasters do?", "Can I change this later?", "What if I miss a week?"]
+        },
+        'publishSchedule': {
+            'message': "Pick the specific days or dates you'll publish. This helps you stay on track and lets your audience know when to expect new episodes.",
+            'suggestions': ["What's a good publishing day?", "Can I change this schedule?", "What if I'm not sure yet?"]
+        },
+        'finish': {
+            'message': "Congratulations! You're all set up! You can start creating episodes now, or explore your dashboard to see what you can do.",
+            'suggestions': ["Show me around", "How do I create an episode?", "What should I do first?"]
+        },
+    }
+    
+    # Get help for this step
+    step_help = help_messages.get(step, {
+        'message': "I'm here to help! Feel free to ask me anything about this step.",
+        'suggestions': ["What do I do here?", "Can I skip this?", "Explain this step"]
+    })
+    
+    return {
+        'message': step_help['message'],
+        'suggestions': step_help['suggestions']
+    }
 
 
 @router.post("/proactive-help")

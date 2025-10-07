@@ -13,6 +13,7 @@ import { FORMATS, NO_MUSIC_OPTION } from "@/components/onboarding/OnboardingWiza
 import CoverCropper from "@/components/dashboard/CoverCropper.jsx";
 import { useResolvedTimezone } from '@/hooks/useResolvedTimezone';
 import { formatInTimezone } from '@/lib/timezone';
+import AIAssistant from "@/components/assistant/AIAssistant.jsx";
 
 export default function Onboarding() {
   const { token, user, refreshUser } = useAuth();
@@ -1507,19 +1508,40 @@ export default function Onboarding() {
   }, [stepId, wizardSteps.length, setStepIndex]);
 
   return (
-    <OnboardingWrapper
-      steps={steps}
-      index={stepIndex}
-      setIndex={setStepIndex}
-      onComplete={handleFinish}
-      prefs={{ largeText, setLargeText, highContrast, setHighContrast }}
-      greetingName={firstName?.trim() || ''}
-      nextDisabled={nextDisabled}
-      hideNext={hideNext}
-      hideBack={importJumpedToStep6 && stepId === 'introOutro'}
-      showExitDiscard={hasExistingPodcast}
-      onExitDiscard={handleExitDiscard}
-    />
+    <>
+      <OnboardingWrapper
+        steps={steps}
+        index={stepIndex}
+        setIndex={setStepIndex}
+        onComplete={handleFinish}
+        prefs={{ largeText, setLargeText, highContrast, setHighContrast }}
+        greetingName={firstName?.trim() || ''}
+        nextDisabled={nextDisabled}
+        hideNext={hideNext}
+        hideBack={importJumpedToStep6 && stepId === 'introOutro'}
+        showExitDiscard={hasExistingPodcast}
+        onExitDiscard={handleExitDiscard}
+      />
+      <AIAssistant 
+        token={token} 
+        user={user}
+        onboardingMode={true}
+        currentStep={stepId}
+        currentStepData={{
+          path,
+          formData,
+          firstName,
+          lastName,
+          formatKey,
+          musicChoice,
+          freqUnit,
+          freqCount,
+          selectedWeekdays,
+          selectedDates,
+          notSureSchedule,
+        }}
+      />
+    </>
   );
 }
 

@@ -13,7 +13,7 @@ import { MessageCircle, X, Send, Minimize2, Maximize2, HelpCircle, AlertCircle }
 import { Button } from '../ui/button';
 import { makeApi } from '../../lib/apiClient';
 
-export default function AIAssistant({ token, user }) {
+export default function AIAssistant({ token, user, onboardingMode = false, currentStep = null, currentStepData = null }) {
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [messages, setMessages] = useState([]);
@@ -27,6 +27,7 @@ export default function AIAssistant({ token, user }) {
   const pageStartTime = useRef(Date.now());
   const actionsAttempted = useRef([]);
   const errorsEncountered = useRef([]);
+  const lastProactiveStep = useRef(null);
   
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -51,8 +52,9 @@ export default function AIAssistant({ token, user }) {
     return () => clearInterval(checkInterval);
   }, [token, user, isOpen]);
   
-  // Show welcome message for new users
+  // Show welcome message for new users (unless in onboarding mode)
   useEffect(() => {
+    if (onboardingMode) return; // Skip welcome for onboarding - we'll show proactive help instead
     if (guidanceStatus?.is_new_user && !guidanceStatus?.progress?.has_seen_welcome) {
       setMessages([{
         role: 'assistant',
@@ -63,7 +65,42 @@ export default function AIAssistant({ token, user }) {
       setIsOpen(true);
       trackMilestone('seen_welcome');
     }
-  }, [guidanceStatus, user]);
+  }, [guidanceStatus, user, onboardingMode]);
+  
+  // Proactive help for onboarding steps
+  useEffect(() => {
+    if (!onboardingMode || !currentStep || !token || !user) return;
+    
+    // Don't show proactive help for the same step twice
+    if (lastProactiveStep.current === currentStep) return;
+    
+    // Show proactive help after 10 seconds on this step
+    const timer = setTimeout(async () => {
+      lastProactiveStep.current = currentStep;
+      
+      try {
+        // Request proactive help from backend
+        const response = await makeApi(token).post('/api/assistant/onboarding-help', {
+          step: currentStep,
+          data: currentStepData,
+        });
+        
+        if (response.message) {
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: response.message,
+            suggestions: response.suggestions,
+            timestamp: new Date(),
+          }]);
+          setIsOpen(true); // Auto-open the assistant
+        }
+      } catch (error) {
+        console.error('Failed to get onboarding help:', error);
+      }
+    }, 10000); // 10 seconds
+    
+    return () => clearTimeout(timer);
+  }, [onboardingMode, currentStep, currentStepData, token, user]);
   
   // Monitor for user being stuck
   useEffect(() => {
@@ -137,10 +174,14 @@ export default function AIAssistant({ token, user }) {
     try {
       // Gather context
       const context = {
-        page: window.location.pathname,
+        page: onboardingMode ? '/onboarding' : window.location.pathname,
         action: actionsAttempted.current[actionsAttempted.current.length - 1],
         error: errorsEncountered.current[errorsEncountered.current.length - 1],
         is_first_time: guidanceStatus?.is_new_user,
+        // Onboarding-specific context
+        onboarding_mode: onboardingMode,
+        onboarding_step: currentStep,
+        onboarding_data: currentStepData,
       };
       
       // Send to AI

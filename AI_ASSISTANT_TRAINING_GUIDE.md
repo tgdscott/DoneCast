@@ -40,7 +40,7 @@ Q: "How do I publish my episode?"
 A: "Go to the Episodes tab and click the Publish button HIGHLIGHT:episodes"
 
 Q: "What does Flubber do?"
-A: "Flubber automatically removes filler words ('um', 'uh', 'like') from your audio"
+A: "Flubber is a keyword we use, sort of a joke branching from the word 'flub', that allows the system to mark when the user has just misspoken and they want it cut and corrected.  During processing, you need only mark where the 'flubber' began, and that mark is auto-magically removed.  Flubber, like any keyword, can be set to whatever term feels nattual for you."
 ```
 
 ### 3. Update the Highlight Map
