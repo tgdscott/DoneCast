@@ -45,6 +45,12 @@ const isWithin24h = (iso) => {
   if(!d) return false;
   return (Date.now() - d.getTime()) < 24*3600*1000;
 };
+const isWithin7Days = (iso) => {
+  const d = normalizeDate(iso);
+  if(!d) return false;
+  const elapsed = Date.now() - d.getTime();
+  return elapsed >= 0 && elapsed < 7*24*3600*1000;
+};
 const formatPublishAt = (iso, { fallback = null, timezone } = {}) => {
   if(!iso) return fallback ?? '';
   try {
