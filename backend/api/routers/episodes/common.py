@@ -39,9 +39,14 @@ def _cover_url_for(path: Optional[str], *, gcs_path: Optional[str] = None) -> Op
             parts = gcs_str.split("/", 1)
             if len(parts) == 2:
                 bucket, key = parts
-                return get_signed_url(bucket, key, expiration=3600)
-        except Exception:
-            pass  # Fall through to path-based resolution
+                url = get_signed_url(bucket, key, expiration=3600)
+                if url:
+                    return url
+        except Exception as e:
+            from api.core.logging import get_logger
+            logger = get_logger("api.episodes.common")
+            logger.warning("GCS URL generation failed for %s: %s", gcs_path, e)
+            # Fall through to path-based resolution
     
     # Priority 2: Remote URL (Spreaker hosted)
     if not path:
@@ -50,8 +55,17 @@ def _cover_url_for(path: Optional[str], *, gcs_path: Optional[str] = None) -> Op
     if p.lower().startswith(("http://", "https://")):
         return p
     
-    # Priority 3: Local file
-    return f"/static/media/{os.path.basename(p)}"
+    # Priority 3: Local file (only if exists)
+    try:
+        basename = os.path.basename(p)
+        local_path = MEDIA_DIR / basename
+        if local_path.exists() and local_path.is_file():
+            return f"/static/media/{basename}"
+    except Exception:
+        pass
+    
+    # No valid source found - return None instead of invalid URL
+    return None
 
 
 def _status_value(s):
@@ -229,6 +243,7 @@ def compute_cover_info(episode: Any, *, now: Optional[datetime] = None) -> dict[
     3. Spreaker cover URL (remote_cover_url)
 
     After 7 days: Uses Spreaker cover (remote_cover_url) if available.
+    Always falls back to remote_cover_url if all else fails.
 
     Returns dict with 'cover_url' key compatible with existing serializers.
     """
@@ -254,20 +269,23 @@ def compute_cover_info(episode: Any, *, now: Optional[datetime] = None) -> dict[
     cover_url = None
     cover_source = "none"
     
+    # Try GCS first within 7-day window
     if within_7days and gcs_cover_path:
-        # Within 7 days: prioritize GCS original
         cover_url = _cover_url_for(None, gcs_path=gcs_cover_path)
-        cover_source = "gcs"
+        if cover_url:
+            cover_source = "gcs"
     
+    # Try local/remote cover_path
     if not cover_url and cover_path:
-        # Fall back to local/remote cover_path
         cover_url = _cover_url_for(cover_path)
-        cover_source = "local"
+        if cover_url:
+            cover_source = "local"
     
+    # ALWAYS fall back to Spreaker remote_cover_url if nothing else works
     if not cover_url and remote_cover_url:
-        # Fall back to Spreaker hosted cover
         cover_url = _cover_url_for(remote_cover_url)
-        cover_source = "remote"
+        if cover_url:
+            cover_source = "remote"
     
     return {
         "cover_url": cover_url,

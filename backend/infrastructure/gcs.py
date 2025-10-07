@@ -142,6 +142,7 @@ def _local_media_url(key: str) -> Optional[str]:
 
     candidate = _resolve_local_media_dir() / rel_key
     if not candidate.exists():
+        logger.warning("Local media file not found for key: %s (path: %s)", key, candidate)
         return None
     return f"/static/media/{rel_key.as_posix()}"
 
