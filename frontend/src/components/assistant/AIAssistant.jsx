@@ -159,6 +159,11 @@ export default function AIAssistant({ token, user }) {
       };
       setMessages(prev => [...prev, assistantMessage]);
       
+      // Handle highlighting if present
+      if (response.highlight) {
+        highlightElement(response.highlight, response.highlight_message);
+      }
+      
     } catch (error) {
       console.error('Failed to send message:', error);
       console.error('Error details:', error.response?.data || error.message);
@@ -175,6 +180,53 @@ export default function AIAssistant({ token, user }) {
   
   const handleSuggestionClick = (suggestion) => {
     sendMessage(suggestion);
+  };
+
+  const highlightElement = (selector, message = 'Look here →') => {
+    try {
+      const element = document.querySelector(selector);
+      if (!element) {
+        console.warn(`Element not found for highlighting: ${selector}`);
+        return;
+      }
+
+      // Scroll element into view
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+      // Add highlight class
+      element.classList.add('ai-highlight');
+
+      // Create pointer overlay
+      const pointer = document.createElement('div');
+      pointer.className = 'ai-pointer';
+      pointer.innerHTML = `
+        <div class="ai-pointer-content">
+          <span class="ai-pointer-text">${message}</span>
+          <span class="ai-pointer-arrow">👆</span>
+        </div>
+      `;
+
+      document.body.appendChild(pointer);
+
+      // Position pointer near element
+      const rect = element.getBoundingClientRect();
+      pointer.style.left = `${rect.left + rect.width / 2}px`;
+      pointer.style.top = `${rect.top - 100}px`;
+
+      // Auto-remove after 8 seconds
+      setTimeout(() => {
+        element.classList.remove('ai-highlight');
+        pointer.remove();
+      }, 8000);
+
+      // Allow manual dismiss
+      pointer.addEventListener('click', () => {
+        element.classList.remove('ai-highlight');
+        pointer.remove();
+      });
+    } catch (error) {
+      console.error('Failed to highlight element:', error);
+    }
   };
   
   const acceptProactiveHelp = () => {

@@ -55,6 +55,8 @@ class ChatResponse(BaseModel):
     response: str
     suggestions: Optional[List[str]] = None  # Quick action suggestions
     requires_action: Optional[Dict[str, Any]] = None  # If AI wants to do something
+    highlight: Optional[str] = None  # CSS selector or element ID to highlight
+    highlight_message: Optional[str] = None  # Message to show near highlighted element
 
 
 class FeedbackRequest(BaseModel):
@@ -310,6 +312,14 @@ Platform Knowledge (Podcast Plus Plus specific):
 - Media library stores uploads with 14-day expiration
 - Episodes published to Spreaker are kept for 7 days with clean audio for editing
 
+Visual Highlighting Feature:
+You can highlight UI elements to help users find buttons/features! When explaining where something is:
+- Add "HIGHLIGHT:" followed by the element name
+- Example: "Click the upload button HIGHLIGHT:upload to get started"
+- Available elements: upload, publish, template, flubber, intern, settings, media-library, episodes, record
+- Only use ONE highlight per response
+- Use it when user asks "where is" or "how do I find" something
+
 Current Context:
 - Page: {conversation.current_page or 'unknown'}
 - Action: {conversation.current_action or 'browsing'}
@@ -434,9 +444,41 @@ async def chat_with_assistant(
         session.add(conversation)
         session.commit()
         
+        # Parse highlighting if present
+        highlight = None
+        highlight_message = None
+        clean_response = response_content
+        
+        if "HIGHLIGHT:" in response_content:
+            try:
+                # Extract highlight instruction
+                parts = response_content.split("HIGHLIGHT:")
+                clean_response = parts[0].strip()
+                highlight_part = parts[1].split()[0].strip()  # Get first word after HIGHLIGHT:
+                
+                # Map element names to CSS selectors
+                highlight_map = {
+                    "upload": "#upload-audio-btn",
+                    "publish": "#publish-episode-btn",
+                    "template": "#template-editor-link",
+                    "flubber": "#flubber-section",
+                    "intern": "#intern-section",
+                    "settings": "#settings-link",
+                    "media-library": "#media-library-nav",
+                    "episodes": "#episodes-nav",
+                    "record": "#record-audio-btn",
+                }
+                
+                highlight = highlight_map.get(highlight_part.lower())
+                if highlight:
+                    highlight_message = f"Look here →"
+                    log.info(f"Highlighting element: {highlight}")
+            except Exception as e:
+                log.warning(f"Failed to parse highlight: {e}")
+        
         # Generate quick suggestions based on context
         suggestions = None
-        lower_response = response_content.lower()
+        lower_response = clean_response.lower()
         if "upload" in lower_response:
             suggestions = ["Show me how to upload", "What file formats work?"]
         elif "template" in lower_response:
@@ -447,8 +489,10 @@ async def chat_with_assistant(
             suggestions = ["Report this bug", "Show me how to fix it"]
         
         return ChatResponse(
-            response=response_content,
+            response=clean_response,
             suggestions=suggestions,
+            highlight=highlight,
+            highlight_message=highlight_message,
         )
     
     except Exception as e:
