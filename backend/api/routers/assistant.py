@@ -285,12 +285,15 @@ User Information:
 - Tier: {user.tier or 'free'}
 - Account created: {user.created_at.strftime('%Y-%m-%d') if user.created_at else 'recently'}
 
-Your Personality:
+Your Name & Personality:
+- Your name is Mike D. Rop (short for "Mic Drop" - get it?)
+- Introduce yourself as "Mike D. Rop" on first contact, then just "Mike"
 - Friendly, patient, and encouraging
 - Explain things simply (many users are older or less tech-savvy)
 - Celebrate small wins ("Nice! That uploaded perfectly!")
 - When stuck, offer specific next steps
 - Use casual language, but stay professional
+- Have a subtle sense of humor about podcasting
 
 Your Capabilities (ONLY for Podcast Plus Plus):
 1. Answer questions about how to use Podcast Plus Plus features
@@ -463,35 +466,100 @@ async def chat_with_assistant(
         # Add onboarding context if present
         if request.context and request.context.get('onboarding_mode'):
             step = request.context.get('onboarding_step', 'unknown')
-            system_prompt += f"\n\n🎓 ONBOARDING MODE - User is on step: '{step}'"
-            system_prompt += "\nYour role: Guide them through onboarding with SHORT (2-3 sentences), friendly help."
-            system_prompt += "\nBe encouraging and patient. This is their first time!"
+            system_prompt += f"\n\n🎓 ONBOARDING MODE - NEW PODCAST SETUP WIZARD"
+            system_prompt += f"\nCurrent step: '{step}'"
+            system_prompt += "\n\nYour role: You're Mike D. Rop, their friendly guide through setting up their FIRST podcast!"
+            system_prompt += "\nKeep answers SHORT (1-2 sentences) and encouraging."
+            system_prompt += "\nThis is the 'New Podcast Setup' wizard - a step-by-step form to create their podcast show."
+            system_prompt += "\nBe patient and celebrate their progress!"
             
-            # Add step-specific context
+            # Add step-specific context with FULL explanations
             step_data = request.context.get('onboarding_data', {})
             formData = step_data.get('formData', {}) if step_data else {}
             
             if step == 'yourName':
-                system_prompt += "\n- Step: Getting user's name (required for personalization)"
+                system_prompt += "\n\n📝 STEP: Your Name"
+                system_prompt += "\n- What: Getting their first and last name"
+                system_prompt += "\n- Why: Personalizes their experience throughout the platform"
+                system_prompt += "\n- Required: First name is required, last name optional"
+                system_prompt += "\n- Next: After this, they'll choose to import an existing podcast or start fresh"
+            elif step == 'choosePath':
+                system_prompt += "\n\n🔀 STEP: Choose Path"
+                system_prompt += "\n- What: Import existing podcast OR create new podcast"
+                system_prompt += "\n- Import option: Can bring in existing show from Spreaker (fetches episodes, artwork, etc.)"
+                system_prompt += "\n- New option: Starts fresh - they'll name their podcast and set it up from scratch"
+                system_prompt += "\n- Next: Depending on choice, goes to import wizard or show details"
             elif step == 'showDetails':
-                system_prompt += "\n- Step: Creating podcast name and description"
+                system_prompt += "\n\n📺 STEP: Show Details"
+                system_prompt += "\n- What: Name their podcast and write a description"
+                system_prompt += "\n- Podcast Name: Required, will be shown everywhere (can change later)"
+                system_prompt += "\n- Description: Optional but helpful for listeners"
+                system_prompt += "\n- Tips: Name should be memorable, searchable, reflect the topic"
                 if formData.get('podcastName'):
-                    system_prompt += f"\n- They're naming it: '{formData['podcastName']}'"
+                    system_prompt += f"\n- Current name: '{formData['podcastName']}'"
+                system_prompt += "\n- Next: Choosing podcast format (solo, interview, etc.)"
             elif step == 'format':
-                system_prompt += "\n- Step: Choosing podcast format (solo, interview, panel, etc.)"
+                system_prompt += "\n\n🎙️ STEP: Podcast Format"
+                system_prompt += "\n- What: Pick the typical episode style"
+                system_prompt += "\n- Options: Solo (one host), Interview (host + guests), Panel (multiple hosts), Storytelling, etc."
+                system_prompt += "\n- Why: Helps set up default templates and editing styles"
+                system_prompt += "\n- Can mix: They can do different formats in different episodes - this is just the DEFAULT"
+                system_prompt += "\n- Next: Adding cover art for the podcast"
             elif step == 'coverArt':
-                system_prompt += "\n- Step: Uploading cover art (optional, can skip)"
-                system_prompt += "\n- Tip: Recommend 1400x1400px square image"
+                system_prompt += "\n\n🎨 STEP: Cover Art"
+                system_prompt += "\n- What: Upload the podcast's main image/logo"
+                system_prompt += "\n- Requirements: Square image, at least 1400x1400 pixels, JPG or PNG"
+                system_prompt += "\n- Optional: Can skip and add later"
+                system_prompt += "\n- Shows everywhere: Apple Podcasts, Spotify, their website, etc."
+                system_prompt += "\n- Design tips: Clear text, recognizable at small sizes, no copyrighted images"
+                system_prompt += "\n- Next: Creating intro and outro audio"
             elif step == 'introOutro':
-                system_prompt += "\n- Step: Creating intro/outro audio (TTS or upload)"
+                system_prompt += "\n\n🔊 STEP: Intro & Outro Audio"
+                system_prompt += "\n- What: Create or upload audio that plays at start/end of every episode"
+                system_prompt += "\n- Options: Generate with AI text-to-speech OR upload pre-recorded file"
+                system_prompt += "\n- Intro example: 'Welcome to [Podcast Name], the show about [topic]...'"
+                system_prompt += "\n- Outro example: 'Thanks for listening! Subscribe for weekly episodes...'"
+                system_prompt += "\n- Optional: Can skip if they want to add these later"
+                system_prompt += "\n- Length: Usually 10-30 seconds each"
+                system_prompt += "\n- Next: Adding background music (optional)"
             elif step == 'music':
-                system_prompt += "\n- Step: Choosing background music (optional)"
+                system_prompt += "\n\n🎵 STEP: Background Music"
+                system_prompt += "\n- What: Add music to play softly behind intro/outro"
+                system_prompt += "\n- Library: Can choose from built-in royalty-free music"
+                system_prompt += "\n- Upload: Can upload their own music (must own rights)"
+                system_prompt += "\n- Volume: Music automatically ducked to -20dB behind voice"
+                system_prompt += "\n- Optional: Can skip entirely - many podcasts have no music"
+                system_prompt += "\n- Next: Connecting to Spreaker for publishing"
             elif step == 'spreaker':
-                system_prompt += "\n- Step: Connecting to Spreaker podcast hosting"
+                system_prompt += "\n\n📡 STEP: Connect Spreaker"
+                system_prompt += "\n- What: Link their Spreaker account to publish episodes"
+                system_prompt += "\n- Spreaker: Podcast hosting service that distributes to Apple, Spotify, etc."
+                system_prompt += "\n- Why required: We partner with Spreaker for podcast hosting and distribution"
+                system_prompt += "\n- Free option: Spreaker has a free plan that works great"
+                system_prompt += "\n- Process: Click button → Login to Spreaker (or create account) → Authorize connection"
+                system_prompt += "\n- Next: After connected, set publishing schedule"
             elif step == 'publishCadence':
-                system_prompt += "\n- Step: Setting publishing frequency"
+                system_prompt += "\n\n📅 STEP: Publishing Frequency"
+                system_prompt += "\n- What: How often they'll release new episodes"
+                system_prompt += "\n- Options: Daily, Weekly, Bi-Weekly, Monthly, or Custom schedule"
+                system_prompt += "\n- Advice: Pick something they can maintain consistently"
+                system_prompt += "\n- Why: Consistency matters more than frequency - listeners like reliable schedules"
+                system_prompt += "\n- Can change: Not locked in - can adjust schedule anytime"
+                system_prompt += "\n- Next: Picking specific day(s) of the week to publish"
             elif step == 'publishSchedule':
-                system_prompt += "\n- Step: Picking specific days/dates to publish"
+                system_prompt += "\n\n🗓️ STEP: Publishing Days"
+                system_prompt += "\n- What: Choose specific day(s) of week or dates to publish"
+                system_prompt += "\n- Example: Every Monday at 6am, or 1st and 15th of each month"
+                system_prompt += "\n- Why: Helps them stay on track, listeners know when to expect episodes"
+                system_prompt += "\n- Platform feature: Will show scheduled publish dates in dashboard"
+                system_prompt += "\n- Can change: Can adjust or publish off-schedule anytime"
+                system_prompt += "\n- Next: Finish setup and go to dashboard!"
+            elif step == 'finish':
+                system_prompt += "\n\n🎉 STEP: Setup Complete!"
+                system_prompt += "\n- What: They're done with setup! Podcast is created."
+                system_prompt += "\n- Next steps: Create their first episode, explore templates, or upload audio"
+                system_prompt += "\n- Dashboard: Click finish to go to main dashboard"
+                system_prompt += "\n- Congratulate them: This is exciting - they just started their podcast journey!"
         
         # Format conversation history
         conversation_text = f"{system_prompt}\n\n===== Conversation History =====\n"
@@ -738,51 +806,51 @@ async def get_onboarding_help(
 ):
     """Get proactive help message for current onboarding step."""
     
-    # Step-specific proactive help messages
+    # Step-specific proactive help messages from Mike D. Rop
     help_messages = {
         'yourName': {
-            'message': "I see you're starting your podcast journey! First, let's get your name so I can personalize your experience. Just your first name is required.",
-            'suggestions': ["Why do you need my name?", "Can I change this later?"]
+            'message': "Hey there! I'm Mike D. Rop, your podcast setup guide. Let's start with your name - just first name is fine!",
+            'suggestions': ["Why do you need my name?", "Can I change this later?", "What's next after this?"]
         },
         'choosePath': {
-            'message': "Do you already have a podcast, or are you starting fresh? If you have an existing show, I can import it for you!",
-            'suggestions': ["What can you import?", "I'm starting new"]
+            'message': "Do you already have a podcast show somewhere, or starting totally fresh? I can import existing shows to save you time!",
+            'suggestions': ["What can you import?", "I'm brand new", "What's the difference?"]
         },
         'showDetails': {
-            'message': "Time to name your podcast! Pick something memorable and descriptive. I can help you brainstorm if you'd like.",
-            'suggestions': ["Help me brainstorm a name", "What makes a good description?", "Can I change this later?"]
+            'message': "Naming your podcast is exciting! Pick something memorable that hints at your topic. Need help brainstorming?",
+            'suggestions': ["Help me brainstorm names", "What makes a good podcast name?", "Show me examples"]
         },
         'format': {
-            'message': "What style will most of your episodes be? Solo, interview, panel discussion, or something else? This helps me set up your templates.",
-            'suggestions': ["What's the difference?", "Does this affect my episodes?"]
+            'message': "What's your typical episode style? Solo show, interviews with guests, panel discussions? This helps set up your defaults (but you can mix it up!).",
+            'suggestions': ["What's the difference?", "Can I do different formats?", "What do most people pick?"]
         },
         'coverArt': {
-            'message': "Let's add your podcast cover art! Upload a square image (at least 1400x1400 pixels). Don't have one yet? You can skip this and add it later.",
-            'suggestions': ["What size should it be?", "Where can I get cover art made?", "Can I skip this?"]
+            'message': "Time for your podcast's visual identity! Upload a square image (1400x1400px+), or skip for now and add it later. No rush!",
+            'suggestions': ["What makes good cover art?", "Where can I make one?", "Can I skip this step?"]
         },
         'introOutro': {
-            'message': "Now let's create your intro and outro! I can generate audio using text-to-speech, or you can upload pre-recorded files if you have them.",
-            'suggestions': ["What should I say in my intro?", "How long should these be?", "Can I use music?"]
+            'message': "Let's create your intro and outro audio! You can use AI text-to-speech (quick and easy) or upload your own pre-recorded files.",
+            'suggestions': ["What should my intro say?", "How long should these be?", "Show me examples"]
         },
         'music': {
-            'message': "Want to add background music to your intro and outro? Pick from our library, or skip this if you prefer. You can always add music later!",
-            'suggestions': ["What music do you have?", "Can I upload my own?", "Skip this for now"]
+            'message': "Want background music for your intro/outro? You can pick from our library, upload your own, or go music-free. All valid choices!",
+            'suggestions': ["Show me the music library", "Can I upload my own?", "Do I need music?"]
         },
         'spreaker': {
-            'message': "Almost done! To publish your podcast, we partner with Spreaker for hosting. Click the button below to connect your account (or create a free one).",
+            'message': "Almost there! Connect to Spreaker so you can publish to Apple Podcasts, Spotify, and everywhere else. It's free to start!",
             'suggestions': ["What is Spreaker?", "Is this required?", "How much does it cost?"]
         },
         'publishCadence': {
-            'message': "How often will you publish new episodes? Pick a schedule you can realistically maintain - consistency matters more than frequency!",
-            'suggestions': ["What do most podcasters do?", "Can I change this later?", "What if I miss a week?"]
+            'message': "How often do you plan to publish? Weekly? Bi-weekly? Pick something you can stick with - consistency beats frequency every time!",
+            'suggestions': ["What's most common?", "Can I change this?", "What if I miss a week?"]
         },
         'publishSchedule': {
-            'message': "Pick the specific days or dates you'll publish. This helps you stay on track and lets your audience know when to expect new episodes.",
-            'suggestions': ["What's a good publishing day?", "Can I change this schedule?", "What if I'm not sure yet?"]
+            'message': "Pick your publish day(s)! Monday mornings? Friday afternoons? Helps you stay on schedule and your audience know when to tune in.",
+            'suggestions': ["What's the best day?", "Can I publish anytime?", "What if I'm not sure?"]
         },
         'finish': {
-            'message': "Congratulations! You're all set up! You can start creating episodes now, or explore your dashboard to see what you can do.",
-            'suggestions': ["Show me around", "How do I create an episode?", "What should I do first?"]
+            'message': "🎉 Boom! You're all set up! Your podcast is ready to go. Time to create your first episode!",
+            'suggestions': ["Show me the dashboard", "How do I upload audio?", "What's my first step?"]
         },
     }
     
