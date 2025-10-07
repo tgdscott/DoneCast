@@ -11,7 +11,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { MessageCircle, X, Send, Minimize2, Maximize2, HelpCircle, AlertCircle } from 'lucide-react';
 import { Button } from '../ui/button';
-import { apiClient } from '../../lib/apiClient';
+import { makeApi } from '../../lib/apiClient';
 
 export default function AIAssistant({ token, user }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -87,7 +87,7 @@ export default function AIAssistant({ token, user }) {
   
   const loadGuidanceStatus = async () => {
     try {
-      const response = await apiClient(token).get('/api/assistant/guidance/status');
+      const response = await makeApi(token).get('/api/assistant/guidance/status');
       setGuidanceStatus(response);
     } catch (error) {
       console.error('Failed to load guidance status:', error);
@@ -97,7 +97,7 @@ export default function AIAssistant({ token, user }) {
   const checkProactiveHelp = async () => {
     try {
       const timeOnPage = Math.floor((Date.now() - pageStartTime.current) / 1000);
-      const response = await apiClient(token).post('/api/assistant/proactive-help', {
+      const response = await makeApi(token).post('/api/assistant/proactive-help', {
         page: window.location.pathname,
         time_on_page: timeOnPage,
         actions_attempted: actionsAttempted.current,
@@ -114,7 +114,7 @@ export default function AIAssistant({ token, user }) {
   
   const trackMilestone = async (milestone) => {
     try {
-      await apiClient(token).post('/api/assistant/guidance/track', { milestone });
+      await makeApi(token).post('/api/assistant/guidance/track', { milestone });
       loadGuidanceStatus();
     } catch (error) {
       console.error('Failed to track milestone:', error);
@@ -144,7 +144,7 @@ export default function AIAssistant({ token, user }) {
       };
       
       // Send to AI
-      const response = await apiClient(token).post('/api/assistant/chat', {
+      const response = await makeApi(token).post('/api/assistant/chat', {
         message: messageText,
         session_id: sessionId,
         context,
