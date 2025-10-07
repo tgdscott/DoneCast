@@ -664,15 +664,18 @@ export default function usePodcastCreator({
     if (transcriptReady) return;
 
     let stopped = false;
+    let polling = false; // Prevent concurrent requests
     const api = makeApi(token);
     const tick = async () => {
-      if (stopped) return;
+      if (stopped || polling) return;
+      polling = true;
       try {
         const params = [];
         if (expectedEpisodeId) params.push(`episode_id=${encodeURIComponent(expectedEpisodeId)}`);
         if (uploadedFilename) params.push(`hint=${encodeURIComponent(uploadedFilename)}`);
         const url = `/api/ai/transcript-ready${params.length ? `?${params.join('&')}` : ''}`;
         const r = await api.get(url);
+        if (stopped) return; // Check again after async operation
         if (Object.prototype.hasOwnProperty.call(r || {}, 'transcript_path')) {
           setTranscriptPath(r?.transcript_path || null);
         }
@@ -680,7 +683,11 @@ export default function usePodcastCreator({
           setTranscriptReady(true);
           return;
         }
-      } catch (_) {}
+      } catch (err) {
+        console.warn('[transcript-ready] poll error:', err);
+      } finally {
+        polling = false;
+      }
       if (!stopped) setTimeout(tick, 5000);
     };
     const initial = setTimeout(tick, 250);
