@@ -16,8 +16,11 @@ import PodcastCreator from "@/components/dashboard/PodcastCreator.jsx";
 import { abApi } from "./lib/abApi";
 import Recorder from "@/components/quicktools/Recorder.jsx";
 import { makeApi } from "@/lib/apiClient";
+import AIAssistant from "@/components/assistant/AIAssistant";
+import { useAuth } from "@/AuthContext";
 
 export default function AppAB({ token }) {
+  const { user } = useAuth();
   const [active, setActive] = useState("dashboard");
   const [collapsed, setCollapsed] = useState(false);
 
@@ -336,6 +339,9 @@ export default function AppAB({ token }) {
           {active === "settings" && <Settings token={token} />}
         </main>
       </div>
+      
+      {/* AI Assistant - Always available in bottom-right corner */}
+      <AIAssistant token={token} user={user} />
     </div>
   );
 }

@@ -22,20 +22,13 @@ from api.models.assistant import (
 from api.models.user import User
 from api.routers.auth import get_current_user
 
-try:
-    import openai
-    OPENAI_AVAILABLE = True
-except ImportError:
-    OPENAI_AVAILABLE = False
-    openai = None  # type: ignore
-
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/assistant", tags=["assistant"])
 
-# OpenAI configuration
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-ASSISTANT_ID = os.getenv("OPENAI_ASSISTANT_ID")  # We'll create this
+# Use Gemini/Vertex AI instead of OpenAI
+from api.services.ai_content.client_gemini import generate as gemini_generate
+
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@podcastplusplus.com")
 
 
@@ -80,19 +73,18 @@ class ProactiveHelpRequest(BaseModel):
 # Helper Functions
 # ============================================================================
 
-def _ensure_openai_client() -> Any:
-    """Ensure OpenAI is available and configured."""
-    if not OPENAI_AVAILABLE:
+def _ensure_gemini_available() -> bool:
+    """Ensure Gemini/Vertex AI is available and configured."""
+    try:
+        # Test that we can import and use Gemini
+        from api.services.ai_content.client_gemini import generate
+        return True
+    except Exception as e:
+        log.error(f"Gemini not available: {e}")
         raise HTTPException(
             status_code=503,
-            detail="AI Assistant not available - OpenAI package not installed"
+            detail="AI Assistant not available - Gemini/Vertex AI not configured"
         )
-    if not OPENAI_API_KEY:
-        raise HTTPException(
-            status_code=503,
-            detail="AI Assistant not configured - OPENAI_API_KEY missing"
-        )
-    return openai.OpenAI(api_key=OPENAI_API_KEY)
 
 
 def _get_or_create_conversation(
@@ -225,9 +217,9 @@ async def chat_with_assistant(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    """Send message to AI assistant and get response."""
+    """Send message to AI assistant and get response using Gemini/Vertex AI."""
     
-    client = _ensure_openai_client()
+    _ensure_gemini_available()
     
     # Get or create conversation
     conversation = _get_or_create_conversation(
@@ -248,54 +240,43 @@ async def chat_with_assistant(
         error_context=request.context.get("error") if request.context else None,
     )
     session.add(user_message)
+    session.commit()
     
     try:
-        # Create or get OpenAI thread
-        if not conversation.openai_thread_id:
-            thread = client.beta.threads.create()
-            conversation.openai_thread_id = thread.id
-            session.add(conversation)
-            session.commit()
-        
-        # Add message to thread
-        client.beta.threads.messages.create(
-            thread_id=conversation.openai_thread_id,
-            role="user",
-            content=request.message,
+        # Build conversation history for context
+        history_stmt = (
+            select(AssistantMessage)
+            .where(AssistantMessage.conversation_id == conversation.id)
+            .order_by(AssistantMessage.created_at.desc())  # type: ignore
+            .limit(10)  # Last 10 messages for context
         )
+        history_messages = list(reversed(session.exec(history_stmt).all()))
         
-        # Run assistant
-        run = client.beta.threads.runs.create(
-            thread_id=conversation.openai_thread_id,
-            assistant_id=ASSISTANT_ID,
-            additional_instructions=_get_system_prompt(current_user, conversation, guidance),
+        # Build full prompt with system instructions + conversation history + new message
+        system_prompt = _get_system_prompt(current_user, conversation, guidance)
+        
+        # Format conversation history
+        conversation_text = f"{system_prompt}\n\n===== Conversation History =====\n"
+        for msg in history_messages[:-1]:  # Exclude the message we just added
+            role = "User" if msg.role == "user" else "Assistant"
+            conversation_text += f"\n{role}: {msg.content}\n"
+        
+        conversation_text += f"\nUser: {request.message}\n\nAssistant:"
+        
+        # Generate response using Gemini
+        response_content = gemini_generate(
+            conversation_text,
+            temperature=0.7,
+            max_output_tokens=500,
         )
-        
-        # Wait for completion (with timeout)
-        import time
-        timeout = 30
-        start = time.time()
-        while run.status in ["queued", "in_progress"]:
-            if time.time() - start > timeout:
-                raise HTTPException(status_code=504, detail="Assistant response timeout")
-            time.sleep(0.5)
-            run = client.beta.threads.runs.retrieve(thread_id=conversation.openai_thread_id, run_id=run.id)
-        
-        if run.status != "completed":
-            log.error(f"Assistant run failed: {run.status}")
-            raise HTTPException(status_code=500, detail="Assistant failed to respond")
-        
-        # Get response
-        messages = client.beta.threads.messages.list(thread_id=conversation.openai_thread_id, limit=1)
-        response_content = messages.data[0].content[0].text.value  # type: ignore
         
         # Save assistant response
         assistant_message = AssistantMessage(
             conversation_id=conversation.id,
             role="assistant",
             content=response_content,
-            model="gpt-4-turbo",
-            tokens_used=run.usage.total_tokens if run.usage else None,  # type: ignore
+            model="gemini-1.5-flash",
+            tokens_used=None,  # Gemini doesn't provide token counts easily
         )
         session.add(assistant_message)
         
@@ -307,12 +288,15 @@ async def chat_with_assistant(
         
         # Generate quick suggestions based on context
         suggestions = None
-        if "upload" in response_content.lower():
+        lower_response = response_content.lower()
+        if "upload" in lower_response:
             suggestions = ["Show me how to upload", "What file formats work?"]
-        elif "template" in response_content.lower():
+        elif "template" in lower_response:
             suggestions = ["Explain templates", "Create my first template"]
-        elif "publish" in response_content.lower():
+        elif "publish" in lower_response:
             suggestions = ["How do I publish?", "Connect to Spreaker"]
+        elif "error" in lower_response or "problem" in lower_response:
+            suggestions = ["Report this bug", "Show me how to fix it"]
         
         return ChatResponse(
             response=response_content,
@@ -320,7 +304,9 @@ async def chat_with_assistant(
         )
     
     except Exception as e:
-        log.error(f"Assistant chat error: {e}")
+        log.error(f"Assistant chat error: {e}", exc_info=True)
+        # Roll back the user message if response failed
+        session.rollback()
         raise HTTPException(status_code=500, detail=f"Assistant error: {str(e)}")
 
 
@@ -335,6 +321,7 @@ async def submit_feedback(
     # Create feedback submission
     feedback = FeedbackSubmission(
         user_id=current_user.id,
+        conversation_id=None,  # Optional - can link to conversation later if needed
         type=request.type,
         title=request.title,
         description=request.description,

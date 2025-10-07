@@ -55,6 +55,7 @@ import TemplateManager from "@/components/dashboard/TemplateManager";
 import BillingPage from "@/components/dashboard/BillingPage";
 import Recorder from "@/components/quicktools/Recorder";
 import WebsiteBuilder from "@/components/dashboard/WebsiteBuilder.jsx";
+import AIAssistant from "@/components/assistant/AIAssistant";
 
 const isAdmin = (u) => !!(u && (u.is_admin || u.role === 'admin'));
 const DASHBOARD_TOUR_STORAGE_KEY = 'ppp_dashboard_tour_completed';
@@ -858,6 +859,9 @@ export default function PodcastPlusDashboard() {
       <main className="container mx-auto max-w-7xl px-4 py-6">
         {renderCurrentView()}
       </main>
+      
+      {/* AI Assistant - Always available in bottom-right corner */}
+      <AIAssistant token={token} user={user} />
     </div>
   );
 }
