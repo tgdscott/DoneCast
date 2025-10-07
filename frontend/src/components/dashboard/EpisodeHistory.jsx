@@ -777,13 +777,19 @@ export default function EpisodeHistory({ token, onBack }) {
         let showRetry = false;
         const st = statusLabel(ep.status);
         if (st === 'error') showRetry = true;
+        // Always show retry if processing with no audio (likely stuck/failed)
+        if (st === 'processing' && !ep.final_audio_exists && !audioUrl) showRetry = true;
         if (st === 'processing') {
           // Use processed_at if present, otherwise fall back to created_at so we can detect long-running items reliably
           const started = normalizeDate(ep.processed_at) || normalizeDate(ep.created_at) || new Date(0);
           const elapsed = Date.now() - started.getTime();
-          const durMs = (typeof ep.duration_ms === 'number' && ep.duration_ms > 0) ? ep.duration_ms : (15*60*1000);
+          // For processing episodes: use actual duration if available, otherwise be aggressive with fallback
+          // Show retry after 20 minutes if no duration info, or 1.25x duration if known
+          const durMs = (typeof ep.duration_ms === 'number' && ep.duration_ms > 0) ? ep.duration_ms : (20*60*1000);
           const threshold = Math.round(durMs * 1.25);
           if (elapsed > threshold) showRetry = true;
+          // ALSO show retry if processing for more than 30 minutes absolute (stuck worker safeguard)
+          if (elapsed > 30*60*1000) showRetry = true;
         }
         return (
           <div key={ep.id} className="space-y-2">
