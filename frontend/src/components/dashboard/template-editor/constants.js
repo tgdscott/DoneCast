@@ -44,8 +44,10 @@ export const volumeLevelToDb = (level) => {
   const clamped = Math.max(1, Math.min(11, level));
   let ratio;
   if (clamped <= 10) {
+    // Level directly represents percentage: 8.2 = 82% of voice volume
     ratio = clamped / 10;
   } else {
+    // Above 10, boost beyond voice level
     const extra = MUSIC_VOLUME_BOOST_RATIO - 1;
     ratio = 1 + (clamped - 10) * (extra <= 0 ? 0 : extra);
   }

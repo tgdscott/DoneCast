@@ -765,7 +765,8 @@ export default function EpisodeHistory({ token, onBack }) {
         let audioUrl = ep.public_url || ep.playback_url || ep.stream_url || ep.final_audio_url || '';
         audioUrl = resolveAssetUrl(audioUrl) || '';
   const missingAudio = audioUrl && ep.final_audio_exists === false && ep.playback_type !== 'stream';
-  const showUnpublish = statusLabel(ep.status) === 'scheduled' || (statusLabel(ep.status) === 'published' && isWithin24h(ep.publish_at));
+  // Allow unpublish for all scheduled/published episodes (force option available after 24h)
+  const showUnpublish = statusLabel(ep.status) === 'scheduled' || statusLabel(ep.status) === 'published';
         // Heuristic: show Retry when status is error, or processing exceeds 1.25x duration (fallback 15min)
         let showRetry = false;
         const st = statusLabel(ep.status);
@@ -825,7 +826,9 @@ export default function EpisodeHistory({ token, onBack }) {
                 </button>
               )}
               <div className="absolute bottom-1 right-1 flex gap-1 items-center">
-                {ep.status === 'processed' && (
+                {(ep.status === 'processed' || 
+                  (statusLabel(ep.status) === 'published' && isWithin7Days(ep.publish_at)) ||
+                  (statusLabel(ep.status) === 'scheduled' && isWithin7Days(ep.publish_at))) && (
                   <>
                     {/* Cut for edits */}
                     <button

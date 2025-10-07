@@ -383,5 +383,22 @@ def delete_episode(
     if not ep:
         # Idempotent delete: if already deleted or not found for user, return 204
         return
+    
+    # Attempt to delete from Spreaker if published (best effort)
+    spreaker_id = getattr(ep, 'spreaker_episode_id', None)
+    spreaker_token = getattr(current_user, 'spreaker_access_token', None)
+    if spreaker_id and spreaker_token:
+        try:
+            from api.services.publisher import SpreakerClient
+            client = SpreakerClient(spreaker_token)
+            r = client.session.delete(f"{client.BASE_URL}/episodes/{spreaker_id}")
+            if r.status_code in (200, 204, 404):
+                logger.info(f"Deleted episode {spreaker_id} from Spreaker during local deletion")
+            else:
+                logger.warning(f"Failed to delete from Spreaker: {r.status_code}")
+        except Exception as e:
+            logger.warning(f"Failed to delete from Spreaker: {e}")
+            # Continue with local deletion even if Spreaker fails
+    
     _svc_repo.delete_episode(session, ep)
     return
