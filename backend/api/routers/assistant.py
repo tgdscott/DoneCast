@@ -4,6 +4,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -30,6 +33,12 @@ router = APIRouter(prefix="/assistant", tags=["assistant"])
 from api.services.ai_content.client_gemini import generate as gemini_generate
 
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@podcastplusplus.com")
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+GOOGLE_SHEETS_ENABLED = os.getenv("GOOGLE_SHEETS_ENABLED", "false").lower() == "true"
+FEEDBACK_SHEET_ID = os.getenv("FEEDBACK_SHEET_ID", "")
 
 
 # ============================================================================
@@ -87,6 +96,119 @@ def _ensure_gemini_available() -> bool:
         )
 
 
+def _send_critical_bug_email(feedback: FeedbackSubmission, user: User) -> None:
+    """Send email notification to admin when critical bug is reported."""
+    if not SMTP_USER or not SMTP_PASSWORD:
+        log.warning("SMTP not configured - skipping email notification")
+        return
+    
+    try:
+        # Create email
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = f"CRITICAL BUG: {feedback.title}"
+        msg['From'] = SMTP_USER
+        msg['To'] = ADMIN_EMAIL
+        
+        # Create HTML body
+        html = f"""
+        <html>
+        <body>
+            <h2 style="color: #d32f2f;">🚨 Critical Bug Report</h2>
+            <p><strong>User:</strong> {user.first_name or 'Unknown'} ({user.email})</p>
+            <p><strong>Type:</strong> {feedback.type}</p>
+            <p><strong>Severity:</strong> {feedback.severity}</p>
+            <p><strong>Page:</strong> {feedback.page_url or 'Unknown'}</p>
+            <p><strong>Time:</strong> {feedback.created_at.strftime('%Y-%m-%d %H:%M:%S')}</p>
+            <hr>
+            <h3>Title:</h3>
+            <p>{feedback.title}</p>
+            <h3>Description:</h3>
+            <p>{feedback.description}</p>
+            {'<h3>Error Logs:</h3><pre>' + feedback.error_logs + '</pre>' if feedback.error_logs else ''}
+            {'<h3>User Action:</h3><p>' + feedback.user_action + '</p>' if feedback.user_action else ''}
+            <hr>
+            <p><a href="https://podcastplusplus.com/admin/feedback">View in Admin Panel</a></p>
+        </body>
+        </html>
+        """
+        
+        msg.attach(MIMEText(html, 'html'))
+        
+        # Send via SMTP
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.send_message(msg)
+        
+        log.info(f"Critical bug email sent for feedback {feedback.id}")
+    except Exception as e:
+        log.error(f"Failed to send critical bug email: {e}")
+
+
+def _log_to_google_sheets(feedback: FeedbackSubmission, user: User) -> Optional[int]:
+    """Log feedback to Google Sheets tracking spreadsheet."""
+    if not GOOGLE_SHEETS_ENABLED or not FEEDBACK_SHEET_ID:
+        log.info("Google Sheets logging not enabled")
+        return None
+    
+    try:
+        # Import here to avoid dependency if not configured
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+        
+        # Get credentials from environment or file
+        creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        if not creds_path:
+            log.warning("GOOGLE_APPLICATION_CREDENTIALS not set - skipping Sheets logging")
+            return None
+        
+        creds = service_account.Credentials.from_service_account_file(
+            creds_path,
+            scopes=['https://www.googleapis.com/auth/spreadsheets']
+        )
+        
+        service = build('sheets', 'v4', credentials=creds)
+        
+        # Prepare row data
+        row = [
+            feedback.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            str(feedback.id),
+            user.email,
+            user.first_name or 'Unknown',
+            feedback.type,
+            feedback.severity,
+            feedback.title,
+            feedback.description,
+            feedback.page_url or '',
+            feedback.user_action or '',
+            feedback.error_logs or '',
+            feedback.status,
+        ]
+        
+        # Append to sheet
+        body = {'values': [row]}
+        result = service.spreadsheets().values().append(
+            spreadsheetId=FEEDBACK_SHEET_ID,
+            range='Feedback!A:L',  # Adjust range as needed
+            valueInputOption='RAW',
+            insertDataOption='INSERT_ROWS',
+            body=body
+        ).execute()
+        
+        # Get row number
+        updated_range = result.get('updates', {}).get('updatedRange', '')
+        if updated_range:
+            # Extract row number from range like "Feedback!A123:L123"
+            row_num = int(updated_range.split('!')[1].split(':')[0][1:])
+            log.info(f"Feedback logged to Google Sheets row {row_num}")
+            return row_num
+        
+        return None
+    except Exception as e:
+        log.error(f"Failed to log to Google Sheets: {e}")
+        return None
+
+
 def _get_or_create_conversation(
     session: Session,
     user_id: UUID,
@@ -133,6 +255,14 @@ def _get_system_prompt(user: User, conversation: AssistantConversation, guidance
     
     base_prompt = f"""You are a helpful AI assistant for Podcast Plus Plus, a podcast creation and editing platform.
 
+CRITICAL RULES - READ CAREFULLY:
+1. You ONLY answer questions about Podcast Plus Plus and how to use this platform
+2. If asked about anything else (politics, news, other software, general knowledge), politely say:
+   "I'm specifically designed to help with Podcast Plus Plus. I can only answer questions about using this platform. How can I help with your podcast?"
+3. Do NOT provide general podcast advice unrelated to this platform
+4. Do NOT help with other podcast platforms or tools
+5. Stay focused on: uploading, editing, publishing, troubleshooting, and using features of THIS platform
+
 User Information:
 - Name: {user.first_name or 'there'}
 - Email: {user.email}
@@ -146,14 +276,14 @@ Your Personality:
 - When stuck, offer specific next steps
 - Use casual language, but stay professional
 
-Your Capabilities:
-1. Answer questions about how to use Podcast Plus Plus
+Your Capabilities (ONLY for Podcast Plus Plus):
+1. Answer questions about how to use Podcast Plus Plus features
 2. Guide users through workflows (uploading, editing, publishing)
-3. Help troubleshoot issues
+3. Help troubleshoot technical issues on this platform
 4. Collect bug reports and feedback (ask clarifying questions)
 5. Offer proactive help when users seem stuck
 
-Platform Knowledge:
+Platform Knowledge (Podcast Plus Plus specific):
 - Users upload audio files (recordings or pre-recorded shows)
 - Transcription happens automatically (2-3 min per hour of audio)
 - "Intern" feature detects spoken editing commands in audio
@@ -161,6 +291,10 @@ Platform Knowledge:
 - Templates define show structure (intro, content, outro, music)
 - Episodes are assembled from templates + audio + edits
 - Publishing goes to Spreaker (and then to all platforms)
+- Users can record directly in-browser
+- AI features: title/description generation, transcript editing
+- Media library stores uploads with 14-day expiration
+- Episodes published to Spreaker are kept for 7 days with clean audio for editing
 
 Current Context:
 - Page: {conversation.current_page or 'unknown'}
@@ -336,8 +470,25 @@ async def submit_feedback(
     session.commit()
     session.refresh(feedback)
     
-    # TODO: Add to Google Sheets (next step)
-    # TODO: Send email notification (next step)
+    # Send email notification for critical bugs
+    if feedback.severity == "critical":
+        try:
+            _send_critical_bug_email(feedback, current_user)
+            feedback.admin_notified = True
+            session.add(feedback)
+            session.commit()
+        except Exception as e:
+            log.error(f"Failed to send email notification: {e}")
+    
+    # Log to Google Sheets for tracking
+    try:
+        row_num = _log_to_google_sheets(feedback, current_user)
+        if row_num:
+            feedback.google_sheet_row = row_num
+            session.add(feedback)
+            session.commit()
+    except Exception as e:
+        log.error(f"Failed to log to Google Sheets: {e}")
     
     log.info(f"Feedback submitted: {feedback.type} - {feedback.title} by {current_user.email}")
     

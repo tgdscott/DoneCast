@@ -112,6 +112,44 @@ export default function App() {
         return () => { cancelled = true; };
     }, [isAuthenticated, token, user, hydrated]);
 
+    // Global error handler for AI Assistant
+    useEffect(() => {
+        const handleError = (event) => {
+            // Dispatch custom event that AIAssistant listens for
+            window.dispatchEvent(new CustomEvent('ppp:error-occurred', {
+                detail: {
+                    message: event.message || 'An error occurred',
+                    stack: event.error?.stack,
+                    filename: event.filename,
+                    lineno: event.lineno,
+                    colno: event.colno,
+                    timestamp: Date.now(),
+                    type: 'uncaught'
+                }
+            }));
+        };
+
+        const handleUnhandledRejection = (event) => {
+            // Also catch unhandled promise rejections
+            window.dispatchEvent(new CustomEvent('ppp:error-occurred', {
+                detail: {
+                    message: event.reason?.message || 'Unhandled promise rejection',
+                    stack: event.reason?.stack,
+                    timestamp: Date.now(),
+                    type: 'unhandled-rejection'
+                }
+            }));
+        };
+
+        window.addEventListener('error', handleError);
+        window.addEventListener('unhandledrejection', handleUnhandledRejection);
+
+        return () => {
+            window.removeEventListener('error', handleError);
+            window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+        };
+    }, []);
+
     // --- Render decisions (after all hooks declared) ---
     const path = window.location.pathname;
     if (!hydrated) return <div className="flex items-center justify-center h-screen">Loading...</div>;

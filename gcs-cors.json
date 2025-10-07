@@ -1,0 +1,8 @@
+[
+  {
+    "origin": ["https://podcastplusplus.com", "https://dashboard.podcastplusplus.com"],
+    "method": ["GET", "PUT", "POST", "DELETE", "HEAD", "OPTIONS"],
+    "responseHeader": ["Content-Type", "Content-Length", "Content-Range", "X-Goog-Resumable"],
+    "maxAgeSeconds": 3600
+  }
+]

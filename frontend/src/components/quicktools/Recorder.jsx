@@ -882,6 +882,23 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source="A" 
                 </div>
                 <div className="flex gap-2 md:justify-end">
                   <Button
+                    variant="outline"
+                    className="flex-1 md:flex-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary"
+                    onClick={() => {
+                      if (!audioUrl || !audioRef.current) return;
+                      const link = document.createElement('a');
+                      link.href = audioUrl;
+                      link.download = `${recordingName || 'recording'}.wav`;
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    }}
+                    disabled={!audioUrl}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Download
+                  </Button>
+                  <Button
                     className="flex-1 md:flex-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary"
                     aria-label="Save and continue"
                     disabled={!audioBlob || isSaving || (audioBlob && audioBlob.size > MAX_UPLOAD_BYTES) || !!serverFilename}
