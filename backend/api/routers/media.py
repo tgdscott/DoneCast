@@ -693,10 +693,9 @@ async def register_upload(
                 try:
                     # Use Cloud Tasks to schedule transcription
                     from infrastructure.tasks_client import enqueue_http_task  # type: ignore
-                    # Pass the original filename from the object path for transcription
-                    filename = Path(upload_item.object_path).name
-                    enqueue_http_task("/api/tasks/transcribe", {"filename": filename})
-                    log.info(f"Scheduled transcription for media_id={media_item.id}")
+                    # Pass the full GCS path so transcription service can download it
+                    enqueue_http_task("/api/tasks/transcribe", {"filename": gcs_url})
+                    log.info(f"Scheduled transcription for media_id={media_item.id}, gcs_path={gcs_url}")
                 except Exception as trans_err:
                     log.warning(f"Failed to schedule transcription: {trans_err}")
         
