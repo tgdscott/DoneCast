@@ -161,6 +161,7 @@ export default function AIAssistant({ token, user }) {
       
     } catch (error) {
       console.error('Failed to send message:', error);
+      console.error('Error details:', error.response?.data || error.message);
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: 'Sorry, I\'m having trouble connecting right now. Please try again in a moment.',

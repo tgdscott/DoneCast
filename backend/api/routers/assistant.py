@@ -33,10 +33,10 @@ router = APIRouter(prefix="/assistant", tags=["assistant"])
 from api.services.ai_content.client_gemini import generate as gemini_generate
 
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@podcastplusplus.com")
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.mailgun.org")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASS", "")  # Use SMTP_PASS from existing config
 GOOGLE_SHEETS_ENABLED = os.getenv("GOOGLE_SHEETS_ENABLED", "false").lower() == "true"
 FEEDBACK_SHEET_ID = os.getenv("FEEDBACK_SHEET_ID", "")
 
@@ -146,9 +146,13 @@ def _send_critical_bug_email(feedback: FeedbackSubmission, user: User) -> None:
 
 
 def _log_to_google_sheets(feedback: FeedbackSubmission, user: User) -> Optional[int]:
-    """Log feedback to Google Sheets tracking spreadsheet."""
+    """Log feedback to Google Sheets tracking spreadsheet.
+    
+    Note: This requires Google Sheets API to be enabled and credentials configured.
+    If not set up, feedback will still be saved to database - Sheets is just for tracking.
+    """
     if not GOOGLE_SHEETS_ENABLED or not FEEDBACK_SHEET_ID:
-        log.info("Google Sheets logging not enabled")
+        log.debug("Google Sheets logging not enabled (set GOOGLE_SHEETS_ENABLED=true)")
         return None
     
     try:
@@ -156,16 +160,26 @@ def _log_to_google_sheets(feedback: FeedbackSubmission, user: User) -> Optional[
         from google.oauth2 import service_account
         from googleapiclient.discovery import build
         
-        # Get credentials from environment or file
+        # Try to get credentials - Google Cloud uses Application Default Credentials
+        # which can come from multiple sources:
+        # 1. GOOGLE_APPLICATION_CREDENTIALS env var pointing to JSON file
+        # 2. gcloud auth application-default login
+        # 3. Automatic in Cloud Run/GCE
         creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
         if not creds_path:
-            log.warning("GOOGLE_APPLICATION_CREDENTIALS not set - skipping Sheets logging")
-            return None
-        
-        creds = service_account.Credentials.from_service_account_file(
-            creds_path,
-            scopes=['https://www.googleapis.com/auth/spreadsheets']
-        )
+            log.info("GOOGLE_APPLICATION_CREDENTIALS not set - trying default credentials")
+            # Try using default credentials (works in Cloud Run)
+            try:
+                import google.auth
+                creds, _ = google.auth.default(scopes=['https://www.googleapis.com/auth/spreadsheets'])
+            except Exception as e:
+                log.warning(f"Could not get default credentials: {e}")
+                return None
+        else:
+            creds = service_account.Credentials.from_service_account_file(
+                creds_path,
+                scopes=['https://www.googleapis.com/auth/spreadsheets']
+            )
         
         service = build('sheets', 'v4', credentials=creds)
         
