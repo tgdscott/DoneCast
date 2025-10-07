@@ -1449,11 +1449,27 @@ def build_template_and_final_mix_step(
                 pass
 
             label_to_intervals: Dict[str, List[Tuple[int, int]]] = {}
+            try:
+                log.append(f"[MUSIC_RULE_MATCHING] apply_to={apply_to} checking {len(placements)} placements")
+            except Exception:
+                pass
             for seg, _aud, st_ms, en_ms in placements:
                 seg_type = str((seg.get('segment_type') or 'content')).lower()
+                try:
+                    log.append(f"[MUSIC_RULE_CHECK] seg_type='{seg_type}' vs apply_to={apply_to} match={seg_type in apply_to}")
+                except Exception:
+                    pass
                 if seg_type not in apply_to:
                     continue
                 label_to_intervals.setdefault(seg_type, []).append((st_ms, en_ms))
+            
+            try:
+                if not label_to_intervals:
+                    log.append(f"[MUSIC_RULE_NO_MATCH] apply_to={apply_to} but no matching segments found in {len(placements)} placements!")
+                else:
+                    log.append(f"[MUSIC_RULE_MATCHED] label_to_intervals={list(label_to_intervals.keys())} with {sum(len(v) for v in label_to_intervals.values())} total intervals")
+            except Exception:
+                pass
 
             for label, intervals in label_to_intervals.items():
                 if not intervals:
