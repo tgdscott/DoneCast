@@ -13,8 +13,12 @@ class AssemblyAITranscriptionError(Exception):
     pass
 
 
-def assemblyai_transcribe_with_speakers(filename: str, timeout_s: int = 1800) -> List[Dict[str, Any]]:
-    """Build runner configuration (including adaptive polling + optional webhook) and execute."""
+def assemblyai_transcribe_with_speakers(filename: str, timeout_s: int = 7200) -> List[Dict[str, Any]]:
+    """Build runner configuration (including adaptive polling + optional webhook) and execute.
+    
+    Default timeout increased to 7200s (2 hours) to support long-form content (1-2+ hour episodes).
+    AssemblyAI processes at ~10x speed, so 2hr timeout allows 20hr audio or slower processing.
+    """
     from .transcription.transcription_runner import run_assemblyai_job  # local import to avoid circular import
     from .transcription.assemblyai_client import AssemblyAITranscriptionError as RunnerClientError
     api_key = settings.ASSEMBLYAI_API_KEY

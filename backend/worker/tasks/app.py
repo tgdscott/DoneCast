@@ -51,8 +51,8 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     task_acks_late=True,
     task_reject_on_worker_lost=True,
-    task_soft_time_limit=3300,
-    task_time_limit=3600,
+    task_soft_time_limit=7200,  # 2 hours - allows long-form content processing
+    task_time_limit=10800,      # 3 hours - supports 2hr audio + 1hr processing overhead
     result_expires=3600,
 )
 

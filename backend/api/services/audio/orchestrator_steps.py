@@ -97,7 +97,7 @@ def _format_ms(ms: int) -> str:
     return _fmt_ts(max(0.0, ms) / 1000.0)
 
 
-MAX_MIX_BUFFER_BYTES = _parse_int_env("CLOUDPOD_MAX_MIX_BUFFER_BYTES", 512 * 1024 * 1024)
+MAX_MIX_BUFFER_BYTES = _parse_int_env("CLOUDPOD_MAX_MIX_BUFFER_BYTES", 2 * 1024 * 1024 * 1024)  # 2 GB - supports ~3.4 hours audio
 BACKGROUND_LOOP_CHUNK_MS = 30_000  # mix background music in 30s chunks to cap allocations
 
 
