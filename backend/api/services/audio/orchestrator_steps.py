@@ -1233,11 +1233,13 @@ def build_template_and_final_mix_step(
 
     _content_frags = [a for s, a in processed_segments if (s.get('segment_type') or 'content') == 'content']
     stitched_content: AudioSegment = _concat(_content_frags) if _content_frags else match_target_dbfs(cleaned_audio)
-    cs_off_ms = int(float((json.loads(getattr(template, 'timing_json', '{}')) or {}).get('content_start_offset_s') or 0.0) * 1000) if template else 0
+    
+    # Get template timing with proper error handling (avoid lazy-loading in invalid session)
     try:
-        template_timing = json.loads(getattr(template, 'timing_json', '{}')) or {}
+        template_timing = json.loads(getattr(template, 'timing_json', '{}')) or {} if template else {}
     except Exception:
         template_timing = {}
+    
     cs_off_ms = int(float(template_timing.get('content_start_offset_s') or 0.0) * 1000)
     os_off_ms = int(float(template_timing.get('outro_start_offset_s') or 0.0) * 1000)
 

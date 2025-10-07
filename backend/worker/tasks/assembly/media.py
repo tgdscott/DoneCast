@@ -313,6 +313,13 @@ def resolve_media_context(
         except Exception:
             pass
         return None, None, {"dropped": True, "reason": "template not found", "template_id": template_id}
+    
+    # Eagerly load template attributes while session is valid to avoid lazy-loading errors later
+    try:
+        _ = template.timing_json
+        _ = template.segments_json
+    except Exception:
+        logging.warning("[assemble] Failed to eagerly load template attributes", exc_info=True)
 
     episode = crud.get_episode_by_id(session, UUID(episode_id))
     if not episode:
