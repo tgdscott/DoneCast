@@ -78,18 +78,11 @@ export default function PreUploadManager({
     setError('');
     setConversionNotice('');
     setConversionProgress(null);
+    setSubmitAfterConvert(false); // Reset on new file
     let preparedFile = null;
     if (!conversionEnabled) {
       setFile(selected);
       setConversionNotice(CONVERSION_DISABLED_NOTICE);
-      if (submitAfterConvert && selected && friendlyName.trim()) {
-        setSubmitAfterConvert(false);
-        try {
-          await doUpload(selected);
-        } catch (uploadError) {
-          console.error('Failed to upload after selecting file with conversion disabled', uploadError);
-        }
-      }
       return;
     }
     setConverting(true);
@@ -131,13 +124,20 @@ export default function PreUploadManager({
       setError('We were unable to prepare that audio file. Please try again.');
       setFile(null);
       setSubmitAfterConvert(false);
+      return;
     } finally {
       setConverting(false);
       setConversionProgress(null);
-      // If the user clicked Upload while we were preparing, start upload now
-      if (submitAfterConvert && preparedFile && friendlyName.trim()) {
-        setSubmitAfterConvert(false);
-        try { await doUpload(preparedFile); } catch {}
+    }
+    
+    // Check if upload was queued while converting - trigger it now
+    if (submitAfterConvert && preparedFile && friendlyName.trim()) {
+      setSubmitAfterConvert(false);
+      toast({ title: 'Starting upload...', description: 'Your audio is ready!' });
+      try { 
+        await doUpload(preparedFile); 
+      } catch (err) {
+        console.error('Auto-upload after conversion failed:', err);
       }
     }
   };
@@ -346,18 +346,31 @@ export default function PreUploadManager({
             )}
 
             <div className="flex justify-between">
-              <Button type="button" variant="ghost" onClick={onDone} disabled={uploading}>
+              <Button type="button" variant="ghost" onClick={onDone} disabled={uploading || submitAfterConvert}>
                 Return to dashboard
               </Button>
               <Button type="submit" disabled={!friendlyName.trim() || (!hasFile && !converting) || uploading}>
-                {converting ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                {submitAfterConvert ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Upload queued...
+                  </>
+                ) : converting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    {friendlyName.trim() ? 'Preparing…' : 'Preparing… (enter name first)'}
+                  </>
                 ) : uploading ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Uploading… {uploadProgress || 0}%
+                  </>
                 ) : (
-                  <Upload className="w-4 h-4 mr-2" />
+                  <>
+                    <Upload className="w-4 h-4 mr-2" />
+                    Upload and return
+                  </>
                 )}
-                {converting ? 'Preparing…' : uploading ? `Uploading… ${uploadProgress || 0}%` : 'Upload and return'}
               </Button>
             </div>
           </form>
