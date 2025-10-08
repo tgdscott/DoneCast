@@ -16,6 +16,7 @@ import { makeApi } from '../../lib/apiClient';
 export default function AIAssistant({ token, user, onboardingMode = false, currentStep = null, currentStepData = null }) {
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
+  const [isPoppedOut, setIsPoppedOut] = useState(false);
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -24,10 +25,12 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
   const [proactiveHelp, setProactiveHelp] = useState(null);
   
   const messagesEndRef = useRef(null);
+  const inputRef = useRef(null);
   const pageStartTime = useRef(Date.now());
   const actionsAttempted = useRef([]);
   const errorsEncountered = useRef([]);
   const lastProactiveStep = useRef(null);
+  const hasShownIntro = useRef(false);
   
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -52,20 +55,33 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
     return () => clearInterval(checkInterval);
   }, [token, user, isOpen]);
   
-  // Show welcome message for new users (unless in onboarding mode)
+  // Show welcome message when chat first opens (introduce Mike!)
   useEffect(() => {
-    if (onboardingMode) return; // Skip welcome for onboarding - we'll show proactive help instead
-    if (guidanceStatus?.is_new_user && !guidanceStatus?.progress?.has_seen_welcome) {
+    // Only show introduction once when chat is opened
+    if (isOpen && !hasShownIntro.current && user) {
+      hasShownIntro.current = true;
+      
+      const introMessage = onboardingMode
+        ? `Hey ${user?.first_name || 'there'}! 👋 I'm Mike D. Rop, your podcast setup guide. I'm here to help you get your show set up. Click "Need Help?" anytime you have questions!`
+        : `Hi ${user?.first_name || 'there'}! 👋 I'm Mike D. Rop (but you can call me Mike), your podcast assistant. I'm here to help you with anything - uploading, editing, publishing, you name it! What can I help you with today?`;
+      
       setMessages([{
         role: 'assistant',
-        content: `Hi ${user?.first_name || 'there'}! 👋 Welcome to Podcast Plus Plus! I'm your AI assistant, here to help you create amazing podcasts.\n\nThis is your first time here - would you like a quick guided tour to get started?`,
-        suggestions: ['Yes, show me around!', 'No thanks, I\'ll explore'],
+        content: introMessage,
+        suggestions: onboardingMode 
+          ? ["What's this step about?", "Can I skip steps?", "How long does this take?"]
+          : ['Show me how to upload audio', 'Where are my episodes?', 'Help me create a template'],
         timestamp: new Date(),
       }]);
-      setIsOpen(true);
-      trackMilestone('seen_welcome');
     }
-  }, [guidanceStatus, user, onboardingMode]);
+  }, [isOpen, user, onboardingMode]);
+  
+  // Focus input when chat opens
+  useEffect(() => {
+    if (isOpen && !isMinimized) {
+      inputRef.current?.focus();
+    }
+  }, [isOpen, isMinimized, messages]);
   
   // Proactive help for onboarding steps
   useEffect(() => {
@@ -238,9 +254,13 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
       
     } catch (error) {
       console.error('Failed to send message:', error);
+      const errorMessage = error?.response?.data?.detail 
+        || error?.message 
+        || 'Unknown error';
+      
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: 'Sorry, I\'m having trouble connecting right now. Please try again in a moment.',
+        content: `Hey, I'm having trouble connecting to my AI brain right now. 🤔\n\nError: ${errorMessage}\n\nThis usually means the Gemini API isn't responding. Can you check:\n1. Is GEMINI_API_KEY set in Cloud Run environment?\n2. Are there any error logs in the backend?\n3. Try refreshing the page?\n\nSorry about that! - Mike`,
         timestamp: new Date(),
         isError: true,
       }]);
@@ -363,17 +383,23 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
       {/* Chat Widget - Responsive sizing to avoid covering content */}
       {isOpen ? (
         <div className={`fixed bg-white border border-gray-300 rounded-lg shadow-2xl flex flex-col
-          ${onboardingMode 
-            ? 'bottom-6 right-6 z-[60]' // Higher z-index for onboarding, positioned right
-            : 'bottom-6 right-6 z-50'
+          ${isPoppedOut
+            ? 'top-[10%] left-[10%] w-[600px] h-[700px] z-[70]'
+            : onboardingMode 
+              ? 'bottom-6 right-6 z-[60]' // Higher z-index for onboarding, positioned right
+              : 'bottom-6 right-6 z-50'
           }
           ${isMinimized 
             ? 'w-80 h-14' 
-            : 'w-96 max-w-[calc(100vw-3rem)] h-[500px] max-h-[min(500px,calc(100vh-10rem))]'
-          }`}>
+            : isPoppedOut
+              ? ''
+              : 'w-96 max-w-[calc(100vw-3rem)] h-[500px] max-h-[min(500px,calc(100vh-10rem))]'
+          }`}
+          style={isPoppedOut ? { resize: 'both', overflow: 'hidden', minWidth: '400px', minHeight: '500px', maxWidth: '90vw', maxHeight: '90vh' } : {}}
+        >
           
           {/* Header */}
-          <div className="flex items-center justify-between p-4 border-b bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-t-lg">
+          <div className="flex items-center justify-between p-4 border-b bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-t-lg flex-shrink-0">
             <div className="flex items-center gap-2">
               <MessageCircle className="w-5 h-5" />
               <span className="font-semibold">Mike D. Rop</span>
@@ -383,14 +409,26 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
             </div>
             <div className="flex items-center gap-2">
               <button
+                onClick={() => setIsPoppedOut(!isPoppedOut)}
+                className="hover:bg-white/20 p-1 rounded transition-colors"
+                title={isPoppedOut ? "Dock to corner" : "Pop out & resize"}
+              >
+                <Maximize2 className="w-4 h-4" />
+              </button>
+              <button
                 onClick={() => setIsMinimized(!isMinimized)}
                 className="hover:bg-white/20 p-1 rounded transition-colors"
+                title={isMinimized ? "Expand" : "Minimize"}
               >
                 {isMinimized ? <Maximize2 className="w-4 h-4" /> : <Minimize2 className="w-4 h-4" />}
               </button>
               <button
-                onClick={() => setIsOpen(false)}
+                onClick={() => {
+                  setIsOpen(false);
+                  setIsPoppedOut(false);
+                }}
                 className="hover:bg-white/20 p-1 rounded transition-colors"
+                title="Close"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -448,21 +486,27 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
               </div>
               
               {/* Input */}
-              <div className="p-4 border-t bg-white rounded-b-lg">
+              <div className="p-4 border-t bg-white rounded-b-lg flex-shrink-0">
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
-                    sendMessage(inputValue);
+                    if (inputValue.trim() && !isLoading) {
+                      sendMessage(inputValue);
+                      // Keep focus on input after sending
+                      setTimeout(() => inputRef.current?.focus(), 0);
+                    }
                   }}
                   className="flex gap-2"
                 >
                   <input
+                    ref={inputRef}
                     type="text"
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
                     placeholder="Ask me anything..."
                     className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     disabled={isLoading}
+                    autoFocus
                   />
                   <Button
                     type="submit"
