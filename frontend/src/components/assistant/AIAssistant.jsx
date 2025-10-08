@@ -231,6 +231,11 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
       };
       setMessages(prev => [...prev, assistantMessage]);
       
+      // Handle visual highlighting if provided
+      if (response.highlight) {
+        applyHighlight(response.highlight, response.highlight_message);
+      }
+      
     } catch (error) {
       console.error('Failed to send message:', error);
       setMessages(prev => [...prev, {
@@ -262,6 +267,73 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
   
   const dismissProactiveHelp = () => {
     setProactiveHelp(null);
+  };
+  
+  const applyHighlight = (selector, message) => {
+    try {
+      // Find the element to highlight
+      const element = document.querySelector(selector);
+      if (!element) {
+        console.warn(`Highlight element not found: ${selector}`);
+        return;
+      }
+      
+      // Remove any existing highlights
+      document.querySelectorAll('.ai-highlight-pulse').forEach(el => {
+        el.classList.remove('ai-highlight-pulse');
+      });
+      
+      // Scroll element into view
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      
+      // Add highlight class
+      element.classList.add('ai-highlight-pulse');
+      
+      // Create and show tooltip if message provided
+      if (message) {
+        showHighlightTooltip(element, message);
+      }
+      
+      // Remove highlight after 10 seconds
+      setTimeout(() => {
+        element.classList.remove('ai-highlight-pulse');
+        removeHighlightTooltip();
+      }, 10000);
+      
+    } catch (error) {
+      console.error('Failed to apply highlight:', error);
+    }
+  };
+  
+  const showHighlightTooltip = (element, message) => {
+    // Remove any existing tooltip
+    removeHighlightTooltip();
+    
+    // Create tooltip element
+    const tooltip = document.createElement('div');
+    tooltip.id = 'ai-highlight-tooltip';
+    tooltip.className = 'fixed z-[9999] bg-blue-600 text-white px-4 py-2 rounded-lg shadow-xl text-sm max-w-xs pointer-events-none';
+    tooltip.textContent = message;
+    
+    // Position tooltip near element
+    const rect = element.getBoundingClientRect();
+    tooltip.style.top = `${rect.top - 50}px`;
+    tooltip.style.left = `${rect.left + rect.width / 2}px`;
+    tooltip.style.transform = 'translateX(-50%)';
+    
+    // Add arrow pointing down
+    const arrow = document.createElement('div');
+    arrow.className = 'absolute bottom-[-6px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-blue-600';
+    tooltip.appendChild(arrow);
+    
+    document.body.appendChild(tooltip);
+  };
+  
+  const removeHighlightTooltip = () => {
+    const tooltip = document.getElementById('ai-highlight-tooltip');
+    if (tooltip) {
+      tooltip.remove();
+    }
   };
   
   if (!token || !user) return null;
