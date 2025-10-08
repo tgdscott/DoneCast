@@ -489,6 +489,117 @@ def _kill_zombie_assembly_processes() -> None:
         log.warning("[startup] Zombie process cleanup failed: %s", e)
 
 
+def _recover_stuck_processing_episodes(limit: int | None = None) -> None:
+    """Check for episodes stuck in 'processing' status and mark them for retry if transcripts exist.
+    
+    This handles the case where:
+    1. A deployment/restart happens while episodes are processing
+    2. The assembly job is lost but the transcript was already generated
+    3. Episodes remain stuck in 'processing' forever
+    
+    We'll mark these as 'error' with a specific message so users can retry them.
+    """
+    try:
+        with session_scope() as session:
+            from api.core.paths import TRANSCRIPTS_DIR
+            
+            _limit = limit or _ROW_LIMIT
+            
+            # Find episodes in processing status that are older than 30 minutes
+            cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=30)
+            
+            try:
+                q = select(Episode).where(
+                    Episode.status == "processing"
+                )
+                if hasattr(Episode, 'processed_at'):
+                    q = q.where(Episode.processed_at < cutoff_time)
+                elif hasattr(Episode, 'created_at'):
+                    q = q.where(Episode.created_at < cutoff_time)
+                
+                q = q.limit(_limit)
+                episodes = session.exec(q).all()
+            except Exception:
+                # If the query fails due to schema issues, skip this recovery
+                log.debug("[startup] Unable to query stuck episodes", exc_info=True)
+                return
+            
+            recovered = 0
+            for ep in episodes:
+                try:
+                    # Check if transcript exists for this episode
+                    transcript_exists = False
+                    
+                    # Try to find transcript by episode ID
+                    if hasattr(ep, 'id') and ep.id:
+                        transcript_path = TRANSCRIPTS_DIR / f"{ep.id}.json"
+                        if transcript_path.exists():
+                            transcript_exists = True
+                    
+                    # Also check by title/output filename if available
+                    if not transcript_exists and hasattr(ep, 'title') and ep.title:
+                        # Sanitize title to potential filename
+                        safe_title = "".join(c for c in str(ep.title) if c.isalnum() or c in (' ', '-', '_')).strip()
+                        safe_title = safe_title.replace(' ', '_')
+                        if safe_title:
+                            transcript_path = TRANSCRIPTS_DIR / f"{safe_title}.json"
+                            if transcript_path.exists():
+                                transcript_exists = True
+                    
+                    if transcript_exists:
+                        # Transcript exists but episode is stuck - mark it for retry
+                        try:
+                            from api.models.podcast import EpisodeStatus as _EpStatus
+                            ep.status = _EpStatus.error  # type: ignore
+                        except Exception:
+                            ep.status = "error"  # type: ignore
+                        
+                        # Set a helpful error message
+                        ep.spreaker_publish_error = "Episode was interrupted during processing. Transcript exists. Click 'Retry' to complete assembly."
+                        
+                        session.add(ep)
+                        recovered += 1
+                        
+                        log.info(
+                            "[startup] Marked episode %s (%s) for retry - transcript exists but status was stuck in processing",
+                            ep.id if hasattr(ep, 'id') else '?',
+                            ep.title if hasattr(ep, 'title') else 'untitled'
+                        )
+                    else:
+                        # No transcript found and processing for 30+ minutes - likely failed
+                        # Mark as error so user knows to re-upload or investigate
+                        try:
+                            from api.models.podcast import EpisodeStatus as _EpStatus
+                            ep.status = _EpStatus.error  # type: ignore
+                        except Exception:
+                            ep.status = "error"  # type: ignore
+                        
+                        ep.spreaker_publish_error = "Episode processing timed out or was interrupted. Please retry or re-upload your audio."
+                        
+                        session.add(ep)
+                        recovered += 1
+                        
+                        log.warning(
+                            "[startup] Marked episode %s (%s) as error - stuck in processing for 30+ min with no transcript",
+                            ep.id if hasattr(ep, 'id') else '?',
+                            ep.title if hasattr(ep, 'title') else 'untitled'
+                        )
+                        
+                except Exception:
+                    log.debug("[startup] Failed to check/recover episode", exc_info=True)
+                    continue
+            
+            if recovered > 0:
+                try:
+                    session.commit()
+                    log.info("[startup] Recovered %d stuck episodes (marked for retry)", recovered)
+                except Exception:
+                    log.warning("[startup] Failed to commit recovered episodes", exc_info=True)
+                    
+    except Exception as e:
+        log.warning("[startup] _recover_stuck_processing_episodes failed: %s", e)
+
+
 def run_startup_tasks() -> None:
     """Perform lightweight startup + optionally heavy normalization/backfill.
 
@@ -516,6 +627,10 @@ def run_startup_tasks() -> None:
         _ensure_user_terms_columns()
     with _timing("ensure_user_subscription_column"):
         _ensure_user_subscription_column()
+    
+    # Always recover stuck episodes - this is critical for good UX after deployments
+    with _timing("recover_stuck_episodes"):
+        _recover_stuck_processing_episodes()
 
     if not _HEAVY_ENABLED:
         log.info("[startup] heavy tasks disabled (STARTUP_HEAVY_TASKS=%s)", _HEAVY_FLAG)
@@ -540,6 +655,7 @@ __all__ = [
     "_ensure_user_subscription_column",
     "_ensure_user_terms_columns",
     "_backfill_mediaitem_expires_at",
+    "_recover_stuck_processing_episodes",
 ]
 
 
