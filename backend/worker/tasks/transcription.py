@@ -93,6 +93,7 @@ def transcribe_media_file(filename: str) -> dict:
             "original": orig_new.name,
             "working": work_new.name,
         }
+        notify_watchers_processed(filename)
         return result
     except Exception as exc:
         logging.warning("[transcribe] failed for %s: %s", filename, exc, exc_info=True)
