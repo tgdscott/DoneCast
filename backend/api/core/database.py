@@ -101,6 +101,12 @@ _POOL_KWARGS = {
     "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", 180)),
     "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", 30)),
     "future": True,
+    # PostgreSQL connection args to handle long-running operations
+    "connect_args": {
+        "connect_timeout": int(os.getenv("DB_CONNECT_TIMEOUT", 60)),
+        # Set statement timeout to 5 minutes for long-running queries
+        "options": f"-c statement_timeout={int(os.getenv('DB_STATEMENT_TIMEOUT_MS', 300000))}",
+    },
 }
 
 def _create_sqlite_engine(url: str):

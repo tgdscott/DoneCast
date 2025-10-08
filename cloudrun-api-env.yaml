@@ -15,6 +15,8 @@ DB_POOL_SIZE: "10"
 DB_MAX_OVERFLOW: "5"
 DB_POOL_RECYCLE: "300"
 DB_POOL_TIMEOUT: "15"
+DB_CONNECT_TIMEOUT: "60"
+DB_STATEMENT_TIMEOUT_MS: "300000"  # 5 minutes for long-running operations
 TASKS_LOCATION: "us-west1"
 TASKS_QUEUE: "ppp-queue"
 # TASKS_URL_BASE must match the external URL the task will post to (the API base)

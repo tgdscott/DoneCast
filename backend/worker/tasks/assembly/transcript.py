@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -31,6 +32,70 @@ try:  # Heavy dependency; optional for local dev/test
     from infrastructure import gcs as gcs_utils  # type: ignore
 except Exception:  # pragma: no cover - fallback when GCS helpers unavailable
     gcs_utils = None  # type: ignore
+
+
+def _commit_with_retry(session, *, max_retries: int = 3, backoff_seconds: float = 1.0) -> bool:
+    """Commit database transaction with retry logic for connection failures.
+    
+    Args:
+        session: SQLAlchemy session
+        max_retries: Maximum number of retry attempts
+        backoff_seconds: Initial backoff delay (doubles each retry)
+    
+    Returns:
+        True if commit succeeded, False if all retries failed
+    """
+    for attempt in range(max_retries):
+        try:
+            session.commit()
+            return True
+        except Exception as exc:
+            session.rollback()
+            
+            # Check if it's a connection-related error
+            exc_str = str(exc).lower()
+            is_connection_error = any(
+                phrase in exc_str
+                for phrase in [
+                    "server closed the connection",
+                    "connection unexpectedly",
+                    "connection lost",
+                    "connection reset",
+                    "connection broken",
+                    "timeout",
+                ]
+            )
+            
+            if is_connection_error and attempt < max_retries - 1:
+                delay = backoff_seconds * (2 ** attempt)
+                logging.warning(
+                    "[transcript] Database connection error on commit (attempt %d/%d), retrying in %.1fs: %s",
+                    attempt + 1,
+                    max_retries,
+                    delay,
+                    exc,
+                )
+                time.sleep(delay)
+                
+                # Try to refresh the session connection
+                try:
+                    session.connection()
+                except Exception:
+                    pass  # Connection will be re-established on next commit
+                    
+                continue
+            
+            # Not a connection error or out of retries
+            logging.error(
+                "[transcript] Database commit failed (attempt %d/%d): %s",
+                attempt + 1,
+                max_retries,
+                exc,
+                exc_info=True,
+            )
+            return False
+    
+    return False
 
 
 @dataclass
@@ -76,9 +141,11 @@ def _snapshot_original_transcript(*, episode, session, words_json_path: Path | N
         meta["transcripts"] = transcripts
         episode.meta_json = json.dumps(meta)
         session.add(episode)
-        session.commit()
+        if not _commit_with_retry(session):
+            logging.warning("[assemble] Failed to persist original transcript metadata after retries")
     except Exception:
         session.rollback()
+        logging.warning("[assemble] Failed to update transcript metadata", exc_info=True)
 
 
 def _load_flubber_cuts(*, episode) -> list[tuple[int, int]] | None:
@@ -523,9 +590,11 @@ def prepare_transcript_context(
                     try:
                         episode.working_audio_name = dest.name if dest.exists() else precut_path.name
                         session.add(episode)
-                        session.commit()
+                        if not _commit_with_retry(session):
+                            logging.warning("[assemble] Failed to update working_audio_name after retries")
                     except Exception:
                         session.rollback()
+                        logging.warning("[assemble] Failed to update working_audio_name", exc_info=True)
                     base_audio_name = episode.working_audio_name or precut_path.name
                     logging.info(
                         "[assemble] applied %s flubber cuts without words.json; working_audio_name=%s",
@@ -581,7 +650,8 @@ def prepare_transcript_context(
             meta["transcripts"] = transcripts
             episode.meta_json = json.dumps(meta)
             session.add(episode)
-            session.commit()
+            if not _commit_with_retry(session):
+                logging.error("[assemble] Failed to persist final transcript metadata after all retries")
     except Exception:
         session.rollback()
         logging.warning(
@@ -708,9 +778,11 @@ def prepare_transcript_context(
 
             episode.working_audio_name = Path(dest).name
             session.add(episode)
-            session.commit()
+            if not _commit_with_retry(session):
+                logging.error("[assemble] Failed to persist cleaned audio metadata after all retries")
         except Exception:
             session.rollback()
+            logging.warning("[assemble] Failed to update working_audio_name for cleaned audio", exc_info=True)
 
     try:
         if source_audio_path and source_audio_path.exists():
