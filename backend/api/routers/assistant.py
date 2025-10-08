@@ -604,10 +604,11 @@ async def chat_with_assistant(
                 system_prompt += "\n- Next: Picking specific day(s) of the week to publish"
             elif step == 'publishSchedule':
                 system_prompt += "\n\n🗓️ STEP: Publishing Days"
-                system_prompt += "\n- What: Choose specific day(s) of week or dates to publish"
-                system_prompt += "\n- Example: Every Monday at 6am, or 1st and 15th of each month"
+                system_prompt += "\n- What: Choose which day(s) of the week to publish (e.g., Monday, Friday)"
+                system_prompt += "\n- Interface: Simple day selector - just click the days they want"
+                system_prompt += "\n- NO TIME SELECTION: This step only picks DAYS, not specific times"
+                system_prompt += "\n- When: They'll set actual publish times later when scheduling each episode"
                 system_prompt += "\n- Why: Helps them stay on track, listeners know when to expect episodes"
-                system_prompt += "\n- Platform feature: Will show scheduled publish dates in dashboard"
                 system_prompt += "\n- Can change: Can adjust or publish off-schedule anytime"
                 system_prompt += "\n- Next: Finish setup and go to dashboard!"
             elif step == 'finish':
@@ -939,7 +940,7 @@ async def get_onboarding_help(
             'suggestions': ["What's most common?", "Can I change this?", "What if I miss a week?"]
         },
         'publishSchedule': {
-            'message': "Pick your publish day(s)! Monday mornings? Friday afternoons? Helps you stay on schedule and your audience know when to tune in.",
+            'message': "Pick your publish day(s)! Just select which days of the week work best. You'll choose specific times when you schedule each episode. This helps you and your listeners stay on track!",
             'suggestions': ["What's the best day?", "Can I publish anytime?", "What if I'm not sure?"]
         },
         'finish': {

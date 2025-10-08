@@ -155,9 +155,9 @@ def spreaker_oauth_callback(code: str, state: str, session: Session = Depends(ge
     session.add(user)
     session.commit()
     html = f"""
-<!DOCTYPE html><html><body style='font-family:sans-serif;'>
-<h3>Spreaker Connected</h3>
-<p>You can close this window and return to the app.</p>
+<!DOCTYPE html><html><body style='font-family:sans-serif; text-align:center; padding: 40px;'>
+<h3>Spreaker Connected!</h3>
+<p>This window will close automatically...</p>
 <script>
   (function() {{
     const target = "{_SPREAKER_SUCCESS_REDIRECT}";
@@ -179,7 +179,7 @@ def spreaker_oauth_callback(code: str, state: str, session: Session = Depends(ge
         window.location.href = target;
       }}
     }}
-    setTimeout(closeOrRedirect, 400);
+    setTimeout(closeOrRedirect, 100);
   }})();
 </script>
 </body></html>
