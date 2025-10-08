@@ -415,6 +415,47 @@ Current Context:
 - Action: {conversation.current_action or 'browsing'}
 """
 
+    # Add page-specific context for Template Editor
+    current_page = conversation.current_page or ''
+    if 'template' in current_page.lower():
+        base_prompt += """
+
+🎨 TEMPLATE EDITOR CONTEXT:
+User is currently building/editing a podcast template.
+
+**What they're seeing:**
+- Template Basics: Name, which show it belongs to, active/inactive toggle
+- Episode Structure: Intro/Content/Outro segments with drag-and-drop reordering
+- Each segment can use: Static (upload audio file), TTS (AI voice), or AI Generated (AI creates from prompt)
+- Music & Timing Options: Background music rules (which track, fade in/out times, volume, segment offsets)
+- AI Guidance: Default settings for AI-generated titles/descriptions when creating episodes
+
+**Template vs Episode:**
+- Template = REUSABLE structure (like a recipe)
+- Episode = SINGLE instance using that template (like a meal from the recipe)
+- Segments in template define what CAN be included
+- Each episode fills in the actual content (audio files, scripts, etc.)
+
+**Common questions:**
+- "What are segments?" → Building blocks of your episode (intro, main content, outro, commercials)
+- "How do I add my intro?" → Click blue "Intro" button above segments list, then select upload or TTS
+- "Where's my uploaded audio?" → Should appear in dropdown when you click segment. If missing, go to Media Library to verify upload succeeded.
+- "What's AI Guidance?" → Default settings for when you ask AI to generate episode titles/descriptions
+- "How does background music work?" → Music rules play tracks BEHIND segments with fade in/out, volume control, and timing offsets
+- "What are timing offsets?" → start_offset: how many seconds into segment to START music (negative = start before segment), end_offset: where to STOP relative to segment end (negative = stop before segment ends)
+
+**Be specific with button/UI references:**
+- Say "Click the blue 'Intro' button above the segments list" NOT "add an intro"
+- Say "In the Episode Structure card, drag the intro segment" NOT "reorder your segments"
+- Say "Click the dropdown in the segment block and choose your file" NOT "select your file"
+- Mention the exact field names: "friendly_name", "apply_to_segments", "fade_in_s", etc.
+
+**Troubleshooting:**
+- Files not appearing? → Check Media Library (/dashboard?tab=media) - files must have correct category (intro/outro/music)
+- Music not playing? → Verify `apply_to_segments` array includes the segment type (intro/content/outro)
+- Template not saving? → Look for red error messages, check required fields (name, podcast_id)
+"""
+
     # Note: onboarding context will be passed in request.context, handled in chat endpoint
     
     # Add guidance context if available
@@ -991,11 +1032,38 @@ async def check_proactive_help(
         is_stuck = True
         help_message = "I see you're running into some issues. Want me to help troubleshoot?"
     
-    # Rule 4: New user on complex page
-    if guidance and not guidance.has_uploaded_audio:
-        if request.page in ["/creator", "/template-editor"]:
-            is_stuck = True
-            help_message = "First time here? I can guide you through creating your first episode!"
+    # Rule 4: New user on complex page - be MORE proactive for Template Editor
+    if request.page and guidance:
+        page_lower = request.page.lower()
+        
+        # Template Editor - very overwhelming for first-timers
+        if 'template' in page_lower:
+            # First visit or very few templates created
+            if not guidance.has_created_template:
+                is_stuck = True
+                help_message = (
+                    "Welcome to the Template Editor! 🎨\n\n"
+                    "This is where you design your podcast structure. Think of it like creating a recipe that you'll reuse for every episode.\n\n"
+                    "**Quick overview:**\n"
+                    "• **Segments** = building blocks (intro, content, outro)\n"
+                    "• **Music Rules** = background tracks that play behind segments\n"
+                    "• **AI Guidance** = settings for auto-generating titles/descriptions\n\n"
+                    "Want me to walk you through it? Or feel free to explore - I'm here if you get stuck!"
+                )
+            # Has templates but hasn't uploaded audio yet - might be confused
+            elif not guidance.has_uploaded_audio:
+                is_stuck = True
+                help_message = (
+                    "Building a new template? Great!\n\n"
+                    "Remember: Templates are reusable structures. You'll add your actual audio when creating episodes.\n\n"
+                    "Need help with any of the sections here? Just ask!"
+                )
+        
+        # Creator/Episode Builder
+        elif '/creator' in page_lower:
+            if not guidance.has_uploaded_audio:
+                is_stuck = True
+                help_message = "First time creating an episode? I can walk you through it step by step!"
     
     if is_stuck and guidance:
         guidance.stuck_count += 1
