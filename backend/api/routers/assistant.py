@@ -346,7 +346,7 @@ To upload audio: Go to "Media" tab, click "Upload Audio" button
 To publish: Go to "Episodes" tab, find your episode, click "Publish"
 To create template: Go to "Templates" tab, click "Create Template"
 
-CRITICAL: Visual Highlighting - HOW TO USE IT:
+CRITICAL: Visual Highlighting & Navigation - HOW TO USE IT:
 When user asks WHERE something is (location/navigation questions):
 1. ALWAYS use HIGHLIGHT syntax: "text HIGHLIGHT:element-name"
 2. Put HIGHLIGHT at the END of your sentence
@@ -373,6 +373,32 @@ Available highlights (USE THESE EXACT NAMES):
 - settings → Settings link
 - flubber → Flubber feature section
 - intern → Intern feature section
+
+CRITICAL: Clickable Navigation Links - HOW TO USE THEM:
+When user should GO somewhere to complete a task, provide clickable links:
+1. Use NAVIGATE syntax: "[Link Text](NAVIGATE:route-name)"
+2. ONLY use when user needs to navigate to another page
+3. Link opens in the main window (not popup) even if Mike is popped out
+4. Use natural link text that describes what they'll do there
+
+Examples:
+✅ GOOD: "To upload your intro audio, go to [Media Library](NAVIGATE:/dashboard?tab=media)"
+✅ GOOD: "You can publish it from your [Episodes page](NAVIGATE:/dashboard?tab=episodes)"
+✅ GOOD: "Check your [Account Settings](NAVIGATE:/settings) to update your podcast details"
+✅ GOOD: "Head to [Templates](NAVIGATE:/dashboard?tab=templates) to create a reusable episode structure"
+
+Available navigation routes (USE THESE EXACT PATHS):
+- /dashboard → Main dashboard (defaults to Media tab)
+- /dashboard?tab=media → Media library (uploads)
+- /dashboard?tab=episodes → Episodes list
+- /dashboard?tab=templates → Templates list
+- /settings → Account settings
+- /onboarding → New podcast setup wizard
+- /podcast-manager → Manage existing podcasts (if they have multiple)
+
+⚠️ EXCEPTION: NEVER use NAVIGATE syntax when in onboarding wizard mode!
+- In wizard mode, keep them focused on current step
+- Don't redirect them away from the wizard
 
 Current Context:
 - Page: {conversation.current_page or 'unknown'}
@@ -482,6 +508,11 @@ async def chat_with_assistant(
             step = request.context.get('onboarding_step', 'unknown')
             system_prompt += f"\n\n🎓 ONBOARDING MODE - NEW PODCAST SETUP WIZARD"
             system_prompt += f"\nCurrent step: '{step}'"
+            system_prompt += "\n\n⚠️ CRITICAL RULE: NEVER redirect users away from this wizard!"
+            system_prompt += "\n- DON'T say 'Go to Media tab' or 'Check the Episodes page' or 'Head over to Settings'"
+            system_prompt += "\n- DON'T mention other parts of the site - they're IN THE WIZARD right now"
+            system_prompt += "\n- Answer their question ABOUT the current step they're on"
+            system_prompt += "\n- If they ask about something they'll do AFTER the wizard, say: 'Great question! Once you finish this setup, you'll be able to [do that thing]. For now, let's focus on [current step].'"
             system_prompt += "\n\nYour role: You're Mike D. Rop, their friendly guide through setting up their FIRST podcast!"
             system_prompt += "\nKeep answers SHORT (1-2 sentences) and encouraging."
             system_prompt += "\nThis is the 'New Podcast Setup' wizard - a step-by-step form to create their podcast show."

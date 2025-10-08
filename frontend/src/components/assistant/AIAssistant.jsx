@@ -9,11 +9,13 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { MessageCircle, X, Send, Minimize2, Maximize2, HelpCircle, AlertCircle } from 'lucide-react';
 import { Button } from '../ui/button';
 import { makeApi } from '../../lib/apiClient';
 
 export default function AIAssistant({ token, user, onboardingMode = false, currentStep = null, currentStepData = null }) {
+  const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [isPoppedOut, setIsPoppedOut] = useState(false);
@@ -202,6 +204,59 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
       loadGuidanceStatus();
     } catch (error) {
       console.error('Failed to track milestone:', error);
+    }
+  };
+  
+  // Parse message content for navigation links: [Link Text](NAVIGATE:/path)
+  const parseMessageContent = (content) => {
+    if (!content) return content;
+    
+    // Pattern: [Link Text](NAVIGATE:/path)
+    const navigatePattern = /\[([^\]]+)\]\(NAVIGATE:([^)]+)\)/g;
+    const parts = [];
+    let lastIndex = 0;
+    let match;
+    
+    while ((match = navigatePattern.exec(content)) !== null) {
+      // Add text before the match
+      if (match.index > lastIndex) {
+        parts.push({
+          type: 'text',
+          content: content.substring(lastIndex, match.index)
+        });
+      }
+      
+      // Add the navigation link
+      parts.push({
+        type: 'navigate',
+        text: match[1],
+        path: match[2]
+      });
+      
+      lastIndex = match.index + match[0].length;
+    }
+    
+    // Add remaining text
+    if (lastIndex < content.length) {
+      parts.push({
+        type: 'text',
+        content: content.substring(lastIndex)
+      });
+    }
+    
+    return parts.length > 0 ? parts : [{ type: 'text', content }];
+  };
+  
+  // Handle navigation link clicks (ensure they work even if Mike is popped out)
+  const handleNavigateClick = (path) => {
+    // If popped out, navigate in the opener window and bring it to focus
+    if (isPoppedOut && window.opener && !window.opener.closed) {
+      // Post message to opener to navigate
+      window.opener.postMessage({ type: 'navigate', path }, window.location.origin);
+      window.opener.focus();
+    } else {
+      // Regular window navigation using React Router
+      navigate(path);
     }
   };
   
@@ -449,7 +504,25 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
                         ? 'bg-red-100 text-red-800 border border-red-300'
                         : 'bg-white border border-gray-200 text-gray-800'
                     }`}>
-                      <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                      {/* Parse and render content with navigation links */}
+                      <div className="text-sm whitespace-pre-wrap">
+                        {parseMessageContent(msg.content).map((part, partIdx) => {
+                          if (part.type === 'navigate') {
+                            return (
+                              <button
+                                key={partIdx}
+                                onClick={() => handleNavigateClick(part.path)}
+                                className={`inline underline font-medium hover:opacity-80 transition-opacity ${
+                                  msg.role === 'user' ? 'text-white' : 'text-blue-600'
+                                }`}
+                              >
+                                {part.text}
+                              </button>
+                            );
+                          }
+                          return <span key={partIdx}>{part.content}</span>;
+                        })}
+                      </div>
                       
                       {/* Generated podcast cover image */}
                       {msg.generatedImage && (

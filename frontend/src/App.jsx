@@ -33,6 +33,22 @@ export default function App() {
     const [podcastCheck, setPodcastCheck] = React.useState({ loading: true, count: 0, fetched: false });
     const { layoutKey } = useLayout();
 
+    // Handle navigation messages from popped-out AI Assistant window
+    useEffect(() => {
+        const handleMessage = (event) => {
+            // Verify origin for security
+            if (event.origin !== window.location.origin) return;
+            
+            // Handle navigate message from AI Assistant popup
+            if (event.data?.type === 'navigate' && event.data?.path) {
+                window.location.href = event.data.path;
+            }
+        };
+
+        window.addEventListener('message', handleMessage);
+        return () => window.removeEventListener('message', handleMessage);
+    }, []);
+
     useEffect(() => {
         const processAuth = async () => {
             const hash = window.location.hash;
