@@ -21,6 +21,7 @@ from api.core.paths import WS_ROOT as PROJECT_ROOT, FINAL_DIR, MEDIA_DIR
 from infrastructure import gcs
 
 from . import billing, media, transcript
+from .transcript import _commit_with_retry
 
 
 ASSEMBLY_LOG_DIR = PROJECT_ROOT / "assembly_logs"
@@ -145,7 +146,8 @@ def _cleanup_main_content(*, session, episode, main_content_filename: str) -> No
 
         try:
             session.delete(media_item)
-            session.commit()
+            if not _commit_with_retry(session):
+                logging.warning("[cleanup] Failed to delete media_item after retries")
         except Exception:
             session.rollback()
             raise
@@ -176,7 +178,8 @@ def _mark_episode_error(session, episode, reason: str) -> None:
 
     try:
         session.add(episode)
-        session.commit()
+        if not _commit_with_retry(session):
+            logging.error("[_mark_episode_error] Failed to commit error status after retries")
     except Exception:
         session.rollback()
     logging.error("[assemble] %s", reason)
@@ -388,9 +391,26 @@ def _finalize_episode(
                     "[assemble] Failed to persist cover image locally", exc_info=True
                 )
 
+    # CRITICAL: This commit marks episode as "processed" - MUST succeed or episode stuck forever
     session.add(episode)
-    session.commit()
-    logging.info("[assemble] done. final=%s", final_path)
+    if not _commit_with_retry(session, max_retries=5, backoff_seconds=2.0):
+        logging.error(
+            "[assemble] CRITICAL: Failed to commit final episode status (status=processed) after 5 retries! "
+            "Episode %s will appear stuck in 'processing' state.", episode.id
+        )
+        # Last-ditch attempt: mark as error so user knows something went wrong
+        try:
+            from api.models.podcast import EpisodeStatus as _EpStatus
+            episode.status = _EpStatus.error  # type: ignore[attr-defined]
+        except Exception:
+            episode.status = "error"  # type: ignore[assignment]
+        try:
+            episode.spreaker_publish_error = "Failed to persist completion status to database after multiple retries"
+            session.commit()  # One final try without retry
+        except Exception:
+            logging.exception("[assemble] Even error status commit failed - episode truly stuck")
+    
+    logging.info("[assemble] done. final=%s status_committed=True", final_path)
 
     try:
         note = Notification(
@@ -400,7 +420,8 @@ def _finalize_episode(
             body=f"{episode.title}",
         )
         session.add(note)
-        session.commit()
+        if not _commit_with_retry(session):
+            logging.warning("[assemble] Failed to create notification after retries")
     except Exception:
         logging.warning("[assemble] Failed to create notification", exc_info=True)
 
@@ -486,7 +507,8 @@ def orchestrate_create_podcast_episode(
                 except Exception:
                     episode.status = "error"  # type: ignore[assignment]
                 session.add(episode)
-                session.commit()
+                if not _commit_with_retry(session):
+                    logging.error("[orchestrate] Failed to commit error status in exception handler")
         except Exception:
             pass
         raise
