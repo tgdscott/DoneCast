@@ -1,4 +1,7 @@
 from collections import defaultdict
+import json
+import logging
+import os
 from pathlib import Path
 from typing import Dict, List
 
@@ -9,7 +12,7 @@ from sqlmodel import Session, select
 from api.core.database import get_session
 from api.core.paths import TRANSCRIPTS_DIR
 from api.models.podcast import MediaCategory, MediaItem
-from api.models.transcription import TranscriptionWatch
+from api.models.transcription import MediaTranscript, TranscriptionWatch
 from api.models.user import User
 from api.routers.ai_suggestions import _gather_user_sfx_entries
 from api.routers.auth import get_current_user
@@ -17,6 +20,8 @@ from api.services.audio.transcript_io import load_transcript_json
 from api.services.intent_detection import analyze_intents, get_user_commands
 
 from .media_schemas import MainContentItem
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/media", tags=["Media Library"])
 
@@ -46,7 +51,13 @@ async def list_user_media(
     return session.exec(statement).all()
 
 
-def _resolve_transcript_path(filename: str) -> Path:
+def _resolve_transcript_path(filename: str, session: Session | None = None) -> Path:
+    """Resolve transcript path, downloading from GCS if missing locally.
+    
+    After Cloud Run deployments, local ephemeral storage is wiped. This function
+    checks GCS for transcripts that were previously uploaded and downloads them
+    back to local storage so the frontend can see transcript_ready=True.
+    """
     stem = Path(filename).stem
     candidates = [
         TRANSCRIPTS_DIR / f"{stem}.json",
@@ -54,9 +65,66 @@ def _resolve_transcript_path(filename: str) -> Path:
         TRANSCRIPTS_DIR / f"{stem}.original.json",
         TRANSCRIPTS_DIR / f"{stem}.original.words.json",
     ]
+    
+    # Check if any candidate exists locally
     for candidate in candidates:
         if candidate.exists():
             return candidate
+    
+    # No local file found - try to recover from GCS using MediaTranscript metadata
+    if session is not None:
+        try:
+            # Query MediaTranscript for this filename to get GCS location
+            stmt = select(MediaTranscript).where(MediaTranscript.filename == filename)
+            transcript_record = session.exec(stmt).first()
+            
+            if transcript_record and transcript_record.transcript_meta_json:
+                meta = json.loads(transcript_record.transcript_meta_json)
+                gcs_uri = meta.get("gcs_json") or meta.get("gcs_uri")
+                bucket_stem = meta.get("bucket_stem") or meta.get("safe_stem") or stem
+                
+                if gcs_uri and gcs_uri.startswith("gs://"):
+                    # Parse gs://bucket/path format
+                    parts = gcs_uri.replace("gs://", "").split("/", 1)
+                    if len(parts) == 2:
+                        bucket_name, key = parts
+                    else:
+                        # Fallback: use env bucket + deterministic path
+                        bucket_name = (os.getenv("TRANSCRIPTS_BUCKET") or "").strip()
+                        key = f"transcripts/{bucket_stem}.json"
+                elif gcs_uri:
+                    # Already a key path like "transcripts/abc.json"
+                    bucket_name = (os.getenv("TRANSCRIPTS_BUCKET") or "").strip()
+                    key = gcs_uri
+                else:
+                    # No GCS URI in metadata - try deterministic location
+                    bucket_name = (os.getenv("TRANSCRIPTS_BUCKET") or "").strip()
+                    key = f"transcripts/{bucket_stem}.json"
+                
+                if bucket_name and key:
+                    try:
+                        from infrastructure.gcs import download_bytes
+                        
+                        content = download_bytes(bucket_name, key)
+                        if content:
+                            # Restore to local path
+                            TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+                            local_path = TRANSCRIPTS_DIR / f"{stem}.json"
+                            local_path.write_bytes(content)
+                            logger.info(
+                                "[media_read] Recovered transcript from gs://%s/%s to %s",
+                                bucket_name, key, local_path
+                            )
+                            return local_path
+                    except Exception as e:
+                        logger.warning(
+                            "[media_read] Could not download transcript from GCS for %s: %s",
+                            filename, e
+                        )
+        except Exception as e:
+            logger.warning("[media_read] Error checking MediaTranscript for %s: %s", filename, e)
+    
+    # Return first candidate even if it doesn't exist (for backwards compatibility)
     return candidates[0]
 
 
@@ -111,7 +179,8 @@ async def list_main_content_uploads(
     results: List[MainContentItem] = []
     for item in uploads:
         filename = str(item.filename)
-        transcript_path = _resolve_transcript_path(filename)
+        # Pass session so we can query MediaTranscript and recover from GCS if needed
+        transcript_path = _resolve_transcript_path(filename, session=session)
         ready = transcript_path.exists()
         # If a worker already notified watchers for this filename, consider it ready
         if not ready:
