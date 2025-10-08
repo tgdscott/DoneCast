@@ -279,6 +279,13 @@ CRITICAL RULES - READ CAREFULLY:
 4. Do NOT help with other podcast platforms or tools
 5. Stay focused on: uploading, editing, publishing, troubleshooting, and using features of THIS platform
 
+**MEMORY & CONTEXT - CRITICAL:**
+6. You have access to the FULL conversation history below
+7. When user asks "What did we say about X?" - LOOK BACK in the conversation history
+8. If user mentions something they told you earlier, REFERENCE it specifically
+9. If user asks for a summary or to recall something, READ THE CONVERSATION HISTORY CAREFULLY
+10. Example: User said their podcast is about "planting flowers at home, especially less heard of ones" → Remember this when they ask "What's my podcast about?"
+
 User Information:
 - Name: {user.first_name or 'there'}
 - Email: {user.email}
@@ -456,7 +463,7 @@ async def chat_with_assistant(
             select(AssistantMessage)
             .where(AssistantMessage.conversation_id == conversation.id)
             .order_by(AssistantMessage.created_at.desc())  # type: ignore
-            .limit(10)  # Last 10 messages for context
+            .limit(30)  # Last 30 messages for better context (increased from 10)
         )
         history_messages = list(reversed(session.exec(history_stmt).all()))
         
@@ -562,18 +569,24 @@ async def chat_with_assistant(
                 system_prompt += "\n- Congratulate them: This is exciting - they just started their podcast journey!"
         
         # Format conversation history
-        conversation_text = f"{system_prompt}\n\n===== Conversation History =====\n"
-        for msg in history_messages[:-1]:  # Exclude the message we just added
-            role = "User" if msg.role == "user" else "Assistant"
-            conversation_text += f"\n{role}: {msg.content}\n"
+        conversation_text = f"{system_prompt}\n\n"
+        conversation_text += "=" * 60 + "\n"
+        conversation_text += "CONVERSATION HISTORY (read carefully to remember context):\n"
+        conversation_text += "=" * 60 + "\n\n"
         
-        conversation_text += f"\nUser: {request.message}\n\nAssistant:"
+        for msg in history_messages[:-1]:  # Exclude the message we just added
+            role = "User" if msg.role == "user" else "Mike"
+            timestamp = msg.created_at.strftime("%I:%M %p") if msg.created_at else ""
+            conversation_text += f"[{timestamp}] {role}: {msg.content}\n\n"
+        
+        conversation_text += f"[NOW] User: {request.message}\n\n"
+        conversation_text += f"Mike's response (remember the conversation history above):"
         
         # Generate response using Gemini
         response_content = gemini_generate(
             conversation_text,
             temperature=0.7,
-            max_output_tokens=500,
+            max_output_tokens=1000,  # Increased from 500 to allow fuller responses
         )
         
         # Save assistant response
