@@ -57,6 +57,7 @@ class ChatResponse(BaseModel):
     requires_action: Optional[Dict[str, Any]] = None  # If AI wants to do something
     highlight: Optional[str] = None  # CSS selector or element ID to highlight
     highlight_message: Optional[str] = None  # Message to show near highlighted element
+    generated_image: Optional[str] = None  # Base64 data URL for generated podcast cover
 
 
 class FeedbackRequest(BaseModel):
@@ -308,6 +309,12 @@ Your Capabilities (ONLY for Podcast Plus Plus):
 3. Help troubleshoot technical issues on this platform
 4. Collect bug reports and feedback (ask clarifying questions)
 5. Offer proactive help when users seem stuck
+6. **Generate podcast cover images** - ONLY when user asks for help creating cover art
+   - When user needs cover art, ask about their podcast theme/topic
+   - Generate professional 1400x1400px square cover images
+   - Respond with: GENERATE_IMAGE: [detailed prompt describing the cover]
+   - Example: User asks "Can you create cover art?" → Ask about podcast, then:
+     "GENERATE_IMAGE: Professional podcast cover art, square format, bold text reading 'Bloom and Gloom', vibrant purple and green floral design, modern typography, gardening theme with decorative flowers, clean layout suitable for small thumbnails"
 
 Platform Knowledge (Podcast Plus Plus specific):
 - Users upload audio files (recordings or pre-recorded shows)
@@ -463,7 +470,7 @@ async def chat_with_assistant(
             select(AssistantMessage)
             .where(AssistantMessage.conversation_id == conversation.id)
             .order_by(AssistantMessage.created_at.desc())  # type: ignore
-            .limit(30)  # Last 30 messages for better context (increased from 10)
+            .limit(50)  # Last 50 messages for excellent context retention
         )
         history_messages = list(reversed(session.exec(history_stmt).all()))
         
@@ -586,7 +593,7 @@ async def chat_with_assistant(
         response_content = gemini_generate(
             conversation_text,
             temperature=0.7,
-            max_output_tokens=1000,  # Increased from 500 to allow fuller responses
+            max_output_tokens=2500,  # Allows detailed explanations and multi-step guidance
         )
         
         # Save assistant response
@@ -605,11 +612,42 @@ async def chat_with_assistant(
         session.add(conversation)
         session.commit()
         
-        # Parse highlighting if present
+        # Parse special commands from response
         highlight = None
         highlight_message = None
         clean_response = response_content
+        generated_image = None
         
+        # Check for image generation request
+        if "GENERATE_IMAGE:" in response_content:
+            try:
+                from api.services.ai_content.client_gemini import generate_podcast_cover_image
+                
+                # Extract image prompt
+                parts = response_content.split("GENERATE_IMAGE:")
+                clean_response = parts[0].strip()
+                image_prompt = parts[1].strip()
+                
+                # Add negative prompt to avoid common issues
+                negative_prompt = "text, watermark, signature, blurry, low quality, distorted"
+                
+                log.info(f"Generating podcast cover image: {image_prompt[:100]}...")
+                generated_image = generate_podcast_cover_image(
+                    image_prompt,
+                    aspect_ratio="1:1",
+                    negative_prompt=negative_prompt
+                )
+                
+                if generated_image:
+                    clean_response += "\n\n✅ Here's your podcast cover! You can download it or generate a new one with different ideas."
+                else:
+                    clean_response += "\n\n❌ Sorry, I had trouble generating the image. This feature requires Vertex AI Imagen to be configured."
+                    
+            except Exception as e:
+                log.error(f"Image generation failed: {e}", exc_info=True)
+                clean_response += "\n\n❌ Sorry, image generation isn't available right now."
+        
+        # Check for visual highlighting
         if "HIGHLIGHT:" in response_content:
             try:
                 # Extract highlight instruction
@@ -654,6 +692,7 @@ async def chat_with_assistant(
             suggestions=suggestions,
             highlight=highlight,
             highlight_message=highlight_message,
+            generated_image=generated_image,
         )
     
     except Exception as e:

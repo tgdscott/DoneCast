@@ -243,6 +243,7 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
         role: 'assistant',
         content: response.response,
         suggestions: response.suggestions,
+        generatedImage: response.generated_image,  // Include generated image if present
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, assistantMessage]);
@@ -449,6 +450,32 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
                         : 'bg-white border border-gray-200 text-gray-800'
                     }`}>
                       <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                      
+                      {/* Generated podcast cover image */}
+                      {msg.generatedImage && (
+                        <div className="mt-3 space-y-2">
+                          <img 
+                            src={msg.generatedImage} 
+                            alt="Generated podcast cover" 
+                            className="w-full rounded-lg border-2 border-purple-300 shadow-md"
+                          />
+                          <div className="flex gap-2">
+                            <a
+                              href={msg.generatedImage}
+                              download="podcast-cover.png"
+                              className="flex-1 text-xs bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded text-center transition-colors"
+                            >
+                              📥 Download
+                            </a>
+                            <button
+                              onClick={() => handleSuggestionClick("Generate another variation")}
+                              className="flex-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-2 rounded transition-colors"
+                            >
+                              🔄 Try Again
+                            </button>
+                          </div>
+                        </div>
+                      )}
                       
                       {/* Quick action suggestions */}
                       {msg.suggestions && (

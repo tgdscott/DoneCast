@@ -276,3 +276,79 @@ def generate_json(content: str) -> Dict[str, Any]:
         except Exception:
             pass
         return {}
+
+
+def generate_podcast_cover_image(
+    prompt: str,
+    *,
+    aspect_ratio: str = "1:1",  # Podcast covers are square
+    negative_prompt: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Generate a podcast cover image using Vertex AI Imagen.
+    
+    Args:
+        prompt: Description of the image to generate
+        aspect_ratio: Image aspect ratio (default "1:1" for square podcast covers)
+        negative_prompt: Things to avoid in the image
+    
+    Returns:
+        Base64-encoded PNG image data, or None if generation fails
+    
+    Cost: ~$0.020 per image (Imagen 3 standard quality)
+    """
+    if _stub_mode():
+        _log.info("STUB: Would generate image with prompt: %s", prompt)
+        return None
+    
+    try:
+        from vertexai.preview.vision_models import ImageGenerationModel  # type: ignore
+        import vertexai  # type: ignore
+        import base64
+        
+        # Initialize Vertex AI
+        project = os.getenv("VERTEX_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
+        location = os.getenv("VERTEX_LOCATION", "us-central1")
+        
+        if not project:
+            _log.error("VERTEX_PROJECT not configured for image generation")
+            return None
+        
+        vertexai.init(project=project, location=location)
+        
+        # Use Imagen 3
+        model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-001")
+        
+        # Build generation parameters
+        generation_params = {
+            "prompt": prompt,
+            "number_of_images": 1,
+            "aspect_ratio": aspect_ratio,
+            "safety_filter_level": "block_some",  # Balanced filtering
+            "person_generation": "allow_all",  # Allow people in images
+        }
+        
+        if negative_prompt:
+            generation_params["negative_prompt"] = negative_prompt
+        
+        # Generate image
+        _log.info(f"Generating podcast cover image: {prompt[:100]}...")
+        response = model.generate_images(**generation_params)
+        
+        if response.images:
+            # Get first image and convert to base64
+            image = response.images[0]
+            image_bytes = image._image_bytes
+            base64_image = base64.b64encode(image_bytes).decode('utf-8')
+            _log.info("Successfully generated podcast cover image")
+            return f"data:image/png;base64,{base64_image}"
+        else:
+            _log.warning("No images generated from Imagen")
+            return None
+            
+    except ImportError:
+        _log.error("Vertex AI SDK not installed for image generation")
+        return None
+    except Exception as e:
+        _log.error(f"Image generation failed: {e}", exc_info=True)
+        return None
