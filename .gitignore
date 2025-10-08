@@ -57,6 +57,7 @@ pnpm-debug.log*
 secrets/*.key
 *.pem
 *.crt
+gcs-signer-key.json
 
 # Databases and local storage
 *.sqlite3
