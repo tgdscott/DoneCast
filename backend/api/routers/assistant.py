@@ -329,6 +329,16 @@ Platform Knowledge (Podcast Plus Plus specific):
 - Media library stores uploads with 14-day expiration
 - Episodes published to Spreaker are kept for 7 days with clean audio for editing
 
+**About Spreaker (IMPORTANT - How to discuss it):**
+- Spreaker is a hosting service from iHeartRadio that stores your podcast files
+- We handle ALL the work - editing, processing, uploading - Spreaker just hosts the final files
+- Think of it like: We're the restaurant kitchen, Spreaker is the delivery service
+- When users ask "Why Spreaker?": "Spreaker hosts your podcast so it reaches Apple, Spotify, etc. But WE do all the heavy lifting - you manage everything here on Podcast Plus Plus."
+- When users ask "How much?": "FREE to start! Spreaker has a free tier that works for most podcasts. You only need paid plans if you get huge numbers."
+- When users ask "Do I need to use Spreaker?": "Yes, but only to connect once - after that you never think about it. We handle everything else automatically."
+- Keep it transparent: Don't oversell Spreaker, keep focus on OUR platform doing the real work
+- If they want alternatives: "Spreaker is currently our distribution partner. We chose them because they're reliable and have a great free tier."
+
 Navigation & UI Structure (IMPORTANT - BE SPECIFIC):
 Dashboard has these main sections:
 - "Media" tab → All uploaded files (intros, outros, background music, episode audio)
@@ -576,13 +586,14 @@ async def chat_with_assistant(
                 system_prompt += "\n- Optional: Can skip entirely - many podcasts have no music"
                 system_prompt += "\n- Next: Connecting to Spreaker for publishing"
             elif step == 'spreaker':
-                system_prompt += "\n\n📡 STEP: Connect Spreaker"
-                system_prompt += "\n- What: Link their Spreaker account to publish episodes"
-                system_prompt += "\n- Spreaker: Podcast hosting service that distributes to Apple, Spotify, etc."
-                system_prompt += "\n- Why required: We partner with Spreaker for podcast hosting and distribution"
-                system_prompt += "\n- Free option: Spreaker has a free plan that works great"
-                system_prompt += "\n- Process: Click button → Login to Spreaker (or create account) → Authorize connection"
-                system_prompt += "\n- Next: After connected, set publishing schedule"
+                system_prompt += "\n\n📡 STEP: Connect to Publishing"
+                system_prompt += "\n- What: Connect your account so episodes can reach Apple Podcasts, Spotify, and everywhere else"
+                system_prompt += "\n- Why: Your podcast needs to live on a hosting server that all podcast apps can access"
+                system_prompt += "\n- Behind the scenes: We use Spreaker (a hosting service from iHeartRadio) - but WE do all the heavy lifting"
+                system_prompt += "\n- You just: Click connect, authorize once, then forget about it - we handle everything else"
+                system_prompt += "\n- Cost: FREE to start! Spreaker has a free tier that works great for most shows"
+                system_prompt += "\n- Process: Click button → Login (or create free account) → Authorize → Done!"
+                system_prompt += "\n- Next: After connected, set your publishing schedule"
             elif step == 'publishCadence':
                 system_prompt += "\n\n📅 STEP: Publishing Frequency"
                 system_prompt += "\n- What: How often they'll release new episodes"
