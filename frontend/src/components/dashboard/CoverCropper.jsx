@@ -219,12 +219,12 @@ const CoverCropper = forwardRef(function CoverCropper({ sourceFile, existingUrl,
     <div className="space-y-2">
   <div
         ref={containerRef}
-        className="relative border rounded overflow-hidden max-h-72 bg-gray-50 flex items-center justify-center"
-        style={{ cursor: dragging ? 'grabbing' : 'grab', userSelect: 'none' }}
+        className="relative border rounded overflow-hidden max-h-72 bg-gray-50"
+        style={{ cursor: dragging ? 'grabbing' : 'grab', userSelect: 'none', display: imgUrl ? 'block' : 'flex', alignItems: imgUrl ? 'flex-start' : 'center', justifyContent: imgUrl ? 'flex-start' : 'center' }}
         onMouseDown={startDrag}
       >
         {imgUrl ? (
-          <img ref={imgRef} src={imgUrl} alt="Cover" onLoad={handleImageLoad} className="max-w-full max-h-72 select-none" draggable={false} />
+          <img ref={imgRef} src={imgUrl} alt="Cover" onLoad={handleImageLoad} className="max-w-full max-h-72 select-none block" draggable={false} />
         ) : (
           <div className="text-xs text-gray-500 p-4">No image selected</div>
         )}

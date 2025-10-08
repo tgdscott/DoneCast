@@ -459,19 +459,51 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
                             alt="Generated podcast cover" 
                             className="w-full rounded-lg border-2 border-purple-300 shadow-md"
                           />
-                          <div className="flex gap-2">
+                          <div className="grid grid-cols-3 gap-2">
+                            <button
+                              onClick={async () => {
+                                try {
+                                  // Convert base64 to File object
+                                  const response = await fetch(msg.generatedImage);
+                                  const blob = await response.blob();
+                                  const file = new File([blob], 'podcast-cover.png', { type: 'image/png' });
+                                  
+                                  // Dispatch custom event with the generated image file
+                                  const event = new CustomEvent('ai-generated-cover', { detail: { file } });
+                                  window.dispatchEvent(event);
+                                  
+                                  // Visual feedback
+                                  setMessages(prev => [...prev, {
+                                    role: 'assistant',
+                                    content: '✅ Cover image sent to your form! Check the cover art upload section.',
+                                    timestamp: new Date(),
+                                  }]);
+                                } catch (error) {
+                                  console.error('Failed to use generated image:', error);
+                                  setMessages(prev => [...prev, {
+                                    role: 'assistant',
+                                    content: '❌ Failed to use the image. Try downloading it instead.',
+                                    timestamp: new Date(),
+                                    isError: true,
+                                  }]);
+                                }
+                              }}
+                              className="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded transition-colors"
+                            >
+                              ✨ Use This
+                            </button>
                             <a
                               href={msg.generatedImage}
                               download="podcast-cover.png"
-                              className="flex-1 text-xs bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded text-center transition-colors"
+                              className="text-xs bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded text-center transition-colors"
                             >
                               📥 Download
                             </a>
                             <button
                               onClick={() => handleSuggestionClick("Generate another variation")}
-                              className="flex-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-2 rounded transition-colors"
+                              className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-2 rounded transition-colors"
                             >
-                              🔄 Try Again
+                              🔄 Retry
                             </button>
                           </div>
                         </div>

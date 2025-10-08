@@ -331,6 +331,29 @@ export default function Onboarding() {
     return () => { if (stepSaveTimer.current) clearTimeout(stepSaveTimer.current); };
   }, [stepIndex]);
 
+  // Listen for AI-generated cover images from Mike D. Rop
+  useEffect(() => {
+    const handleAiGeneratedCover = (event) => {
+      const file = event.detail?.file;
+      if (file && file instanceof File) {
+        // Update formData with the AI-generated cover
+        setFormData(prev => ({ ...prev, coverArt: file }));
+        setCoverCrop(null); // Reset crop for new image
+        
+        // Auto-advance to cover art step if not already there
+        if (stepId !== 'coverArt') {
+          const coverStepIndex = wizardSteps.findIndex(s => s.id === 'coverArt');
+          if (coverStepIndex >= 0) {
+            setStepIndex(coverStepIndex);
+          }
+        }
+      }
+    };
+    
+    window.addEventListener('ai-generated-cover', handleAiGeneratedCover);
+    return () => window.removeEventListener('ai-generated-cover', handleAiGeneratedCover);
+  }, [stepId, wizardSteps]);
+
   // When on the music step, fetch assets once
   useEffect(() => {
     if (stepId === 'music' && musicAssets.length <= 1 && !musicLoading) {
