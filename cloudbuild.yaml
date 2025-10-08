@@ -187,7 +187,7 @@ steps:
             --concurrency=80 \
             --no-cpu-throttling \
             --execution-environment=gen2 \
-            --set-env-vars="CLOUDPOD_MAX_MIX_BUFFER_BYTES=2147483648"
+            --update-env-vars="CLOUDPOD_MAX_MIX_BUFFER_BYTES=2147483648"
         }
 
         # Retry deploy to handle transient API errors
