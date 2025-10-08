@@ -82,6 +82,7 @@ public                 = _safe_import("api.routers.public")
 waitlist_router        = _safe_import("api.routers.waitlist")
 debug                  = _safe_import("api.routers.debug")
 billing_router         = _safe_import("api.routers.billing")
+billing_config_router  = _safe_import("api.routers.billing_config")
 billing_webhook_router = _safe_import("api.routers.billing_webhook")
 notifications_router   = _safe_import("api.routers.notifications")
 music_router           = _safe_import("api.routers.music")
@@ -151,6 +152,8 @@ def attach_routers(app: FastAPI) -> dict:
     availability['music_router'] = music_router is not None
     _maybe(app, billing_router)
     availability['billing_router'] = billing_router is not None
+    _maybe(app, billing_config_router)
+    availability['billing_config_router'] = billing_config_router is not None
     _maybe(app, billing_webhook_router)
     availability['billing_webhook_router'] = billing_webhook_router is not None
     _maybe(app, notifications_router)

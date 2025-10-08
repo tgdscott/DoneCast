@@ -100,6 +100,138 @@ def _ensure_customer(user: User, session: Session):
         return cust.id
     return user.stripe_customer_id
 
+class CheckoutSessionResponse(BaseModel):
+    """Response for embedded checkout - returns client_secret instead of redirect URL"""
+    client_secret: str
+    session_id: str
+
+@router.post("/checkout/embedded", response_model=CheckoutSessionResponse)
+async def create_embedded_checkout_session(
+    request: Request,
+    req: CheckoutRequest,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """
+    Create a Stripe Checkout Session for embedded components (ui_mode='embedded').
+    Returns client_secret for frontend to initialize embedded checkout.
+    """
+    if req.plan_key not in PRICE_MAP:
+        raise HTTPException(status_code=400, detail="Unknown plan")
+    cycle_prices = PRICE_MAP[req.plan_key]
+    if req.billing_cycle not in cycle_prices:
+        raise HTTPException(status_code=400, detail="Invalid billing cycle")
+    if not stripe.api_key:
+        raise HTTPException(status_code=500, detail="Stripe not configured")
+
+    origin = None
+    try:
+        origin = request.headers.get('origin')
+    except Exception:
+        origin = None
+    if origin and origin.startswith("http"):
+        base_url = origin.rstrip('/')
+    else:
+        base_url = os.getenv("APP_BASE_URL", "https://app.podcastplusplus.com")
+    
+    price_id = _resolve_price_id(cycle_prices[req.billing_cycle])
+    
+    try:
+        customer_id = _ensure_customer(current_user, session)
+        
+        metadata = {"user_id": str(current_user.id), "plan_key": req.plan_key, "cycle": req.billing_cycle}
+        subscription_data = {"metadata": metadata}
+        discounts = []
+
+        # --- Upgrade / Proration Logic ---
+        prior_tier = getattr(current_user, 'tier', 'free') or 'free'
+        prior_exp = getattr(current_user, 'subscription_expires_at', None)
+        is_free_to_paid = (prior_tier == 'free' and req.plan_key != 'free')
+        same_plan_cycle_change = (prior_tier == req.plan_key and req.billing_cycle == 'annual' and prior_exp is not None)
+        is_plan_upgrade = (prior_tier != 'free' and prior_tier != req.plan_key)
+        needs_proration = (same_plan_cycle_change or is_plan_upgrade) and (prior_exp is not None)
+        
+        if needs_proration:
+            try:
+                today = datetime.utcnow().date()
+                remaining_days = (prior_exp.date() - today).days if prior_exp else 0
+                if remaining_days < 0:
+                    remaining_days = 0
+                remaining_total_days = (prior_exp.date() - today).days if prior_exp else 0
+                prior_cycle = 'annual' if remaining_total_days > 200 else 'monthly'
+                daily_rate = Decimal('1.00') if prior_cycle == 'monthly' else Decimal('0.8333333')
+                credit = (daily_rate * Decimal(remaining_days)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                
+                try:
+                    price_obj = stripe.Price.retrieve(price_id)
+                    unit_amount = Decimal(price_obj['unit_amount']) / Decimal(100)
+                except Exception:
+                    unit_amount = Decimal('0')
+                
+                prev_sub = crud.get_active_subscription_for_user(session, current_user.id)
+                if prev_sub:
+                    try:
+                        prev_price_obj = stripe.Price.retrieve(prev_sub.price_id)
+                        prev_amount = Decimal(prev_price_obj['unit_amount']) / Decimal(100)
+                        prev_cap = prev_amount - Decimal('1.00')
+                        if prev_cap < 0:
+                            prev_cap = Decimal('0')
+                        if credit > prev_cap:
+                            credit = prev_cap
+                    except Exception:
+                        pass
+                
+                if credit > unit_amount:
+                    credit = unit_amount
+                
+                if credit > 0:
+                    coupon = stripe.Coupon.create(
+                        name="Prorated credit for previous plan",
+                        amount_off=int((credit * 100).to_integral_value(rounding=ROUND_HALF_UP)),
+                        currency='usd',
+                        duration='once',
+                        metadata={"source": "upgrade_proration", "user_id": str(current_user.id), "prior_tier": prior_tier, "prorated":"1"}
+                    )
+                    discounts = [{"coupon": coupon.id}]
+                    metadata['upgrade_prorated'] = '1'
+            except Exception as e:
+                metadata['proration_error'] = str(e)[:150]
+        
+        if same_plan_cycle_change:
+            metadata['cycle_change'] = '1'
+        if is_plan_upgrade:
+            metadata['plan_upgrade'] = '1'
+        if is_free_to_paid:
+            metadata['first_paid'] = '1'
+
+        params = dict(
+            mode="subscription",
+            ui_mode="embedded",
+            line_items=[{"price": price_id, "quantity": 1}],
+            return_url=f"{base_url}{req.success_path}?checkout=success&session_id={{CHECKOUT_SESSION_ID}}",
+            customer=customer_id if customer_id else None,
+            subscription_data=subscription_data,
+            metadata=metadata,
+        )
+        
+        if discounts:
+            params['discounts'] = discounts
+        else:
+            params['allow_promotion_codes'] = True  # type: ignore[assignment]
+        
+        checkout_session = stripe.checkout.Session.create(**params)  # type: ignore
+        
+        client_secret = getattr(checkout_session, 'client_secret', None)
+        if not client_secret:
+            raise HTTPException(status_code=502, detail="Stripe did not return a client secret")
+        
+        return CheckoutSessionResponse(
+            client_secret=str(client_secret),
+            session_id=str(checkout_session.id)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Stripe error: {e}")
+
 @router.post("/checkout", response_model=CheckoutResponse)
 async def create_checkout_session(
     request: Request,
@@ -196,9 +328,9 @@ async def create_checkout_session(
 
         params = dict(
             mode="subscription",
+            ui_mode="embedded",  # Enable embedded checkout
             line_items=[{"price": price_id, "quantity": 1}],
-            success_url=f"{base_url}{req.success_path}{success_qs}" if '?' not in req.success_path else f"{base_url}{req.success_path}&checkout=success&session_id={{CHECKOUT_SESSION_ID}}",
-            cancel_url=f"{base_url}{req.cancel_path}",
+            return_url=f"{base_url}{req.success_path}?checkout=success&session_id={{CHECKOUT_SESSION_ID}}",
             customer=customer_id if customer_id else None,
             subscription_data=subscription_data,
             metadata=metadata,

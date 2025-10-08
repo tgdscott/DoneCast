@@ -65,6 +65,12 @@ async def get_edit_context(episode_id: str, session: Session = Depends(get_sessi
     flubber_keyword = 'flubber'
     flubber_detected = False  # server-side detection TBD
 
+    # CRITICAL: Ensure audio_url is absolute for frontend waveform
+    if playback_url and playback_type == 'local' and not playback_url.startswith('http'):
+        # Make it absolute if relative
+        if not playback_url.startswith('/'):
+            playback_url = f"/{playback_url}"
+
     return {
         "episode_id": str(ep.id),
         "duration_ms": duration_ms,

@@ -36,16 +36,27 @@ _SIGNING_CREDENTIALS = None
 
 
 def _get_signing_credentials():
-    """Load service account credentials for signing URLs from Secret Manager."""
+    """Load service account credentials for signing URLs from Secret Manager or env var."""
     global _SIGNING_CREDENTIALS
     
     if _SIGNING_CREDENTIALS is not None:
         return _SIGNING_CREDENTIALS
     
+    # Try loading from environment variable first (for local development)
+    cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if cred_path and os.path.exists(cred_path):
+        try:
+            credentials = service_account.Credentials.from_service_account_file(cred_path)
+            _SIGNING_CREDENTIALS = credentials
+            logger.info("Loaded signing credentials from GOOGLE_APPLICATION_CREDENTIALS")
+            return credentials
+        except Exception as e:
+            logger.warning(f"Failed to load signing credentials from file: {e}")
+    
+    # Try loading from Secret Manager (for Cloud Run)
     try:
         from google.cloud import secretmanager
         
-        # Load the signing key from Secret Manager
         client = secretmanager.SecretManagerServiceClient()
         project_id = os.getenv("GCP_PROJECT", "podcast612")
         secret_name = f"projects/{project_id}/secrets/gcs-signer-key/versions/latest"
@@ -54,13 +65,12 @@ def _get_signing_credentials():
         key_json = response.payload.data.decode("UTF-8")
         key_dict = json.loads(key_json)
         
-        # Create credentials from the service account key
         credentials = service_account.Credentials.from_service_account_info(key_dict)
         _SIGNING_CREDENTIALS = credentials
         logger.info("Loaded signing credentials from Secret Manager")
         return credentials
     except Exception as e:
-        logger.warning(f"Failed to load signing credentials: {e}")
+        logger.warning(f"Failed to load signing credentials from Secret Manager: {e}")
         return None
 
 
@@ -246,15 +256,41 @@ def _generate_signed_url(
     method: str = "GET",
     content_type: Optional[str] = None,
 ) -> Optional[str]:
-    """Generate a signed URL, using IAM-based signing when private key unavailable.
+    """Generate a signed URL, using service account credentials or IAM-based signing.
     
-    Cloud Run uses Compute Engine credentials which don't have private keys.
-    We use the IAMCredentials API to sign URLs instead.
+    Priority order:
+    1. Try using loaded service account credentials (from env var or Secret Manager)
+    2. Try using default client credentials
+    3. Fall back to IAM-based signing for Cloud Run
     """
     client = _get_gcs_client()
     if not client:
         return None
 
+    # Try using signing credentials from Secret Manager or env var first
+    signing_creds = _get_signing_credentials()
+    if signing_creds:
+        try:
+            bucket = client.bucket(bucket_name)
+            blob = bucket.blob(key)
+            kwargs = {
+                "version": "v4",
+                "expiration": expires,
+                "method": method,
+                "credentials": signing_creds,
+            }
+            
+            if content_type and method.upper() in {"POST", "PUT"}:
+                kwargs["content_type"] = content_type
+                
+            signed_url = blob.generate_signed_url(**kwargs)
+            logger.debug("Generated signed URL using loaded service account credentials")
+            return signed_url
+        except Exception as e:
+            logger.warning(f"Failed to generate signed URL with loaded credentials: {e}")
+            # Fall through to try other methods
+
+    # Try standard signing with client credentials
     try:
         bucket = client.bucket(bucket_name)
         blob = bucket.blob(key)
@@ -271,57 +307,54 @@ def _generate_signed_url(
         if content_type and method.upper() in {"POST", "PUT"}:
             kwargs["content_type"] = content_type
             
-        try:
-            # Try standard signing first (works with service account keys)
-            return blob.generate_signed_url(**kwargs)
-        except (AttributeError, ValueError) as e:
-            # Cloud Run uses Compute Engine credentials without private keys
-            # For read operations (GET), we can return public URL since bucket is publicly readable
-            # For write operations (PUT/POST), we MUST use IAM-based signing
-            error_str = str(e).lower()
-            if "private key" in error_str or "signer" in error_str:
-                if method.upper() == "GET":
-                    # Read-only: public URL works
-                    logger.info("No private key available; using public URL for GET (bucket is publicly readable)")
-                    return f"https://storage.googleapis.com/{bucket_name}/{key}"
-                else:
-                    # Write operation: MUST use IAM signing with custom signer
-                    logger.info("No private key available; using IAM-based signing for %s", method)
-                    try:
-                        from google.auth import compute_engine, iam
-                        from google.auth.transport import requests as auth_requests
-                        
-                        # Get compute engine credentials
-                        credentials = compute_engine.Credentials()
-                        
-                        # Create IAM signer that uses the IAM Credentials API
-                        # This signs blobs using the service account without needing the private key
-                        request = auth_requests.Request()
-                        signer = iam.Signer(
-                            request=request,
-                            credentials=credentials,
-                            service_account_email=None  # Will auto-detect from credentials
-                        )
-                        
-                        # Generate signed URL using the IAM signer
-                        from google.cloud.storage._signing import generate_signed_url_v4
-                        
-                        signed_url = generate_signed_url_v4(
-                            credentials=signer,
-                            resource=f"/{bucket_name}/{key}",
-                            expiration=expires,
-                            api_access_endpoint="https://storage.googleapis.com",
-                            method=method,
-                            headers={"Content-Type": content_type} if content_type else None,
-                        )
-                        
-                        return signed_url
-                        
-                    except Exception as iam_err:
-                        logger.error("IAM-based signing failed: %s", iam_err, exc_info=True)
-                        raise RuntimeError(f"Cannot generate signed {method} URL without private key or IAM access") from iam_err
+        signed_url = blob.generate_signed_url(**kwargs)
+        logger.debug("Generated signed URL using default client credentials")
+        return signed_url
+    except (AttributeError, ValueError) as e:
+        # Cloud Run uses Compute Engine credentials without private keys
+        error_str = str(e).lower()
+        if "private key" in error_str or "signer" in error_str:
+            # For write operations, try IAM-based signing
+            if method.upper() != "GET":
+                logger.info("No private key available; using IAM-based signing for %s", method)
+                try:
+                    from google.auth import compute_engine, iam
+                    from google.auth.transport import requests as auth_requests
+                    
+                    # Get compute engine credentials
+                    credentials = compute_engine.Credentials()
+                    
+                    # Create IAM signer that uses the IAM Credentials API
+                    request = auth_requests.Request()
+                    signer = iam.Signer(
+                        request=request,
+                        credentials=credentials,
+                        service_account_email=None  # Will auto-detect from credentials
+                    )
+                    
+                    # Generate signed URL using the IAM signer
+                    from google.cloud.storage._signing import generate_signed_url_v4
+                    
+                    signed_url = generate_signed_url_v4(
+                        credentials=signer,
+                        resource=f"/{bucket_name}/{key}",
+                        expiration=expires,
+                        api_access_endpoint="https://storage.googleapis.com",
+                        method=method,
+                        headers={"Content-Type": content_type} if content_type else None,
+                    )
+                    
+                    return signed_url
+                    
+                except Exception as iam_err:
+                    logger.error("IAM-based signing failed: %s", iam_err, exc_info=True)
+                    raise RuntimeError(f"Cannot generate signed {method} URL without private key or IAM access") from iam_err
             else:
-                raise
+                # For GET operations, return None to trigger fallback handling
+                logger.warning("No private key available for GET request; will use fallback")
+                return None
+        else:
+            raise
                 
     except Exception as exc:
         logger.error(

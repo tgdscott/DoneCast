@@ -50,7 +50,14 @@ def _commit_with_retry(session, *, max_retries: int = 3, backoff_seconds: float 
             session.commit()
             return True
         except Exception as exc:
-            session.rollback()
+            # Always rollback on error to clean up transaction state
+            try:
+                session.rollback()
+            except Exception as rollback_exc:
+                logging.warning(
+                    "[transcript] Rollback failed during commit retry: %s",
+                    rollback_exc,
+                )
             
             # Check if it's a connection-related error
             exc_str = str(exc).lower()
@@ -63,6 +70,8 @@ def _commit_with_retry(session, *, max_retries: int = 3, backoff_seconds: float 
                     "connection reset",
                     "connection broken",
                     "timeout",
+                    "intrans",  # PostgreSQL transaction state error
+                    "can't change 'autocommit'",  # psycopg autocommit error
                 ]
             )
             
@@ -75,13 +84,32 @@ def _commit_with_retry(session, *, max_retries: int = 3, backoff_seconds: float 
                     delay,
                     exc,
                 )
+                
+                # CRITICAL: Rollback the failed transaction to clear session state
+                try:
+                    session.rollback()
+                    logging.debug("[transcript] Rolled back failed transaction")
+                except Exception as rollback_exc:
+                    logging.warning(
+                        "[transcript] Rollback failed during retry: %s",
+                        rollback_exc,
+                    )
+                
+                # Wait with exponential backoff
                 time.sleep(delay)
                 
-                # Try to refresh the session connection
+                # Verify connection is alive before retry
                 try:
-                    session.connection()
-                except Exception:
-                    pass  # Connection will be re-established on next commit
+                    # This will get a new connection from pool if needed
+                    from sqlalchemy import text
+                    session.execute(text("SELECT 1"))
+                    logging.debug("[transcript] Connection verified for retry")
+                except Exception as reconnect_exc:
+                    logging.warning(
+                        "[transcript] Connection test failed during retry: %s",
+                        reconnect_exc,
+                    )
+                    # Continue anyway - commit will trigger fresh connection
                     
                 continue
             
@@ -466,7 +494,7 @@ def prepare_transcript_context(
             return ai_enhancer.generate_speech_from_text(
                 text,
                 voice_id=str((tts_values or {}).get("intern_voice_id") or ""),
-                api_key=getattr(media_context.user, "elevenlabs_api_key", None),
+                api_key=media_context.elevenlabs_api_key,
                 provider=media_context.preferred_tts_provider,
             )
         except Exception:
@@ -717,7 +745,7 @@ def prepare_transcript_context(
             bucket = (os.getenv("MEDIA_BUCKET") or "").strip()
             if bucket and dest.exists() and gcs_utils and hasattr(gcs_utils, "upload_fileobj"):
                 try:
-                    user_part = str(getattr(episode, "user_id", "") or "").strip()
+                    user_part = media_context.user_id or "shared"
                     if not user_part:
                         user_part = "shared"
                     gcs_key = "/".join(
@@ -798,7 +826,7 @@ def prepare_transcript_context(
         )
 
     try:
-        raw_settings = getattr(media_context.user, "audio_cleanup_settings_json", None)
+        raw_settings = media_context.audio_cleanup_settings_json
         parsed_settings = json.loads(raw_settings) if raw_settings else {}
     except Exception:
         parsed_settings = {}

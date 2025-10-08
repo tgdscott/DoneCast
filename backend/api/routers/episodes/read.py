@@ -1,5 +1,6 @@
 import os
 import logging
+import json
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 
@@ -19,7 +20,7 @@ from api.services.episodes import repo as _svc_repo
 from api.services.episodes.transcripts import transcript_endpoints_for_episode
 from uuid import UUID as _UUID
 from pathlib import Path
-from api.core.paths import FINAL_DIR, MEDIA_DIR, APP_ROOT
+from api.core.paths import FINAL_DIR, MEDIA_DIR, APP_ROOT, TRANSCRIPTS_DIR
 
 logger = logging.getLogger("ppp.episodes.read")
 
@@ -28,6 +29,21 @@ router = APIRouter(tags=["episodes"])  # parent provides prefix '/episodes'
 
 # Avoid importing app main (would cause circular import). Derive project root relative to this file.
 PROJECT_ROOT = APP_ROOT
+
+
+def _is_flubber_token(word: str) -> bool:
+        """Check if a word token is 'flubber' or a close variant."""
+        if not word:
+                return False
+        normalized = str(word).strip().lower()
+        if normalized == "flubber":
+                return True
+        # Optional: fuzzy matching for common STT variants
+        try:
+                import difflib
+                return difflib.SequenceMatcher(a=normalized, b="flubber").ratio() >= 0.8
+        except Exception:
+                return False
 
 
 def _set_status(ep: Episode, status_str: str) -> None:
@@ -389,11 +405,33 @@ def list_episodes(
                                 "absolute_json": None,
                                 "absolute_text": None,
                         }
+                
+                # Check if transcript contains "flubber" for conditional UI display
+                has_flubber = False
+                try:
+                        from api.services.episodes.transcripts import _candidate_stems_from_episode
+                        stems = _candidate_stems_from_episode(e)
+                        for stem in stems:
+                                tr_path = TRANSCRIPTS_DIR / f"{stem}.json"
+                                if tr_path.is_file():
+                                        words = json.loads(tr_path.read_text(encoding="utf-8"))
+                                        # Check for "flubber" token (case-insensitive)
+                                        for w in words:
+                                                word = str(w.get("word", "")).strip().lower()
+                                                if word == "flubber":
+                                                        has_flubber = True
+                                                        break
+                                        if has_flubber:
+                                                break
+                except Exception:
+                        pass
+                
                 items.append({
                         "id": str(e.id),
                         "podcast_id": getattr(e, 'podcast_id', None),
                         "title": e.title,
                         "status": derived_status,
+                        "has_flubber": has_flubber,
                         "processed_at": e.processed_at.isoformat() if getattr(e, "processed_at", None) else None,
                         "duration_ms": getattr(e, 'duration_ms', None),
                         "final_audio_url": final_audio_url,

@@ -71,6 +71,7 @@ class Settings(BaseSettings):
 
     # --- Stripe Billing ---
     STRIPE_SECRET_KEY: str = ""
+    STRIPE_PUBLISHABLE_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
 
     # --- Application Behavior ---

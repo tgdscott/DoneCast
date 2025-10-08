@@ -157,7 +157,9 @@ async def create_tts_media(
     if gcs_bucket and body.category in ("intro", "outro", "music", "sfx", "commercial"):
         try:
             from infrastructure import gcs
-            gcs_key = f"media/{current_user.id.hex}/{body.category.value}/{filename}"
+            # Use consistent path format: {user_id}/media/{category}/{filename}
+            # This matches the manual upload path format in media_write.py
+            gcs_key = f"{current_user.id.hex}/media/{body.category.value}/{filename}"
             with open(out_path, "rb") as f:
                 gcs_url = gcs.upload_fileobj(gcs_bucket, gcs_key, f, content_type="audio/mpeg")
             if gcs_url:

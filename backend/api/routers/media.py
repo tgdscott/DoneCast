@@ -238,7 +238,8 @@ async def upload_media_files(
         ):
             try:
                 from infrastructure import gcs
-                gcs_key = f"{current_user.id.hex}/{category.value}/{safe_filename}"
+                # Use consistent path format: {user_id}/media/{category}/{filename}
+                gcs_key = f"{current_user.id.hex}/media/{category.value}/{safe_filename}"
                 with open(file_path, "rb") as f:
                     gcs_url = gcs.upload_fileobj(gcs_bucket, gcs_key, f, content_type=final_content_type or "audio/mpeg")
                 
@@ -376,6 +377,9 @@ async def preview_media(
         resolve: If true, return JSON {url} instead of redirect
     """
     from fastapi.responses import JSONResponse, RedirectResponse
+    import logging
+    
+    log = logging.getLogger("api.media.preview")
     
     item: Optional[MediaItem] = None
     if id:
@@ -387,6 +391,7 @@ async def preview_media(
         if not item or item.user_id != current_user.id:
             raise HTTPException(status_code=404, detail="Not found")
         path = item.filename
+        log.info(f"Preview request for media_id={id}, filename={path}")
     
     if not path:
         raise HTTPException(status_code=400, detail="Missing id or path")
@@ -396,11 +401,15 @@ async def preview_media(
         p = path[5:]
         bucket, _, key = p.partition("/")
         if not bucket or not key:
+            log.error(f"Invalid gs:// path format: {path}")
             raise HTTPException(status_code=400, detail="Invalid gs path")
         try:
             from infrastructure import gcs
+            log.info(f"Generating signed URL for gs://{bucket}/{key}")
             url = gcs.make_signed_url(bucket, key, minutes=int(os.getenv("GCS_SIGNED_URL_TTL_MIN", "10")))
+            log.info(f"Successfully generated signed URL: {url[:100]}...")
         except Exception as ex:
+            log.error(f"Failed to generate signed URL: {ex}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Failed to sign URL: {ex}")
         
         if resolve:
@@ -409,6 +418,7 @@ async def preview_media(
     
     # Handle local files (development fallback)
     filename = path.lstrip("/\\")
+    log.info(f"Checking local file: {filename}")
     try:
         media_root = MEDIA_DIR.resolve()
     except Exception:
@@ -417,14 +427,18 @@ async def preview_media(
     try:
         candidate = (MEDIA_DIR / filename).resolve(strict=False)
         if not candidate.is_relative_to(media_root):
+            log.error(f"Path traversal attempt: {filename}")
             raise HTTPException(status_code=403, detail="Path traversal not allowed")
         if not candidate.exists():
-            raise HTTPException(status_code=404, detail="File not found")
+            log.error(f"File not found: {candidate}")
+            raise HTTPException(status_code=404, detail=f"File not found: {filename}")
     except Exception as ex:
+        log.error(f"Error resolving local file: {ex}")
         raise HTTPException(status_code=404, detail=str(ex))
     
     # For local files, return a relative API path
     rel = f"/api/media/files/{filename}"
+    log.info(f"Returning local file path: {rel}")
     if resolve:
         return JSONResponse({"url": rel})
     return RedirectResponse(url=rel)

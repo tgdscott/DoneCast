@@ -119,15 +119,15 @@ def _cleanup_main_content(*, session, episode, main_content_filename: str) -> No
             except Exception:
                 base_name = filename
 
-            candidates = []
+            file_candidates: list[Path] = []
             for root in {MEDIA_DIR, PROJECT_ROOT / "media_uploads", Path("media_uploads")}:
                 try:
-                    candidates.append((root / base_name).resolve(strict=False))
+                    file_candidates.append((root / base_name).resolve(strict=False))
                 except Exception:
                     continue
 
             seen: set[str] = set()
-            for candidate in candidates:
+            for candidate in file_candidates:
                 try:
                     key = str(candidate)
                 except Exception:
@@ -208,7 +208,7 @@ def _finalize_episode(
         },
         tts_overrides=tts_values or {},
         cover_image_path=media_context.cover_image_path,
-        elevenlabs_api_key=getattr(media_context.user, "elevenlabs_api_key", None),
+        elevenlabs_api_key=media_context.elevenlabs_api_key,
         tts_provider=media_context.preferred_tts_provider,
         mix_only=True,
         words_json_path=str(transcript_context.words_json_path)
@@ -447,71 +447,74 @@ def orchestrate_create_podcast_episode(
     skip_charge: bool = False,
 ):
     logging.info("[assemble] CWD = %s", os.getcwd())
-    session = next(get_session())
-    try:
-        billing.debit_usage_at_start(
-            session=session,
-            user_id=user_id,
-            episode_id=episode_id,
-            main_content_filename=main_content_filename,
-            skip_charge=skip_charge,
-        )
-
-        media_context, words_json_path, early_result = media.resolve_media_context(
-            session=session,
-            episode_id=episode_id,
-            template_id=template_id,
-            main_content_filename=main_content_filename,
-            output_filename=output_filename,
-            episode_details=episode_details,
-            user_id=user_id,
-        )
-
-        if early_result:
-            return early_result
-
-        assert media_context is not None  # for type checkers
-
-        transcript_context = transcript.prepare_transcript_context(
-            session=session,
-            media_context=media_context,
-            words_json_path=Path(words_json_path) if words_json_path else None,
-            main_content_filename=main_content_filename,
-            output_filename=output_filename,
-            tts_values=tts_values,
-            user_id=user_id,
-            intents=intents,
-        )
-
-        return _finalize_episode(
-            session=session,
-            media_context=media_context,
-            transcript_context=transcript_context,
-            main_content_filename=main_content_filename,
-            output_filename=output_filename,
-            tts_values=tts_values,
-        )
-    except Exception as exc:
-        logging.exception(
-            "Error during episode assembly for %s: %s", output_filename, exc
-        )
+    
+    # Use dedicated session with proper context management and connection cleanup
+    # This prevents connection pool corruption during long-running assembly tasks
+    from api.core.database import session_scope
+    
+    with session_scope() as session:
         try:
-            from api.core import crud
+            billing.debit_usage_at_start(
+                session=session,
+                user_id=user_id,
+                episode_id=episode_id,
+                main_content_filename=main_content_filename,
+                skip_charge=skip_charge,
+            )
 
-            episode = crud.get_episode_by_id(session, UUID(episode_id))
-            if episode:
-                try:
-                    from api.models.podcast import EpisodeStatus as EpStatus
+            media_context, words_json_path, early_result = media.resolve_media_context(
+                session=session,
+                episode_id=episode_id,
+                template_id=template_id,
+                main_content_filename=main_content_filename,
+                output_filename=output_filename,
+                episode_details=episode_details,
+                user_id=user_id,
+            )
 
-                    episode.status = EpStatus.error  # type: ignore[attr-defined]
-                except Exception:
-                    episode.status = "error"  # type: ignore[assignment]
-                session.add(episode)
-                if not _commit_with_retry(session):
-                    logging.error("[orchestrate] Failed to commit error status in exception handler")
-        except Exception:
-            pass
-        raise
-    finally:
-        session.close()
+            if early_result:
+                return early_result
+
+            assert media_context is not None  # for type checkers
+
+            transcript_context = transcript.prepare_transcript_context(
+                session=session,
+                media_context=media_context,
+                words_json_path=Path(words_json_path) if words_json_path else None,
+                main_content_filename=main_content_filename,
+                output_filename=output_filename,
+                tts_values=tts_values,
+                user_id=user_id,
+                intents=intents,
+            )
+
+            return _finalize_episode(
+                session=session,
+                media_context=media_context,
+                transcript_context=transcript_context,
+                main_content_filename=main_content_filename,
+                output_filename=output_filename,
+                tts_values=tts_values,
+            )
+        except Exception as exc:
+            logging.exception(
+                "Error during episode assembly for %s: %s", output_filename, exc
+            )
+            try:
+                from api.core import crud
+
+                episode = crud.get_episode_by_id(session, UUID(episode_id))
+                if episode:
+                    try:
+                        from api.models.podcast import EpisodeStatus as EpStatus
+
+                        episode.status = EpStatus.error  # type: ignore[attr-defined]
+                    except Exception:
+                        episode.status = "error"  # type: ignore[assignment]
+                    session.add(episode)
+                    if not _commit_with_retry(session):
+                        logging.error("[orchestrate] Failed to commit error status in exception handler")
+            except Exception:
+                pass
+            raise
 

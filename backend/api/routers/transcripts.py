@@ -18,6 +18,80 @@ from api.routers.ai_suggestions import _discover_transcript_json_path  # reuse d
 router = APIRouter(prefix="/transcripts", tags=["transcripts"])
 
 
+def _format_timestamp(seconds: float) -> str:
+    """Format seconds as MM:SS or HH:MM:SS"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def _format_diarized_transcript(words: list) -> str:
+    """Convert word-level transcript to diarized text format with speaker labels.
+    
+    Builds phrases by grouping consecutive words from the same speaker with gaps < 0.8s.
+    Formats as: [MM:SS - MM:SS] Speaker: text
+    """
+    if not words:
+        return ""
+    
+    phrases = []
+    current_phrase = None
+    prev_end = None
+    prev_speaker = None
+    gap_threshold = 0.8  # seconds
+    
+    for w in words:
+        if not isinstance(w, dict):
+            continue
+        
+        word_text = str(w.get("word", "")).strip()
+        if not word_text:
+            continue
+        
+        start = float(w.get("start", 0.0))
+        end = float(w.get("end", start))
+        speaker = str(w.get("speaker") or "Speaker")
+        
+        # Calculate gap from previous word
+        gap = (start - prev_end) if prev_end is not None else 0.0
+        
+        # Start new phrase if speaker changed or gap is too large
+        if current_phrase is None or speaker != prev_speaker or gap >= gap_threshold:
+            if current_phrase is not None:
+                phrases.append(current_phrase)
+            current_phrase = {
+                "speaker": speaker,
+                "start": start,
+                "end": end,
+                "text": word_text
+            }
+        else:
+            # Continue current phrase
+            current_phrase["end"] = end
+            current_phrase["text"] += " " + word_text
+        
+        prev_end = end
+        prev_speaker = speaker
+    
+    # Don't forget the last phrase
+    if current_phrase is not None:
+        phrases.append(current_phrase)
+    
+    # Format phrases as text
+    lines = []
+    for p in phrases:
+        start_ts = _format_timestamp(p["start"])
+        end_ts = _format_timestamp(p["end"])
+        speaker = p["speaker"]
+        text = p["text"].strip()
+        lines.append(f"[{start_ts} - {end_ts}] {speaker}: {text}")
+    
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
 def _resolve_from_gcs(session: Session, episode_id: str) -> Optional[tuple[str, bytes]]:
     """Attempt to fetch transcript JSON content from GCS based on episode/user stems.
 
@@ -111,10 +185,16 @@ def get_episode_transcript_text(episode_id: str, session: Session = Depends(get_
                 words = None
     if words is None:
         raise HTTPException(status_code=404, detail="TRANSCRIPT_NOT_FOUND")
+    
+    # Generate diarized transcript with speaker labels and timestamps
     try:
-        text = " ".join([str(w.get("word", "")).strip() for w in words if w.get("word")])
+        text = _format_diarized_transcript(words)
     except Exception:
-        text = ""
+        # Fallback to simple concatenation if formatting fails
+        try:
+            text = " ".join([str(w.get("word", "")).strip() for w in words if w.get("word")])
+        except Exception:
+            text = ""
     return Response(content=text.encode("utf-8"), media_type="text/plain; charset=utf-8")
 
 
@@ -147,9 +227,13 @@ def get_transcript_by_hint(
             if words is None:
                 raise HTTPException(status_code=404, detail="TRANSCRIPT_NOT_FOUND")
             try:
-                text = " ".join([str(w.get("word", "")).strip() for w in words if w.get("word")])
+                text = _format_diarized_transcript(words)
             except Exception:
-                text = ""
+                # Fallback to simple concatenation if formatting fails
+                try:
+                    text = " ".join([str(w.get("word", "")).strip() for w in words if w.get("word")])
+                except Exception:
+                    text = ""
             return Response(content=text.encode("utf-8"), media_type="text/plain; charset=utf-8")
         else:
             content = Path(path).read_bytes()

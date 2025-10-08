@@ -50,7 +50,27 @@ def purge_expired_uploads() -> dict:
         episode_query = select(Episode)
         episodes = session.exec(episode_query).all()
         in_use: set[str] = set()
+        
+        # Only mark files as "in use" if they're referenced by episodes that are NOT complete
+        # Complete = processed, published, or scheduled (scheduled not in enum but might exist in DB)
+        # We want to KEEP files if ANY episode is: pending, processing, or error
+        from api.models.podcast import EpisodeStatus
+        
+        incomplete_statuses = {
+            EpisodeStatus.pending,
+            EpisodeStatus.processing,
+            EpisodeStatus.error,
+        }
+        
         for ep in episodes:
+            # Check if episode is incomplete (needs the file)
+            ep_status = getattr(ep, "status", None)
+            if ep_status not in incomplete_statuses:
+                # Episode is complete (processed/published), file can be cleaned up
+                continue
+                
+            # Episode is incomplete, keep its files
+            # Check direct episode fields
             for name in (
                 getattr(ep, "working_audio_name", None),
                 getattr(ep, "final_audio_path", None),
@@ -63,6 +83,21 @@ def purge_expired_uploads() -> dict:
                     in_use.add(Path(str(name)).name)
                 except Exception:
                     in_use.add(str(name))
+            
+            # Also check meta_json for main_content_filename (used by retry logic)
+            try:
+                meta_str = getattr(ep, "meta_json", None)
+                if meta_str:
+                    meta = json.loads(meta_str)
+                    if isinstance(meta, dict):
+                        main_content = meta.get("main_content_filename")
+                        if main_content:
+                            try:
+                                in_use.add(Path(str(main_content)).name)
+                            except Exception:
+                                in_use.add(str(main_content))
+            except Exception:
+                pass  # Ignore JSON parse errors
 
         for media_item in items:
             checked += 1

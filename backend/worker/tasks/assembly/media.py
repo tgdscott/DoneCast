@@ -27,6 +27,11 @@ class MediaContext:
     template: Any
     episode: Episode
     user: Any
+    # Extracted scalar values to avoid DetachedInstanceError
+    user_id: Optional[str]
+    episode_id: Optional[str]
+    elevenlabs_api_key: Optional[str]
+    audio_cleanup_settings_json: Optional[str]
     cover_image_path: Optional[str]
     cleanup_settings: dict
     preferred_tts_provider: str
@@ -335,6 +340,20 @@ def resolve_media_context(
             pass
         return None, None, {"dropped": True, "reason": "episode not found", "episode_id": episode_id}
 
+    # CRITICAL: Eagerly load episode attributes while session is still valid
+    # This prevents DetachedInstanceError when accessing attributes after session closes
+    try:
+        _ = episode.user_id  # Force load
+        _ = episode.id  # Force load
+        _ = episode.status  # Force load
+        _ = episode.final_audio_path  # Force load
+        _ = episode.title  # Force load
+        _ = episode.show_notes  # Force load
+        _ = episode.working_audio_name  # Force load
+        _ = episode.meta_json  # Force load
+    except Exception:
+        logging.debug("[assemble] Failed to eagerly load episode attributes", exc_info=True)
+
     if getattr(episode, "status", None) == "processed" and getattr(
         episode, "final_audio_path", None
     ):
@@ -364,6 +383,17 @@ def resolve_media_context(
             )
 
     user_obj = crud.get_user_by_id(session, UUID(user_id)) if hasattr(crud, "get_user_by_id") else None
+    
+    # CRITICAL: Eagerly load user attributes while session is still valid
+    # This prevents DetachedInstanceError when accessing attributes after session closes
+    if user_obj:
+        try:
+            _ = user_obj.elevenlabs_api_key  # Force load
+            _ = user_obj.email  # Force load
+            _ = user_obj.id  # Force load
+        except Exception:
+            logging.debug("[assemble] Failed to eagerly load user attributes", exc_info=True)
+    
     cleanup_settings = _load_cleanup_settings(user_obj)
 
     preferred_tts_provider = None
@@ -823,11 +853,21 @@ def resolve_media_context(
                     "[assemble] Unable to download transcript JSON from configured bucket", exc_info=True
                 )
 
+    # Extract scalar values to avoid DetachedInstanceError when session closes
+    user_id_val = str(getattr(episode, "user_id", "") or "").strip() if episode else None
+    episode_id_val = str(getattr(episode, "id", "") or "").strip() if episode else None
+    elevenlabs_key = getattr(user_obj, "elevenlabs_api_key", None) if user_obj else None
+    audio_settings_json = getattr(user_obj, "audio_cleanup_settings_json", None) if user_obj else None
+
     return (
         MediaContext(
             template=template,
             episode=episode,
             user=user_obj,
+            user_id=user_id_val,
+            episode_id=episode_id_val,
+            elevenlabs_api_key=elevenlabs_key,
+            audio_cleanup_settings_json=audio_settings_json,
             cover_image_path=cover_image_path,
             cleanup_settings=cleanup_settings,
             preferred_tts_provider=preferred_tts_provider,

@@ -95,10 +95,12 @@ DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT", "5432")
 
 _POOL_KWARGS = {
-    "pool_pre_ping": True,
+    # Disabled pool_pre_ping due to psycopg3 incompatibility with INTRANS state
+    # Relying on pool_recycle instead to handle stale connections
+    "pool_pre_ping": False,
     "pool_size": int(os.getenv("DB_POOL_SIZE", 5)),
-    "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", 0)),
-    "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", 180)),
+    "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", 10)),  # Increased from 0 to handle concurrent requests
+    "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", 300)),  # Increased from 180s to 5min - recycle stale connections
     "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", 30)),
     "future": True,
     # PostgreSQL connection args to handle long-running operations
@@ -388,14 +390,47 @@ def get_session():
 
 @contextmanager
 def session_scope() -> Iterator[Session]:
-    """Provide a context manager for DB sessions outside FastAPI dependencies."""
-
-    session = Session(engine)
+    """Provide a context manager for DB sessions outside FastAPI dependencies.
+    
+    Ensures proper transaction cleanup even if commit fails or exceptions occur.
+    Critical for long-running tasks to prevent connection pool corruption.
+    
+    CRITICAL: Always executes ROLLBACK before returning connection to pool.
+    This prevents INTRANS state leakage that causes "can't change autocommit" errors.
+    """
+    session = Session(engine, expire_on_commit=False)  # Prevent lazy-load issues after commit
     try:
         yield session
+        # Note: Caller is responsible for commit() - this allows retry logic
     except Exception:
-        session.rollback()
+        # Always rollback on exception to clean transaction state
+        try:
+            session.rollback()
+        except Exception as rollback_exc:
+            log.warning(
+                "[db] Rollback failed in session_scope cleanup: %s",
+                rollback_exc,
+            )
         raise
     finally:
-        session.close()
+        # CRITICAL: Force rollback before closing to prevent INTRANS state
+        # This ensures NO connection is ever returned to pool in a transaction
+        try:
+            # Check if there's an active transaction and roll it back
+            if session.in_transaction():
+                session.rollback()
+        except Exception as rollback_exc:
+            log.debug(
+                "[db] Pre-close rollback in session_scope: %s",
+                rollback_exc,
+            )
+        
+        # Ensure session is properly closed and connection returned to pool
+        try:
+            session.close()
+        except Exception as close_exc:
+            log.warning(
+                "[db] Session close failed in session_scope cleanup: %s",
+                close_exc,
+            )
 

@@ -836,14 +836,16 @@ export default function EpisodeHistory({ token, onBack }) {
                   (statusLabel(ep.status) === 'published' && isWithin7Days(ep.publish_at)) ||
                   (statusLabel(ep.status) === 'scheduled' && isWithin7Days(ep.publish_at))) && (
                   <>
-                    {/* Cut for edits */}
-                    <button
-                      className="bg-white/85 hover:bg-white text-purple-700 border border-purple-300 rounded p-1 shadow-sm"
-                      title="Cut for edits"
-                      onClick={() => setFlubberEpId(prev => prev===ep.id? null : ep.id)}
-                    >
-                      <Scissors className="w-4 h-4" />
-                    </button>
+                    {/* Cut for edits - ONLY show if transcript contains "flubber" */}
+                    {ep.has_flubber && (
+                      <button
+                        className="bg-white/85 hover:bg-white text-purple-700 border border-purple-300 rounded p-1 shadow-sm"
+                        title="Cut for edits (flubber detected)"
+                        onClick={() => setFlubberEpId(prev => prev===ep.id? null : ep.id)}
+                      >
+                        <Scissors className="w-4 h-4" />
+                      </button>
+                    )}
                     {/* Manual Editor */}
                     <button
                       className="bg-white/85 hover:bg-white text-blue-700 border border-blue-300 rounded p-1 shadow-sm"
@@ -911,15 +913,19 @@ export default function EpisodeHistory({ token, onBack }) {
                 <div className="text-gray-500 text-xs flex items-center"><Play className="w-3 h-3 mr-1"/>No audio</div>
               )}
               {missingAudio && <div className="text-[10px] text-red-600">File missing on server</div>}
-              {/* Show transcript scroll icon if GCS transcript is available */}
+              {/* Show publicly accessible transcript link if available */}
               {(() => {
-                let transcriptUrl = null;
+                // Prefer the public TXT endpoint for human-readable diarized transcript
+                const transcriptTxtUrl = ep.has_transcript && ep.transcript_url ? resolveAssetUrl(ep.transcript_url) : null;
+                // Also check GCS JSON as fallback
+                let transcriptJsonUrl = null;
                 if (ep.meta_json) {
                   try {
                     const meta = typeof ep.meta_json === 'string' ? JSON.parse(ep.meta_json) : ep.meta_json;
-                    transcriptUrl = resolveAssetUrl(meta?.transcripts?.gcs_json || null) || null;
+                    transcriptJsonUrl = resolveAssetUrl(meta?.transcripts?.gcs_json || null) || null;
                   } catch {}
                 }
+                const transcriptUrl = transcriptTxtUrl || transcriptJsonUrl;
                 if (transcriptUrl) {
                   return (
                     <a
@@ -927,10 +933,9 @@ export default function EpisodeHistory({ token, onBack }) {
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 underline"
-                      title="View transcript"
+                      title="View human-readable transcript (publicly accessible)"
                     >
-                      {/* Simple scroll icon for now */}
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M4 2a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H4zm0 1h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm2 2v6h4V4H6zm1 1h2v4H7V5z"/></svg>
+                      <FileText className="w-3 h-3"/>
                       Transcript
                     </a>
                   );
