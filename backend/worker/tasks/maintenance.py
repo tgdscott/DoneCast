@@ -24,12 +24,17 @@ except Exception:  # pragma: no cover
 
 @celery_app.task(name="maintenance.purge_expired_uploads")
 def purge_expired_uploads() -> dict:
-    """Delete expired raw uploads that are no longer referenced."""
+    """Delete expired raw uploads that are no longer referenced.
+    
+    For recordings (main_content), enforces 24-hour minimum retention period
+    even if used in an episode, giving users time to download a backup.
+    """
 
     session = next(get_session())
     now = datetime.utcnow()
     removed = 0
     skipped_in_use = 0
+    skipped_too_young = 0
     checked = 0
 
     try:
@@ -64,6 +69,15 @@ def purge_expired_uploads() -> dict:
             filename = getattr(media_item, "filename", None)
             if not filename:
                 continue
+            
+            # Enforce 24-hour minimum retention for recordings (gives users "oops" time to download backup)
+            created_at = getattr(media_item, "created_at", None)
+            if created_at:
+                age_hours = (now - created_at).total_seconds() / 3600
+                if age_hours < 24:
+                    skipped_too_young += 1
+                    continue
+            
             if filename in in_use:
                 skipped_in_use += 1
                 continue
@@ -95,12 +109,18 @@ def purge_expired_uploads() -> dict:
         session.close()
 
     logging.info(
-        "[purge] expired uploads: checked=%s removed=%s skipped_in_use=%s",
+        "[purge] expired uploads: checked=%s removed=%s skipped_in_use=%s skipped_too_young=%s",
         checked,
         removed,
         skipped_in_use,
+        skipped_too_young,
     )
-    return {"checked": checked, "removed": removed, "skipped_in_use": skipped_in_use}
+    return {
+        "checked": checked, 
+        "removed": removed, 
+        "skipped_in_use": skipped_in_use,
+        "skipped_too_young": skipped_too_young
+    }
 
 
 @celery_app.task(name="maintenance.purge_published_episode_mirrors")

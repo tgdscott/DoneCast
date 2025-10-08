@@ -143,10 +143,16 @@ def notify_watchers_processed(filename: str) -> None:
                 friendly_text = (watch.friendly_name or friendly or Path(filename).stem or filename)
 
                 if email:
-                    subject = "Your upload is ready to edit"
+                    subject = "Your recording is ready to edit"
+                    # Include download link and 24-hour retention notice
                     body = (
-                        f"Good news! The audio file '{friendly_text}' has finished processing and is ready in Podcast Plus Plus.\n\n"
-
+                        f"Good news! Your recording '{friendly_text}' has finished processing and is ready in Podcast Plus Plus.\n\n"
+                        
+                        f"💾 Download your raw recording (valid for 24 hours):\n"
+                        f"https://app.podcastplusplus.com/media-library\n\n"
+                        
+                        "💡 Tip: Download a backup copy now! The raw file will be automatically deleted after 24 hours.\n\n"
+                        
                         "You can return to the dashboard to continue building your episode."
                     )
                     try:
