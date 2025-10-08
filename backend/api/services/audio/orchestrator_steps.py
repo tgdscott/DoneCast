@@ -1421,22 +1421,65 @@ def build_template_and_final_mix_step(
 
         for rule in (template_background_music_rules or []):
             req_name = (rule.get('music_filename') or rule.get('music') or '')
-            music_path = MEDIA_DIR / req_name
-            if not music_path.exists():
-                altm = _resolve_media_file(req_name)
-                if altm and altm.exists():
-                    music_path = altm
+            
+            # Handle GCS URLs (music uploaded via media library)
+            if req_name.startswith("gs://"):
+                import tempfile
+                from infrastructure import gcs
+                temp_path = None
+                try:
+                    # Parse gs://bucket/key format
+                    gcs_str = req_name[5:]  # Remove "gs://"
+                    bucket, key = gcs_str.split("/", 1)
+                    
+                    # Download bytes from GCS
+                    file_bytes = gcs.download_bytes(bucket, key)
+                    if not file_bytes:
+                        raise RuntimeError(f"Failed to download from GCS: {req_name}")
+                    
+                    # Write to temp file for pydub
+                    temp_fd, temp_path = tempfile.mkstemp(suffix=".mp3")
+                    os.close(temp_fd)
+                    
+                    with open(temp_path, "wb") as f:
+                        f.write(file_bytes)
+                    
+                    bg = AudioSegment.from_file(temp_path)
                     try:
-                        log.append(f"[MUSIC_RULE_RESOLVED] requested={req_name} -> {music_path.name}")
+                        log.append(f"[MUSIC_RULE_GCS_OK] gcs={req_name} len_ms={len(bg)}")
                     except Exception:
                         pass
-                else:
+                except Exception as e:
                     try:
-                        log.append(f"[MUSIC_RULE_SKIP] missing_file={req_name}")
+                        log.append(f"[MUSIC_RULE_GCS_ERROR] gcs={req_name} error={type(e).__name__}: {e}")
                     except Exception:
                         pass
                     continue
-            bg = AudioSegment.from_file(music_path)
+                finally:
+                    if temp_path and os.path.exists(temp_path):
+                        try:
+                            os.remove(temp_path)
+                        except Exception:
+                            pass
+            else:
+                # Handle local files
+                music_path = MEDIA_DIR / req_name
+                if not music_path.exists():
+                    altm = _resolve_media_file(req_name)
+                    if altm and altm.exists():
+                        music_path = altm
+                        try:
+                            log.append(f"[MUSIC_RULE_RESOLVED] requested={req_name} -> {music_path.name}")
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            log.append(f"[MUSIC_RULE_SKIP] missing_file={req_name}")
+                        except Exception:
+                            pass
+                        continue
+                bg = AudioSegment.from_file(music_path)
+            
             apply_to = [str(t).lower() for t in (rule.get('apply_to_segments') or [])]
             vol_db = float(rule.get('volume_db') if rule.get('volume_db') is not None else -15)
             fade_in_ms = int(max(0.0, float(rule.get('fade_in_s') or 0.0)) * 1000)
@@ -1444,7 +1487,7 @@ def build_template_and_final_mix_step(
             start_off_s = float(rule.get('start_offset_s') or 0.0)
             end_off_s = float(rule.get('end_offset_s') or 0.0)
             try:
-                log.append(f"[MUSIC_RULE_OK] file={music_path.name} apply_to={apply_to} vol_db={vol_db} start_off_s={start_off_s} end_off_s={end_off_s}")
+                log.append(f"[MUSIC_RULE_OK] file={req_name} apply_to={apply_to} vol_db={vol_db} start_off_s={start_off_s} end_off_s={end_off_s}")
             except Exception:
                 pass
 
