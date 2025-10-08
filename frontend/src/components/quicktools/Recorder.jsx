@@ -4,12 +4,14 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
-import { ArrowLeft, Mic, Square, Loader2, CheckCircle } from "lucide-react";
+import { ArrowLeft, Mic, Square, Loader2, CheckCircle, Download } from "lucide-react";
 import { makeApi } from "@/lib/apiClient";
 import { uploadMediaDirect } from "@/lib/directUpload";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/AuthContext";
 
 export default function Recorder({ onBack, token, onFinish, onSaved, source="A" }) {
+  const { user: authUser } = useAuth();
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [hasPreview, setHasPreview] = useState(false);
@@ -588,19 +590,32 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source="A" 
   setSavedDisplayName(filenameWithExt);
       // Build File from Blob so server receives a filename with extension
       const file = new File([audioBlob], filenameWithExt, { type: mimeType || audioBlob.type || "audio/webm" });
+      
+      // Get user email for notification
+      const userEmail = authUser?.email || '';
+      
       const uploaded = await uploadMediaDirect({
         category: 'main_content',
         file,
         friendlyName: baseName,
         token,
+        notifyWhenReady: !!userEmail,
+        notifyEmail: userEmail || undefined,
       });
       const first = Array.isArray(uploaded) ? uploaded[0] : null;
       const stored = first && (first.filename || first.name || first.stored_name);
       if (!stored) throw new Error("Upload response missing filename");
       setServerFilename(stored);
       setServerStem(extractStemFromFilename(stored));
-      // Surface success toast
-      toast({ title: "Saved", description: "Saved. Transcription has started." });
+      
+      // Surface success toast with email confirmation
+      const emailMsg = userEmail 
+        ? ` We'll email you at ${userEmail} when it's ready.` 
+        : '';
+      toast({ 
+        title: "Recording Saved!", 
+        description: `Transcription started.${emailMsg} Download link available for 24 hours.` 
+      });
   // Notify host app (Plus Plus workspace upload screen, etc.) so it can surface the new media immediately
   try { window.dispatchEvent(new CustomEvent('ppp:media-uploaded', { detail: first })); } catch {}
   try { if (typeof onSaved === 'function') onSaved(first); } catch {}
@@ -936,6 +951,36 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source="A" 
                           <Loader2 className="h-4 w-4 mr-1 animate-spin" aria-hidden /> Processing…
                         </span>
                       )}
+                    </div>
+                  </div>
+                  
+                  {/* Prominent download button - available for 24 hours */}
+                  {audioUrl && audioBlob && (
+                    <div className="border-t pt-3 mt-3">
+                      <div className="text-xs text-muted-foreground mb-2">
+                        💾 <strong>Save a backup copy!</strong> Download link available for 24 hours.
+                      </div>
+                      <Button
+                        onClick={() => {
+                          const a = document.createElement("a");
+                          a.href = audioUrl;
+                          a.download = savedDisplayName || recordingName || "recording.webm";
+                          document.body.appendChild(a);
+                          a.click();
+                          document.body.removeChild(a);
+                        }}
+                        variant="outline"
+                        className="w-full sm:w-auto"
+                      >
+                        <Download className="w-4 h-4 mr-2" />
+                        Download Raw Recording
+                      </Button>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between gap-3 flex-wrap mt-3">
+                    <div></div>
+                    <div className="flex items-center gap-3">
                       {transcriptReady && (
                         <Button
                           className="bg-primary text-primary-foreground hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary"
