@@ -1,0 +1,11 @@
+# Google Cloud Run dispatch rules for app.podcastplusplus.com
+# This routes requests to the appropriate service based on URL path
+
+dispatch:
+  # Route all /api/* requests to the backend API service
+  - url: "app.podcastplusplus.com/api/*"
+    service: podcast-api
+  
+  # Route all other requests to the frontend
+  - url: "app.podcastplusplus.com/*"
+    service: podcast-web

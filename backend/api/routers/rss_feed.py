@@ -9,6 +9,7 @@ This replaces Spreaker's RSS feed with our own, giving full control over:
 """
 
 from datetime import datetime, timezone
+import logging
 from typing import List, Optional
 from uuid import UUID
 import xml.etree.ElementTree as ET
@@ -21,6 +22,8 @@ from api.core.database import get_session
 from api.models.podcast import Podcast, Episode, EpisodeStatus
 from api.core.config import settings
 from infrastructure.gcs import get_public_audio_url
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/rss", tags=["rss-feed"])
 
@@ -134,7 +137,14 @@ def _generate_podcast_rss(podcast: Podcast, episodes: List[Episode], base_url: s
         # Episode audio enclosure
         audio_url = None
         if episode.gcs_audio_path:
+            logger.info(f"RSS Feed: Generating audio URL for episode {episode.episode_number}: {episode.gcs_audio_path}")
             audio_url = get_public_audio_url(episode.gcs_audio_path, expiration_days=7)
+            if audio_url:
+                logger.info(f"RSS Feed: Generated audio URL for episode {episode.episode_number}")
+            else:
+                logger.warning(f"RSS Feed: Failed to generate audio URL for episode {episode.episode_number}")
+        else:
+            logger.warning(f"RSS Feed: Episode {episode.episode_number} has no gcs_audio_path")
         
         if audio_url:
             # Get file size (required for RSS enclosure)

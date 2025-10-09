@@ -53,7 +53,23 @@ def _get_signing_credentials():
         except Exception as e:
             logger.warning(f"Failed to load signing credentials from file: {e}")
     
-    # Try loading from Secret Manager (for Cloud Run)
+    # Try loading from GCS_SIGNER_KEY_JSON env var (Cloud Run with Secret Manager)
+    signer_key_json = os.getenv("GCS_SIGNER_KEY_JSON")
+    if signer_key_json:
+        try:
+            # If it starts with sm://, Cloud Run will have already resolved it to the actual JSON content
+            # Otherwise, treat it as inline JSON
+            key_dict = json.loads(signer_key_json)
+            credentials = service_account.Credentials.from_service_account_info(key_dict)
+            _SIGNING_CREDENTIALS = credentials
+            logger.info("Loaded signing credentials from GCS_SIGNER_KEY_JSON env var")
+            return credentials
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse GCS_SIGNER_KEY_JSON as JSON: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to load signing credentials from GCS_SIGNER_KEY_JSON: {e}")
+    
+    # Try loading from Secret Manager directly (fallback for Cloud Run)
     try:
         from google.cloud import secretmanager
         

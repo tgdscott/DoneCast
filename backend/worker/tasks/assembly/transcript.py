@@ -573,6 +573,23 @@ def prepare_transcript_context(
                     cleaned_path = Path(final_path)
         except Exception:
             cleaned_path = None
+        
+        # Persist updated transcript to disk for mixer to find
+        try:
+            edits = (((engine_result or {}).get("summary", {}) or {}).get("edits", {}) or {})
+            words_json_data = edits.get("words_json")
+            if words_json_data and isinstance(words_json_data, (list, dict)):
+                # Save to transcripts directory with cleaned audio stem
+                cleaned_stem = cleaned_path.stem if cleaned_path else f"cleaned_{Path(base_audio_name).stem}"
+                transcript_dir = PROJECT_ROOT / "transcripts"
+                transcript_dir.mkdir(parents=True, exist_ok=True)
+                transcript_path = transcript_dir / f"{cleaned_stem}.original.json"
+                with open(transcript_path, "w", encoding="utf-8") as f:
+                    json.dump(words_json_data, f, indent=2)
+                logging.info("[assemble] Saved updated transcript to %s", transcript_path)
+        except Exception:
+            logging.warning("[assemble] Failed to persist updated transcript", exc_info=True)
+        
         try:
             edits = (((engine_result or {}).get("summary", {}) or {}).get("edits", {}) or {})
             spans = edits.get("censor_spans_ms", [])

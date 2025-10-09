@@ -1,8 +1,8 @@
 # Session Summary - Critical Fixes
 
-**Date:** October 8, 2025  
-**Session Duration:** ~4 hours  
-**Issues Fixed:** 5 critical production bugs (4 worker + 1 API)
+**Date:** October 8-9, 2025  
+**Session Duration:** ~6 hours  
+**Issues Fixed:** 6 critical production bugs (5 worker + 1 API)
 
 ---
 
@@ -158,6 +158,11 @@ gcloud logging read "jsonPayload.message=~'assemble.*complete'" --limit 10
 - **Fallback:** Re-enable pool_pre_ping=True
 - **Impact:** API requests blocked (INTRANS errors return)
 
+### Issue #6 (Cleaned Audio Transcript):
+- **Risk:** LOW
+- **Fallback:** Revert transcript persistence code
+- **Impact:** Episodes stuck searching for transcript (30+ min timeout)
+
 ---
 
 ## Issue #5: API Connection Pool INTRANS Error ✅ FIXED
@@ -176,6 +181,25 @@ gcloud logging read "jsonPayload.message=~'assemble.*complete'" --limit 10
 
 **Documentation:**
 - `POOL_PRE_PING_FIX.md` - Comprehensive explanation and monitoring guide
+
+---
+
+## Issue #6: Cleaned Audio Transcript Not Persisted ✅ FIXED
+
+**User Report:** "Episode stuck on processing with 30+ GCS 404 errors for cleaned_*.json"
+
+**Root Cause:** After `clean_engine` processes audio (removes silence/fillers), the updated transcript with adjusted timestamps exists in memory but is never written to disk
+
+**Solution:** 
+- Persist `engine_result["summary"]["edits"]["words_json"]` to disk immediately after processing
+- Write to `/tmp/transcripts/cleaned_<stem>.original.json`
+- Mixer finds transcript on first try instead of 30+ GCS fallback attempts
+
+**Files Changed:**
+- `backend/worker/tasks/assembly/transcript.py` - Added transcript persistence after clean_engine
+
+**Documentation:**
+- `CLEANED_AUDIO_TRANSCRIPT_FIX.md` - Complete explanation with examples
 
 ---
 
@@ -203,18 +227,20 @@ gcloud logging read "jsonPayload.message=~'assemble.*complete'" --limit 10
 3. `backend/worker/tasks/maintenance.py` - File retention logic
 4. `backend/worker/tasks/assembly/media.py` - MediaContext scalars
 5. `backend/worker/tasks/assembly/orchestrator.py` - Use scalars
-6. `backend/worker/tasks/assembly/transcript.py` - Use scalars + connection retry fix
+6. `backend/worker/tasks/assembly/transcript.py` - Use scalars + connection retry fix + transcript persistence
 7. `backend/api/core/database.py` - Disable pool_pre_ping for psycopg3 compatibility
+8. `frontend/package.json` - Fixed Stripe dependency version
 
 **Documentation:**
-8. `TRANSCRIPT_RECOVERY_FROM_GCS_FIX.md`
-9. `TRANSCRIPT_RECOVERY_SUMMARY.md`
-10. `PREMATURE_FILE_DELETION_FIX.md`
-11. `EPISODE_RETRY_FIX_SUMMARY.md`
-12. `DETACHED_INSTANCE_ERROR_FIX.md`
-13. `DATABASE_CONNECTION_TIMEOUT_FIX.md`
-14. `POOL_PRE_PING_FIX.md`
-15. `SESSION_SUMMARY.md` (this file)
+9. `TRANSCRIPT_RECOVERY_FROM_GCS_FIX.md`
+10. `TRANSCRIPT_RECOVERY_SUMMARY.md`
+11. `PREMATURE_FILE_DELETION_FIX.md`
+12. `EPISODE_RETRY_FIX_SUMMARY.md`
+13. `DETACHED_INSTANCE_ERROR_FIX.md`
+14. `DATABASE_CONNECTION_TIMEOUT_FIX.md`
+15. `POOL_PRE_PING_FIX.md`
+16. `CLEANED_AUDIO_TRANSCRIPT_FIX.md`
+17. `SESSION_SUMMARY.md` (this file)
 
 ---
 
