@@ -674,3 +674,56 @@ def delete_gcs_blob(bucket_name: str, blob_name: str) -> None:
             blob_name,
             exc,
         )
+
+
+def get_public_audio_url(gcs_path: Optional[str], expiration_days: int = 7) -> Optional[str]:
+    """
+    Generate a public-accessible URL for podcast audio in GCS.
+    
+    For RSS feeds, generates signed URLs with longer expiration (default 7 days).
+    Podcast apps cache RSS feeds, so URLs need to remain valid for several days.
+    
+    Args:
+        gcs_path: Full GCS path like "gs://bucket/path/to/file.mp3"
+        expiration_days: How many days the URL should remain valid (default 7)
+        
+    Returns:
+        Public HTTPS URL for the audio file, or None if path is invalid
+        
+    Usage:
+        >>> get_public_audio_url("gs://my-bucket/episodes/ep123.mp3")
+        'https://storage.googleapis.com/my-bucket/episodes/ep123.mp3?...'
+    """
+    if not gcs_path or not gcs_path.startswith("gs://"):
+        logger.warning("Invalid GCS path for audio URL: %s", gcs_path)
+        return None
+    
+    # Parse gs://bucket/path -> bucket, path
+    try:
+        parts = gcs_path[5:].split("/", 1)
+        if len(parts) != 2:
+            logger.warning("Invalid GCS path format: %s", gcs_path)
+            return None
+        
+        bucket_name, object_path = parts
+        
+        # Generate signed URL with expiration
+        signed_url = _generate_signed_url(
+            bucket_name=bucket_name,
+            key=object_path,
+            expires=timedelta(days=expiration_days),
+            method="GET",
+        )
+        
+        if signed_url:
+            logger.debug("Generated public audio URL for %s (expires in %d days)", gcs_path, expiration_days)
+            return signed_url
+        
+        # Fallback: Return public GCS URL (will only work if bucket is publicly readable)
+        public_url = f"https://storage.googleapis.com/{bucket_name}/{object_path}"
+        logger.warning("Could not generate signed URL, falling back to public URL: %s", public_url)
+        return public_url
+        
+    except Exception as e:
+        logger.error("Failed to generate public audio URL for %s: %s", gcs_path, e, exc_info=True)
+        return None

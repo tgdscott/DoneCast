@@ -340,6 +340,22 @@ def _finalize_episode(
         # Upload audio file
         audio_src = fallback_candidate if fallback_candidate and fallback_candidate.is_file() else None
         if audio_src:
+            # Get audio file size for RSS feed
+            try:
+                episode.audio_file_size = audio_src.stat().st_size
+                logging.info("[assemble] Audio file size: %d bytes", episode.audio_file_size)
+            except Exception as size_err:
+                logging.warning("[assemble] Could not get audio file size: %s", size_err)
+            
+            # Get audio duration for RSS feed
+            try:
+                from pydub import AudioSegment
+                audio = AudioSegment.from_file(str(audio_src))
+                episode.duration_ms = len(audio)
+                logging.info("[assemble] Audio duration: %d ms (%.1f minutes)", episode.duration_ms, episode.duration_ms / 1000 / 60)
+            except Exception as dur_err:
+                logging.warning("[assemble] Could not get audio duration: %s", dur_err)
+            
             gcs_audio_key = f"{user_id}/episodes/{episode_id}/audio/{final_basename}"
             with open(audio_src, "rb") as f:
                 gcs_audio_url = gcs.upload_fileobj(gcs_bucket, gcs_audio_key, f, content_type="audio/mpeg")  # type: ignore[attr-defined]

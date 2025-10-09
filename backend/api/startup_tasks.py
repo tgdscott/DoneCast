@@ -454,6 +454,99 @@ def _ensure_user_terms_columns() -> None:
             log.warning("[migrate] Unable to ensure user terms columns (%s): %s", backend, exc)
 
 
+def _ensure_rss_feed_columns() -> None:
+    """Add columns needed for self-hosted RSS feed generation.
+    
+    Adds:
+    - episode.audio_file_size: File size in bytes (required for RSS <enclosure> tag)
+    - episode.duration_ms: Duration in milliseconds (for iTunes <duration> tag)
+    - podcast.slug: Friendly URL slug (e.g., 'my-awesome-podcast')
+    """
+    backend = engine.url.get_backend_name()
+    if backend == "sqlite":
+        try:
+            with engine.connect() as conn:
+                # Episode columns
+                res = conn.exec_driver_sql("PRAGMA table_info(episode)")
+                cols = {row[1] for row in res}
+                
+                if "audio_file_size" not in cols:
+                    conn.exec_driver_sql("ALTER TABLE episode ADD COLUMN audio_file_size INTEGER")
+                    log.info("[migrate] Added episode.audio_file_size for RSS enclosures")
+                
+                if "duration_ms" not in cols:
+                    conn.exec_driver_sql("ALTER TABLE episode ADD COLUMN duration_ms INTEGER")
+                    log.info("[migrate] Added episode.duration_ms for iTunes duration tag")
+                
+                # Podcast slug column
+                res = conn.exec_driver_sql("PRAGMA table_info(podcast)")
+                pod_cols = {row[1] for row in res}
+                
+                if "slug" not in pod_cols:
+                    # SQLite doesn't support adding UNIQUE columns, enforce at app level
+                    conn.exec_driver_sql("ALTER TABLE podcast ADD COLUMN slug VARCHAR(100)")
+                    log.info("[migrate] Added podcast.slug for friendly RSS URLs")
+                    
+                    # Auto-generate slugs for existing podcasts
+                    import re
+                    from sqlmodel import Session, select
+                    from api.models.podcast import Podcast
+                    
+                    with Session(engine) as session:
+                        podcasts = session.exec(select(Podcast)).all()
+                        for podcast in podcasts:
+                            if not podcast.slug:
+                                # Generate slug from name: "My Awesome Podcast" -> "my-awesome-podcast"
+                                slug = re.sub(r'[^a-z0-9]+', '-', podcast.name.lower()).strip('-')
+                                # Ensure uniqueness
+                                base_slug = slug
+                                counter = 1
+                                while session.exec(select(Podcast).where(Podcast.slug == slug)).first():
+                                    slug = f"{base_slug}-{counter}"
+                                    counter += 1
+                                podcast.slug = slug
+                                session.add(podcast)
+                        session.commit()
+                        log.info("[migrate] Auto-generated slugs for %d existing podcast(s)", len(podcasts))
+        except Exception as exc:  # pragma: no cover
+            log.warning("[migrate] Unable to ensure RSS feed columns (sqlite): %s", exc)
+    else:
+        # PostgreSQL
+        statements = [
+            'ALTER TABLE episode ADD COLUMN IF NOT EXISTS audio_file_size INTEGER',
+            'ALTER TABLE episode ADD COLUMN IF NOT EXISTS duration_ms INTEGER',
+            'ALTER TABLE podcast ADD COLUMN IF NOT EXISTS slug VARCHAR(100) UNIQUE',
+        ]
+        try:
+            with engine.connect() as conn:
+                for stmt in statements:
+                    conn.exec_driver_sql(stmt)
+                log.info("[migrate] Ensured RSS feed columns exist (PostgreSQL)")
+                
+                # Auto-generate slugs for existing podcasts
+                import re
+                from sqlmodel import Session, select
+                from api.models.podcast import Podcast
+                
+                with Session(engine) as session:
+                    podcasts = session.exec(select(Podcast).where(Podcast.slug == None)).all()
+                    if podcasts:
+                        for podcast in podcasts:
+                            slug = re.sub(r'[^a-z0-9]+', '-', podcast.name.lower()).strip('-')
+                            # Ensure uniqueness
+                            base_slug = slug
+                            counter = 1
+                            while session.exec(select(Podcast).where(Podcast.slug == slug)).first():
+                                slug = f"{base_slug}-{counter}"
+                                counter += 1
+                            podcast.slug = slug
+                            session.add(podcast)
+                        session.commit()
+                        log.info("[migrate] Auto-generated slugs for %d existing podcast(s)", len(podcasts))
+        except Exception as exc:  # pragma: no cover
+            log.warning("[migrate] Unable to ensure RSS feed columns (%s): %s", backend, exc)
+
+
 def _kill_zombie_assembly_processes() -> None:
     """Kill any orphaned assembly worker processes from previous restarts.
     
@@ -600,6 +693,59 @@ def _recover_stuck_processing_episodes(limit: int | None = None) -> None:
         log.warning("[startup] _recover_stuck_processing_episodes failed: %s", e)
 
 
+def _ensure_episode_gcs_columns() -> None:
+    """Add GCS and import-related columns to episode table.
+    
+    These columns support:
+    - GCS storage paths for audio/cover retention
+    - Episode import from external feeds
+    - Numbering conflict detection
+    """
+    backend = engine.url.get_backend_name()
+    
+    if backend == "sqlite":
+        try:
+            with engine.connect() as conn:
+                res = conn.exec_driver_sql("PRAGMA table_info(episode)")
+                cols = {row[1] for row in res}
+                
+                columns_to_add = {
+                    'gcs_audio_path': 'VARCHAR',
+                    'gcs_cover_path': 'VARCHAR',
+                    'has_numbering_conflict': 'BOOLEAN DEFAULT FALSE',
+                    'original_guid': 'VARCHAR',
+                    'source_media_url': 'VARCHAR',
+                    'source_published_at': 'DATETIME',
+                    'source_checksum': 'VARCHAR',
+                }
+                
+                for col_name, col_type in columns_to_add.items():
+                    if col_name not in cols:
+                        conn.exec_driver_sql(f"ALTER TABLE episode ADD COLUMN {col_name} {col_type}")
+                        log.info("[migrate] Added episode.%s", col_name)
+                        
+        except Exception as exc:
+            log.warning("[migrate] Unable to ensure episode GCS columns (sqlite): %s", exc)
+    else:
+        # PostgreSQL
+        statements = [
+            'ALTER TABLE episode ADD COLUMN IF NOT EXISTS gcs_audio_path VARCHAR',
+            'ALTER TABLE episode ADD COLUMN IF NOT EXISTS gcs_cover_path VARCHAR',
+            'ALTER TABLE episode ADD COLUMN IF NOT EXISTS has_numbering_conflict BOOLEAN DEFAULT FALSE',
+            'ALTER TABLE episode ADD COLUMN IF NOT EXISTS original_guid VARCHAR',
+            'ALTER TABLE episode ADD COLUMN IF NOT EXISTS source_media_url VARCHAR',
+            'ALTER TABLE episode ADD COLUMN IF NOT EXISTS source_published_at TIMESTAMP',
+            'ALTER TABLE episode ADD COLUMN IF NOT EXISTS source_checksum VARCHAR',
+        ]
+        try:
+            with engine.connect() as conn:
+                for stmt in statements:
+                    conn.exec_driver_sql(stmt)
+                log.info("[migrate] Ensured episode GCS columns exist (PostgreSQL)")
+        except Exception as exc:
+            log.warning("[migrate] Unable to ensure episode GCS columns (postgresql): %s", exc)
+
+
 def run_startup_tasks() -> None:
     """Perform lightweight startup + optionally heavy normalization/backfill.
 
@@ -627,6 +773,10 @@ def run_startup_tasks() -> None:
         _ensure_user_terms_columns()
     with _timing("ensure_user_subscription_column"):
         _ensure_user_subscription_column()
+    with _timing("ensure_episode_gcs_columns"):
+        _ensure_episode_gcs_columns()
+    with _timing("ensure_rss_feed_columns"):
+        _ensure_rss_feed_columns()
     
     # Always recover stuck episodes - this is critical for good UX after deployments
     with _timing("recover_stuck_episodes"):

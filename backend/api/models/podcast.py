@@ -65,6 +65,8 @@ class PodcastBase(SQLModel):
     feed_url_canonical: Optional[str] = Field(default=None, description="Final fetched URL after redirects")
     verification_method: Optional[str] = Field(default=None, description="email|dns when ownership verified")
     verified_at: Optional[datetime] = Field(default=None)
+    # Friendly URL slug for public-facing URLs (RSS feeds, websites, etc.)
+    slug: Optional[str] = Field(default=None, index=True, unique=True, max_length=100, description="URL-friendly slug for public links (e.g., 'my-awesome-podcast')")
 
 class Podcast(PodcastBase, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
@@ -289,6 +291,10 @@ class Episode(SQLModel, table=True):
     # Audio pipeline metadata & working filename for in-progress/cleaned content
     meta_json: Optional[str] = Field(default="{}", description="Arbitrary JSON metadata for processing (flubber contexts, cuts, etc.)")
     working_audio_name: Optional[str] = Field(default=None, description="Current working audio basename (e.g., cleaned content) used as source for final mixing")
+    
+    # Self-hosted RSS feed requirements
+    audio_file_size: Optional[int] = Field(default=None, description="Audio file size in bytes (required for RSS <enclosure> length attribute)")
+    duration_ms: Optional[int] = Field(default=None, description="Episode duration in milliseconds (for iTunes <duration> tag)")
 
     processed_at: datetime = Field(default_factory=datetime.utcnow)
     created_at: datetime = Field(default_factory=datetime.utcnow, description="Creation timestamp (added via migration)")

@@ -97,6 +97,7 @@ recurring              = _safe_import("api.routers.recurring")
 assemblyai_router      = _safe_import("api.routers.assemblyai_webhook")
 media_upload_alias     = _safe_import("api.routers.media_upload_alias")
 assistant_router       = _safe_import("api.routers.assistant")
+rss_feed_router        = _safe_import("api.routers.rss_feed")
 
 def _maybe(app: FastAPI, r, prefix: str = "/api"):
     if r is not None:
@@ -176,6 +177,8 @@ def attach_routers(app: FastAPI) -> dict:
     availability['recurring'] = recurring is not None
     _maybe(app, assemblyai_router)
     availability['assemblyai_router'] = assemblyai_router is not None
+    _maybe(app, rss_feed_router)
+    availability['rss_feed_router'] = rss_feed_router is not None
 
     # Cloud Tasks internal hook (no prefix: it already has /api/tasks)
     app.include_router(tasks_router)
