@@ -346,21 +346,36 @@ def _finalize_episode(
     else:
         audio_input_path = episode.working_audio_name or main_content_filename
     
+    # Prepare cleanup options - skip all cleaning if chunking was used
+    if use_chunking:
+        # Audio is already fully cleaned and reassembled - just mix it
+        cleanup_opts = {
+            **transcript_context.mixer_only_options,
+            "internIntent": "skip",  # Skip intern processing
+            "flubberIntent": "skip",  # Skip filler removal
+            "removePauses": False,  # Skip silence removal
+            "removeFillers": False,  # Skip filler word removal
+            "internEnabled": False,  # Disable intern feature
+        }
+    else:
+        # Normal cleanup options
+        cleanup_opts = {
+            **transcript_context.mixer_only_options,
+            "internIntent": transcript_context.intern_intent,
+            "flubberIntent": transcript_context.flubber_intent,
+        }
+    
     # Standard audio processing (for short files or chunking fallback)
     final_path, log_data, ai_note_additions = audio_processor.process_and_assemble_episode(
         template=media_context.template,
         main_content_filename=audio_input_path,
         output_filename=output_filename,
-        cleanup_options={
-            **transcript_context.mixer_only_options,
-            "internIntent": transcript_context.intern_intent,
-            "flubberIntent": transcript_context.flubber_intent,
-        },
+        cleanup_options=cleanup_opts,
         tts_overrides=tts_values or {},
         cover_image_path=media_context.cover_image_path,
         elevenlabs_api_key=media_context.elevenlabs_api_key,
         tts_provider=media_context.preferred_tts_provider,
-        mix_only=True if use_chunking else True,  # Always mix_only since cleaning is done
+        mix_only=True,  # Always mix_only since cleaning is done
         words_json_path=str(transcript_context.words_json_path)
         if transcript_context.words_json_path
         else None,
