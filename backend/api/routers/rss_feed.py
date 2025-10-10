@@ -75,7 +75,7 @@ def _generate_podcast_rss(podcast: Podcast, episodes: List[Episode], base_url: s
     
     # iTunes tags
     ET.SubElement(channel, "itunes:author").text = podcast.author_name or podcast.owner_name or "Unknown"
-    ET.SubElement(channel, "itunes:explicit").text = "no"  # TODO: Make configurable
+    ET.SubElement(channel, "itunes:explicit").text = "yes" if getattr(podcast, 'is_explicit', False) else "no"
     
     # Podcast owner (required for iTunes submission)
     if podcast.contact_email or podcast.owner_name:
@@ -100,8 +100,8 @@ def _generate_podcast_rss(podcast: Podcast, episodes: List[Episode], base_url: s
         ET.SubElement(image_elem, "link").text = base_url
     
     # Podcast categories (iTunes)
-    # TODO: Map category_id to iTunes category names
-    ET.SubElement(channel, "itunes:category", {"text": "Technology"})
+    itunes_category = getattr(podcast, 'itunes_category', 'Technology') or 'Technology'
+    ET.SubElement(channel, "itunes:category", {"text": itunes_category})
     
     # Copyright
     if podcast.copyright_line:
@@ -184,7 +184,9 @@ def _generate_podcast_rss(podcast: Podcast, episodes: List[Episode], base_url: s
         ET.SubElement(item, "itunes:explicit").text = "yes" if episode.is_explicit else "no"
         
         # Episode type (full, trailer, bonus)
-        ET.SubElement(item, "itunes:episodeType").text = "full"  # TODO: Make configurable
+        episode_type = getattr(episode, 'episode_type', 'full') or 'full'
+        if episode_type in ('full', 'trailer', 'bonus'):
+            ET.SubElement(item, "itunes:episodeType").text = episode_type
         
         # Tags as keywords
         tags = episode.tags()

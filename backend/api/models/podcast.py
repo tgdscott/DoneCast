@@ -57,6 +57,9 @@ class PodcastBase(SQLModel):
     author_name: Optional[str] = None
     spreaker_show_id: Optional[str] = None
     contact_email: Optional[str] = None
+    # iTunes/RSS settings
+    is_explicit: bool = Field(default=False, description="Podcast contains explicit content (iTunes)")
+    itunes_category: Optional[str] = Field(default="Technology", description="Primary iTunes category")
     category_id: Optional[int] = Field(default=None, description="Primary Spreaker category id")
     category_2_id: Optional[int] = Field(default=None, description="Secondary Spreaker category id")
     category_3_id: Optional[int] = Field(default=None, description="Tertiary Spreaker category id")
@@ -269,9 +272,9 @@ class Episode(SQLModel, table=True):
     season_number: Optional[int] = Field(default=None, description="Season number for ordering/auto-increment")
     episode_number: Optional[int] = Field(default=None, description="Episode number within the season")
     # Extended editable metadata (locally stored; some not yet propagated to Spreaker API)
-    # episode_type & chapters intentionally omitted until Spreaker exposes API support
     tags_json: Optional[str] = Field(default="[]", description="JSON list of tag strings (AI generated soon)")
     is_explicit: bool = Field(default=False, description="Explicit content flag (local; mirror to Spreaker when API exposed)")
+    episode_type: Optional[str] = Field(default="full", description="iTunes episode type: full, trailer, or bonus")
     image_crop: Optional[str] = Field(default=None, description="Crop rectangle 'x1,y1,x2,y2' for square extraction when pushing to Spreaker")
     
     status: EpisodeStatus = Field(default=EpisodeStatus.pending)
