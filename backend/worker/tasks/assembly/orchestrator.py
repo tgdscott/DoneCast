@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import tempfile
 from pathlib import Path
 from uuid import UUID
 
@@ -19,6 +20,7 @@ from api.models.podcast import MediaCategory, MediaItem
 from api.services import audio as audio_processor
 from api.core.paths import WS_ROOT as PROJECT_ROOT, FINAL_DIR, MEDIA_DIR
 from infrastructure import gcs
+from infrastructure.tasks_client import enqueue_http_task
 
 from . import billing, media, transcript
 from .transcript import _commit_with_retry
@@ -197,6 +199,146 @@ def _finalize_episode(
     episode = media_context.episode
     stream_log_path = str(ASSEMBLY_LOG_DIR / f"{episode.id}.log")
 
+    # NEW: Check if we should use chunked processing for long files
+    from pathlib import Path as PathLib
+    from worker.tasks.assembly import chunked_processor
+    
+    # Find the main audio file path
+    audio_name = episode.working_audio_name or main_content_filename
+    main_audio_path = MEDIA_DIR / audio_name if not PathLib(audio_name).is_absolute() else PathLib(audio_name)
+    
+    use_chunking = chunked_processor.should_use_chunking(main_audio_path)
+    
+    if use_chunking:
+        logging.info("[assemble] File duration >10min, using chunked processing for episode_id=%s", episode.id)
+        
+        # Split audio into chunks
+        try:
+            # Get user_id from episode
+            from uuid import UUID as UUIDType
+            user_uuid = UUIDType(str(episode.user_id)) if episode.user_id else UUIDType(str(episode.podcast.user_id))
+            
+            chunks = chunked_processor.split_audio_into_chunks(
+                audio_path=main_audio_path,
+                user_id=user_uuid,
+                episode_id=episode.id,
+            )
+            
+            # Split transcript to match chunks
+            if transcript_context.words_json_path:
+                chunked_processor.split_transcript_for_chunks(
+                    transcript_path=PathLib(transcript_context.words_json_path),
+                    chunks=chunks,
+                )
+            
+            # Save chunk manifest to episode metadata
+            manifest_path = PathLib(tempfile.gettempdir()) / f"chunks_{episode.id}_manifest.json"
+            chunked_processor.save_chunk_manifest(chunks, manifest_path)
+            
+            # Dispatch Cloud Tasks for each chunk
+            cleanup_options = {
+                **transcript_context.mixer_only_options,
+                "internIntent": transcript_context.intern_intent,
+                "flubberIntent": transcript_context.flubber_intent,
+            }
+            
+            for chunk in chunks:
+                chunk_payload = {
+                    "episode_id": str(episode.id),
+                    "chunk_id": chunk.chunk_id,
+                    "chunk_index": chunk.index,
+                    "gcs_audio_uri": chunk.gcs_audio_uri,
+                    "gcs_transcript_uri": chunk.gcs_transcript_uri,
+                    "cleanup_options": cleanup_options,
+                    "user_id": str(media_context.user_id),
+                }
+                
+                try:
+                    task_info = enqueue_http_task("/api/tasks/process-chunk", chunk_payload)
+                    logging.info("[assemble] Dispatched chunk %d task: %s", chunk.index, task_info)
+                except Exception as e:
+                    logging.error("[assemble] Failed to dispatch chunk %d: %s", chunk.index, e)
+                    # Mark chunk as failed
+                    chunk.status = "failed"
+            
+            # Wait for all chunks to complete
+            import time
+            max_wait_seconds = 900  # 15 minutes
+            poll_interval = 5  # 5 seconds
+            start_time = time.time()
+            
+            logging.info("[assemble] Waiting for %d chunks to complete...", len(chunks))
+            
+            while time.time() - start_time < max_wait_seconds:
+                # Check if all chunks have cleaned URIs in GCS
+                import infrastructure.gcs as gcs
+                
+                all_complete = True
+                for chunk in chunks:
+                    if not chunk.gcs_audio_uri:
+                        all_complete = False
+                        continue
+                    
+                    cleaned_uri = chunk.gcs_audio_uri.replace(".wav", "_cleaned.mp3")
+                    
+                    # Parse URI to check existence
+                    if cleaned_uri.startswith("gs://"):
+                        parts = cleaned_uri[5:].split("/", 1)
+                        if len(parts) == 2:
+                            bucket_name, blob_path = parts
+                            exists = gcs.blob_exists(bucket_name, blob_path)
+                            
+                            if exists:
+                                chunk.cleaned_path = f"/tmp/{chunk.chunk_id}_cleaned.mp3"
+                                chunk.gcs_cleaned_uri = cleaned_uri
+                                chunk.status = "completed"
+                            else:
+                                all_complete = False
+                
+                if all_complete:
+                    logging.info("[assemble] All %d chunks completed in %.1f seconds",
+                               len(chunks), time.time() - start_time)
+                    break
+                
+                time.sleep(poll_interval)
+            
+            if not all_complete:
+                raise RuntimeError(f"Chunk processing timed out after {max_wait_seconds}s")
+            
+            # Download and reassemble chunks
+            logging.info("[assemble] Reassembling %d chunks...", len(chunks))
+            
+            # Download cleaned chunks
+            for chunk in chunks:
+                if chunk.gcs_cleaned_uri:
+                    gcs_uri = chunk.gcs_cleaned_uri
+                    if gcs_uri.startswith("gs://"):
+                        parts = gcs_uri[5:].split("/", 1)
+                        if len(parts) == 2:
+                            bucket_name, blob_path = parts
+                            cleaned_bytes = gcs.download_gcs_bytes(bucket_name, blob_path)
+                            if cleaned_bytes:
+                                chunk_path = PathLib(f"/tmp/{chunk.chunk_id}_cleaned.mp3")
+                                chunk_path.write_bytes(cleaned_bytes)
+                                chunk.cleaned_path = str(chunk_path)
+                                logging.info("[assemble] Downloaded chunk %d: %s", chunk.index, chunk_path)
+            
+            # Reassemble into single file
+            reassembled_path = PathLib(f"/tmp/{episode.id}_reassembled.mp3")
+            chunked_processor.reassemble_chunks(chunks, reassembled_path)
+            
+            # Use reassembled file as main content for mixing
+            main_content_filename = str(reassembled_path)
+            mix_only_mode = True
+            
+            logging.info("[assemble] Chunked processing complete, proceeding to mixing with %s", main_content_filename)
+            
+        except Exception as e:
+            logging.error("[assemble] Chunked processing failed: %s", e, exc_info=True)
+            logging.warning("[assemble] Falling back to direct processing")
+            use_chunking = False
+    
+    # Standard audio processing (for short files or chunking fallback)
     final_path, log_data, ai_note_additions = audio_processor.process_and_assemble_episode(
         template=media_context.template,
         main_content_filename=episode.working_audio_name or main_content_filename,
@@ -210,7 +352,7 @@ def _finalize_episode(
         cover_image_path=media_context.cover_image_path,
         elevenlabs_api_key=media_context.elevenlabs_api_key,
         tts_provider=media_context.preferred_tts_provider,
-        mix_only=True,
+        mix_only=True if use_chunking else True,  # Always mix_only since cleaning is done
         words_json_path=str(transcript_context.words_json_path)
         if transcript_context.words_json_path
         else None,
