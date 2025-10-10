@@ -753,6 +753,7 @@ def assemble_or_queue(
             logging.getLogger("assemble").error(f"[assemble] Cloud Tasks import failed: {e}", exc_info=True)
             should_use = False
 
+        cloud_tasks_succeeded = False
         if should_use:
                 try:
                     # Build payload to send to /api/tasks/assemble; in dev this will route to a local
@@ -785,15 +786,17 @@ def assemble_or_queue(
                         session.refresh(ep)
                     except Exception:
                         session.rollback()
+                    cloud_tasks_succeeded = True
                     return {"mode": "cloud-task", "job_id": task_info.get("name", "cloud-task"), "episode_id": str(ep.id)}
                 except Exception as e:
                     # If Cloud Tasks path fails, log and fall back to inline
                     logging.getLogger("assemble").error(f"[assemble] Cloud Tasks dispatch failed: {e}", exc_info=True)
+                    cloud_tasks_succeeded = False
 
         # If Cloud Tasks failed or unavailable, fall back to inline execution
         # Celery is DISABLED in production - inline execution is the only fallback
-        if not should_use:
-            logging.getLogger("assemble").warning("[assemble] Cloud Tasks unavailable, falling back to inline execution")
+        if not should_use or not cloud_tasks_succeeded:
+            logging.getLogger("assemble").warning("[assemble] Cloud Tasks unavailable or failed, falling back to inline execution")
             inline_result = _run_inline_fallback(
                 episode_id=ep.id,
                 template_id=template_id,

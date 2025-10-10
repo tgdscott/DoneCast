@@ -17,6 +17,7 @@ import MetaHead from '@/components/MetaHead.jsx';
 import TermsGate from '@/components/common/TermsGate.jsx';
 import AppAB from '@/ab/AppAB.jsx';
 import { useLayout } from '@/layout/LayoutContext.jsx';
+import BuildInfo from '@/components/admin/BuildInfo.jsx';
 
 // --- IMPORTANT ---
 // Admin is determined by backend role; no hard-coded emails.
@@ -248,6 +249,7 @@ export function AppWithToasterWrapper() {
     return <>
     <MetaHead />
         <App />
+        <BuildInfo />
         <Toaster />
     </>;
 }

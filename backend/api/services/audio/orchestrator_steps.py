@@ -748,20 +748,24 @@ def detect_and_prepare_ai_commands(
     if mix_only and not force_commands:
         def _allow(intent: str) -> bool:
             v = (intent or '').strip().lower()
-            return v not in {"no", "false", "0"}
+            # Intent should be "skip", "no", "false", "0" to DISABLE
+            return v not in {"skip", "no", "false", "0", ""}
 
         new_cfg: Dict[str, Any] = {}
         if _allow(flubber_intent):
             if 'flubber' in (commands_cfg or {}) or flubber_count > 0:
                 new_cfg['flubber'] = (commands_cfg or {}).get('flubber') or {'action': 'rollback_restart', 'max_lookback_words': 50}
                 log.append("[AI_ENABLE_FLUBBER_BY_INTENT] mix_only=True -> flubber enabled")
+        else:
+            if 'flubber' in (commands_cfg or {}):
+                log.append("[AI_DISABLED_BY_INTENT] flubber config present but intent=skip/no")
         if _allow(intern_intent):
             if 'intern' in (commands_cfg or {}) or intern_count > 0:
                 new_cfg['intern'] = (commands_cfg or {}).get('intern') or {'action': 'ai_command'}
                 log.append("[AI_ENABLE_INTERN_BY_INTENT] mix_only=True -> intern enabled")
         else:
             if 'intern' in (commands_cfg or {}):
-                log.append("[AI_DISABLED_BY_INTENT] intern config present but intent=no")
+                log.append("[AI_DISABLED_BY_INTENT] intern config present but intent=skip/no")
         commands_cfg = new_cfg
     elif mix_only and force_commands:
         log.append("[AI_FORCED] mix_only=True but forceCommands=True -> commands enabled")
@@ -842,6 +846,12 @@ def primary_cleanup_and_rebuild(
     log: List[str],
 ) -> Tuple[AudioSegment, List[Dict[str, Any]], Dict[str, int], int]:
     """Remove fillers per config and rebuild audio; also update words if needed."""
+    # Early return if mix_only - skip expensive audio processing
+    if mix_only:
+        log.append("[FILLERS] Skipping filler removal (mix_only=True)")
+        audio = AudioSegment.from_file(content_path)
+        return audio, mutable_words, {}, 0
+    
     raw_filler_list = (cleanup_options.get('fillerWords', []) or []) if isinstance(cleanup_options, dict) else []
     filler_words = set([str(w).strip().lower() for w in raw_filler_list if str(w).strip()])
     remove_fillers_flag = bool((cleanup_options or {}).get('removeFillers', True)) if isinstance(cleanup_options, dict) else True

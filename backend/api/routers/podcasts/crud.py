@@ -213,7 +213,7 @@ def _load_user_podcasts(session: Session, user_id: UUID) -> List[Podcast]:
             """
         )
 
-        rows = session.exec(legacy_query, {"user_id": str(user_id)}).all()
+        rows = session.execute(legacy_query, {"user_id": str(user_id)}).all()
         podcasts: List[Podcast] = []
         for row in rows:
             data = dict(getattr(row, "_mapping", row))

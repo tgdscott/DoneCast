@@ -515,12 +515,16 @@ def _ensure_rss_feed_columns() -> None:
         statements = [
             'ALTER TABLE episode ADD COLUMN IF NOT EXISTS audio_file_size INTEGER',
             'ALTER TABLE episode ADD COLUMN IF NOT EXISTS duration_ms INTEGER',
+            'ALTER TABLE episode ADD COLUMN IF NOT EXISTS episode_type VARCHAR(20) DEFAULT \'full\'',
             'ALTER TABLE podcast ADD COLUMN IF NOT EXISTS slug VARCHAR(100) UNIQUE',
+            'ALTER TABLE podcast ADD COLUMN IF NOT EXISTS is_explicit BOOLEAN DEFAULT FALSE',
+            'ALTER TABLE podcast ADD COLUMN IF NOT EXISTS itunes_category VARCHAR(100)',
         ]
         try:
             with engine.connect() as conn:
                 for stmt in statements:
                     conn.exec_driver_sql(stmt)
+                conn.commit()  # Commit the schema changes before querying
                 log.info("[migrate] Ensured RSS feed columns exist (PostgreSQL)")
                 
                 # Auto-generate slugs for existing podcasts
