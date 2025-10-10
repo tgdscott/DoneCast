@@ -338,10 +338,18 @@ def _finalize_episode(
             logging.warning("[assemble] Falling back to direct processing")
             use_chunking = False
     
+    # Determine which audio file to use for mixing
+    # If chunking was used successfully, use the reassembled file
+    # Otherwise, use the original cleaned audio
+    if use_chunking:
+        audio_input_path = main_content_filename  # This is the reassembled path
+    else:
+        audio_input_path = episode.working_audio_name or main_content_filename
+    
     # Standard audio processing (for short files or chunking fallback)
     final_path, log_data, ai_note_additions = audio_processor.process_and_assemble_episode(
         template=media_context.template,
-        main_content_filename=episode.working_audio_name or main_content_filename,
+        main_content_filename=audio_input_path,
         output_filename=output_filename,
         cleanup_options={
             **transcript_context.mixer_only_options,
