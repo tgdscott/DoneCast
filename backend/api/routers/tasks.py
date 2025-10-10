@@ -366,7 +366,14 @@ async def process_chunk_task(request: Request, x_tasks_auth: str | None = Header
                             if transcript_bytes:
                                 import json
                                 transcript_data = json.loads(transcript_bytes.decode("utf-8"))
-                                log.info("event=chunk.transcript_downloaded words=%d", len(transcript_data.get("words", [])))
+                                # Handle both list and dict formats
+                                if isinstance(transcript_data, list):
+                                    word_count = len(transcript_data)
+                                elif isinstance(transcript_data, dict):
+                                    word_count = len(transcript_data.get("words", []))
+                                else:
+                                    word_count = 0
+                                log.info("event=chunk.transcript_downloaded words=%d", word_count)
                 
                 # Run audio cleaning on chunk - simplified processing
                 log.info("event=chunk.clean_start chunk_path=%s", chunk_audio_path)
