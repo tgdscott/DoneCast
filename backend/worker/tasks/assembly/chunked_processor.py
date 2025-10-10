@@ -240,7 +240,15 @@ def split_transcript_for_chunks(
         log.error(f"[chunking] Failed to load transcript: {e}")
         return
     
-    words = transcript_data.get("words", [])
+    # Handle both dict format {"words": [...]} and list format [...]
+    if isinstance(transcript_data, list):
+        words = transcript_data
+    elif isinstance(transcript_data, dict):
+        words = transcript_data.get("words", [])
+    else:
+        log.warning(f"[chunking] Unexpected transcript format: {type(transcript_data)}")
+        return
+    
     if not words:
         log.warning("[chunking] No words found in transcript")
         return
@@ -266,16 +274,20 @@ def split_transcript_for_chunks(
             adjusted_words.append(adjusted)
         
         # Create chunk transcript
-        chunk_transcript = {
-            **transcript_data,
-            "words": adjusted_words,
-            "chunk_metadata": {
-                "chunk_id": chunk.chunk_id,
-                "chunk_index": chunk.index,
-                "original_start_ms": chunk.start_ms,
-                "original_end_ms": chunk.end_ms,
+        if isinstance(transcript_data, dict):
+            chunk_transcript = {
+                **transcript_data,
+                "words": adjusted_words,
+                "chunk_metadata": {
+                    "chunk_id": chunk.chunk_id,
+                    "chunk_index": chunk.index,
+                    "original_start_ms": chunk.start_ms,
+                    "original_end_ms": chunk.end_ms,
+                }
             }
-        }
+        else:
+            # transcript_data is a list, just save adjusted words
+            chunk_transcript = adjusted_words
         
         # Save chunk transcript
         transcript_filename = f"{chunk.chunk_id}.json"
