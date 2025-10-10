@@ -745,16 +745,15 @@ def assemble_or_queue(
             return inline_result
         _raise_worker_unavailable()
     else:
-        # Optional: Use Cloud Tasks HTTP dispatch instead of Celery when enabled.
-        if os.getenv("USE_CLOUD_TASKS", "").strip().lower() in {"1", "true", "yes", "on"}:
-            try:
-                from infrastructure.tasks_client import enqueue_http_task, should_use_cloud_tasks  # type: ignore
-            except Exception:
-                should_use = False
-            else:
-                should_use = bool(should_use_cloud_tasks())
+        # ALWAYS use Cloud Tasks in production - Celery is disabled
+        try:
+            from infrastructure.tasks_client import enqueue_http_task, should_use_cloud_tasks  # type: ignore
+            should_use = bool(should_use_cloud_tasks())
+        except Exception as e:
+            logging.getLogger("assemble").error(f"[assemble] Cloud Tasks import failed: {e}", exc_info=True)
+            should_use = False
 
-            if should_use:
+        if should_use:
                 try:
                     # Build payload to send to /api/tasks/assemble; in dev this will route to a local
                     # thread fallback; in prod it uses Cloud Tasks HTTP to call back into the API.
@@ -787,15 +786,14 @@ def assemble_or_queue(
                     except Exception:
                         session.rollback()
                     return {"mode": "cloud-task", "job_id": task_info.get("name", "cloud-task"), "episode_id": str(ep.id)}
-                except Exception:
-                    # If Cloud Tasks path fails, continue to Celery queue path as a secondary option
-                    pass
+                except Exception as e:
+                    # If Cloud Tasks path fails, log and fall back to inline
+                    logging.getLogger("assemble").error(f"[assemble] Cloud Tasks dispatch failed: {e}", exc_info=True)
 
-        # Celery path (default)
-        # Attempt to enqueue on Celery broker. If the broker is unreachable or
-        # misconfigured, gracefully fall back to inline execution so the request
-        # does not hang in production.
-        if create_podcast_episode is None:
+        # If Cloud Tasks failed or unavailable, fall back to inline execution
+        # Celery is DISABLED in production - inline execution is the only fallback
+        if not should_use:
+            logging.getLogger("assemble").warning("[assemble] Cloud Tasks unavailable, falling back to inline execution")
             inline_result = _run_inline_fallback(
                 episode_id=ep.id,
                 template_id=template_id,
@@ -811,90 +809,6 @@ def assemble_or_queue(
                 return inline_result
             _raise_worker_unavailable()
 
-        async_result = None
-        try:
-            from typing import Any as _Any, cast as _cast
-
-            task_fn = _cast(_Any, create_podcast_episode)
-            if not hasattr(task_fn, "delay"):
-                raise AttributeError("task missing delay attribute")
-            async_result = task_fn.delay(
-                episode_id=str(ep.id),
-                template_id=str(template_id),
-                main_content_filename=str(main_content_filename),
-                output_filename=str(output_filename),
-                tts_values=tts_values or {},
-                episode_details=episode_details or {},
-                user_id=str(current_user.id),
-                podcast_id=str(getattr(ep, 'podcast_id', '') or ''),
-                intents=intents or None,
-            )
-        except Exception:
-            logging.getLogger("assemble").warning(
-                "[assemble] Celery broker unreachable -> running inline fallback",
-                exc_info=True,
-            )
-            inline_result = _run_inline_fallback(
-                episode_id=ep.id,
-                template_id=template_id,
-                main_content_filename=main_content_filename,
-                output_filename=output_filename,
-                tts_values=tts_values or {},
-                episode_details=episode_details or {},
-                user_id=getattr(current_user, "id", None),
-                podcast_id=getattr(ep, "podcast_id", None),
-                intents=intents,
-            )
-            if inline_result:
-                return inline_result
-        # Store job id in meta for diagnostics
-        if async_result is not None:
-            try:
-                import json as _json
-                meta = {}
-                if getattr(ep, 'meta_json', None):
-                    try:
-                        meta = _json.loads(ep.meta_json or '{}')
-                    except Exception:
-                        meta = {}
-                meta['assembly_job_id'] = async_result.id
-                ep.meta_json = _json.dumps(meta)
-                session.add(ep); session.commit(); session.refresh(ep)
-            except Exception:
-                session.rollback()
-
-        # Automatic dev/local fallback (or explicit env) if no workers respond
-        if auto_fallback:
-            no_workers = False
-            if celery_app is None:
-                no_workers = True
-            else:
-                try:
-                    ping = celery_app.control.ping(timeout=1)
-                    if not ping:
-                        no_workers = True
-                except Exception:
-                    no_workers = True
-            if no_workers:
-                logging.getLogger("assemble").warning(
-                    "[assemble] No Celery workers detected -> running fallback inline"
-                )
-                inline_result = _run_inline_fallback(
-                    episode_id=ep.id,
-                    template_id=template_id,
-                    main_content_filename=main_content_filename,
-                    output_filename=output_filename,
-                    tts_values=tts_values or {},
-                    episode_details=episode_details or {},
-                    user_id=getattr(current_user, "id", None),
-                    podcast_id=getattr(ep, "podcast_id", None),
-                    intents=intents,
-                )
-                if inline_result:
-                    return inline_result
-        if async_result is None:
-            _raise_worker_unavailable()
-        from typing import Any as _Any, cast as _cast
-
-        _ar = _cast(_Any, async_result)
-        return {"mode": "queued", "job_id": _ar.id, "episode_id": str(ep.id)}
+        # Should never reach here - either Cloud Tasks worked or inline fallback returned
+        _raise_worker_unavailable()
+        return {"mode": "error", "job_id": "none", "episode_id": str(ep.id)}
