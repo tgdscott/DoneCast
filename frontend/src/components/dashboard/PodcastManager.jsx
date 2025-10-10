@@ -14,7 +14,7 @@ import { makeApi, buildApiUrl } from "@/lib/apiClient";
 
 const API_BASE_URL = ""; // Use relative so it works behind any proxy
 
-export default function PodcastManager({ onBack, token, podcasts, setPodcasts }) {
+export default function PodcastManager({ onBack, token, podcasts, setPodcasts, onViewAnalytics }) {
   const [showToDelete, setShowToDelete] = useState(null);
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
@@ -381,6 +381,11 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts })
                       <div className="flex-1 space-y-4">
                         <div className="grid sm:grid-cols-2 gap-3">
                           <ActionButton icon={Icons.Settings} onClick={() => openEditDialog(podcast)}>Edit show details</ActionButton>
+                          {onViewAnalytics && (
+                            <ActionButton icon={Icons.BarChart3} onClick={() => onViewAnalytics(podcast.id)}>
+                              View Analytics
+                            </ActionButton>
+                          )}
                           {(issues.length === 0 || hasShowId) && (
                             <ActionButton icon={Icons.Share2} onClick={() => openDistributionDialog(podcast)}>
                               Distribution checklist

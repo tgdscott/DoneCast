@@ -47,6 +47,7 @@ import PreUploadManager from "@/components/dashboard/PreUploadManager";
 import MediaLibrary from "@/components/dashboard/MediaLibrary";
 import EpisodeHistory from "@/components/dashboard/EpisodeHistory";
 import PodcastManager from "@/components/dashboard/PodcastManager";
+import PodcastAnalytics from "@/components/dashboard/PodcastAnalytics";
 import RssImporter from "@/components/dashboard/RssImporter";
 import DevTools from "@/components/dashboard/DevTools";
 import TemplateWizard from "@/components/dashboard/TemplateWizard";
@@ -124,6 +125,7 @@ export default function PodcastPlusDashboard() {
     return 'dashboard';
   });
   const [selectedTemplateId, setSelectedTemplateId] = useState(null);
+  const [selectedPodcastId, setSelectedPodcastId] = useState(null);
   const [preselectedMainFilename, setPreselectedMainFilename] = useState(null);
   const [preselectedTranscriptReady, setPreselectedTranscriptReady] = useState(false);
   const [shouldRunTour, setShouldRunTour] = useState(false);
@@ -552,7 +554,16 @@ export default function PodcastPlusDashboard() {
           />
         );
       case 'podcastManager':
-        return <PodcastManager onBack={handleBackToDashboard} token={token} podcasts={podcasts} setPodcasts={setPodcasts}/>;
+        return <PodcastManager 
+          onBack={handleBackToDashboard} 
+          token={token} 
+          podcasts={podcasts} 
+          setPodcasts={setPodcasts}
+          onViewAnalytics={(podcastId) => {
+            setSelectedPodcastId(podcastId);
+            setCurrentView('analytics');
+          }}
+        />;
       case 'rssImporter':
         return <RssImporter onBack={handleBackToDashboard} token={token} />;
       case 'devTools':
@@ -565,6 +576,14 @@ export default function PodcastPlusDashboard() {
         return <TemplateWizard user={user} token={token} onBack={() => setCurrentView('templateManager')} onTemplateCreated={() => { fetchData(); setCurrentView('templateManager'); }} />;
       case 'billing':
         return <BillingPage token={token} onBack={() => setCurrentView('dashboard')} />;
+      case 'analytics':
+        return (
+          <PodcastAnalytics 
+            podcastId={selectedPodcastId} 
+            token={token} 
+            onBack={handleBackToDashboard}
+          />
+        );
       case 'dashboard':
       default: {
         const canCreateEpisode = podcasts.length > 0 && templates.length > 0;
@@ -715,6 +734,20 @@ export default function PodcastPlusDashboard() {
                       <Button onClick={() => setCurrentView('templateManager')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-templates"><FileText className="w-4 h-4 mr-2" />Templates</Button>
                       <Button onClick={() => setCurrentView('mediaLibrary')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-media"><Music className="w-4 h-4 mr-2" />Media</Button>
           <Button onClick={() => setCurrentView('episodeHistory')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-episodes"><BarChart3 className="w-4 h-4 mr-2" />Episodes</Button>
+          <Button 
+            onClick={() => {
+              if (podcasts.length > 0) {
+                setSelectedPodcastId(podcasts[0].id);
+                setCurrentView('analytics');
+              }
+            }} 
+            variant="outline" 
+            className="justify-start text-sm h-10" 
+            data-tour-id="dashboard-quicktool-analytics"
+            disabled={podcasts.length === 0}
+          >
+            <BarChart3 className="w-4 h-4 mr-2" />Analytics
+          </Button>
           {/* Import moved under Podcasts */}
           <Button onClick={() => setCurrentView('billing')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-subscription"><DollarSign className="w-4 h-4 mr-2" />Subscription</Button>
                       <Button onClick={() => setCurrentView('settings')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-settings"><SettingsIcon className="w-4 h-4 mr-2" />Settings</Button>

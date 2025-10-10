@@ -140,7 +140,9 @@ def _generate_podcast_rss(podcast: Podcast, episodes: List[Episode], base_url: s
             logger.info(f"RSS Feed: Generating audio URL for episode {episode.episode_number}: {episode.gcs_audio_path}")
             audio_url = get_public_audio_url(episode.gcs_audio_path, expiration_days=7)
             if audio_url:
-                logger.info(f"RSS Feed: Generated audio URL for episode {episode.episode_number}")
+                # Add OP3 analytics prefix for download tracking
+                audio_url = f"https://op3.dev/e/{audio_url}"
+                logger.info(f"RSS Feed: Generated OP3-prefixed URL for episode {episode.episode_number}")
             else:
                 logger.warning(f"RSS Feed: Failed to generate audio URL for episode {episode.episode_number}")
         else:
