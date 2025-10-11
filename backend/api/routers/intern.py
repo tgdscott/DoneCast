@@ -114,6 +114,13 @@ def _resolve_media_path(filename: str) -> Path:
     
     _LOG.info(f"[intern] _resolve_media_path called for filename: {filename}")
     
+    # If frontend passes full GCS URL, extract just the base filename
+    original_filename = filename
+    if filename.startswith("gs://"):
+        # Extract: gs://bucket/path/to/file.mp3 -> file.mp3
+        filename = Path(filename).name
+        _LOG.info(f"[intern] Extracted base filename from GCS URL: {filename}")
+    
     # Check local filesystem first (dev/test)
     try:
         base = MEDIA_DIR.resolve()
@@ -136,12 +143,13 @@ def _resolve_media_path(filename: str) -> Path:
     # Production: Download from GCS
     try:
         session = next(get_session())
+        # Query with original_filename (may be full GCS URL)
         media = session.exec(
-            select(MediaItem).where(MediaItem.filename == filename)
+            select(MediaItem).where(MediaItem.filename == original_filename)
         ).first()
         
         if not media:
-            _LOG.error(f"[intern] MediaItem not found in database for filename: {filename}")
+            _LOG.error(f"[intern] MediaItem not found in database for filename: {original_filename}")
             raise HTTPException(status_code=404, detail="uploaded file not found in database")
         
         _LOG.info(f"[intern] MediaItem found - id: {media.id}, user_id: {media.user_id}")

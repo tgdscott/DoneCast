@@ -165,6 +165,13 @@ def apply_flubber_cuts(
         base_audio_name = meta.get('cleaned_audio')
     if not base_audio_name:
         raise HTTPException(status_code=404, detail="No working/cleaned audio available for flubber cuts")
+    
+    # If base_audio_name is a full GCS URL, extract just the filename for local path
+    original_audio_name = base_audio_name
+    if base_audio_name.startswith("gs://"):
+        base_audio_name = Path(base_audio_name).name
+        logger.info(f"[flubber] Extracted base filename from GCS URL: {base_audio_name}")
+    
     base_path = cleaned_dir / base_audio_name
     if not base_path.is_file():
         # fallback: if a copy exists in media uploads (for preview)
@@ -181,10 +188,10 @@ def apply_flubber_cuts(
             from sqlmodel import select
             from api.models.podcast import MediaItem
             
-            # Try to find the media item
-            logger.info(f"[flubber] Querying database for MediaItem with filename: {base_audio_name}")
+            # Try to find the media item (use original_audio_name which may be full GCS URL)
+            logger.info(f"[flubber] Querying database for MediaItem with filename: {original_audio_name}")
             media = session.exec(
-                select(MediaItem).where(MediaItem.filename == base_audio_name)
+                select(MediaItem).where(MediaItem.filename == original_audio_name)
             ).first()
             
             if media:
@@ -228,7 +235,7 @@ def apply_flubber_cuts(
                     logger.error(f"[flubber] GCS download returned no data for: gs://{gcs_bucket}/{gcs_key}")
                     raise HTTPException(status_code=404, detail="Working audio file not found in GCS")
             else:
-                logger.error(f"[flubber] MediaItem not found in database for filename: {base_audio_name}")
+                logger.error(f"[flubber] MediaItem not found in database for filename: {original_audio_name}")
                 raise HTTPException(status_code=404, detail="Working audio file missing")
         except HTTPException:
             raise
