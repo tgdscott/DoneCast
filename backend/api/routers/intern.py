@@ -310,7 +310,11 @@ def _collect_transcript_preview(
     return text
 
 
-def _export_snippet(audio: "AudioSegment", filename: str, start_s: float, end_s: float, *, suffix: str) -> Tuple[str, Path]:
+def _export_snippet(audio: "AudioSegment", filename: str, start_s: float, end_s: float, *, suffix: str) -> Tuple[str, str]:
+    """Export audio snippet and upload to GCS, return signed URL."""
+    import os
+    from infrastructure import gcs
+    
     safe_stem = re.sub(r"[^a-zA-Z0-9]+", "-", Path(filename).stem.lower()).strip("-") or "audio"
     start_ms = max(0, int(start_s * 1000))
     end_ms = max(start_ms + 1, int(end_s * 1000))
@@ -331,6 +335,7 @@ def _export_snippet(audio: "AudioSegment", filename: str, start_s: float, end_s:
         _LOG.warning(f"[intern] Failed to create directory {INTERN_CTX_DIR}: {exc}")
         pass
 
+    # Export to local temp first
     try:
         _LOG.info(f"[intern] Starting mp3 export to {mp3_path}...")
         clip.export(mp3_path, format="mp3")
@@ -344,11 +349,37 @@ def _export_snippet(audio: "AudioSegment", filename: str, start_s: float, end_s:
         wav_path = mp3_path.with_suffix(".wav")
         try:
             clip.export(wav_path, format="wav")
+            mp3_path = wav_path  # Use WAV as fallback
         except Exception as exc2:
             _LOG.warning("[intern] wav export failed for %s: %s", wav_path, exc2)
             raise HTTPException(status_code=500, detail="Unable to prepare intern audio snippet")
-        return wav_path.name, wav_path
-    return mp3_path.name, mp3_path
+    
+    # Upload to GCS and generate signed URL
+    try:
+        gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+        gcs_key = f"intern_snippets/{base_name}{mp3_path.suffix}"
+        
+        _LOG.info(f"[intern] Uploading snippet to GCS: gs://{gcs_bucket}/{gcs_key}")
+        with open(mp3_path, "rb") as f:
+            file_data = f.read()
+        gcs.upload_bytes(gcs_bucket, gcs_key, file_data, content_type="audio/mpeg")
+        _LOG.info(f"[intern] Snippet uploaded to GCS successfully")
+        
+        # Generate signed URL (valid for 1 hour)
+        signed_url = gcs.generate_signed_url(gcs_bucket, gcs_key, expiration_seconds=3600)
+        _LOG.info(f"[intern] Generated signed URL for snippet")
+        
+        # Clean up local file
+        try:
+            mp3_path.unlink(missing_ok=True)
+        except:
+            pass
+        
+        return mp3_path.name, signed_url
+    except Exception as exc:
+        _LOG.error(f"[intern] Failed to upload snippet to GCS: {exc}", exc_info=True)
+        # Fallback to local static serving (won't work in production but better than crash)
+        return mp3_path.name, f"/static/intern/{mp3_path.name}"
 
 
 @router.post(
@@ -408,7 +439,7 @@ def prepare_intern_by_file(
         default_end = max(start_s + 0.5, min(default_end, snippet_end))
         if snippet_end <= snippet_start:
             continue
-        slug, _ = _export_snippet(audio, filename, snippet_start, snippet_end, suffix="intern")
+        slug, audio_url = _export_snippet(audio, filename, snippet_start, snippet_end, suffix="intern")
         transcript_preview = _collect_transcript_preview(words, snippet_start, snippet_end)
         prompt_text = str(cmd.get("local_context") or transcript_preview or "").strip()
         contexts.append(
@@ -423,8 +454,8 @@ def prepare_intern_by_file(
                 "duration_s": snippet_end - snippet_start,
                 "prompt_text": prompt_text,
                 "transcript_preview": transcript_preview,
-                "audio_url": f"/static/intern/{slug}",
-                "snippet_url": f"/static/intern/{slug}",
+                "audio_url": audio_url,
+                "snippet_url": audio_url,
                 "filename": filename,
                 "voice_id": (payload or {}).get("voice_id"),
             }
@@ -524,8 +555,7 @@ def execute_intern_command(
     if answer and voice_id is not None:
         try:
             speech = enhancer.generate_speech_from_text(answer, voice_id=voice_id, user=current_user)
-            slug, path = _export_snippet(speech, filename, 0.0, len(speech) / 1000.0, suffix="intern-response")
-            audio_url = f"/static/intern/{slug}"
+            slug, audio_url = _export_snippet(speech, filename, 0.0, len(speech) / 1000.0, suffix="intern-response")
         except _AIEnhancerError as exc:
             _LOG.warning("[intern] TTS generation failed: %s", exc)
         except Exception as exc:  # pragma: no cover - defensive guard
