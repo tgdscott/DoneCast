@@ -226,20 +226,32 @@ def merge_into_episode(
                 "source": source,
             })
 
+    # Season/Episode numbers: NEVER auto-overwrite from Spreaker sync
+    # Spreaker auto-assigns these based on show's total episode count,
+    # which conflicts with user-set numbering. Only apply if explicitly requested.
     for field in ("season_number", "episode_number"):
         incoming_num = _coerce_int(incoming.get(field))
         if incoming_num is None:
             continue
         current_num = getattr(episode, field)
-        if current_num is None:
+        
+        # Only apply if field is in explicit overwrite list AND user wants remote values
+        if overwrite_fields and field in overwrite_fields:
+            if current_num is None or int(current_num) != incoming_num:
+                setattr(episode, field, incoming_num)
+                applied_fields.append(field)
+        # Otherwise: only set if current is None (for truly new episodes)
+        elif current_num is None:
             setattr(episode, field, incoming_num)
             applied_fields.append(field)
+        # If numbers differ, log as conflict but DON'T overwrite
         elif int(current_num) != incoming_num:
             conflicts.append({
                 "field": field,
                 "existing": _serialize(current_num),
                 "incoming": incoming_num,
                 "source": source,
+                "note": "Spreaker auto-assigns episode numbers; local value preserved",
             })
 
     incoming_guid = incoming.get("original_guid")
