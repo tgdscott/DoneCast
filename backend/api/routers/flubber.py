@@ -399,9 +399,84 @@ def prepare_flubber_by_file(
         raise HTTPException(status_code=400, detail="filename is required")
     window_before_s = float((payload or {}).get('window_before_s', 15.0))
     window_after_s = float((payload or {}).get('window_after_s', 15.0))
+    
+    # If frontend passes full GCS URL, extract just the base filename
+    original_filename = filename
+    if filename.startswith("gs://"):
+        filename = Path(filename).name
+        logger.info(f"[flubber] prepare-by-file: Extracted base filename from GCS URL: {filename}")
+    
     # Uploaded files live under media_uploads with user prefix; validate existence
     src = MEDIA_DIR / filename
     if not src.is_file():
+        # Production: Download from GCS if not found locally
+        logger.info(f"[flubber] prepare-by-file: File not found locally: {src}, attempting GCS download...")
+        try:
+            import os
+            from infrastructure import gcs
+            from sqlmodel import select
+            from api.models.podcast import MediaItem
+            from api.core.database import get_session
+            
+            # Try to find the media item (use original_filename which may be full GCS URL)
+            session = next(get_session())
+            logger.info(f"[flubber] prepare-by-file: Querying database for MediaItem with filename: {original_filename}")
+            media = session.exec(
+                select(MediaItem).where(MediaItem.filename == original_filename)
+            ).first()
+            
+            if media:
+                logger.info(f"[flubber] prepare-by-file: MediaItem found - id: {media.id}, user_id: {media.user_id}")
+                
+                # MediaItem.filename can be either:
+                # 1. Simple filename (legacy): "abc123.mp3"
+                # 2. Full GCS URL (current): "gs://bucket/user_id/media/main_content/abc123.mp3"
+                stored_filename = media.filename
+                gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+                
+                logger.info(f"[flubber] prepare-by-file: Stored filename in DB: {stored_filename}")
+                
+                if stored_filename.startswith("gs://"):
+                    # Extract key from full GCS URL: gs://bucket/key/path
+                    parts = stored_filename.replace("gs://", "").split("/", 1)
+                    if len(parts) == 2:
+                        gcs_key = parts[1]  # Everything after bucket name
+                        logger.info(f"[flubber] prepare-by-file: Extracted GCS key from URL: {gcs_key}")
+                    else:
+                        logger.error(f"[flubber] prepare-by-file: Invalid GCS URL format: {stored_filename}")
+                        raise HTTPException(status_code=500, detail="Invalid GCS URL format in database")
+                else:
+                    # Legacy format: construct path
+                    gcs_key = f"{media.user_id.hex}/media/main_content/{stored_filename}"
+                    logger.info(f"[flubber] prepare-by-file: Constructed GCS key (legacy): {gcs_key}")
+                
+                logger.info(f"[flubber] prepare-by-file: Downloading from GCS: gs://{gcs_bucket}/{gcs_key}")
+                
+                # Download from GCS
+                data = gcs.download_bytes(gcs_bucket, gcs_key)
+                if data:
+                    logger.info(f"[flubber] prepare-by-file: GCS download successful - {len(data)} bytes received")
+                    
+                    # Save to local path
+                    src.parent.mkdir(parents=True, exist_ok=True)
+                    src.write_bytes(data)
+                    logger.info(f"[flubber] prepare-by-file: File written to local cache: {src} ({src.stat().st_size} bytes)")
+                    # File now exists locally
+                else:
+                    logger.error(f"[flubber] prepare-by-file: GCS download returned no data for: gs://{gcs_bucket}/{gcs_key}")
+                    raise HTTPException(status_code=404, detail="uploaded file not found in GCS")
+            else:
+                logger.error(f"[flubber] prepare-by-file: MediaItem not found in database for filename: {original_filename}")
+                raise HTTPException(status_code=404, detail="uploaded file not found in database")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("[flubber] prepare-by-file: Failed to download from GCS: %s", e, exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Failed to retrieve file: {str(e)}")
+    
+    # Final check
+    if not src.is_file():
+        logger.error(f"[flubber] prepare-by-file: File still missing after download attempt: {src}")
         raise HTTPException(status_code=404, detail="uploaded file not found")
     # Obtain word timestamps; prefer existing transcript if present
     try:
