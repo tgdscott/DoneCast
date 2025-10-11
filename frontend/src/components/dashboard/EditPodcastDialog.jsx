@@ -287,12 +287,7 @@ export default function EditPodcastDialog({
 					</DialogDescription>
 				</DialogHeader>
 				<form onSubmit={handleSubmit} className="space-y-4">
-					<div className="text-xs -mb-1 flex items-center justify-between">
-						<span className="text-muted-foreground">
-							{remoteStatus.loading && "Loading Spreaker metadata..."}
-							{!remoteStatus.loading && remoteStatus.loaded && "Values loaded from Spreaker"}
-							{!remoteStatus.loading && !remoteStatus.loaded && remoteStatus.error && "Remote load failed — using local data"}
-						</span>
+					<div className="text-xs -mb-1 flex items-center justify-end">
 						<button
 							type="button"
 							className="underline text-blue-600"
@@ -329,7 +324,7 @@ export default function EditPodcastDialog({
 							{nameTooShort && <p className="text-[11px] text-amber-700">Minimum 4 characters.</p>}
 						</div>
 						<div className="space-y-1">
-							<Label htmlFor="spreaker_show_id">Spreaker Show ID</Label>
+							<Label htmlFor="spreaker_show_id">Show ID</Label>
 							<Input id="spreaker_show_id" value={formData.spreaker_show_id} onChange={handleChange} />
 						</div>
 						<div className="space-y-1">
@@ -446,16 +441,40 @@ export default function EditPodcastDialog({
 								</p>
 							</div>
 						</div>
-						{(podcast?.rss_url_locked || podcast?.rss_url) && (
-							<div className="space-y-1">
-								<Label>RSS Feed</Label>
-								<Input value={podcast.rss_url_locked || podcast.rss_url} readOnly className="text-xs" />
-							</div>
-						)}
-						{podcast?.rss_url_locked && (
-							<div className="space-y-1">
-								<Label>RSS (Locked)</Label>
-								<Input value={podcast.rss_url_locked} readOnly className="text-xs" />
+						{podcast && (
+							<div className="space-y-2 p-3 bg-blue-50 border border-blue-200 rounded">
+								<Label className="text-sm font-semibold text-blue-900">RSS Feed URLs</Label>
+								<div className="space-y-2">
+									{podcast.slug && (
+										<div className="space-y-1">
+											<p className="text-xs text-blue-700 font-medium">Primary Feed (slug-based):</p>
+											<a
+												href={`https://api.podcastplusplus.com/v1/rss/${podcast.slug}/feed.xml`}
+												target="_blank"
+												rel="noopener noreferrer"
+												className="text-xs text-blue-600 hover:underline break-all block"
+											>
+												https://api.podcastplusplus.com/v1/rss/{podcast.slug}/feed.xml
+											</a>
+										</div>
+									)}
+									{podcast.spreaker_show_id && (
+										<div className="space-y-1">
+											<p className="text-xs text-blue-700 font-medium">Alternate Feed (show-id-based):</p>
+											<a
+												href={`https://api.podcastplusplus.com/v1/rss/${podcast.spreaker_show_id}/feed.xml`}
+												target="_blank"
+												rel="noopener noreferrer"
+												className="text-xs text-blue-600 hover:underline break-all block"
+											>
+												https://api.podcastplusplus.com/v1/rss/{podcast.spreaker_show_id}/feed.xml
+											</a>
+										</div>
+									)}
+									<p className="text-[10px] text-blue-600 mt-2">
+										These are your Podcast++ RSS feeds. Share these URLs with podcast directories.
+									</p>
+								</div>
 							</div>
 						)}
 					</div>
