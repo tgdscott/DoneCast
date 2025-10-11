@@ -30,6 +30,10 @@ export default function ClosedAlphaGate() {
       if (r.ok) {
         toast({ title: "Request received", description: "We'll notify you as soon as a spot opens." });
         setNote("");
+        // Redirect to main page after successful submission
+        setTimeout(() => {
+          window.location.href = '/';
+        }, 2000);
       } else {
         let msg = "Please try again later.";
         try { const j = await r.json(); msg = j?.error?.message || j?.detail || msg; } catch {}

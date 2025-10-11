@@ -80,7 +80,9 @@ async def register_user(
         default_active = False
 
     base_user = UserCreate(**user_in.model_dump(exclude={"accept_terms", "terms_version"}))
-    base_user.is_active = default_active
+    # TEMP URGENT FIX: Make users active immediately while SMTP is being configured
+    # Email verification will still be sent, but users can log in right away
+    base_user.is_active = True  # Was: default_active
 
     user = crud.create_user(session=session, user_create=base_user)
 
