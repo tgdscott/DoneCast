@@ -422,8 +422,10 @@ def sync_spreaker_episodes(
                 publish_at=payload_dict.get("publish_at"),
                 cover_path=payload_dict.get("cover_path"),
                 remote_cover_url=payload_dict.get("remote_cover_url"),
-                season_number=payload_dict.get("season_number"),
-                episode_number=payload_dict.get("episode_number"),
+                # DO NOT set season_number/episode_number from Spreaker - they auto-assign wrong values
+                # User sets these explicitly in the UI. Leave as None for new synced episodes.
+                season_number=None,
+                episode_number=None,
                 is_explicit=payload_dict.get("is_explicit", False),
                 spreaker_episode_id=payload_dict.get("spreaker_episode_id"),
                 is_published_to_spreaker=True,

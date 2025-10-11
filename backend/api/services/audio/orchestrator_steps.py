@@ -847,10 +847,13 @@ def primary_cleanup_and_rebuild(
 ) -> Tuple[AudioSegment, List[Dict[str, Any]], Dict[str, int], int]:
     """Remove fillers per config and rebuild audio; also update words if needed."""
     # Early return if mix_only - skip expensive audio processing
+    # Create an empty AudioSegment as a placeholder to avoid loading the large file
     if mix_only:
         log.append("[FILLERS] Skipping filler removal (mix_only=True)")
-        audio = AudioSegment.from_file(content_path)
-        return audio, mutable_words, {}, 0
+        # Return a 1ms silent placeholder to avoid OOM on large files
+        # The actual file will be loaded only in export step
+        placeholder_audio = AudioSegment.silent(duration=1)
+        return placeholder_audio, mutable_words, {}, 0
     
     raw_filler_list = (cleanup_options.get('fillerWords', []) or []) if isinstance(cleanup_options, dict) else []
     filler_words = set([str(w).strip().lower() for w in raw_filler_list if str(w).strip()])
@@ -992,8 +995,26 @@ def export_cleaned_audio_step(
     out_stem = Path(main_content_filename).stem
     cleaned_filename = f"cleaned_{out_stem}.mp3" if not out_stem.startswith("cleaned_") else f"{out_stem}.mp3"
     cleaned_path = CLEANED_DIR / cleaned_filename
-    cleaned_audio.export(cleaned_path, format="mp3")
-    log.append(f"Saved cleaned content to {cleaned_filename}")
+    
+    # If cleaned_audio is a placeholder (1ms silent), use file copy instead
+    # This happens in mix_only mode to avoid OOM on large files
+    if len(cleaned_audio) == 1:
+        log.append(f"[EXPORT] Detected placeholder audio, copying from disk: {main_content_filename}")
+        # Check if the file already exists (e.g., reassembled file from chunking)
+        source_path = Path(main_content_filename)
+        if source_path.exists() and source_path.is_file():
+            # Just copy the file instead of loading into memory
+            import shutil
+            shutil.copy2(source_path, cleaned_path)
+            log.append(f"[EXPORT] Copied cleaned audio from {source_path} to {cleaned_filename}")
+        else:
+            # Fallback: load and export (shouldn't happen)
+            real_audio = AudioSegment.from_file(source_path)
+            real_audio.export(cleaned_path, format="mp3")
+            log.append(f"Saved cleaned content to {cleaned_filename} (loaded from disk)")
+    else:
+        cleaned_audio.export(cleaned_path, format="mp3")
+        log.append(f"Saved cleaned content to {cleaned_filename}")
     return cleaned_filename, cleaned_path
 
 
@@ -1014,7 +1035,14 @@ def build_template_and_final_mix_step(
 
     Returns: (final_path, placements)
     """
-    # Parse template sections
+    # If cleaned_audio is a placeholder (1ms silent), load from disk to avoid OOM
+    # This happens in mix_only mode after chunked processing
+    if len(cleaned_audio) == 1:
+        log.append(f"[MIX] Detected placeholder audio, loading from cleaned_path: {cleaned_path}")
+        cleaned_audio = AudioSegment.from_file(cleaned_path)
+        log.append(f"[MIX] Loaded cleaned audio: {len(cleaned_audio)}ms")
+    
+    # Parse template segments
     try:
         template_segments = json.loads(getattr(template, 'segments_json', '[]'))
     except Exception:

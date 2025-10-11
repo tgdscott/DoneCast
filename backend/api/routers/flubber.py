@@ -9,7 +9,10 @@ from api.models.podcast import Episode
 from sqlmodel import select
 from api.routers.auth import get_current_user
 from api.models.user import User
-from pydub import AudioSegment
+try:
+    from pydub import AudioSegment
+except ImportError:
+    AudioSegment = None  # type: ignore
 import shutil
 
 from api.services import flubber_helper
@@ -167,6 +170,8 @@ def apply_flubber_cuts(
             base_path = alt
     if not base_path.is_file():
         raise HTTPException(status_code=404, detail="Working audio file missing")
+    if AudioSegment is None:
+        raise HTTPException(status_code=503, detail="Audio processing unavailable (pydub not installed)")
     audio = AudioSegment.from_file(base_path)
     # Helper to load words for this audio (prefer precomputed transcript if available)
     def _load_words_for_audio(name: str) -> List[Dict[str, Any]]:
@@ -254,6 +259,8 @@ def apply_flubber_cuts(
             merged.append([s,e])
         else:
             merged[-1][1] = max(merged[-1][1], e)
+    if AudioSegment is None:
+        raise HTTPException(status_code=503, detail="Audio processing unavailable (pydub not installed)")
     cursor_ms = 0
     out_audio = AudioSegment.empty()
     removed_ms = 0

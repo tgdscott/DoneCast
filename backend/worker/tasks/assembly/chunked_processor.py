@@ -323,6 +323,7 @@ def reassemble_chunks(
     """Reassemble cleaned audio chunks into final file.
     
     Assumes all chunks have been processed and cleaned_path is set.
+    Uses ffmpeg concat to avoid loading all chunks into memory.
     """
     log.info(f"[chunking] Reassembling {len(chunks)} chunks into {output_path}")
     
@@ -334,23 +335,58 @@ def reassemble_chunks(
     if missing:
         raise RuntimeError(f"[chunking] Cannot reassemble: chunks {missing} not completed")
     
-    # Load and concatenate chunks
-    combined = AudioSegment.empty()
-    for chunk in sorted_chunks:
-        log.info(f"[chunking] Loading cleaned chunk {chunk.index} from {chunk.cleaned_path}")
+    # Use ffmpeg concat demuxer for memory-efficient concatenation
+    # Create concat file list
+    import tempfile
+    import subprocess
+    
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as concat_file:
+        concat_file_path = concat_file.name
+        for chunk in sorted_chunks:
+            # Escape single quotes in path for ffmpeg
+            safe_path = str(chunk.cleaned_path).replace("'", "'\\''")
+            concat_file.write(f"file '{safe_path}'\n")
+    
+    try:
+        log.info(f"[chunking] Concatenating {len(sorted_chunks)} chunks using ffmpeg")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Use ffmpeg concat demuxer (fast, no re-encoding, low memory)
+        cmd = [
+            'ffmpeg', '-y',  # Overwrite output
+            '-f', 'concat',  # Use concat demuxer
+            '-safe', '0',  # Allow absolute paths
+            '-i', concat_file_path,  # Input concat file
+            '-c', 'copy',  # Copy without re-encoding (fast!)
+            str(output_path)
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        
+        if result.returncode != 0:
+            log.error(f"[chunking] ffmpeg concat failed: {result.stderr}")
+            # Fallback to pydub (slower, more memory)
+            log.info(f"[chunking] Falling back to pydub concatenation")
+            combined = AudioSegment.empty()
+            for chunk in sorted_chunks:
+                log.info(f"[chunking] Loading cleaned chunk {chunk.index} from {chunk.cleaned_path}")
+                chunk_audio = AudioSegment.from_file(chunk.cleaned_path)
+                combined += chunk_audio
+            combined.export(str(output_path), format="mp3")
+            duration_ms = len(combined)
+        else:
+            # Get duration from first chunk (for logging)
+            first_chunk_audio = AudioSegment.from_file(sorted_chunks[0].cleaned_path)
+            # Estimate total duration (sum of chunk durations)
+            duration_ms = sum(c.end_ms - c.start_ms for c in sorted_chunks)
+            log.info(f"[chunking] ffmpeg concat successful")
+    finally:
+        # Clean up concat file
         try:
-            chunk_audio = AudioSegment.from_file(chunk.cleaned_path)
-            combined += chunk_audio
-        except Exception as e:
-            log.error(f"[chunking] Failed to load chunk {chunk.index}: {e}")
-            raise
+            Path(concat_file_path).unlink()
+        except Exception:
+            pass
     
-    # Export final file
-    log.info(f"[chunking] Exporting reassembled audio to {output_path}")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    combined.export(str(output_path), format="mp3")
-    
-    duration_ms = len(combined)
     log.info(f"[chunking] Reassembly complete: {duration_ms}ms ({duration_ms / 60000:.1f} minutes)")
     
     return output_path

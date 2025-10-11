@@ -527,17 +527,14 @@ async def list_main_content_uploads(
             )
         ).all()
         
-        published_files = set()
+        in_use_files = set()
         for ep in published_episodes:
-            # Include if published, or if processed with a scheduled publish date
-            if ep.status == EpisodeStatus.published:
-                if ep.working_audio_name:
-                    published_files.add(str(ep.working_audio_name))
-            elif ep.status == EpisodeStatus.processed and ep.publish_at:
-                if ep.working_audio_name:
-                    published_files.add(str(ep.working_audio_name))
+            # Filter ALL episodes using the file, not just published/scheduled
+            # This prevents the same audio from being used in multiple episodes
+            if ep.working_audio_name:
+                in_use_files.add(str(ep.working_audio_name))
     except Exception:
-        published_files = set()
+        in_use_files = set()
     
     stmt = (
         select(MediaItem)
@@ -549,8 +546,8 @@ async def list_main_content_uploads(
     )
     all_uploads = session.exec(stmt).all()
     
-    # Filter out files that are already used in published/scheduled episodes
-    uploads = [u for u in all_uploads if str(u.filename) not in published_files]
+    # Filter out files that are already used in ANY episode
+    uploads = [u for u in all_uploads if str(u.filename) not in in_use_files]
 
     watch_map: Dict[str, List[TranscriptionWatch]] = defaultdict(list)
     try:
