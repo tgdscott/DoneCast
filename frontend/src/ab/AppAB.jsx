@@ -153,6 +153,42 @@ export default function AppAB({ token }) {
     return () => { aborted = true; };
   }, [token]);
 
+  // Check transcript readiness for all "processing" drafts on mount/refresh
+  // This prevents drafts from being stuck showing "processing" after a page reload/deployment
+  // when the transcript is actually ready on the server
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!token) return;
+      
+      // Find all drafts that show as "processing"
+      const processingDrafts = drafts.filter(d => d.transcript === 'processing' && d.hint);
+      if (processingDrafts.length === 0) return;
+
+      // Check each one with the server
+      for (const draft of processingDrafts) {
+        if (cancelled) break;
+        try {
+          const res = await abApi(token).transcriptReady({ hint: draft.hint });
+          if (cancelled) return;
+          if (res && res.ready) {
+            // Update this draft to show as ready
+            setDrafts(prev => prev.map(d => 
+              d.id === draft.id ? { ...d, transcript: 'ready' } : d
+            ));
+          }
+        } catch {
+          // Ignore errors, draft will stay as "processing" and normal polling will continue
+        }
+        // Small delay between checks to avoid hammering the API
+        if (!cancelled && processingDrafts.indexOf(draft) < processingDrafts.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token]); // Only run once on mount when token is available
+
   const uploadById = useMemo(() => Object.fromEntries(uploads.map(u => [u.id, u])), [uploads]);
 
   // Merge a freshly uploaded media item into the uploads list and seed a draft
