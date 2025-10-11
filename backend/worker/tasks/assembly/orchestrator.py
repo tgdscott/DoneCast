@@ -247,6 +247,7 @@ def _finalize_episode(
                     "episode_id": str(episode.id),
                     "chunk_id": chunk.chunk_id,
                     "chunk_index": chunk.index,
+                    "total_chunks": len(chunks),  # Used to detect last chunk for trailing silence trim
                     "gcs_audio_uri": chunk.gcs_audio_uri,
                     "gcs_transcript_uri": chunk.gcs_transcript_uri,
                     "cleanup_options": cleanup_options,
