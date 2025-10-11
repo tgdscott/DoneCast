@@ -228,8 +228,8 @@ def publish_episode_to_spreaker_task(
             tags=tags_arg,
             explicit=explicit_arg,
             transcript_url=transcript_url,
-            season_number=getattr(episode, "season_number", None),
-            episode_number=getattr(episode, "episode_number", None),
+            # season_number/episode_number removed - Spreaker auto-assigns these,
+            # ignoring our values and causing numbering conflicts. No longer sent.
         )
 
         if not ok:
@@ -281,8 +281,7 @@ def publish_episode_to_spreaker_task(
                         ep_id,
                         publish_state="unpublished",
                         transcript_url=transcript_url,
-                        season_number=getattr(episode, "season_number", None),
-                        episode_number=getattr(episode, "episode_number", None),
+                        # season_number/episode_number removed
                     )
                     logging.info(
                         "[publish] enforced private via update ok=%s", ok_upd
@@ -323,8 +322,7 @@ def publish_episode_to_spreaker_task(
                                 ep_id,
                                 image_file=image_file_path,
                                 debug_try_all=True,
-                                season_number=getattr(episode, "season_number", None),
-                                episode_number=getattr(episode, "episode_number", None),
+                                # season_number/episode_number removed
                             )
                             logging.info(
                                 "[publish] fallback image update via update_episode ok=%s",
