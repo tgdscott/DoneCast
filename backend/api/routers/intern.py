@@ -135,10 +135,22 @@ def _resolve_media_path(filename: str) -> Path:
         if not media:
             raise HTTPException(status_code=404, detail="uploaded file not found in database")
         
-        # Construct GCS path: {user_id}/media/main_content/{filename}
-        # (main_content files use direct transcription, not uploaded to GCS with gs:// prefix)
-        gcs_key = f"{media.user_id.hex}/media/main_content/{filename}"
+        # MediaItem.filename can be either:
+        # 1. Simple filename (legacy): "abc123.mp3"
+        # 2. Full GCS URL (current): "gs://bucket/user_id/media/main_content/abc123.mp3"
+        stored_filename = media.filename
         gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+        
+        if stored_filename.startswith("gs://"):
+            # Extract key from full GCS URL: gs://bucket/key/path
+            parts = stored_filename.replace("gs://", "").split("/", 1)
+            if len(parts) == 2:
+                gcs_key = parts[1]  # Everything after bucket name
+            else:
+                raise HTTPException(status_code=500, detail="Invalid GCS URL format in database")
+        else:
+            # Legacy format: construct path
+            gcs_key = f"{media.user_id.hex}/media/main_content/{stored_filename}"
         
         # Download from GCS
         data = gcs.download_bytes(gcs_bucket, gcs_key)
