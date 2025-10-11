@@ -174,6 +174,7 @@ def apply_flubber_cuts(
     
     # Production: Download from GCS if not found locally
     if not base_path.is_file():
+        logger.info(f"[flubber] File not found locally: {base_path}, attempting GCS download...")
         try:
             import os
             from infrastructure import gcs
@@ -181,38 +182,53 @@ def apply_flubber_cuts(
             from api.models.podcast import MediaItem
             
             # Try to find the media item
+            logger.info(f"[flubber] Querying database for MediaItem with filename: {base_audio_name}")
             media = session.exec(
                 select(MediaItem).where(MediaItem.filename == base_audio_name)
             ).first()
             
             if media:
+                logger.info(f"[flubber] MediaItem found - id: {media.id}, user_id: {media.user_id}")
+                
                 # MediaItem.filename can be either:
                 # 1. Simple filename (legacy): "abc123.mp3"
                 # 2. Full GCS URL (current): "gs://bucket/user_id/media/main_content/abc123.mp3"
                 stored_filename = media.filename
                 gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
                 
+                logger.info(f"[flubber] Stored filename in DB: {stored_filename}")
+                
                 if stored_filename.startswith("gs://"):
                     # Extract key from full GCS URL: gs://bucket/key/path
                     parts = stored_filename.replace("gs://", "").split("/", 1)
                     if len(parts) == 2:
                         gcs_key = parts[1]  # Everything after bucket name
+                        logger.info(f"[flubber] Extracted GCS key from URL: {gcs_key}")
                     else:
+                        logger.error(f"[flubber] Invalid GCS URL format: {stored_filename}")
                         raise HTTPException(status_code=500, detail="Invalid GCS URL format in database")
                 else:
                     # Legacy format: construct path
                     gcs_key = f"{media.user_id.hex}/media/main_content/{stored_filename}"
+                    logger.info(f"[flubber] Constructed GCS key (legacy): {gcs_key}")
+                
+                logger.info(f"[flubber] Downloading from GCS: gs://{gcs_bucket}/{gcs_key}")
                 
                 # Download from GCS
                 data = gcs.download_bytes(gcs_bucket, gcs_key)
                 if data:
+                    logger.info(f"[flubber] GCS download successful - {len(data)} bytes received")
+                    
                     # Save to local path
                     base_path.parent.mkdir(parents=True, exist_ok=True)
                     base_path.write_bytes(data)
+                    logger.info(f"[flubber] File written to local cache: {base_path} ({base_path.stat().st_size} bytes)")
                     # File now exists locally
                 else:
+                    logger.error(f"[flubber] GCS download returned no data for: gs://{gcs_bucket}/{gcs_key}")
                     raise HTTPException(status_code=404, detail="Working audio file not found in GCS")
             else:
+                logger.error(f"[flubber] MediaItem not found in database for filename: {base_audio_name}")
                 raise HTTPException(status_code=404, detail="Working audio file missing")
         except HTTPException:
             raise
@@ -222,10 +238,22 @@ def apply_flubber_cuts(
     
     # Final check
     if not base_path.is_file():
+        logger.error(f"[flubber] Audio file still missing after download attempt: {base_path}")
         raise HTTPException(status_code=404, detail="Working audio file missing")
+    
+    logger.info(f"[flubber] Audio file ready: {base_path}")
+    
     if AudioSegment is None:
+        logger.error("[flubber] AudioSegment is None - pydub not installed")
         raise HTTPException(status_code=503, detail="Audio processing unavailable (pydub not installed)")
-    audio = AudioSegment.from_file(base_path)
+    
+    logger.info(f"[flubber] Loading audio from {base_path}...")
+    try:
+        audio = AudioSegment.from_file(base_path)
+        logger.info(f"[flubber] Audio loaded successfully - duration: {len(audio)}ms, channels: {audio.channels}, frame_rate: {audio.frame_rate}")
+    except Exception as exc:
+        logger.error(f"[flubber] Failed to load audio from {base_path}: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to load audio: {str(exc)}")
     # Helper to load words for this audio (prefer precomputed transcript if available)
     def _load_words_for_audio(name: str) -> List[Dict[str, Any]]:
         stem = Path(name).stem

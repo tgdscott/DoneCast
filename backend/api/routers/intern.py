@@ -112,18 +112,26 @@ def _resolve_media_path(filename: str) -> Path:
     import os
     from infrastructure import gcs
     
-    # First check local filesystem (for dev/test)
+    _LOG.info(f"[intern] _resolve_media_path called for filename: {filename}")
+    
+    # Check local filesystem first (dev/test)
     try:
         base = MEDIA_DIR.resolve()
     except Exception:
         base = MEDIA_DIR
     candidate = (MEDIA_DIR / filename).resolve()
     if not str(candidate).startswith(str(base)):
+        _LOG.error(f"[intern] Invalid filename - path traversal attempt: {filename}")
         raise HTTPException(status_code=400, detail="Invalid filename")
+    
+    _LOG.info(f"[intern] Local path candidate: {candidate}")
     
     # If file exists locally, use it
     if candidate.is_file():
+        _LOG.info(f"[intern] File found locally: {candidate}")
         return candidate
+    
+    _LOG.info(f"[intern] File not found locally, querying database for MediaItem...")
     
     # Production: Download from GCS
     try:
@@ -133,7 +141,10 @@ def _resolve_media_path(filename: str) -> Path:
         ).first()
         
         if not media:
+            _LOG.error(f"[intern] MediaItem not found in database for filename: {filename}")
             raise HTTPException(status_code=404, detail="uploaded file not found in database")
+        
+        _LOG.info(f"[intern] MediaItem found - id: {media.id}, user_id: {media.user_id}")
         
         # MediaItem.filename can be either:
         # 1. Simple filename (legacy): "abc123.mp3"
@@ -141,25 +152,36 @@ def _resolve_media_path(filename: str) -> Path:
         stored_filename = media.filename
         gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
         
+        _LOG.info(f"[intern] Stored filename in DB: {stored_filename}")
+        
         if stored_filename.startswith("gs://"):
             # Extract key from full GCS URL: gs://bucket/key/path
             parts = stored_filename.replace("gs://", "").split("/", 1)
             if len(parts) == 2:
                 gcs_key = parts[1]  # Everything after bucket name
+                _LOG.info(f"[intern] Extracted GCS key from URL: {gcs_key}")
             else:
+                _LOG.error(f"[intern] Invalid GCS URL format: {stored_filename}")
                 raise HTTPException(status_code=500, detail="Invalid GCS URL format in database")
         else:
             # Legacy format: construct path
             gcs_key = f"{media.user_id.hex}/media/main_content/{stored_filename}"
+            _LOG.info(f"[intern] Constructed GCS key (legacy): {gcs_key}")
+        
+        _LOG.info(f"[intern] Downloading from GCS: gs://{gcs_bucket}/{gcs_key}")
         
         # Download from GCS
         data = gcs.download_bytes(gcs_bucket, gcs_key)
         if not data:
+            _LOG.error(f"[intern] GCS download returned no data for: gs://{gcs_bucket}/{gcs_key}")
             raise HTTPException(status_code=404, detail="uploaded file not found in GCS")
+        
+        _LOG.info(f"[intern] GCS download successful - {len(data)} bytes received")
         
         # Save to local path
         candidate.parent.mkdir(parents=True, exist_ok=True)
         candidate.write_bytes(data)
+        _LOG.info(f"[intern] File written to local cache: {candidate} ({candidate.stat().st_size} bytes)")
         return candidate
         
     except HTTPException:
@@ -284,18 +306,29 @@ def _export_snippet(audio: "AudioSegment", filename: str, start_s: float, end_s:
     safe_stem = re.sub(r"[^a-zA-Z0-9]+", "-", Path(filename).stem.lower()).strip("-") or "audio"
     start_ms = max(0, int(start_s * 1000))
     end_ms = max(start_ms + 1, int(end_s * 1000))
+    
+    _LOG.info(f"[intern] _export_snippet called - filename: {filename}, start: {start_s}s, end: {end_s}s")
+    
     clip = audio[start_ms:end_ms]
+    _LOG.info(f"[intern] Audio clip extracted - duration: {len(clip)}ms")
+    
     base_name = f"{safe_stem}_{suffix}_{start_ms}_{end_ms}"
     mp3_path = INTERN_CTX_DIR / f"{base_name}.mp3"
+    _LOG.info(f"[intern] Target export path: {mp3_path}")
+    
     try:
         INTERN_CTX_DIR.mkdir(parents=True, exist_ok=True)
-    except Exception:  # pragma: no cover - directory creation best effort
+        _LOG.info(f"[intern] Export directory ready: {INTERN_CTX_DIR}")
+    except Exception as exc:  # pragma: no cover - directory creation best effort
+        _LOG.warning(f"[intern] Failed to create directory {INTERN_CTX_DIR}: {exc}")
         pass
 
     try:
+        _LOG.info(f"[intern] Starting mp3 export to {mp3_path}...")
         clip.export(mp3_path, format="mp3")
+        _LOG.info(f"[intern] MP3 export successful - size: {mp3_path.stat().st_size} bytes")
     except Exception as exc:
-        _LOG.warning("[intern] mp3 export failed for %s: %s", mp3_path, exc)
+        _LOG.error(f"[intern] mp3 export failed for {mp3_path}: {exc}", exc_info=True)
         try:
             mp3_path.unlink(missing_ok=True)
         except Exception:  # pragma: no cover - cleanup best effort
@@ -325,11 +358,19 @@ def prepare_intern_by_file(
     if not filename:
         raise HTTPException(status_code=400, detail="filename is required")
 
+    _LOG.info(f"[intern] prepare_intern_by_file called for filename: {filename}")
+    
     audio_path = _resolve_media_path(filename)
+    _LOG.info(f"[intern] Audio path resolved: {audio_path}")
+    
     AudioSegmentCls = _require_audio_segment()
+    _LOG.info(f"[intern] AudioSegment class loaded: {AudioSegmentCls}")
+    
     try:
         audio = AudioSegmentCls.from_file(audio_path)
-    except Exception:
+        _LOG.info(f"[intern] Audio loaded successfully - duration: {len(audio)}ms, channels: {audio.channels}, frame_rate: {audio.frame_rate}")
+    except Exception as exc:
+        _LOG.error(f"[intern] Failed to load audio from {audio_path}: {exc}", exc_info=True)
         raise HTTPException(status_code=500, detail="Unable to open audio for intern review")
 
     words, transcript_path = _load_transcript_words(filename)
