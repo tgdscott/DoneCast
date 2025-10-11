@@ -20,6 +20,9 @@ from api.services import transcription
 
 from api.core.paths import MEDIA_DIR, CLEANED_DIR, FLUBBER_CTX_DIR, TRANSCRIPTS_DIR
 
+import logging
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/flubber", tags=["flubber"], responses={404: {"description": "Not found"}})
 
 def _load_episode_meta(ep: Episode) -> Dict[str, Any]:
@@ -168,6 +171,43 @@ def apply_flubber_cuts(
         alt = media_dir / base_audio_name
         if alt.is_file():
             base_path = alt
+    
+    # Production: Download from GCS if not found locally
+    if not base_path.is_file():
+        try:
+            import os
+            from infrastructure import gcs
+            from sqlmodel import select
+            from api.models.podcast import MediaItem
+            
+            # Try to find the media item
+            media = session.exec(
+                select(MediaItem).where(MediaItem.filename == base_audio_name)
+            ).first()
+            
+            if media:
+                # Construct GCS path for main_content
+                gcs_key = f"{media.user_id.hex}/media/main_content/{base_audio_name}"
+                gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+                
+                # Download from GCS
+                data = gcs.download_bytes(gcs_bucket, gcs_key)
+                if data:
+                    # Save to local path
+                    base_path.parent.mkdir(parents=True, exist_ok=True)
+                    base_path.write_bytes(data)
+                    # File now exists locally
+                else:
+                    raise HTTPException(status_code=404, detail="Working audio file not found in GCS")
+            else:
+                raise HTTPException(status_code=404, detail="Working audio file missing")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("[flubber] Failed to download from GCS: %s", e, exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Failed to retrieve file: {str(e)}")
+    
+    # Final check
     if not base_path.is_file():
         raise HTTPException(status_code=404, detail="Working audio file missing")
     if AudioSegment is None:

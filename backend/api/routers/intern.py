@@ -105,16 +105,56 @@ def _require_detect_and_prepare_ai_commands():
 
 
 def _resolve_media_path(filename: str) -> Path:
+    """Resolve media file path, downloading from GCS if needed for production."""
+    from api.core.database import get_session
+    from api.models.podcast import MediaItem
+    from sqlmodel import select
+    import os
+    from infrastructure import gcs
+    
+    # First check local filesystem (for dev/test)
     try:
         base = MEDIA_DIR.resolve()
-    except Exception:  # pragma: no cover - defensive guard
+    except Exception:
         base = MEDIA_DIR
     candidate = (MEDIA_DIR / filename).resolve()
     if not str(candidate).startswith(str(base)):
         raise HTTPException(status_code=400, detail="Invalid filename")
-    if not candidate.is_file():
-        raise HTTPException(status_code=404, detail="uploaded file not found")
-    return candidate
+    
+    # If file exists locally, use it
+    if candidate.is_file():
+        return candidate
+    
+    # Production: Download from GCS
+    try:
+        session = next(get_session())
+        media = session.exec(
+            select(MediaItem).where(MediaItem.filename == filename)
+        ).first()
+        
+        if not media:
+            raise HTTPException(status_code=404, detail="uploaded file not found in database")
+        
+        # Construct GCS path: {user_id}/media/main_content/{filename}
+        # (main_content files use direct transcription, not uploaded to GCS with gs:// prefix)
+        gcs_key = f"{media.user_id.hex}/media/main_content/{filename}"
+        gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+        
+        # Download from GCS
+        data = gcs.download_bytes(gcs_bucket, gcs_key)
+        if not data:
+            raise HTTPException(status_code=404, detail="uploaded file not found in GCS")
+        
+        # Save to local path
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+        candidate.write_bytes(data)
+        return candidate
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        _LOG.error("[intern] Failed to download file from GCS: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve file: {str(e)}")
 
 
 def _load_transcript_words(filename: str) -> Tuple[List[Dict[str, Any]], Optional[Path]]:
