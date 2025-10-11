@@ -561,8 +561,11 @@ def prepare_flubber_by_file(
         contexts = []
     out = []
     for c in contexts:
-        p = Path(c.get('snippet_path',''))
-        url = f"/static/flubber/{p.name}" if p.is_file() else None
+        # Use audio_url from GCS if available, fall back to snippet_path for backward compat
+        url = c.get('audio_url')
+        if not url:
+            p = Path(c.get('snippet_path',''))
+            url = f"/static/flubber/{p.name}" if p.is_file() else None
         out.append({**c, 'url': url})
     # Insist policy: by default, surface 425 to encourage the client to retry until found
     insist = True if (payload is None or 'insist' not in payload) else bool(payload.get('insist'))

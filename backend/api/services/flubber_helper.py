@@ -1,12 +1,16 @@
 from pathlib import Path
 from typing import List, Dict, Any
 import difflib
+import logging
+import os
 from pydub import AudioSegment
 
 from api.core.paths import FLUBBER_CTX_DIR, CLEANED_DIR, MEDIA_DIR
 
 FLUBBER_CONTEXT_DIR = FLUBBER_CTX_DIR
 FLUBBER_CONTEXT_DIR.mkdir(parents=True, exist_ok=True)
+
+_LOG = logging.getLogger(__name__)
 
 def extract_flubber_contexts(
     main_content_filename: str,
@@ -78,11 +82,44 @@ def extract_flubber_contexts(
         end_ms = int(end_s * 1000)
         snippet = audio[start_ms:end_ms]
         out_name = f"flubber_{int(start_ms)}_{int(end_ms)}.mp3"
-        out_path = FLUBBER_CONTEXT_DIR / out_name
+        
+        # Export to /tmp temporarily
+        tmp_path = FLUBBER_CONTEXT_DIR / out_name
         try:
-            snippet.export(out_path, format="mp3")
-        except Exception:
+            _LOG.info(f"[flubber_helper] Exporting snippet to /tmp: {out_name}")
+            snippet.export(tmp_path, format="mp3")
+            _LOG.info(f"[flubber_helper] Snippet exported - size: {tmp_path.stat().st_size} bytes")
+        except Exception as exc:
+            _LOG.error(f"[flubber_helper] Failed to export snippet: {exc}", exc_info=True)
             continue
+        
+        # Upload to GCS and generate signed URL
+        audio_url = None
+        try:
+            from infrastructure import gcs
+            gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+            gcs_key = f"flubber_snippets/{out_name}"
+            
+            _LOG.info(f"[flubber_helper] Uploading snippet to GCS: gs://{gcs_bucket}/{gcs_key}")
+            with open(tmp_path, "rb") as f:
+                file_data = f.read()
+            gcs.upload_bytes(gcs_bucket, gcs_key, file_data, content_type="audio/mpeg")
+            _LOG.info(f"[flubber_helper] Snippet uploaded to GCS successfully")
+            
+            # Generate signed URL (valid for 1 hour)
+            audio_url = gcs.generate_signed_url(gcs_bucket, gcs_key, expiration_seconds=3600)
+            _LOG.info(f"[flubber_helper] Generated signed URL for snippet")
+            
+            # Clean up local file
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except:
+                pass
+        except Exception as exc:
+            _LOG.error(f"[flubber_helper] Failed to upload snippet to GCS: {exc}", exc_info=True)
+            # Fall back to local path if GCS upload fails
+            audio_url = f"/static/flubber/{out_name}"
+        
         contexts.append({
             'flubber_index': idx,
             'flubber_time_s': t,
@@ -90,7 +127,8 @@ def extract_flubber_contexts(
             'computed_end_s': min(duration_s, max(t_end + 0.2, t)),
             'snippet_start_s': start_s,
             'snippet_end_s': end_s,
-            'snippet_path': str(out_path),
+            'snippet_path': str(tmp_path),  # Keep for backward compat
+            'audio_url': audio_url,  # NEW: GCS signed URL
             'relative_flubber_ms': int((t - start_s) * 1000),
             'window_before_s': window_before_s,
             'window_after_s': window_after_s,
