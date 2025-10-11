@@ -243,12 +243,25 @@ async def upload_media_files(
                 with open(file_path, "rb") as f:
                     gcs_url = gcs.upload_fileobj(gcs_bucket, gcs_key, f, content_type=final_content_type or "audio/mpeg")
                 
-                # Store GCS URL instead of local filename for persistence
+                # Verify GCS upload succeeded
                 if gcs_url and gcs_url.startswith("gs://"):
                     final_filename = gcs_url
+                    print(f"[media.upload] ✅ Uploaded {category.value} to GCS: {gcs_url}")
+                else:
+                    # GCS upload returned invalid URL - fail the upload
+                    raise Exception(f"GCS upload returned invalid URL: {gcs_url}")
+                    
             except Exception as e:
-                # Log warning but continue with local-only storage (will work until container restart)
-                print(f"[media.upload] Warning: Failed to upload {category.value} to GCS: {e}")
+                # FAIL THE UPLOAD - don't silently fall back to /tmp
+                print(f"[media.upload] ❌ FAILED to upload {category.value} to GCS: {e}")
+                try:
+                    file_path.unlink(missing_ok=True)
+                except:
+                    pass
+                raise HTTPException(
+                    status_code=500, 
+                    detail=f"Failed to upload {category.value} to cloud storage: {str(e)}"
+                )
 
         media_item = MediaItem(
             filename=final_filename,

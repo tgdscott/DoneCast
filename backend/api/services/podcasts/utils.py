@@ -30,11 +30,12 @@ def save_cover_upload(
     allowed_extensions: Optional[Iterable[str]] = None,
     require_image_content_type: bool = False,
 ) -> Tuple[str, Path]:
-    """Persist an uploaded cover image to ``upload_dir``.
+    """Persist an uploaded cover image to GCS with temporary local staging.
 
-    Returns the stored filename and absolute path. Raises :class:`HTTPException`
+    Returns the GCS URL as filename and temp path. Raises :class:`HTTPException`
     for validation issues so API handlers can surface friendly errors.
     """
+    import os
 
     if not cover_image or not cover_image.filename:
         raise HTTPException(status_code=400, detail="Cover image filename missing.")
@@ -62,11 +63,12 @@ def save_cover_upload(
     safe_name = sanitize_cover_filename(cover_image.filename)
     file_extension = Path(safe_name).suffix.lower() or extension or ".png"
     unique_filename = f"{user_id}_{uuid4()}{file_extension}"
-    save_path = upload_dir / unique_filename
+    temp_path = upload_dir / unique_filename
 
+    # Stage to /tmp temporarily
     total = 0
     try:
-        with save_path.open("wb") as buffer:
+        with temp_path.open("wb") as buffer:
             while True:
                 chunk = cover_image.file.read(1024 * 1024)
                 if not chunk:
@@ -74,7 +76,7 @@ def save_cover_upload(
                 total += len(chunk)
                 if max_bytes and total > max_bytes:
                     try:
-                        save_path.unlink(missing_ok=True)  # type: ignore[call-arg]
+                        temp_path.unlink(missing_ok=True)  # type: ignore[call-arg]
                     except Exception:
                         pass
                     raise HTTPException(
@@ -86,12 +88,48 @@ def save_cover_upload(
         raise
     except Exception as exc:  # pragma: no cover - defensive cleanup
         try:
-            save_path.unlink(missing_ok=True)  # type: ignore[call-arg]
+            temp_path.unlink(missing_ok=True)  # type: ignore[call-arg]
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=f"Failed to store cover image: {exc}") from exc
 
-    return unique_filename, save_path
+    # Upload to GCS immediately
+    gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+    gcs_key = f"{user_id.hex}/covers/{unique_filename}"
+    
+    try:
+        from infrastructure import gcs
+        with open(temp_path, "rb") as f:
+            gcs_url = gcs.upload_fileobj(
+                gcs_bucket, 
+                gcs_key, 
+                f, 
+                content_type=content_type or "image/jpeg"
+            )
+        
+        # Clean up temp file
+        try:
+            temp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        
+        # Verify GCS upload succeeded
+        if not gcs_url or not gcs_url.startswith("gs://"):
+            raise Exception(f"GCS upload returned invalid URL: {gcs_url}")
+        
+        # Return GCS URL as filename
+        return gcs_url, temp_path  # temp_path for backward compat (no longer exists)
+        
+    except Exception as e:
+        # Clean up temp file and fail
+        try:
+            temp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to upload cover to cloud storage: {str(e)}"
+        ) from e
 
 
 def build_distribution_context(podcast: "Podcast") -> Dict[str, Optional[str]]:

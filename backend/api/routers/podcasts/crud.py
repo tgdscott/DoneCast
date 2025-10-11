@@ -133,8 +133,9 @@ async def create_podcast(
                 allowed_extensions={".png", ".jpg", ".jpeg"},
                 require_image_content_type=True,
             )
+            # stored_filename is now a GCS URL (gs://bucket/path)
             db_podcast.cover_path = stored_filename
-            log.info("Successfully saved cover image to: %s", save_path)
+            log.info("✅ Cover uploaded to GCS: %s", stored_filename)
 
             if spreaker_show_id and client is not None:
                 log.info("Uploading cover art to Spreaker for show ID: %s", spreaker_show_id)
