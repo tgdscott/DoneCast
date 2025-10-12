@@ -768,6 +768,9 @@ export default function usePodcastCreator({
       const voiceId = resolveInternVoiceId();
       if (voiceId) payload.voice_id = voiceId;
     } catch (_) {}
+    if (selectedTemplate?.id) {
+      payload.template_id = selectedTemplate.id;
+    }
 
     (async () => {
       try {
@@ -1504,10 +1507,43 @@ export default function usePodcastCreator({
     proceedAfterFlubber();
   };
 
-  const handleInternComplete = (results) => {
+  const handleInternComplete = async (results) => {
     const safe = Array.isArray(results) ? results : [];
-    setInternResponses(safe);
-    setIntents((prev) => ({ ...prev, intern_overrides: safe }));
+    
+    // Generate TTS for each response that doesn't already have audio
+    setStatusMessage('Generating intern voice responses...');
+    const api = makeApi(token);
+    const enriched = [];
+    
+    for (const result of safe) {
+      if (!result.audio_url && result.response_text && result.voice_id) {
+        try {
+          const ttsPayload = {
+            text: result.response_text,
+            voice_id: result.voice_id,
+            category: 'intern',
+            provider: 'elevenlabs',
+            speaking_rate: 1.0,
+            confirm_charge: false,
+          };
+          const ttsResult = await api.post('/api/media/tts', ttsPayload);
+          // MediaItem.filename contains the GCS URL after upload
+          enriched.push({
+            ...result,
+            audio_url: ttsResult?.filename || null,
+          });
+        } catch (err) {
+          console.warn('Failed to generate TTS for intern response:', err);
+          enriched.push(result);
+        }
+      } else {
+        enriched.push(result);
+      }
+    }
+    
+    setStatusMessage('');
+    setInternResponses(enriched);
+    setIntents((prev) => ({ ...prev, intern_overrides: enriched }));
     setShowInternReview(false);
     setInternReviewContexts([]);
     setInternPendingContexts(null);
@@ -1536,6 +1572,9 @@ export default function usePodcastCreator({
         end_s: endSeconds,
         voice_id: resolveInternVoiceId() || undefined,
       };
+      if (selectedTemplate?.id) {
+        payload.template_id = selectedTemplate.id;
+      }
       const commandId = context?.command_id ?? context?.intern_index ?? context?.id ?? context?.index ?? (typeof context?.__index === 'number' ? context.__index : null);
       if (commandId != null) payload.command_id = commandId;
       const start = typeof startSeconds === 'number' && isFinite(startSeconds)
@@ -1547,7 +1586,7 @@ export default function usePodcastCreator({
       const res = await api.post('/api/intern/execute', payload);
       return res || {};
     },
-    [uploadedFilename, selectedPreupload, token, resolveInternVoiceId],
+    [uploadedFilename, selectedPreupload, token, resolveInternVoiceId, selectedTemplate],
   );
 
   const handleIntentSubmit = async (answers = intents) => {
@@ -1631,6 +1670,9 @@ export default function usePodcastCreator({
           const payload = { filename: sourceFilename };
           const voiceId = resolveInternVoiceId();
           if (voiceId) payload.voice_id = voiceId;
+          if (selectedTemplate?.id) {
+            payload.template_id = selectedTemplate.id;
+          }
           const data = await api.post('/api/intern/prepare-by-file', payload);
           const contexts = Array.isArray(data?.contexts)
             ? data.contexts

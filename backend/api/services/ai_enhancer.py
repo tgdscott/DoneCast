@@ -198,7 +198,7 @@ def get_answer_for_topic(
     if mode == "shownote":
         guidance = "Produce concise bullet point show notes summarizing the key takeaways."
     else:
-        guidance = "Draft a friendly spoken reply (2-3 sentences) the host can play in their show."
+        guidance = "Draft a friendly, natural spoken reply that sounds conversational and human. Write 2-3 complete sentences that flow naturally when read aloud. Do NOT use bullet points, lists, or formatting - just natural speech."
 
     prompt = dedent(
         f"""
@@ -208,7 +208,7 @@ def get_answer_for_topic(
     ).strip()
     if context_text:
         prompt += "\nTranscript excerpt:\n" + context_text
-    prompt += "\nResponse:"
+    prompt += "\nSpoken response:"
 
     try:
         generated = client_gemini.generate(prompt, max_output_tokens=512, temperature=0.6)
@@ -231,6 +231,9 @@ def get_answer_for_topic(
         base = topic_text or context_text or "that topic"
         return f"Here's the update you requested about {base}."
 
+    # Remove any bullet points or list formatting that might have snuck through
+    cleaned = re.sub(r"^\s*[-•*]\s+", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"\n\s*[-•*]\s+", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
 

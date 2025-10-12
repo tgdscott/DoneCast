@@ -389,7 +389,7 @@ def _export_snippet(audio: "AudioSegment", filename: str, start_s: float, end_s:
 )
 def prepare_intern_by_file(
     payload: Dict[str, Any] = Body(
-        ..., description="{ filename, preview_duration_s?, pre_roll_s?, cleanup_options?, voice_id? }"
+        ..., description="{ filename, preview_duration_s?, pre_roll_s?, cleanup_options?, voice_id?, template_id? }"
     ),
     current_user: User = Depends(get_current_user),
 ):
@@ -398,6 +398,26 @@ def prepare_intern_by_file(
         raise HTTPException(status_code=400, detail="filename is required")
 
     _LOG.info(f"[intern] prepare_intern_by_file called for filename: {filename}")
+    
+    # Resolve voice_id from template if template_id is provided
+    voice_id = (payload or {}).get("voice_id")
+    template_id = (payload or {}).get("template_id")
+    if template_id and not voice_id:
+        try:
+            from uuid import UUID
+            from api.core.database import get_session
+            from api.models.podcast import PodcastTemplate
+            from sqlmodel import select
+            session = next(get_session())
+            template = session.exec(
+                select(PodcastTemplate).where(PodcastTemplate.id == UUID(str(template_id)))
+            ).first()
+            if template:
+                voice_id = getattr(template, 'default_intern_voice_id', None) or getattr(template, 'default_elevenlabs_voice_id', None)
+                if voice_id:
+                    _LOG.info(f"[intern] Using intern voice from template: {voice_id}")
+        except Exception as exc:
+            _LOG.warning(f"[intern] Failed to fetch template voice: {exc}")
     
     audio_path = _resolve_media_path(filename)
     _LOG.info(f"[intern] Audio path resolved: {audio_path}")
@@ -442,6 +462,21 @@ def prepare_intern_by_file(
         slug, audio_url = _export_snippet(audio, filename, snippet_start, snippet_end, suffix="intern")
         transcript_preview = _collect_transcript_preview(words, snippet_start, snippet_end)
         prompt_text = str(cmd.get("local_context") or transcript_preview or "").strip()
+        
+        # Extract word timestamps for this snippet window so frontend can update prompt text dynamically
+        snippet_words = []
+        for w in words:
+            try:
+                t = float((w or {}).get("start") or (w or {}).get("time") or 0.0)
+            except Exception:
+                continue
+            if snippet_start <= t < snippet_end:
+                snippet_words.append({
+                    "word": str((w or {}).get("word") or ""),
+                    "start": t,
+                    "end": float((w or {}).get("end") or t),
+                })
+        
         contexts.append(
             {
                 "command_id": cmd.get("command_id"),
@@ -457,7 +492,8 @@ def prepare_intern_by_file(
                 "audio_url": audio_url,
                 "snippet_url": audio_url,
                 "filename": filename,
-                "voice_id": (payload or {}).get("voice_id"),
+                "voice_id": voice_id,
+                "words": snippet_words,
             }
         )
 
@@ -476,13 +512,33 @@ def prepare_intern_by_file(
 )
 def execute_intern_command(
     payload: Dict[str, Any] = Body(
-        ..., description="{ filename, start_s?, end_s, command_id?, override_text?, regenerate?, voice_id? }"
+        ..., description="{ filename, start_s?, end_s, command_id?, override_text?, regenerate?, voice_id?, template_id? }"
     ),
     current_user: User = Depends(get_current_user),
 ):
     filename = str((payload or {}).get("filename") or "").strip()
     if not filename:
         raise HTTPException(status_code=400, detail="filename is required")
+    
+    # Resolve voice_id from template if template_id is provided
+    voice_id_from_payload = (payload or {}).get("voice_id")
+    template_id = (payload or {}).get("template_id")
+    if template_id and not voice_id_from_payload:
+        try:
+            from uuid import UUID
+            from api.core.database import get_session
+            from api.models.podcast import PodcastTemplate
+            from sqlmodel import select
+            session = next(get_session())
+            template = session.exec(
+                select(PodcastTemplate).where(PodcastTemplate.id == UUID(str(template_id)))
+            ).first()
+            if template:
+                voice_id_from_payload = getattr(template, 'default_intern_voice_id', None) or getattr(template, 'default_elevenlabs_voice_id', None)
+                if voice_id_from_payload:
+                    _LOG.info(f"[intern] Using intern voice from template for execution: {voice_id_from_payload}")
+        except Exception as exc:
+            _LOG.warning(f"[intern] Failed to fetch template voice for execution: {exc}")
 
     start_s = (payload or {}).get("start_s")
     end_s = (payload or {}).get("end_s")
@@ -550,22 +606,15 @@ def execute_intern_command(
     if not answer:
         answer = "I'm on it!"
 
-    voice_id = (payload or {}).get("voice_id") or target_cmd.get("voice_id")
-    audio_url = None
-    if answer and voice_id is not None:
-        try:
-            speech = enhancer.generate_speech_from_text(answer, voice_id=voice_id, user=current_user)
-            slug, audio_url = _export_snippet(speech, filename, 0.0, len(speech) / 1000.0, suffix="intern-response")
-        except _AIEnhancerError as exc:
-            _LOG.warning("[intern] TTS generation failed: %s", exc)
-        except Exception as exc:  # pragma: no cover - defensive guard
-            _LOG.warning("[intern] unexpected TTS error: %s", exc)
-
+    voice_id = voice_id_from_payload or target_cmd.get("voice_id")
+    
+    # Return text only - TTS will be generated on frontend after user edits/approves
     return {
         "command_id": target_cmd.get("command_id"),
         "start_s": resolved_start,
         "end_s": resolved_end,
         "response_text": answer,
-        "audio_url": audio_url,
+        "voice_id": voice_id,
+        "audio_url": None,
         "log": log,
     }

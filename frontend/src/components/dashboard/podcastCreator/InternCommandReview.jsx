@@ -60,6 +60,7 @@ export default function InternCommandReview({
         defaultEndRelative = Math.min(maxRelative, startRelative + 6);
       }
       const audioUrl = raw.audio_url || raw.snippet_url || raw.url || null;
+      const words = Array.isArray(raw.words) ? raw.words : [];
       return {
         raw,
         id: raw.command_id ?? raw.intern_index ?? raw.id ?? `intern-${index}`,
@@ -72,6 +73,7 @@ export default function InternCommandReview({
         startRelative,
         defaultEndRelative,
         maxRelative,
+        words,
       };
     });
   }, [contexts]);
@@ -81,6 +83,19 @@ export default function InternCommandReview({
   const [processingId, setProcessingId] = useState(null);
   const [errors, setErrors] = useState({});
   const [regenCount, setRegenCount] = useState({});
+
+  const calculatePromptText = (ctx, endRelative) => {
+    if (!Array.isArray(ctx.words) || ctx.words.length === 0) {
+      return ctx.prompt;
+    }
+    const endAbs = ctx.snippetStart + endRelative;
+    const tokens = [];
+    for (const w of ctx.words) {
+      if (w.start >= endAbs) break;
+      tokens.push(w.word);
+    }
+    return tokens.join(' ').trim() || ctx.prompt;
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -200,13 +215,15 @@ export default function InternCommandReview({
       const marker = markerMap[ctx.id] || { start: ctx.startRelative, end: ctx.defaultEndRelative };
       const endAbs = ctx.snippetStart + clamp(marker.end, ctx.startRelative + 0.25, ctx.maxRelative);
       const text = (responses[ctx.id]?.text || '').trim();
+      const voiceId = responses[ctx.id]?.raw?.voice_id || ctx.raw?.voice_id;
       return {
         command_id: responses[ctx.id]?.commandId ?? ctx.raw?.command_id ?? ctx.id,
         start_s: ctx.startAbs,
         end_s: endAbs,
         response_text: text,
+        voice_id: voiceId,
         audio_url: responses[ctx.id]?.audioUrl || null,
-        prompt_text: ctx.prompt,
+        prompt_text: calculatePromptText(ctx, marker.end),
         regenerate_count: regenCount[ctx.id] || 0,
       };
     });
@@ -289,7 +306,7 @@ export default function InternCommandReview({
                 <div className="space-y-2">
                   <div className="text-xs font-semibold text-slate-700">Prompt snippet</div>
                   <div className="text-xs text-slate-600 bg-slate-100 border border-slate-200 rounded-md p-3 whitespace-pre-wrap">
-                    {ctx.prompt || '—'}
+                    {calculatePromptText(ctx, marker.end) || '—'}
                   </div>
                 </div>
 
