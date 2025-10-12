@@ -49,14 +49,51 @@ class OP3Analytics:
     """Client for OP3 Analytics API."""
     
     BASE_URL = "https://op3.dev/api/1"
+    # OP3 requires authentication - using preview token for public access
+    # To get your own token, visit: https://op3.dev/api/keys
+    PREVIEW_TOKEN = "preview07ce"
     
-    def __init__(self, timeout: int = 30):
+    def __init__(self, timeout: int = 30, api_token: Optional[str] = None):
         self.timeout = timeout
+        self.api_token = api_token or self.PREVIEW_TOKEN
         self.client = httpx.AsyncClient(timeout=timeout)
     
     async def close(self):
         """Close the HTTP client."""
         await self.client.aclose()
+    
+    async def get_show_uuid_from_feed_url(self, feed_url: str) -> Optional[str]:
+        """
+        Get the OP3 show UUID for a given podcast feed URL.
+        
+        Args:
+            feed_url: The RSS feed URL of the podcast
+        
+        Returns:
+            Show UUID if found, None otherwise
+        """
+        import base64
+        
+        # Convert feed URL to urlsafe base64
+        feed_url_b64 = base64.urlsafe_b64encode(feed_url.encode()).decode().rstrip('=')
+        
+        url = f"{self.BASE_URL}/shows/{feed_url_b64}"
+        params = {"token": self.api_token}
+        
+        try:
+            response = await self.client.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+            return data.get("showUuid")
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning(f"OP3: Feed URL not registered: {feed_url}")
+                return None
+            logger.error(f"OP3 API error getting show UUID: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get show UUID from OP3: {e}")
+            return None
     
     async def get_show_downloads(
         self,
@@ -65,33 +102,29 @@ class OP3Analytics:
         end_date: Optional[datetime] = None,
     ) -> OP3ShowStats:
         """
-        Get download statistics for a podcast show.
+        Get download statistics for a podcast show using OP3's show-download-counts API.
         
         Args:
             show_url: The RSS feed URL of the podcast show
-            start_date: Start date for statistics (default: 30 days ago)
-            end_date: End date for statistics (default: now)
+            start_date: Ignored (OP3 API uses fixed 30-day window)
+            end_date: Ignored (OP3 API uses fixed 30-day window)
         
         Returns:
             OP3ShowStats with download data
         """
-        if not start_date:
-            start_date = datetime.utcnow() - timedelta(days=30)
-        if not end_date:
-            end_date = datetime.utcnow()
+        # Step 1: Get the show UUID from the feed URL
+        show_uuid = await self.get_show_uuid_from_feed_url(show_url)
         
-        # Format dates as YYYY-MM-DD
-        start_str = start_date.strftime("%Y-%m-%d")
-        end_str = end_date.strftime("%Y-%m-%d")
+        if not show_uuid:
+            logger.warning(f"OP3: Could not get show UUID for {show_url}")
+            return OP3ShowStats(show_url=show_url, total_downloads=0)
         
-        # OP3 API endpoint for show downloads
-        # Note: OP3 API is public and doesn't require authentication for read access
-        url = f"{self.BASE_URL}/downloads/show"
+        # Step 2: Query the show-download-counts endpoint
+        # This gives us monthly downloads (last 30 days) without needing date parameters
+        url = f"{self.BASE_URL}/queries/show-download-counts"
         params = {
-            "url": show_url,
-            "start": start_str,
-            "end": end_str,
-            "format": "json",
+            "showUuid": show_uuid,
+            "token": self.api_token,
         }
         
         try:
@@ -99,23 +132,33 @@ class OP3Analytics:
             response.raise_for_status()
             data = response.json()
             
+            # Extract show stats from the response
+            show_data = data.get("showDownloadCounts", {}).get(show_uuid, {})
+            monthly_downloads = show_data.get("monthlyDownloads", 0)
+            weekly_downloads = show_data.get("weeklyDownloads", [])
+            
+            logger.info(f"OP3: Got {monthly_downloads} downloads for show {show_uuid}")
+            
             return OP3ShowStats(
                 show_url=show_url,
-                show_title=data.get("showTitle"),
-                total_downloads=data.get("downloads", 0),
-                downloads_trend=data.get("downloadsByDay", []),
-                top_countries=data.get("topCountries", []),
-                top_apps=data.get("topApps", []),
+                show_title=None,  # Not included in this endpoint
+                total_downloads=monthly_downloads,
+                downloads_trend=[],  # Could reconstruct from weekly if needed
+                top_countries=[],  # Not included in this endpoint
+                top_apps=[],  # Not included in this endpoint
             )
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
-                logger.warning(f"OP3: No data found for show {show_url}")
+                logger.warning(f"OP3: No data found for show UUID {show_uuid}")
+                return OP3ShowStats(show_url=show_url, total_downloads=0)
+            elif e.response.status_code == 401:
+                logger.error(f"OP3 API authentication failed. Check API token. Status: 401 Unauthorized")
                 return OP3ShowStats(show_url=show_url, total_downloads=0)
             logger.error(f"OP3 API error: {e}")
-            raise
+            return OP3ShowStats(show_url=show_url, total_downloads=0)
         except Exception as e:
             logger.error(f"Failed to fetch OP3 show stats: {e}")
-            raise
+            return OP3ShowStats(show_url=show_url, total_downloads=0)
     
     async def get_episode_downloads(
         self,

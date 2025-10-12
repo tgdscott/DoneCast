@@ -171,9 +171,12 @@ def dashboard_stats(
             
             if op3_show_stats:
                 op3_downloads_30d = op3_show_stats.total_downloads
-                logger.info(f"OP3 stats SUCCESS: {op3_downloads_30d} downloads in last 30 days")
-                if op3_downloads_30d == 0:
-                    op3_error_message = "No download data yet - waiting for first downloads"
+                if op3_downloads_30d > 0:
+                    logger.info(f"OP3 stats SUCCESS: {op3_downloads_30d} downloads in last 30 days")
+                else:
+                    # OP3 returned 0 - could be no data OR 401 auth required
+                    logger.warning(f"OP3 returned 0 downloads for {rss_url} - check if API requires authentication")
+                    op3_error_message = "OP3 API requires authentication or no data available"
             else:
                 logger.warning("OP3 stats fetch returned None - API may have returned no data")
                 op3_error_message = "OP3 API returned no data"
