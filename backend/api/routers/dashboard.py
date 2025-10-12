@@ -103,6 +103,7 @@ def _compute_local_episode_stats(session: Session, user_id) -> tuple[dict, int]:
             Episode.user_id == user_id,
             Episode.publish_at != None,  # noqa: E711
             Episode.publish_at >= since,
+            Episode.publish_at <= now,  # Only count PAST episodes, not future scheduled ones
         )
     ).one()
 
@@ -144,6 +145,7 @@ def dashboard_stats(
     # Try to fetch OP3 analytics for enhanced stats
     op3_downloads_30d = None
     op3_show_stats = None
+    op3_error_message = None
     
     try:
         # Get user's primary podcast RSS feed URL
@@ -154,23 +156,32 @@ def dashboard_stats(
         
         podcast = podcasts[0] if podcasts else None
         
-        if podcast and podcast.rss_feed_url:
-            logger.info(f"Fetching OP3 stats for RSS feed: {podcast.rss_feed_url}")
+        if not podcast:
+            logger.info("No podcast found for user - skipping OP3 stats")
+            op3_error_message = "No podcast configured"
+        elif not podcast.rss_feed_url:
+            logger.warning(f"Podcast {podcast.id} has no RSS feed URL - cannot fetch OP3 stats")
+            op3_error_message = "RSS feed not configured"
+        else:
+            rss_url = podcast.rss_feed_url
+            logger.info(f"Fetching OP3 stats for RSS feed: {rss_url}")
             
             # Use sync wrapper to fetch OP3 stats (handles async internally)
-            op3_show_stats = get_show_stats_sync(podcast.rss_feed_url, days=30)
+            op3_show_stats = get_show_stats_sync(rss_url, days=30)
             
             if op3_show_stats:
                 op3_downloads_30d = op3_show_stats.total_downloads
-                logger.info(f"OP3 stats retrieved: {op3_downloads_30d} downloads in last 30 days")
+                logger.info(f"OP3 stats SUCCESS: {op3_downloads_30d} downloads in last 30 days")
+                if op3_downloads_30d == 0:
+                    op3_error_message = "No download data yet - waiting for first downloads"
             else:
-                logger.warning("OP3 stats fetch returned None - may be no data or API error")
-        else:
-            logger.info("No RSS feed URL available for OP3 stats - using local counts only")
+                logger.warning("OP3 stats fetch returned None - API may have returned no data")
+                op3_error_message = "OP3 API returned no data"
             
     except Exception as e:
         # OP3 fetch failed - log but don't crash dashboard
         logger.error(f"Failed to fetch OP3 analytics: {e}", exc_info=True)
+        op3_error_message = f"API error: {str(e)}"
         logger.info("Falling back to local episode counts")
     
     # Build response with OP3 data if available, else local counts
@@ -185,4 +196,6 @@ def dashboard_stats(
         "recent_episode_plays": [],
         # Include flag so frontend knows if OP3 data is present
         "op3_enabled": op3_downloads_30d is not None,
+        # Include error message for debugging (not shown to user)
+        "op3_error": op3_error_message if op3_downloads_30d is None else None,
     }
