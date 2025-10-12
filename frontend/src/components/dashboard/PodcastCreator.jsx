@@ -242,7 +242,9 @@ export default function PodcastCreator({
     if (internVoiceId === 'default') return 'Default voice';
     const mapped = voiceNameById?.[internVoiceId];
     if (mapped && !isUuidLike(mapped)) return mapped;
-    return formatDisplayName(internVoiceId, { fallback: 'Custom voice' }) || 'Custom voice';
+    // Check if it's the ElevenLabs George voice (most common default)
+    if (internVoiceId === '19B4gjtpL5m876wS3Dfg') return 'George (ElevenLabs)';
+    return formatDisplayName(internVoiceId, { fallback: 'AI Voice' }) || 'AI Voice';
   }, [internVoiceId, voiceNameById]);
 
   const baseIntentHide = {
