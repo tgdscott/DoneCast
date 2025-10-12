@@ -67,17 +67,28 @@ async def confirm_email(
 
     now = datetime.utcnow()
     if not ev and payload.code:
+        # Query for matching code that hasn't been used yet
         ev = session.exec(
             select(EmailVerification)
             .where(EmailVerification.user_id == user.id)
             .where(EmailVerification.code == payload.code)
+            .where(EmailVerification.used == False)  # noqa: E712
         ).first()
 
     if not ev:
+        # Log for debugging: check if code exists but is marked as used
+        all_matches = session.exec(
+            select(EmailVerification)
+            .where(EmailVerification.user_id == user.id)
+            .where(EmailVerification.code == payload.code)
+        ).all()
+        if all_matches:
+            print(f"[VERIFICATION DEBUG] Code {payload.code} exists but all are used={[e.used for e in all_matches]}")
         raise HTTPException(status_code=400, detail="Invalid or expired verification")
     if ev.expires_at < now:
         raise HTTPException(status_code=400, detail="Verification expired")
     if ev.used:
+        # This should never happen now that we filter by used=False in the query
         raise HTTPException(status_code=400, detail="Verification already used")
 
     ev.verified_at = now
