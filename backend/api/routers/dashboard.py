@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+import logging
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func
@@ -10,8 +11,10 @@ from api.core.database import get_session
 from api.models.podcast import Episode, EpisodeStatus, Podcast
 from api.models.user import User
 from api.services.publisher import SpreakerClient
+from api.services.op3_analytics import OP3Analytics
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+logger = logging.getLogger(__name__)
 
 
 def _parse_spreaker_datetime(value: Optional[object]) -> Optional[datetime]:
@@ -113,10 +116,16 @@ def _compute_local_episode_stats(session: Session, user_id) -> tuple[dict, int]:
 
 
 @router.get("/stats")
-def dashboard_stats(
+async def dashboard_stats(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
+    """
+    Get dashboard statistics from local database and OP3 analytics.
+    
+    This endpoint now uses OP3 (Open Podcast Prefix Project) for download/play stats
+    instead of Spreaker, as we're migrating away from Spreaker.
+    """
     try:
         base_stats, local_last_30d = _compute_local_episode_stats(session, current_user.id)
     except Exception:
@@ -128,142 +137,123 @@ def dashboard_stats(
             "last_assembly_status": None,
         }, 0)
 
-    token = getattr(current_user, "spreaker_access_token", None)
-    if not token:
+    # Get all podcasts for this user
+    try:
+        podcasts = session.exec(
+            select(Podcast).where(Podcast.user_id == current_user.id)
+        ).all()
+    except Exception:
+        podcasts = []
+    
+    if not podcasts:
         return {
             **base_stats,
             "spreaker_connected": False,
             "episodes_last_30d": local_last_30d,
             "plays_last_30d": None,
+            "downloads_last_30d": None,
             "recent_episode_plays": [],
         }
 
-    client = SpreakerClient(token)
+    # Fetch download statistics from OP3 for all podcasts
+    from api.core.config import settings
+    from infrastructure.gcs import get_public_audio_url
+    
+    total_downloads_30d = 0
+    recent_episode_data = []
+    op3_client = OP3Analytics()
+    
     try:
-        shows = session.exec(
-            select(Podcast)
-            .where(Podcast.user_id == current_user.id)
-            .where(getattr(Podcast, "spreaker_show_id") != None)  # noqa: E711
-        ).all()
-    except Exception:
-        shows = []
-
-    episodes_last_30d = 0
-    counted_episode_ids: set[str] = set()
-    plays_last_30d = 0
-    plays_from_spreaker = False
-    episodes_from_spreaker = False
-    episodes_by_id: dict[str, dict] = {}
-
-    now = datetime.now(timezone.utc)
-    since = now - timedelta(days=30)
-    date_window = {"from": since.strftime("%Y-%m-%d"), "to": now.strftime("%Y-%m-%d")}
-    stats_params = {**date_window, "group": "day"}
-    episodes_params = {"limit": 100, **date_window}
-
-    for show in shows:
-        try:
-            sid = getattr(show, "spreaker_show_id", None)
-            if not sid:
-                continue
-            sid_str = str(sid)
-
-            ok, ep_list = client._get_paginated(
-                f"/shows/{sid_str}/episodes",
-                params=episodes_params,
-                items_key="items",
-            )
-            if ok and isinstance(ep_list, dict):
-                for ep in ep_list.get("items", []):
-                    episode_id = ep.get("episode_id") or ep.get("id")
-                    if not episode_id:
-                        continue
-                    episode_id = str(episode_id)
-                    meta = episodes_by_id.setdefault(episode_id, {"episode_id": episode_id, "show_id": sid_str})
-                    meta["title"] = ep.get("title") or ep.get("name") or "Untitled"
-
-                    pub_dt = _parse_spreaker_datetime(
-                        ep.get("published_at")
-                        or ep.get("publish_at")
-                        or ep.get("auto_published_at")
-                    )
-                    if pub_dt:
-                        meta["published_at"] = pub_dt
-                        if pub_dt <= now and pub_dt >= since and episode_id not in counted_episode_ids:
-                            episodes_last_30d += 1
-                            counted_episode_ids.add(episode_id)
-                            episodes_from_spreaker = True
-                    else:
-                        schedule_dt = _parse_spreaker_datetime(ep.get("publish_at"))
-                        if schedule_dt:
-                            meta["scheduled_for"] = schedule_dt
-
-            ok, stats = client._get(f"/shows/{sid_str}/statistics/plays", params=stats_params)
-            if ok and isinstance(stats, dict):
-                buckets = stats.get("items")
-                if isinstance(buckets, list):
-                    for bucket in buckets:
-                        plays_val = _coerce_int(bucket.get("plays_count") or bucket.get("plays_total"))
-                        if plays_val is not None:
-                            plays_last_30d += plays_val
-                            plays_from_spreaker = True
+        now = datetime.now(timezone.utc)
+        since = now - timedelta(days=30)
+        
+        # For each podcast, get OP3 stats
+        for podcast in podcasts:
+            try:
+                # Construct RSS feed URL for this podcast  
+                # Use the same pattern as the analytics.py endpoint
+                if hasattr(podcast, 'feed_url') and podcast.feed_url:
+                    rss_url = podcast.feed_url
                 else:
-                    plays_val = _coerce_int(stats.get("plays_count") or stats.get("plays_total"))
-                    if plays_val is not None:
-                        plays_last_30d += plays_val
-                        plays_from_spreaker = True
-
-            ok, ep_stats = client.get_show_episodes_plays_totals(sid_str, params=stats_params)
-            if ok and isinstance(ep_stats, dict):
-                for item in ep_stats.get("items") or []:
-                    episode_id = item.get("episode_id") or item.get("id")
-                    if not episode_id:
+                    identifier = getattr(podcast, 'slug', None) or str(podcast.id)
+                    base_url = settings.APP_BASE_URL or "https://api.podcastplusplus.com"
+                    rss_url = f"{base_url}/v1/rss/{identifier}/feed.xml"
+                
+                # Fetch show-level stats from OP3
+                try:
+                    show_stats = await op3_client.get_show_downloads(
+                        show_url=rss_url,
+                        start_date=since,
+                        end_date=now
+                    )
+                    total_downloads_30d += show_stats.total_downloads
+                    logger.info(f"OP3 stats for {podcast.name}: {show_stats.total_downloads} downloads")
+                except Exception as e:
+                    logger.warning(f"Failed to fetch OP3 stats for podcast {podcast.id}: {e}")
+                    continue
+                
+                # Get recent published episodes for this podcast
+                stmt = (
+                    select(Episode)
+                    .where(Episode.podcast_id == podcast.id)
+                    .where(Episode.status == EpisodeStatus.published)
+                    .where(Episode.gcs_audio_path.is_not(None))
+                    .where(Episode.publish_at.is_not(None))
+                    .where(Episode.publish_at >= since)
+                    .order_by(Episode.publish_at.desc())
+                    .limit(10)
+                )
+                episodes = session.exec(stmt).all()
+                
+                # Fetch episode-level stats from OP3
+                for episode in episodes:
+                    if not episode.gcs_audio_path:
                         continue
-                    episode_id = str(episode_id)
-                    meta = episodes_by_id.setdefault(episode_id, {"episode_id": episode_id, "show_id": sid_str})
-                    meta.setdefault("title", item.get("title") or item.get("name") or "Untitled")
-
-                    plays_val = None
-                    for key in ("plays_count", "plays_total", "plays", "count", "play_count"):
-                        plays_val = _coerce_int(item.get(key))
-                        if plays_val is not None:
-                            break
-                    if plays_val is not None:
-                        meta["plays_total"] = meta.get("plays_total", 0) + plays_val
-
-                    downloads_val = None
-                    for key in ("downloads_count", "downloads_total", "downloads"):
-                        downloads_val = _coerce_int(item.get(key))
-                        if downloads_val is not None:
-                            break
-                    if downloads_val is not None:
-                        meta["downloads_total"] = meta.get("downloads_total", 0) + downloads_val
-        except Exception:
-            # Ignore per-show failures to avoid breaking the whole dashboard
-            continue
-
-    published_episodes = [
-        meta for meta in episodes_by_id.values()
-        if meta.get("published_at") and meta["published_at"] <= now
-    ]
-    published_episodes.sort(key=lambda m: m["published_at"], reverse=True)
-
-    recent_episode_plays = []
-    for meta in published_episodes[:3]:
-        entry = {
-            "episode_id": meta["episode_id"],
-            "title": meta.get("title") or "Untitled",
-            "plays_total": meta.get("plays_total"),
-            "published_at": meta["published_at"].isoformat(),
-        }
-        if "downloads_total" in meta:
-            entry["downloads_total"] = meta["downloads_total"]
-        recent_episode_plays.append(entry)
+                    
+                    try:
+                        audio_url = get_public_audio_url(episode.gcs_audio_path, expiration_days=7)
+                        if not audio_url:
+                            continue
+                        
+                        op3_url = f"https://op3.dev/e/{audio_url}"
+                        
+                        ep_stats = await op3_client.get_episode_downloads(
+                            episode_url=op3_url,
+                            start_date=since,
+                            end_date=now
+                        )
+                        
+                        recent_episode_data.append({
+                            "episode_id": str(episode.id),
+                            "title": episode.title or "Untitled",
+                            "downloads_30d": ep_stats.downloads_30d,
+                            "downloads_total": ep_stats.downloads_total,
+                            "published_at": episode.publish_at.isoformat() if episode.publish_at else None,
+                        })
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch OP3 stats for episode {episode.id}: {e}")
+                        continue
+                
+            except Exception as e:
+                logger.warning(f"Error processing podcast {podcast.id} for OP3 stats: {e}")
+                continue
+        
+        # Sort by downloads and take top 3
+        recent_episode_data.sort(key=lambda x: x.get("downloads_30d", 0), reverse=True)
+        recent_episode_plays = recent_episode_data[:3]
+        
+    except Exception as e:
+        logger.error(f"Error fetching OP3 dashboard stats: {e}")
+        total_downloads_30d = 0
+        recent_episode_plays = []
+    finally:
+        await op3_client.close()
 
     return {
         **base_stats,
-        "spreaker_connected": True,
-        "episodes_last_30d": episodes_last_30d if episodes_from_spreaker else local_last_30d,
-        "plays_last_30d": plays_last_30d if plays_from_spreaker else None,
+        "spreaker_connected": False,  # We're migrating away from Spreaker
+        "episodes_last_30d": local_last_30d,
+        "downloads_last_30d": total_downloads_30d,
+        "plays_last_30d": total_downloads_30d,  # OP3 tracks downloads, which are equivalent to plays
         "recent_episode_plays": recent_episode_plays,
     }

@@ -624,13 +624,9 @@ export default function PodcastPlusDashboard() {
                         <div className="text-[11px] tracking-wide text-gray-500">Episodes</div>
                         <div className="font-semibold text-gray-800 mt-0.5">{stats?.total_episodes ?? '–'}</div>
                       </div>
-                      <div className="text-center">
-                        <div className="text-[11px] tracking-wide text-gray-500">Ready?</div>
-                        <div className={`font-semibold mt-0.5 ${canCreateEpisode ? 'text-green-600' : 'text-amber-600'}`}>{canCreateEpisode ? 'Yes' : 'Setup needed'}</div>
-                      </div>
                     </div>
                       <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-                        {canCreateEpisode ? (
+                        {canCreateEpisode && (
                           <Button
                             className="flex-1 md:flex-none"
                             title="Start a new episode"
@@ -646,30 +642,7 @@ export default function PodcastPlusDashboard() {
                             <Plus className="w-4 h-4 mr-2" />
                             Start New Episode
                           </Button>
-                        ) : (
-                        <div className="flex gap-2 flex-wrap">
-                          {templates.length === 0 && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setCurrentView('templateManager')}
-                              className="border-red-500 text-red-700"
-                            >
-                              Create Template
-                            </Button>
-                          )}
-                          {stats?.spreaker_connected === false && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setCurrentView('settings')}
-                              className="border-red-500 text-red-700"
-                            >
-                              Connect Spreaker
-                            </Button>
-                          )}
-                        </div>
-                      )}
+                        )}
                     </div>
                   </CardContent>
                 </Card>
