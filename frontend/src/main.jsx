@@ -13,6 +13,7 @@ import PrivacyPolicy from '@/pages/PrivacyPolicy.jsx';
 import TermsOfUse from '@/pages/TermsOfUse.jsx';
 import Legal from '@/pages/Legal.jsx';
 import Verify from '@/pages/Verify.jsx';
+import EmailVerification from '@/pages/EmailVerification.jsx';
 import Pricing from '@/pages/Pricing.jsx';
 import PodcastWebsiteBuilder from '@/pages/PodcastWebsiteBuilder.jsx';
 import NewLanding from '@/pages/NewLanding.jsx';
@@ -112,6 +113,7 @@ const router = createBrowserRouter([
   { path: '/terms', element: <TermsOfUse /> },
   { path: '/legal', element: <Legal /> },
   { path: '/verify', element: <Verify /> },
+  { path: '/email-verification', element: <EmailVerification /> },
   { path: '/pricing', element: <Pricing /> },
   { path: '/subscriptions', element: <Pricing /> },
   { path: '/docs/podcast-website-builder', element: <PodcastWebsiteBuilder /> },

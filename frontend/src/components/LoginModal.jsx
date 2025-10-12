@@ -185,7 +185,12 @@ export default function LoginModal({ onClose }) {
           'Invalid email or password.'
         );
         if (/confirm your email/i.test(detail)) {
-          showError(detail, 'info');
+          // User needs to verify email - redirect to verification page
+          onClose();
+          sessionStorage.setItem('pendingVerificationEmail', (nextEmail ?? email).trim());
+          sessionStorage.setItem('pendingVerificationPassword', nextPassword ?? password);
+          window.location.href = '/email-verification';
+          return;
         } else {
           showError(detail, 'error');
         }
@@ -276,14 +281,15 @@ export default function LoginModal({ onClose }) {
         return;
       }
       const data = await res.json().catch(() => ({}));
-      const inactive = Boolean(data?.detail?.includes?.('inactive')) || data?.requires_verification;
-      if (inactive) {
-        setVerificationEmail(trimmedEmail);
-        setVerifyExpiresAt(Date.now() + 15 * 60 * 1000);
-        setMode('verify');
-        setVerifyCode('');
-        setChangeEmail(false);
-        setNewEmail('');
+      // Check if email verification is required
+      if (data?.requires_verification === true) {
+        // Close modal and redirect to dedicated email verification page
+        onClose();
+        // Use window.location for full navigation with state
+        window.location.href = '/email-verification';
+        // Store email and password in sessionStorage for the verification page
+        sessionStorage.setItem('pendingVerificationEmail', trimmedEmail);
+        sessionStorage.setItem('pendingVerificationPassword', password);
         return;
       }
       await attemptEmailLogin(trimmedEmail, password);

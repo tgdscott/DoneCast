@@ -39,13 +39,19 @@ class UserRegisterPayload(UserCreate):
     terms_version: str | None = None
 
 
-@router.post("/register", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
+class UserRegisterResponse(BaseModel):
+    """Response model for registration that includes verification status."""
+    email: str
+    requires_verification: bool
+
+
+@router.post("/register", response_model=UserRegisterResponse, status_code=status.HTTP_201_CREATED)
 @limiter.limit("5/minute")  # coarse cap; relies on IP key func
 async def register_user(
     user_in: UserRegisterPayload,
     request: Request,
     session: Session = Depends(get_session),
-) -> UserPublic:
+) -> UserRegisterResponse:
     """Register a new user with email and password."""
 
     try:
@@ -80,9 +86,8 @@ async def register_user(
         default_active = False
 
     base_user = UserCreate(**user_in.model_dump(exclude={"accept_terms", "terms_version"}))
-    # TEMP URGENT FIX: Make users active immediately while SMTP is being configured
-    # Email verification will still be sent, but users can log in right away
-    base_user.is_active = True  # Was: default_active
+    # Users must verify their email before they can log in
+    base_user.is_active = False
 
     user = crud.create_user(session=session, user_create=base_user)
 
@@ -154,7 +159,10 @@ async def register_user(
 
     threading.Thread(target=_send_verification, name="send_verification", daemon=True).start()
 
-    return to_user_public(user)
+    return UserRegisterResponse(
+        email=user.email,
+        requires_verification=True
+    )
 
 
 class LoginRequest(BaseModel):
