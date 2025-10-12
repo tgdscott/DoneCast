@@ -193,20 +193,28 @@ def execute_intern_commands(
             log.append("[INTERN_SKIP] empty prompt_text; no action taken")
             continue
         log.append(f"[INTERN_PROMPT] '{prompt_text[:200]}'")
-        try:
-            if fast_mode:
+        
+        # If user has explicitly set mode (from override review), respect it - don't let LLM override
+        explicit_mode = cmd.get("mode")
+        if explicit_mode:
+            action = "add_to_shownotes" if explicit_mode == "shownote" else "generate_audio"
+            log.append(f"[INTERN_EXPLICIT_MODE] mode={explicit_mode} -> action={action}")
+        else:
+            # No explicit mode - let LLM interpret the command
+            try:
+                if fast_mode:
+                    interpreted = {"action": "generate_audio"}
+                    try:
+                        log.append("[INTERN_FAST_MODE] enabled; skipping LLM interpret")
+                    except Exception:
+                        pass
+                else:
+                    interpreted = ai_enhancer.interpret_intern_command(prompt_text) if prompt_text else {"action": "generate_audio"}
+            except Exception as e:
                 interpreted = {"action": "generate_audio"}
-                try:
-                    log.append("[INTERN_FAST_MODE] enabled; skipping LLM interpret")
-                except Exception:
-                    pass
-            else:
-                interpreted = ai_enhancer.interpret_intern_command(prompt_text) if prompt_text else {"action": "generate_audio"}
-        except Exception as e:
-            interpreted = {"action": "generate_audio"}
-            log.append(f"[INTERN_INTERPRET_FALLBACK] {e}")
-        default_action = "add_to_shownotes" if (cmd.get("mode") == "shownote") else "generate_audio"
-        action = (interpreted or {}).get("action") or default_action
+                log.append(f"[INTERN_INTERPRET_FALLBACK] {e}")
+            default_action = "add_to_shownotes" if (cmd.get("mode") == "shownote") else "generate_audio"
+            action = (interpreted or {}).get("action") or default_action
         # Get the clean topic from the interpretation, but fall back to the
         # original prompt if the interpretation failed for some reason.
         query_text = (interpreted or {}).get("topic") or prompt_text
