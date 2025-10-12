@@ -14,6 +14,7 @@ import CoverCropper from "@/components/dashboard/CoverCropper.jsx";
 import { useResolvedTimezone } from '@/hooks/useResolvedTimezone';
 import { formatInTimezone } from '@/lib/timezone';
 import AIAssistant from "@/components/assistant/AIAssistant.jsx";
+import VoiceRecorder from "@/components/onboarding/VoiceRecorder.jsx";
 
 export default function Onboarding() {
   const { token, user, refreshUser } = useAuth();
@@ -592,9 +593,14 @@ export default function Onboarding() {
     try { window.location.replace('/?onboarding=0'); } catch {}
   };
 
-  async function generateOrUploadTTS(kind, mode, script, file) {
+  async function generateOrUploadTTS(kind, mode, script, file, recordedAsset) {
     // kind: 'intro' | 'outro'
+    // mode: 'tts' | 'upload' | 'record' | 'existing'
     try {
+      if (mode === 'record') {
+        // Recording already uploaded via VoiceRecorder component
+        return recordedAsset || null;
+      }
       if (mode === 'upload') {
         if (!file) return null;
         const fd = new FormData();
@@ -883,7 +889,7 @@ export default function Onboarding() {
             <div className="space-y-6">
               <div className="space-y-2">
                 <div className="font-medium">Intro</div>
-                <div className="flex gap-3 items-center">
+                <div className="flex gap-3 items-center flex-wrap">
                   {introOptions.length > 0 && (
                     <label className={`border rounded p-2 cursor-pointer ${introMode==='existing'? 'border-blue-600':'hover:border-gray-400'}`}>
                       <input type="radio" name="introMode" value="existing" checked={introMode==='existing'} onChange={()=> setIntroMode('existing')} />
@@ -892,6 +898,17 @@ export default function Onboarding() {
                       </span>
                     </label>
                   )}
+                  <label className={`border rounded p-2 cursor-pointer ${introMode==='record'?'border-blue-600 bg-blue-50':'hover:border-gray-400'}`}>
+                    <input type="radio" name="introMode" value="record" checked={introMode==='record'} onChange={()=> setIntroMode('record')} />
+                    <span className="ml-2 inline-flex flex-col items-center text-center">
+                      <span className="flex items-center gap-1">
+                        <Mic className="h-4 w-4" />
+                        <span>Record Now</span>
+                        <span className="ml-1 px-1.5 py-0.5 bg-green-100 text-green-800 text-xs rounded font-medium">Easy!</span>
+                      </span>
+                      <span className="text-xs italic text-muted-foreground">(Use your own voice)</span>
+                    </span>
+                  </label>
                   <label className={`border rounded p-2 cursor-pointer ${introMode==='tts'?'border-blue-600':'hover:border-gray-400'}`}>
                     <input type="radio" name="introMode" value="tts" checked={introMode==='tts'} onChange={()=> setIntroMode('tts')} />
                     <span className="ml-2 inline-flex flex-col items-center text-center">
@@ -933,6 +950,21 @@ export default function Onboarding() {
                     </select>
                   </div>
                 )}
+                {introMode==='record' && (
+                  <VoiceRecorder
+                    type="intro"
+                    token={token}
+                    maxDuration={60}
+                    largeText={largeText}
+                    onRecordingComplete={(mediaItem) => {
+                      setIntroAsset(mediaItem);
+                      toast({ 
+                        title: "Perfect!", 
+                        description: "Your intro has been recorded and saved." 
+                      });
+                    }}
+                  />
+                )}
                 {introMode==='tts' ? (
                   <Textarea value={introScript} onChange={(e)=> setIntroScript(e.target.value)} placeholder="Welcome to my podcast!" />
                 ) : (
@@ -942,7 +974,7 @@ export default function Onboarding() {
               </div>
               <div className="space-y-2">
                 <div className="font-medium">Outro</div>
-                <div className="flex gap-3 items-center">
+                <div className="flex gap-3 items-center flex-wrap">
                   {outroOptions.length > 0 && (
                     <label className={`border rounded p-2 cursor-pointer ${outroMode==='existing'? 'border-blue-600':'hover:border-gray-400'}`}>
                       <input type="radio" name="outroMode" value="existing" checked={outroMode==='existing'} onChange={()=> setOutroMode('existing')} />
@@ -951,6 +983,17 @@ export default function Onboarding() {
                       </span>
                     </label>
                   )}
+                  <label className={`border rounded p-2 cursor-pointer ${outroMode==='record'?'border-blue-600 bg-blue-50':'hover:border-gray-400'}`}>
+                    <input type="radio" name="outroMode" value="record" checked={outroMode==='record'} onChange={()=> setOutroMode('record')} />
+                    <span className="ml-2 inline-flex flex-col items-center text-center">
+                      <span className="flex items-center gap-1">
+                        <Mic className="h-4 w-4" />
+                        <span>Record Now</span>
+                        <span className="ml-1 px-1.5 py-0.5 bg-green-100 text-green-800 text-xs rounded font-medium">Easy!</span>
+                      </span>
+                      <span className="text-xs italic text-muted-foreground">(Use your own voice)</span>
+                    </span>
+                  </label>
                   <label className={`border rounded p-2 cursor-pointer ${outroMode==='tts'?'border-blue-600':'hover:border-gray-400'}`}>
                     <input type="radio" name="outroMode" value="tts" checked={outroMode==='tts'} onChange={()=> setOutroMode('tts')} />
                     <span className="ml-2 inline-flex flex-col items-center text-center">
@@ -991,6 +1034,21 @@ export default function Onboarding() {
                       })}
                     </select>
                   </div>
+                )}
+                {outroMode==='record' && (
+                  <VoiceRecorder
+                    type="outro"
+                    token={token}
+                    maxDuration={60}
+                    largeText={largeText}
+                    onRecordingComplete={(mediaItem) => {
+                      setOutroAsset(mediaItem);
+                      toast({ 
+                        title: "Perfect!", 
+                        description: "Your outro has been recorded and saved." 
+                      });
+                    }}
+                  />
                 )}
                 {outroMode==='tts' ? (
                   <Textarea value={outroScript} onChange={(e)=> setOutroScript(e.target.value)} placeholder="Thank you for listening and see you next time!" />
@@ -1395,12 +1453,15 @@ export default function Onboarding() {
       // If upload mode is chosen, enforce selecting a file
       if (introMode === 'upload' && !introFile) return false;
       if (outroMode === 'upload' && !outroFile) return false;
+      // If record mode is chosen, ensure recording was completed
+      if (introMode === 'record' && !introAsset) return false;
+      if (outroMode === 'record' && !outroAsset) return false;
       if (!introAsset) {
-        const ia = await generateOrUploadTTS('intro', introMode, introScript, introFile);
+        const ia = await generateOrUploadTTS('intro', introMode, introScript, introFile, introAsset);
         if (ia) { setIntroAsset(ia); createdIntro = ia; }
       }
       if (!outroAsset) {
-        const oa = await generateOrUploadTTS('outro', outroMode, outroScript, outroFile);
+        const oa = await generateOrUploadTTS('outro', outroMode, outroScript, outroFile, outroAsset);
         if (oa) { setOutroAsset(oa); createdOutro = oa; }
       }
       if (createdIntro || createdOutro) {
