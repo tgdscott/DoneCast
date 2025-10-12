@@ -94,14 +94,14 @@ const normalizeMessage = (value, fallback) => {
   return String(value) || fallback;
 };
 
-export default function LoginModal({ onClose }) {
+export default function LoginModal({ onClose, initialMode = 'login' }) {
   const { login } = useAuth();
   const googleLoginUrl = useMemo(buildGoogleLoginUrl, []);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [errorTone, setErrorTone] = useState('error');
-  const [mode, setMode] = useState('login'); // 'login' | 'register' | 'verify'
+  const [mode, setMode] = useState(initialMode); // 'login' | 'register' | 'verify'
   const [verifyCode, setVerifyCode] = useState('');
   const [verificationEmail, setVerificationEmail] = useState('');
   const [verifyExpiresAt, setVerifyExpiresAt] = useState(null); // timestamp ms

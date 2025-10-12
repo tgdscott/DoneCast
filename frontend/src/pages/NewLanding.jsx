@@ -225,6 +225,7 @@ const FooterColumn = ({ title, links }) => (
 export default function NewLanding() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(() => searchParams.get('login') === '1');
+  const [loginModalMode, setLoginModalMode] = useState('login'); // Track whether to show login or signup
   const navigate = useNavigate();
   const { isAuthenticated, hydrated } = useAuth();
 
@@ -243,6 +244,18 @@ export default function NewLanding() {
   }, [searchParams]);
 
   const openLoginModal = () => {
+    setLoginModalMode('login');
+    setIsLoginModalOpen(true);
+    if (searchParams.get('login') === '1') {
+      return;
+    }
+    const next = new URLSearchParams(searchParams);
+    next.set('login', '1');
+    setSearchParams(next, { replace: true });
+  };
+
+  const openSignupModal = () => {
+    setLoginModalMode('register');
     setIsLoginModalOpen(true);
     if (searchParams.get('login') === '1') {
       return;
@@ -268,7 +281,7 @@ export default function NewLanding() {
 
   return (
     <div className="new-landing">
-      {isLoginModalOpen && <LoginModal onClose={closeLoginModal} />}
+      {isLoginModalOpen && <LoginModal onClose={closeLoginModal} initialMode={loginModalMode} />}
       <nav className="nl-nav">
         <div className="nl-container">
           <div className="nl-nav-inner">
@@ -292,7 +305,7 @@ export default function NewLanding() {
                   Start Free Trial
                 </Link>
               ) : (
-                <button type="button" className="nl-button" onClick={openLoginModal}>
+                <button type="button" className="nl-button" onClick={openSignupModal}>
                   Start Free Trial
                 </button>
               )}
@@ -321,7 +334,7 @@ export default function NewLanding() {
                   <ArrowRight size={18} />
                 </Link>
               ) : (
-                <button type="button" className="nl-button" onClick={openLoginModal}>
+                <button type="button" className="nl-button" onClick={openSignupModal}>
                   Start Your Free Trial
                   <ArrowRight size={18} />
                 </button>
