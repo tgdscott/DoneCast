@@ -27,7 +27,7 @@ def handle_flubber(mutable_words: List[Dict[str, Any]], cfg: Dict[str, Any], log
             raise RuntimeError("FLUBBER_ABORT")
     if hits:
         idx, t = hits[-1]
-        max_lookback = int(cfg.get('max_lookback_words', 50))
+        max_lookback = int(cfg.get('max_lookback_words', 100))
         start_idx = max(0, idx - max_lookback)
         for j in range(start_idx, idx):
             if isinstance(mutable_words[j].get('word'), str):

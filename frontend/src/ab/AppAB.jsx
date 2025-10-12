@@ -158,8 +158,10 @@ export default function AppAB({ token }) {
   // when the transcript is actually ready on the server
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      if (!token) return;
+    let checkTimeoutId = null;
+    
+    const checkProcessingDrafts = async () => {
+      if (!token || cancelled) return;
       
       // Find all drafts that show as "processing"
       const processingDrafts = drafts.filter(d => d.transcript === 'processing' && d.hint);
@@ -185,9 +187,18 @@ export default function AppAB({ token }) {
           await new Promise(resolve => setTimeout(resolve, 200));
         }
       }
-    })();
-    return () => { cancelled = true; };
-  }, [token]); // Only run once on mount when token is available
+    };
+    
+    // Run immediately on mount, then debounce subsequent checks
+    if (token && drafts.some(d => d.transcript === 'processing' && d.hint)) {
+      checkTimeoutId = setTimeout(checkProcessingDrafts, 100);
+    }
+    
+    return () => { 
+      cancelled = true;
+      if (checkTimeoutId) clearTimeout(checkTimeoutId);
+    };
+  }, [token, drafts]); // Run when token or drafts change
 
   const uploadById = useMemo(() => Object.fromEntries(uploads.map(u => [u.id, u])), [uploads]);
 

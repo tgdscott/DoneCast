@@ -44,7 +44,7 @@ def compute_flubber_spans(
         last = max(contexts, key=lambda c: c.get('time', 0.0))
         idx = int(last.get('index', -1))
         if idx >= 0:
-            max_lookback = int((cfg or {}).get('max_lookback_words', 50))
+            max_lookback = int((cfg or {}).get('max_lookback_words', 100))
             s = max(0, idx - max_lookback)
             spans.append((s, idx + 1))  # include the flubber token itself
     except Exception:

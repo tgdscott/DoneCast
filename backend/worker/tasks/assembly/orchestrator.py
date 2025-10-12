@@ -58,8 +58,11 @@ def _cleanup_main_content(*, session, episode, main_content_filename: str) -> No
     try:
         raw_value = str(main_content_filename or "").strip()
         if not raw_value:
+            logging.info("[cleanup] No main_content_filename provided, skipping cleanup")
             return
 
+        logging.info("[cleanup] Starting cleanup for main_content_filename: %s", raw_value)
+        
         main_fn = os.path.basename(raw_value)
         # Build a set of plausible filename representations to match against the
         # stored MediaItem filename. In practice uploads are stored as gs:// URIs
@@ -75,33 +78,46 @@ def _cleanup_main_content(*, session, episode, main_content_filename: str) -> No
             except Exception:
                 pass
 
+        logging.info("[cleanup] Looking for MediaItem with candidates: %s", list(candidates)[:3])
+        
         query = select(MediaItem).where(
             MediaItem.user_id == episode.user_id,
             MediaItem.category == MediaCategory.main_content,
         )
         media_item = None
-        for item in session.exec(query).all():
+        all_items = session.exec(query).all()
+        logging.info("[cleanup] Found %d main_content MediaItems for user", len(all_items))
+        
+        for item in all_items:
             stored = str(getattr(item, "filename", "") or "").strip()
             if not stored:
                 continue
             if stored in candidates:
                 media_item = item
+                logging.info("[cleanup] Matched MediaItem by exact filename: %s", stored)
                 break
             # Fallback: match when either value endswith the other to support
             # cases like gs://bucket/path/<name> vs <name>.
             for candidate in candidates:
                 if stored.endswith(candidate) or candidate.endswith(stored):
                     media_item = item
+                    logging.info("[cleanup] Matched MediaItem by partial filename: %s (candidate: %s)", stored, candidate)
                     break
             if media_item:
                 break
-        if not media_item or media_item.category != MediaCategory.main_content:
+        
+        if not media_item:
+            logging.warning("[cleanup] Could not find MediaItem matching candidates: %s", list(candidates)[:3])
+            return
+        if media_item.category != MediaCategory.main_content:
+            logging.warning("[cleanup] Found MediaItem but category is %s, not main_content", media_item.category)
             return
 
         filename = str(media_item.filename or "").strip()
         removed_file = False
 
         if filename.startswith("gs://"):
+            logging.info("[cleanup] Attempting to delete GCS object: %s", filename)
             try:
                 without_scheme = filename[len("gs://") :]
                 bucket_name, key = without_scheme.split("/", 1)
@@ -109,11 +125,20 @@ def _cleanup_main_content(*, session, episode, main_content_filename: str) -> No
                     from google.cloud import storage  # type: ignore
 
                     client = storage.Client()
-                    client.bucket(bucket_name).blob(key).delete()
-                    removed_file = True
-            except Exception:
+                    bucket = client.bucket(bucket_name)
+                    blob = bucket.blob(key)
+                    
+                    # Check if blob exists before deleting
+                    if blob.exists():
+                        blob.delete()
+                        removed_file = True
+                        logging.info("[cleanup] Successfully deleted GCS object: %s", filename)
+                    else:
+                        logging.warning("[cleanup] GCS object does not exist: %s", filename)
+                        removed_file = True  # Consider it removed if it doesn't exist
+            except Exception as e:
                 logging.warning(
-                    "[cleanup] Failed to delete gs object %s", filename, exc_info=True
+                    "[cleanup] Failed to delete GCS object %s: %s", filename, e, exc_info=True
                 )
         else:
             try:
@@ -146,21 +171,26 @@ def _cleanup_main_content(*, session, episode, main_content_filename: str) -> No
                             "[cleanup] Unable to unlink file %s", candidate, exc_info=True
                         )
 
+        # Delete the MediaItem from database
+        logging.info("[cleanup] Deleting MediaItem (id=%s) from database", media_item.id)
         try:
             session.delete(media_item)
             if not _commit_with_retry(session):
-                logging.warning("[cleanup] Failed to delete media_item after retries")
-        except Exception:
+                logging.error("[cleanup] Failed to delete MediaItem from database after retries (id=%s)", media_item.id)
+            else:
+                logging.info("[cleanup] Successfully deleted MediaItem from database (id=%s)", media_item.id)
+        except Exception as e:
+            logging.error("[cleanup] Exception deleting MediaItem from database: %s", e, exc_info=True)
             session.rollback()
             raise
 
         logging.info(
-            "[cleanup] Removed main content source %s after assembly (file_removed=%s)",
+            "[cleanup] ✅ Cleanup complete for %s (GCS file removed: %s, DB record removed: True)",
             media_item.filename,
             removed_file,
         )
-    except Exception:
-        logging.warning("[cleanup] Failed to remove main content media item", exc_info=True)
+    except Exception as e:
+        logging.error("[cleanup] ❌ Cleanup failed: %s", e, exc_info=True)
 
 
 def _mark_episode_error(session, episode, reason: str) -> None:

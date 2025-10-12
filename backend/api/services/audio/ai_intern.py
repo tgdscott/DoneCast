@@ -230,7 +230,12 @@ def execute_intern_commands(
                 log.append(f"[INTERN_NOTE_ERROR] {e}")
         else:
             try:
-                if fast_mode:
+                # Check if user provided an override answer first
+                override_answer = (cmd.get("override_answer") or "").strip()
+                if override_answer:
+                    answer = override_answer
+                    log.append(f"[INTERN_OVERRIDE_ANSWER] using user-edited text len={len(answer)}")
+                elif fast_mode:
                     answer = "The intern is out to lunch."
                     try:
                         log.append("[INTERN_FAST_MODE] using placeholder answer")
@@ -287,7 +292,25 @@ def execute_intern_commands(
                 log.append(f"[INTERN_ANSWER_ERROR] {e}; using fallback reply")
                 answer = "The intern is out to lunch."
             try:
-                if fast_mode:
+                # Check if user provided pre-generated audio URL
+                override_audio_url = (cmd.get("override_audio_url") or "").strip()
+                if override_audio_url:
+                    # Download the pre-generated audio from the URL
+                    try:
+                        import requests
+                        import io
+                        log.append(f"[INTERN_OVERRIDE_AUDIO] downloading from {override_audio_url[:100]}")
+                        response = requests.get(override_audio_url, timeout=30)
+                        response.raise_for_status()
+                        audio_bytes = io.BytesIO(response.content)
+                        speech = AudioSegment.from_file(audio_bytes)
+                        log.append(f"[INTERN_OVERRIDE_AUDIO] loaded {len(speech)}ms from URL")
+                    except Exception as e:
+                        log.append(f"[INTERN_OVERRIDE_AUDIO_ERROR] {e}; will generate fresh TTS")
+                        speech = ai_enhancer.generate_speech_from_text(
+                            answer, provider=tts_provider, api_key=elevenlabs_api_key
+                        )
+                elif fast_mode:
                     # Insert a short placeholder clip (silence) to avoid network calls in fast mode
                     speech = AudioSegment.silent(duration=600)
                     try:

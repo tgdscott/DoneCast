@@ -754,7 +754,7 @@ def detect_and_prepare_ai_commands(
         new_cfg: Dict[str, Any] = {}
         if _allow(flubber_intent):
             if 'flubber' in (commands_cfg or {}) or flubber_count > 0:
-                new_cfg['flubber'] = (commands_cfg or {}).get('flubber') or {'action': 'rollback_restart', 'max_lookback_words': 50}
+                new_cfg['flubber'] = (commands_cfg or {}).get('flubber') or {'action': 'rollback_restart', 'max_lookback_words': 100}
                 log.append("[AI_ENABLE_FLUBBER_BY_INTENT] mix_only=True -> flubber enabled")
         else:
             if 'flubber' in (commands_cfg or {}):
@@ -771,7 +771,7 @@ def detect_and_prepare_ai_commands(
         log.append("[AI_FORCED] mix_only=True but forceCommands=True -> commands enabled")
     elif (not mix_only) and (not commands_cfg):
         commands_cfg = {
-            'flubber': {'action': 'rollback_restart', 'max_lookback_words': 50},
+            'flubber': {'action': 'rollback_restart', 'max_lookback_words': 100},
             'intern': {'action': 'ai_command', 'keep_command_token_in_transcript': True, 'insert_pad_ms': 350},
         }
     try:
@@ -784,7 +784,36 @@ def detect_and_prepare_ai_commands(
 
     mutable_words = [dict(w) for w in words]
     _sfx_markers = select_sfx_markers(mutable_words, commands_cfg, log)
-    ai_cmds = build_intern_prompt(mutable_words, commands_cfg, log, insane_verbose=insane_verbose)
+    
+    # Check for user-reviewed intern overrides first
+    intern_overrides = cleanup_options.get('intern_overrides', []) or []
+    if intern_overrides and isinstance(intern_overrides, list) and len(intern_overrides) > 0:
+        # User has reviewed intern commands - use their approved responses instead of detecting
+        log.append(f"[AI_CMDS] using {len(intern_overrides)} user-reviewed intern overrides")
+        ai_cmds = []
+        for override in intern_overrides:
+            if not isinstance(override, dict):
+                continue
+            # Convert frontend override format to backend command format
+            cmd = {
+                "command_token": "intern",
+                "command_id": override.get("command_id"),
+                "time": float(override.get("start_s") or 0.0),
+                "context_end": float(override.get("end_s") or 0.0),
+                "end_marker_start": float(override.get("end_s") or 0.0),  # User-marked cut point
+                "end_marker_end": float(override.get("end_s") or 0.0),  # Same for point marker
+                "local_context": str(override.get("prompt_text") or "").strip(),
+                "override_answer": str(override.get("response_text") or "").strip(),  # User-edited text
+                "override_audio_url": str(override.get("audio_url") or "").strip() or None,  # Pre-generated TTS
+                "mode": "audio",  # Explicitly audio mode, not shownote
+            }
+            ai_cmds.append(cmd)
+            if insane_verbose:
+                log.append(f"[AI_OVERRIDE] cmd_id={cmd.get('command_id')} time={cmd.get('time'):.2f}s end={cmd.get('end_marker_start'):.2f}s text_len={len(cmd.get('override_answer', ''))}")
+    else:
+        # No overrides - detect commands from transcript as normal
+        ai_cmds = build_intern_prompt(mutable_words, commands_cfg, log, insane_verbose=insane_verbose)
+    
     log.append(f"[AI_CMDS] detected={len(ai_cmds)}")
     if (intern_count or flubber_count) and not ai_cmds:
         log.append(f"[AI_CMDS_MISMATCH] tokens_seen intern={intern_count} flubber={flubber_count} but ai_cmds=0; cfg_keys={list((commands_cfg or {}).keys())}")
@@ -825,7 +854,7 @@ def detect_and_prepare_ai_commands(
         else:
             if any(str((w or {}).get('word') or '').lower() == 'flubber' for w in mutable_words):
                 try:
-                    handle_flubber(mutable_words, {'max_lookback_words': 50}, log)
+                    handle_flubber(mutable_words, {'max_lookback_words': 100}, log)
                     log.append("[FLUBBER_TRANSCRIPT_ONLY] applied default rollback for transcript")
                 except RuntimeError:
                     log.append("[FLUBBER_TRANSCRIPT_ONLY] abort ignored (transcript-only)")

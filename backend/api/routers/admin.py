@@ -1298,3 +1298,199 @@ def admin_db_table_row_delete(
             session.rollback()
             raise HTTPException(status_code=500, detail=f"Delete failed: {e}")
     return {"deleted": True, "table": table_name, "id": row_id}
+
+
+# ============================================================================
+# USER MANAGEMENT - Delete test accounts
+# ============================================================================
+
+@router.delete(
+    "/users/{user_id}",
+    status_code=status.HTTP_200_OK,
+    summary="Delete a user and all their data (Admin only)",
+)
+def delete_user(
+    user_id: str,
+    confirm_email: str = Body(..., embed=True),
+    session: Session = Depends(get_session),
+    admin: User = Depends(get_current_admin_user),
+) -> Dict[str, Any]:
+    """
+    Delete a user and ALL their associated data.
+    
+    **WARNING**: This is permanent and irreversible!
+    
+    **Deletes**:
+    - User account
+    - All podcasts
+    - All episodes  
+    - All media items
+    - All database records
+    
+    **Does NOT delete** (manual cleanup required):
+    - GCS files (gs://ppp-media-us-west1/{user_id}/...)
+    
+    **Parameters**:
+    - user_id: UUID of user to delete
+    - confirm_email: Must match user's email (safety check)
+    
+    **Body**:
+    ```json
+    {
+        "confirm_email": "user@example.com"
+    }
+    ```
+    """
+    logger.warning(f"[ADMIN] User deletion requested by {admin.email} for user_id: {user_id}")
+    
+    # Parse UUID
+    try:
+        user_uuid = UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user_id format. Must be a valid UUID."
+        )
+    
+    # Find the user
+    user = session.get(User, user_uuid)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User {user_id} not found"
+        )
+    
+    # Safety check: confirm email matches
+    if user.email != confirm_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Email confirmation failed. Expected '{user.email}' but got '{confirm_email}'"
+        )
+    
+    # Prevent deletion of admin users
+    admin_emails = [settings.ADMIN_EMAIL.lower(), "tom@pluspluspodcasts.com", "tgdscott@gmail.com"]
+    if user.email.lower() in admin_emails:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot delete admin users"
+        )
+    
+    logger.warning(f"[ADMIN] Confirmed deletion of user: {user.email} ({user.id})")
+    
+    # Count items before deletion (for summary)
+    from ..models.media import MediaItem
+    
+    media_stmt = select(func.count()).select_from(MediaItem).where(MediaItem.user_id == user.id)
+    media_count = session.exec(media_stmt).one()
+    
+    podcast_stmt = select(func.count()).select_from(Podcast).where(Podcast.user_id == user.id)
+    podcast_count = session.exec(podcast_stmt).one()
+    
+    episode_stmt = select(func.count()).select_from(Episode).where(Episode.user_id == user.id)
+    episode_count = session.exec(episode_stmt).one()
+    
+    try:
+        # Delete in order (child records first to avoid foreign key issues)
+        
+        # 1. Media items
+        media_items = session.exec(select(MediaItem).where(MediaItem.user_id == user.id)).all()
+        for item in media_items:
+            session.delete(item)
+        logger.info(f"[ADMIN] Deleted {media_count} media items for user {user.id}")
+        
+        # 2. Episodes
+        episodes = session.exec(select(Episode).where(Episode.user_id == user.id)).all()
+        for episode in episodes:
+            session.delete(episode)
+        logger.info(f"[ADMIN] Deleted {episode_count} episodes for user {user.id}")
+        
+        # 3. Podcasts
+        podcasts = session.exec(select(Podcast).where(Podcast.user_id == user.id)).all()
+        for podcast in podcasts:
+            session.delete(podcast)
+        logger.info(f"[ADMIN] Deleted {podcast_count} podcasts for user {user.id}")
+        
+        # 4. User account
+        session.delete(user)
+        logger.warning(f"[ADMIN] Deleted user account: {user.email} ({user.id})")
+        
+        # Commit all deletions
+        _commit_with_retry(session)
+        
+        summary = {
+            "success": True,
+            "deleted_user": {
+                "id": str(user.id),
+                "email": user.email,
+            },
+            "deleted_items": {
+                "podcasts": podcast_count,
+                "episodes": episode_count,
+                "media_items": media_count,
+            },
+            "gcs_cleanup_required": True,
+            "gcs_path": f"gs://ppp-media-us-west1/{user.id.hex}/",
+            "gcs_cleanup_command": f"gsutil -m rm -r gs://ppp-media-us-west1/{user.id.hex}/",
+        }
+        
+        logger.warning(f"[ADMIN] User deletion complete: {summary}")
+        
+        return summary
+        
+    except Exception as exc:
+        session.rollback()
+        logger.error(f"[ADMIN] Failed to delete user {user.id}: {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete user: {str(exc)}"
+        )
+
+
+@router.get(
+    "/users",
+    status_code=status.HTTP_200_OK,
+    summary="List all users (Admin only)",
+)
+def list_users(
+    session: Session = Depends(get_session),
+    admin: User = Depends(get_current_admin_user),
+) -> Dict[str, Any]:
+    """
+    List all users in the system with their content counts.
+    
+    Useful for identifying test accounts to delete.
+    """
+    users = session.exec(select(User)).all()
+    
+    user_list = []
+    for user in users:
+        podcast_count = session.exec(
+            select(func.count()).select_from(Podcast).where(Podcast.user_id == user.id)
+        ).one()
+        
+        episode_count = session.exec(
+            select(func.count()).select_from(Episode).where(Episode.user_id == user.id)
+        ).one()
+        
+        from ..models.media import MediaItem
+        media_count = session.exec(
+            select(func.count()).select_from(MediaItem).where(MediaItem.user_id == user.id)
+        ).one()
+        
+        user_list.append({
+            "id": str(user.id),
+            "email": user.email,
+            "created_at": user.created_at.isoformat() if hasattr(user, 'created_at') and user.created_at else None,
+            "email_verified": user.email_verified if hasattr(user, 'email_verified') else None,
+            "counts": {
+                "podcasts": podcast_count,
+                "episodes": episode_count,
+                "media_items": media_count,
+            },
+            "is_test_account": podcast_count == 0 and episode_count == 0,
+        })
+    
+    return {
+        "total_users": len(user_list),
+        "users": sorted(user_list, key=lambda u: u["created_at"] or "", reverse=True),
+    }

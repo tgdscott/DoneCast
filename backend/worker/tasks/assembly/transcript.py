@@ -868,16 +868,30 @@ def prepare_transcript_context(
         pass
 
     user_filler_words = (parsed_settings or {}).get("fillerWords") or []
+    
+    # Extract intern_overrides from intents if provided
+    intern_overrides = []
+    if intents and isinstance(intents, dict):
+        overrides = intents.get("intern_overrides", [])
+        if overrides and isinstance(overrides, list):
+            intern_overrides = overrides
+            logging.info(
+                "[assemble] found %d intern_overrides from user review",
+                len(intern_overrides),
+            )
+    
     mixer_only_opts = {
         "removeFillers": False,
         "removePauses": False,
         "fillerWords": user_filler_words if isinstance(user_filler_words, list) else [],
         "commands": user_commands if isinstance(user_commands, dict) else {},
+        "intern_overrides": intern_overrides,  # Pass user-reviewed responses to the pipeline
     }
     try:
         logging.info(
-            "[assemble] mix-only commands keys=%s",
+            "[assemble] mix-only commands keys=%s intern_overrides=%d",
             list((mixer_only_opts.get("commands") or {}).keys()),
+            len(intern_overrides),
         )
     except Exception:
         pass
