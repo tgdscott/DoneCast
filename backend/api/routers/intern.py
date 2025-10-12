@@ -366,8 +366,8 @@ def _export_snippet(audio: "AudioSegment", filename: str, start_s: float, end_s:
         _LOG.info(f"[intern] Snippet uploaded to GCS successfully")
         
         # Generate signed URL (valid for 1 hour)
-        signed_url = gcs.generate_signed_url(gcs_bucket, gcs_key, expiration_seconds=3600)
-        _LOG.info(f"[intern] Generated signed URL for snippet")
+        signed_url = gcs.get_signed_url(gcs_bucket, gcs_key, expiration=3600)
+        _LOG.info(f"[intern] Generated signed URL for snippet: {signed_url}")
         
         # Clean up local file
         try:

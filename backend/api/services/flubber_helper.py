@@ -107,8 +107,8 @@ def extract_flubber_contexts(
             _LOG.info(f"[flubber_helper] Snippet uploaded to GCS successfully")
             
             # Generate signed URL (valid for 1 hour)
-            audio_url = gcs.generate_signed_url(gcs_bucket, gcs_key, expiration_seconds=3600)
-            _LOG.info(f"[flubber_helper] Generated signed URL for snippet")
+            audio_url = gcs.get_signed_url(gcs_bucket, gcs_key, expiration=3600)
+            _LOG.info(f"[flubber_helper] Generated signed URL for snippet: {audio_url}")
             
             # Clean up local file
             try:
