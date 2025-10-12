@@ -9,7 +9,7 @@ API Documentation: https://op3.dev/api/docs
 
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
 import httpx
@@ -40,9 +40,9 @@ class OP3ShowStats(BaseModel):
     show_url: str
     show_title: Optional[str] = None
     total_downloads: int = 0
-    downloads_trend: List[Dict[str, any]] = []
-    top_countries: List[Dict[str, any]] = []
-    top_apps: List[Dict[str, any]] = []
+    downloads_trend: List[Dict[str, Any]] = []
+    top_countries: List[Dict[str, Any]] = []
+    top_apps: List[Dict[str, Any]] = []
 
 
 class OP3Analytics:
