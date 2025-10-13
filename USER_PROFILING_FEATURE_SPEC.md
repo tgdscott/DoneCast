@@ -321,7 +321,7 @@ function App() {
 # backend/api/services/assistant/prompts.py
 
 def get_system_prompt(user_verbosity='normal'):
-    base = "You are Mike D. Rop, a friendly podcast assistant..."
+    base = "You are Mike Czech, a friendly podcast assistant..."
     
     if user_verbosity == 'minimal':
         return base + """

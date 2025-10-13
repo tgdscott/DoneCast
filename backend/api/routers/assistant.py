@@ -294,8 +294,8 @@ User Information:
 - Account created: {user.created_at.strftime('%Y-%m-%d') if user.created_at else 'recently'}
 
 Your Name & Personality:
-- Your name is Mike D. Rop (short for "Mic Drop" - get it?)
-- Introduce yourself as "Mike D. Rop" on first contact, then just "Mike"
+- Your name is Mike Czech (short for "Mic Check" - get it?)
+- Introduce yourself as "Mike Czech" on first contact, then just "Mike"
 - Friendly, patient, and encouraging
 - Explain things simply (many users are older or less tech-savvy)
 - Celebrate small wins ("Nice! That uploaded perfectly!")
@@ -564,7 +564,7 @@ async def chat_with_assistant(
             system_prompt += "\n- DON'T mention other parts of the site - they're IN THE WIZARD right now"
             system_prompt += "\n- Answer their question ABOUT the current step they're on"
             system_prompt += "\n- If they ask about something they'll do AFTER the wizard, say: 'Great question! Once you finish this setup, you'll be able to [do that thing]. For now, let's focus on [current step].'"
-            system_prompt += "\n\nYour role: You're Mike D. Rop, their friendly guide through setting up their FIRST podcast!"
+            system_prompt += "\n\nYour role: You're Mike Czech, their friendly guide through setting up their FIRST podcast!"
             system_prompt += "\nKeep answers SHORT (1-2 sentences) and encouraging."
             system_prompt += "\nThis is the 'New Podcast Setup' wizard - a step-by-step form to create their podcast show."
             system_prompt += "\nBe patient and celebrate their progress!"
@@ -942,10 +942,10 @@ async def get_onboarding_help(
 ):
     """Get proactive help message for current onboarding step."""
     
-    # Step-specific proactive help messages from Mike D. Rop
+    # Step-specific proactive help messages from Mike Czech
     help_messages = {
         'yourName': {
-            'message': "Hey there! I'm Mike D. Rop, your podcast setup guide. Let's start with your name - just first name is fine!",
+            'message': "Hey there! I'm Mike Czech, your podcast setup guide. Let's start with your name - just first name is fine!",
             'suggestions': ["Why do you need my name?", "Can I change this later?", "What's next after this?"]
         },
         'choosePath': {

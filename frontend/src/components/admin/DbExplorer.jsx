@@ -160,7 +160,7 @@ export default function DbExplorer() {
               {columns.map(c=> (
                 <div key={c} className="flex items-start gap-2 text-xs">
                   <label className="w-40 font-medium pt-1">{c}</label>
-                  {c==='id' || c.endsWith('_at') || c==='spreaker_episode_id' ? (
+                  {c==='id' || c.endsWith('_at') || c.endsWith('_episode_id') ? (
                     <div className="pt-1 text-gray-500 break-all">{String(editBuffer[c])}</div>
                   ) : (
                     <textarea

@@ -1,9 +1,11 @@
-# AI Knowledge Base for "Mike" Assistant
+# AI Knowledge Base for "Mike Czech" Assistant
 
 **Purpose:** Comprehensive reference for AI assistant to provide accurate, helpful answers  
-**Audience:** AI system (Mike), used for context injection  
+**Audience:** AI system (Mike Czech), used for context injection  
 **Format:** Q&A style, structured data, common patterns  
-**Last Updated:** October 11, 2025
+**Last Updated:** October 12, 2025
+
+**Assistant Name:** Mike Czech (short for "Mic Check" - get it?)
 
 ---
 
@@ -160,22 +162,51 @@ HIGHLIGHT:add-intro-button
 HIGHLIGHT:media-tab
 ```
 
+### Q: "What are Magic Words?"
+
+**Answer:**
+> **Magic Words** is the umbrella feature for voice-activated audio editing while you record. It includes two powerful tools:
+>
+> 1. **Flubber** - Say your wake word (default: "flubber") right after a mistake, and we automatically rewind to the last natural pause, cut out the error, and let you continue cleanly.
+>
+> 2. **Intern** - Say a trigger word (default: "intern") followed by instructions, then say your stop phrase (default: "stop, stop intern") to mark sections for removal or note-taking during recording.
+>
+> You can customize ALL the trigger words and stop phrases in **Settings → Audio Cleanup → Magic Words**.
+
+**Key Points:**
+- Magic Words = Voice-activated editing commands
+- Flubber = Redo mistakes instantly
+- Intern = Draft edits and add notes while recording
+- All keywords are customizable
+- Found in: Settings tab → Audio Cleanup Settings → Magic Words section
+
 ### Q: "What's the difference between Intern and Flubber?"
 
 **Answer:**
-> **Intern** detects spoken editing commands in your recording:
-> - You say "cut that out" while recording
-> - Intern marks that section for removal
-> - You review and apply edits
+> **Flubber** (redo mistakes):
+> - Say your wake word ("flubber" by default) right after a flub
+> - We rewind to the previous natural pause
+> - Cut the mistake automatically
+> - Let you pick up cleanly
+> - Great for: Mispronunciations, coughs, false starts
 >
-> **Flubber** removes filler words and pauses:
-> - Automatically detects "um", "uh", "like"
-> - Removes awkward pauses
-> - No commands needed - fully automatic
+> **Intern** (draft edits):
+> - Say trigger word ("intern" by default)
+> - Give your request
+> - Finish with stop phrase ("stop, stop intern")
+> - We tuck the response into the next pause
+> - Update your transcript with notes
+> - Great for: Research requests, removing sections, adding production notes
 
 **Use cases:**
-- Intern: Planned edits while recording ("cut that cough")
-- Flubber: Polish speech by removing unconscious fillers
+- Flubber: Quick mistake recovery while recording ("flubber" → restart sentence)
+- Intern: Planned edits and notes ("intern, cut that cough, stop, stop intern")
+
+**Customization:**
+Users can change these keywords in Settings → Audio Cleanup → Magic Words. For example:
+- Change "flubber" to "do-over" or "rewind"
+- Change "intern" to "jennifer" or "helper"
+- Set custom stop phrases
 
 ### Q: "Why is my episode stuck in 'Processing'?"
 
@@ -253,6 +284,50 @@ HIGHLIGHT:schedule-option
 - AI can generate titles/descriptions from transcript
 - Intern/Flubber use transcript for editing
 - Searchable content archive
+
+### Magic Words (Voice-Activated Editing)
+
+**What are Magic Words?**
+Voice-activated commands that let podcasters edit while recording. Instead of stopping to edit later, you say special keywords that trigger automatic editing actions.
+
+**Two Main Features:**
+
+**1. Flubber (Mistake Recovery)**
+- **How it works:** Say wake word → We rewind to last natural pause → Cut the error → Continue recording
+- **Default wake word:** "flubber"
+- **Action:** `rollback_restart` (removes everything from last pause to the wake word)
+- **Use case:** Quick recovery from mispronunciations, coughs, false starts
+
+**2. Intern (Draft Edits & Notes)**
+- **How it works:** Say trigger word → Give instruction → Say stop phrase → We insert note into transcript
+- **Default trigger:** "intern"
+- **Default stop phrases:** "stop", "stop intern"
+- **Action:** `note_removal` (marks section for removal/review)
+- **Use case:** Research requests, removing sections, adding production notes
+
+**Customization (Settings → Audio Cleanup → Magic Words):**
+- **Change wake words:** Users can replace "flubber" with "do-over", "rewind", etc.
+- **Change trigger words:** Users can replace "intern" with "jennifer", "helper", etc.
+- **Change stop phrases:** Customize when commands end (e.g., "end", "stop intern")
+- **Custom commands:** Users can add their own Magic Words with custom actions
+
+**Example Conversation:**
+- User: "What are magic words?"
+  - You: "Magic Words are voice-activated editing commands! While recording, you can say 'flubber' to instantly redo mistakes, or use 'intern' to draft edits and notes. You can customize all these keywords in Settings → Audio Cleanup Settings."
+
+- User: "Can I change the flubber keyword?"
+  - You: "Yes! Go to Settings → Audio Cleanup Settings → Magic Words section. You can change 'flubber' to anything you like - 'do-over', 'rewind', or even your assistant's name!"
+
+**Technical Details:**
+- Commands detected during transcription
+- Audio edited based on timestamp data
+- Transcript updated with edit notes
+- Works with all recording methods (in-browser, uploaded files)
+
+**Common Issues:**
+- "Magic Words not working" → Check if transcription is enabled, verify keyword pronunciation matches settings
+- "Flubber cutting too much" → Adjust natural pause detection sensitivity in settings
+- "Intern not removing sections" → Ensure you said the complete stop phrase
 
 ### Background Music Ducking
 

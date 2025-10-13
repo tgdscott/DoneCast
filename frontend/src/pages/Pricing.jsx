@@ -17,7 +17,6 @@ const standardTiers = [
       uploadRecord: true,
       basicCleanup: true,
       manualPublish: true,
-      autopublishSpreaker: false,
       flubber: false,
       intern: false,
       advancedIntern: false,
@@ -41,7 +40,6 @@ const standardTiers = [
       uploadRecord: true,
       basicCleanup: true,
       manualPublish: true,
-      autopublishSpreaker: true,
       flubber: true,
       intern: true,
       advancedIntern: false,
@@ -67,7 +65,6 @@ const standardTiers = [
       uploadRecord: true,
       basicCleanup: true,
       manualPublish: true,
-      autopublishSpreaker: true,
       flubber: true,
       intern: true,
       advancedIntern: true,
@@ -91,7 +88,6 @@ const standardTiers = [
       uploadRecord: true,
       basicCleanup: true,
       manualPublish: true,
-      autopublishSpreaker: true,
       flubber: true,
       intern: true,
       advancedIntern: true,
@@ -119,7 +115,6 @@ const earlyAccessTiers = [
       uploadRecord: true,
       basicCleanup: true,
       manualPublish: true,
-      autopublishSpreaker: false,
       flubber: false,
       intern: false,
       advancedIntern: false,
@@ -150,7 +145,6 @@ const earlyAccessTiers = [
       uploadRecord: true,
       basicCleanup: true,
       manualPublish: true,
-      autopublishSpreaker: true,
       flubber: true,
       intern: true,
       advancedIntern: false,
@@ -193,7 +187,6 @@ const earlyAccessTiers = [
       uploadRecord: true,
       basicCleanup: true,
       manualPublish: true,
-      autopublishSpreaker: true,
       flubber: true,
       intern: true,
       advancedIntern: true,
@@ -234,7 +227,6 @@ const earlyAccessTiers = [
       uploadRecord: true,
       basicCleanup: true,
       manualPublish: true,
-      autopublishSpreaker: true,
       flubber: true,
       intern: true,
       advancedIntern: true,
@@ -264,12 +256,11 @@ const rows = [
   { key: "uploadRecord", label: "Upload & record" },
   { key: "basicCleanup", label: "Basic cleanup (noise, trim)" },
   { key: "manualPublish", label: "Manual publish" },
-  { key: "autopublishSpreaker", label: "Auto-publish to Spreaker (+ linked platforms)" },
   { key: "flubber", label: "Flubber (filler removal)" },
   { key: "intern", label: "Intern (spoken edits)" },
   { key: "advancedIntern", label: "Advanced Intern (multi-step edits)" },
   { key: "sfxTemplates", label: "Sound Effects & templates" },
-  { key: "analytics", label: "Analytics (via Spreaker API)" },
+  { key: "analytics", label: "Analytics" },
   { key: "multiUser", label: "Multi-user accounts" },
   { key: "priorityQueue", label: "Priority processing queue" },
   { key: "premiumSupport", label: "Premium support" },
@@ -401,7 +392,7 @@ export default function PricingPage() {
         <p className="text-muted-foreground">
           {mode === "early"
             ? "Lock in founder-only rates before the public launch. These offers disappear after Sept 30."
-            : "All plans include powerful editing tools, publishing to Spreaker, and friendly support. Upgrade anytime."}
+            : "All plans include powerful editing tools, publishing features, and friendly support. Upgrade anytime."}
         </p>
         <div className="mt-6 inline-flex items-center gap-3 rounded-full border px-3 py-1 text-sm">
           <button

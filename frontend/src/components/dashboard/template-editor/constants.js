@@ -24,17 +24,17 @@ export const AI_DEFAULT = {
 export const MUSIC_VOLUME_BOOST_RATIO = 1.35;
 
 export const MUSIC_VOLUME_LEVELS = [
-  { level: 1, ratio: 0.1, description: "Barely audible under the host" },
-  { level: 2, ratio: 0.2, description: "Very soft background bed" },
-  { level: 3, ratio: 0.3, description: "Gentle supporting layer" },
-  { level: 4, ratio: 0.4, description: "Noticeable but still tucked under" },
-  { level: 5, ratio: 0.5, description: "Balanced bed under the voice" },
-  { level: 6, ratio: 0.6, description: "Present with a mild punch" },
-  { level: 7, ratio: 0.7, description: "Energetic mix that rides with the host" },
-  { level: 8, ratio: 0.8, description: "Almost level with the dialogue" },
-  { level: 9, ratio: 0.9, description: "Bold mix that demands attention" },
-  { level: 10, ratio: 1.0, description: "Same volume as the main mix" },
-  { level: 11, ratio: MUSIC_VOLUME_BOOST_RATIO, description: "Spinal Tap mode – louder than the main mix" },
+  { level: 1, ratio: 0.4, description: "Soft background bed" },
+  { level: 2, ratio: 0.5, description: "Gentle supporting layer" },
+  { level: 3, ratio: 0.6, description: "Noticeable and present" },
+  { level: 4, ratio: 0.7, description: "Balanced bed under the voice" },
+  { level: 5, ratio: 0.8, description: "Energetic with punch" },
+  { level: 6, ratio: 0.9, description: "Strong presence riding with the host" },
+  { level: 7, ratio: 1.0, description: "Same volume as the main mix" },
+  { level: 8, ratio: 1.1, description: "Slightly above dialogue level" },
+  { level: 9, ratio: 1.2, description: "Bold and prominent" },
+  { level: 10, ratio: 1.3, description: "Music-forward mix" },
+  { level: 11, ratio: MUSIC_VOLUME_BOOST_RATIO, description: "Spinal Tap mode – maximum loudness" },
 ];
 
 export const DEFAULT_VOLUME_LEVEL = 4;
@@ -44,10 +44,15 @@ export const volumeLevelToDb = (level) => {
   const clamped = Math.max(1, Math.min(11, level));
   let ratio;
   if (clamped <= 10) {
-    // Level directly represents percentage: 8.2 = 82% of voice volume
-    ratio = clamped / 10;
+    // Shifted mapping: level 6.8 should give 98% (what 9.8 used to give)
+    // This means we add 3.0 to the level before converting to ratio
+    // New formula: ratio = (level + 3) / 10
+    const adjustedLevel = clamped + 3.0;
+    ratio = adjustedLevel / 10;
+    // Ensure ratio doesn't exceed 1.3 (before going to level 11 territory)
+    ratio = Math.min(ratio, 1.3);
   } else {
-    // Above 10, boost beyond voice level
+    // Above 10, boost beyond voice level (Spinal Tap mode)
     const extra = MUSIC_VOLUME_BOOST_RATIO - 1;
     ratio = 1 + (clamped - 10) * (extra <= 0 ? 0 : extra);
   }
@@ -59,8 +64,10 @@ export const volumeDbToLevel = (db) => {
   if (typeof db !== "number" || Number.isNaN(db)) return DEFAULT_VOLUME_LEVEL;
   const ratio = Math.pow(10, db / 20);
   if (!Number.isFinite(ratio) || ratio <= 0) return DEFAULT_VOLUME_LEVEL;
-  if (ratio <= 1) {
-    return Math.max(1, Math.min(10, ratio * 10));
+  if (ratio <= 1.3) {
+    // Inverse of the shifted mapping: level = (ratio * 10) - 3
+    const level = (ratio * 10) - 3.0;
+    return Math.max(1, Math.min(10, level));
   }
   const extra = MUSIC_VOLUME_BOOST_RATIO - 1;
   if (extra <= 0) return 11;

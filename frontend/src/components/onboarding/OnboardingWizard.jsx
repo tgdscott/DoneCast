@@ -33,7 +33,6 @@ export default function OnboardingWizard(){
     // New step: intro/outro with voice selection
     'greeting',
     'audioSetup',
-    'spreaker',
     'lastInfo',
     'distribution',
     'reviewCreate',
@@ -82,12 +81,6 @@ export default function OnboardingWizard(){
   const [musicLoading, setMusicLoading] = useState(false);
   const [musicPreviewing, setMusicPreviewing] = useState(null); // asset id currently playing
   const audioRef = React.useRef(null);
-  const [spreakerSaved, setSpreakerSaved] = useState(false);
-  const [spreakerShows, setSpreakerShows] = useState([]);
-  const [spreakerLoading, setSpreakerLoading] = useState(false);
-  const [spreakerPhase, setSpreakerPhase] = useState('intro'); // intro | token | status
-  const [spreakerVerifying, setSpreakerVerifying] = useState(false); // after popup closes we verify token
-  const [spreakerConnectError, setSpreakerConnectError] = useState(null); // specific to connect flow
   const [connectClicked, setConnectClicked] = useState(false); // require click before continue
   const [showInfo, setShowInfo] = useState(null); // remote mapped show info after creation
   const [showInfoLoading, setShowInfoLoading] = useState(false);
@@ -128,13 +121,13 @@ export default function OnboardingWizard(){
     if(idx>0) setImportStep(IMPORT_STEPS[idx-1]);
   }
 
-  // Fetch Spreaker categories early (when entering new flow)
+  // Fetch podcast categories early (when entering new flow)
   useEffect(()=>{
     if(mode==='new' && categories.length===0 && !catLoading){
       setCatLoading(true);
       (async ()=>{
         try {
-          const data = await makeApi(token).get('/api/spreaker/categories');
+          const data = await makeApi(token).get('/api/podcasts/categories');
           const items = data?.categories || [];
           setCategories(items.map(it=>({ id: it.category_id || it.id || it.value, name: it.name || it.description || it.label || it.title })));
         } catch {}
@@ -276,52 +269,7 @@ export default function OnboardingWizard(){
     return true;
   }
 
-  // legacy saveSpreaker removed (OAuth flow replaces manual token)
 
-  async function fetchSpreakerShows({ verify=false }={}){
-  setSpreakerLoading(true);
-    if(verify){ setSpreakerVerifying(true); }
-    setSpreakerConnectError(null);
-    try {
-  const data = await makeApi(token).get('/api/spreaker/shows');
-  setSpreakerShows(data?.shows || []);
-      setSpreakerSaved(true); // success => mark connected
-    } catch(e){
-      // failed verification => allow retry
-      setSpreakerSaved(false);
-      setSpreakerShows([]);
-      if(verify) setSpreakerConnectError('Spreaker connection failed. Please try again.');
-    } finally {
-      setSpreakerLoading(false);
-      if(verify){ setSpreakerVerifying(false); }
-    } }
-
-  async function disconnectSpreaker(){
-  try { await makeApi(token).post('/api/spreaker/disconnect'); } catch {}
-    setSpreakerSaved(false);
-    setSpreakerShows([]);
-    setSpreakerConnectError(null);
-  }
-
-  async function refreshRss(){
-    if(!createdPodcast) return;
-    setShowInfoLoading(true); setShowInfoError(null);
-    try {
-  const r = await makeApi(token).raw(`/api/spreaker/refresh/${createdPodcast.id}`, { method:'POST' });
-  if(r && r.status && r.status >= 400) throw new Error('Refresh failed');
-      // refetch full show info after refresh
-      await loadRemoteShow();
-    } catch(e){ setShowInfoError(e.message);} finally { setShowInfoLoading(false);} }
-
-  async function loadRemoteShow(){
-    if(!createdPodcast) return;
-    setShowInfoLoading(true); setShowInfoError(null);
-    try {
-      try {
-        const data = await makeApi(token).get(`/api/spreaker/show/${createdPodcast.id}?mapped=true`);
-        setShowInfo(data?.mapped || null);
-      } catch (e) { throw new Error('Could not load remote show'); }
-    } catch(e){ setShowInfoError(e.message);} finally { setShowInfoLoading(false);} }
 
   async function handleCreateAndTemplate(){
     setSaving(true); setError(null);
@@ -386,11 +334,6 @@ export default function OnboardingWizard(){
           });
         }
       } catch {}
-      // If Spreaker token provided, attempt to load remote show info (creation attempted server-side)
-      if(spreakerSaved){
-        // slight delay to allow backend to create remote show
-        setTimeout(()=>{ loadRemoteShow(); }, 600);
-      }
       setNewStep('success');
     } catch(e){ setError(e.message);} finally { setSaving(false);} }
 
@@ -433,28 +376,6 @@ export default function OnboardingWizard(){
       <div className="max-w-xl mx-auto py-12">
   <h1 className="text-3xl font-bold mb-4 text-center">All set</h1>
         <p className="mb-6 text-center">Your podcast, "{podcastName}" and first template are ready.</p>
-        {spreakerSaved && (
-          <div className="mb-6 p-4 border rounded bg-white/50">
-            <h2 className="text-lg font-semibold mb-2">Spreaker Show Status</h2>
-            {!showInfo && !showInfoLoading && (
-              <button onClick={loadRemoteShow} className="px-3 py-2 bg-blue-600 text-white rounded text-sm">Load Remote Show Info</button>
-            )}
-            {showInfoLoading && <div className="text-sm text-gray-600">Loading...</div>}
-            {showInfoError && <div className="text-sm text-red-600 mb-2">{showInfoError}</div>}
-            {showInfo && (
-              <div className="text-sm space-y-1">
-                <div><strong>Spreaker Show ID:</strong> {showInfo.spreaker_show_id || '—'}</div>
-                <div><strong>RSS URL:</strong> {showInfo.rss_url_locked || showInfo.rss_url || 'Pending generation'}</div>
-                <div><strong>Title:</strong> {showInfo.name}</div>
-                <div><strong>Description:</strong> {(showInfo.description||'').slice(0,140) + (showInfo.description && showInfo.description.length>140?'…':'')}</div>
-                <div className="pt-2 flex gap-2">
-                  <button disabled={showInfoLoading} onClick={loadRemoteShow} className="px-3 py-1 bg-gray-100 rounded text-xs">Refresh Info</button>
-                  <button disabled={showInfoLoading} onClick={refreshRss} className="px-3 py-1 bg-gray-100 rounded text-xs">Force RSS Check</button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
         <div className="text-center">
           <a href="/" className="px-6 py-3 bg-blue-600 text-white rounded inline-block">Go to Dashboard</a>
         </div>
@@ -661,73 +582,7 @@ export default function OnboardingWizard(){
               ))}
             </div>
             <p className="text-[11px] text-gray-500">We’ll expand this with AI-generated suggestions soon.</p>
-            <NavButtons onBack={()=> setNewStep('greeting')} onNext={()=> setNewStep('spreaker')} />
-          </div>
-        )}
-        {newStep==='spreaker' && (
-          <div>
-            <h2 className="text-xl font-semibold mb-2">Connect hosting</h2>
-            {!spreakerSaved && (
-              <div className="space-y-4 text-sm text-gray-700 mb-4">
-                <p>We partner with Spreaker to host your podcast.</p>
-                <button
-                    onClick={async () => {
-                    try { setConnectClicked(true); } catch {}
-                    try {
-                      // Unified popup start endpoint with JWT in query
-                      let popupUrl = null;
-                      if (token) {
-                        const qs = new URLSearchParams({ access_token: token }).toString();
-                        popupUrl = buildApiUrl(`/api/auth/spreaker/start?${qs}`);
-                      }
-                      if(!popupUrl) throw new Error('Auth init failed');
-                      window.open(popupUrl, 'spreakerOAuth', 'width=720,height=800');
-                      const handler = (ev) => {
-                        try {
-                          // Accept messages from our app and API origins
-                          const allowed = new Set([window.location.origin]);
-                          const apiBase = buildApiUrl("");
-                          if (apiBase) {
-                            const apiOrigin = new URL(apiBase).origin;
-                            allowed.add(apiOrigin);
-                          }
-                          if (!allowed.has(ev.origin)) return;
-                        } catch(_) {}
-                        if(ev.data === 'spreaker_connected' || (ev.data && ev.data.type==='spreaker_connected')){
-                          window.removeEventListener('message', handler);
-                          // Verify server actually stored token before marking connected
-                          fetchSpreakerShows({ verify:true });
-                        }
-                      };
-                      window.addEventListener('message', handler);
-                    } catch(e){ setError("Couldn't start the Spreaker sign-in"); }
-                  }}
-                  className="px-5 py-2 bg-blue-600 text-white rounded"
-                >Connect to Podcast Host</button>
-                {spreakerVerifying && <div className="text-xs text-gray-500">Verifying connection…</div>}
-                {spreakerConnectError && (
-                  <div className="text-xs text-red-600 flex items-center gap-2">
-                    <span>{spreakerConnectError}</span>
-                    <button onClick={()=>{
-                      setSpreakerConnectError(null);
-                      // allow starting over
-                    }} className="underline">Reset</button>
-                  </div>
-                )}
-                {/* Removed skip option: Spreaker connection is required for the current flow */}
-              </div>
-            )}
-            {spreakerSaved && (
-              <div className="space-y-3 mb-4 text-sm">
-                <div className="p-2 bg-green-100 text-green-700 rounded text-xs inline-block">Connected</div>
-                <div className="flex gap-2 flex-wrap">
-                  <button onClick={disconnectSpreaker} className="px-2 py-1 bg-red-100 text-red-700 rounded text-xs">Disconnect</button>
-                  <button onClick={()=> setNewStep('lastInfo')} className="px-2 py-1 bg-blue-600 text-white rounded text-xs">Continue</button>
-                </div>
-              </div>
-            )}
-            {!spreakerSaved && <NavButtons onBack={()=> setNewStep('audioSetup')} nextDisabled={!connectClicked} onNext={()=> setNewStep('lastInfo')} />}
-            {spreakerSaved && <NavButtons onBack={()=> setNewStep('audioSetup')} onNext={()=> setNewStep('lastInfo')} />}
+            <NavButtons onBack={()=> setNewStep('greeting')} onNext={()=> setNewStep('lastInfo')} />
           </div>
         )}
         {newStep==='lastInfo' && (
@@ -746,7 +601,7 @@ export default function OnboardingWizard(){
                 <option value="occasionally">Occasionally</option>
               </select>
             </div>
-            <NavButtons onBack={()=> setNewStep('spreaker')} onNext={()=> setNewStep('distribution')} nextDisabled={!publishFrequency} />
+            <NavButtons onBack={()=> setNewStep('audioSetup')} onNext={()=> setNewStep('distribution')} nextDisabled={!publishFrequency} />
           </div>
         )}
         {newStep==='distribution' && (
@@ -775,11 +630,10 @@ export default function OnboardingWizard(){
               <li><strong>Intro:</strong> {introMode}</li>
               <li><strong>Outro:</strong> {outroMode}</li>
               <li><strong>Cover:</strong> {coverMode}</li>
-              <li><strong>Spreaker:</strong> {spreakerSaved? 'Connected':'Not connected (must connect)'} </li>
             </ul>
             <div className="flex justify-between">
               <button onClick={()=> setNewStep('distribution')} className="text-gray-500">Back</button>
-              <button disabled={saving || !podcastName || !spreakerSaved} onClick={handleCreateAndTemplate} className="px-5 py-2 bg-green-600 text-white rounded disabled:opacity-50">{saving? 'Finishing...':'Finish'}</button>
+              <button disabled={saving || !podcastName} onClick={handleCreateAndTemplate} className="px-5 py-2 bg-green-600 text-white rounded disabled:opacity-50">{saving? 'Finishing...':'Finish'}</button>
             </div>
           </div>
         )}

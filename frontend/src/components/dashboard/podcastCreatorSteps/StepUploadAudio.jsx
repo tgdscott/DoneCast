@@ -32,6 +32,7 @@ export default function StepUploadAudio({
   minutesRemaining = null,
   formatDuration = () => null,
   audioDurationSec: audioDurationSecProp = null,
+  episodeStatus = null,
 }) {
   const audioDurationSec = audioDurationSecProp;
   const handleFileInput = (event) => {
@@ -236,6 +237,14 @@ export default function StepUploadAudio({
             )}
             <input ref={fileInputRef} type="file" accept="audio/*" onChange={handleFileInput} className="hidden" />
           </div>
+          {/* Show deletion notice for processed episodes */}
+          {(uploadedFile || uploadedFilename) && episodeStatus && ['processed', 'published', 'scheduled'].includes(String(episodeStatus).toLowerCase()) && (
+            <div className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-center">
+              <p className="text-sm font-semibold text-red-700">
+                This episode has successfully processed. You may delete this file.
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 

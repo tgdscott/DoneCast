@@ -21,7 +21,9 @@ export default function VoiceRecorder({
   maxDuration = 60,
   type = 'intro', // 'intro' | 'outro'
   largeText = false,
-  token 
+  token,
+  userFirstName = '', // User's first name for default friendly name
+  refreshUser = null // Optional callback to refresh auth token
 }) {
   const { toast } = useToast();
   
@@ -34,6 +36,10 @@ export default function VoiceRecorder({
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState('');
   
+  // Friendly name state
+  const defaultFriendlyName = userFirstName ? `${userFirstName}'s ${type === 'intro' ? 'Intro' : 'Outro'}` : `My ${type === 'intro' ? 'Intro' : 'Outro'}`;
+  const [friendlyName, setFriendlyName] = useState(defaultFriendlyName);
+  
   // Audio state
   const [audioUrl, setAudioUrl] = useState('');
   const [audioBlob, setAudioBlob] = useState(null);
@@ -44,6 +50,13 @@ export default function VoiceRecorder({
   const chunksRef = useRef([]);
   const timerRef = useRef(null);
   const audioRef = useRef(null);
+  
+  // Check for valid token on mount
+  useEffect(() => {
+    if (!token) {
+      setError('No authentication session found. Please refresh the page and sign in again.');
+    }
+  }, [token]);
   
   // Cleanup on unmount
   useEffect(() => {
@@ -175,6 +188,8 @@ export default function VoiceRecorder({
     setHasRecording(false);
     setElapsed(0);
     setError('');
+    // Reset friendly name to default when retrying
+    setFriendlyName(defaultFriendlyName);
   };
   
   const handleAccept = async () => {
@@ -184,10 +199,48 @@ export default function VoiceRecorder({
     setError('');
     
     try {
+      // Verify token exists before uploading
+      if (!token) {
+        throw new Error('No authentication token available. Please refresh the page and sign in again.');
+      }
+      
+      // Try to refresh the user session to ensure token is valid
+      if (refreshUser) {
+        try {
+          await refreshUser({ force: false });
+        } catch (refreshErr) {
+          console.warn('[VoiceRecorder] Token refresh failed:', refreshErr);
+          // Continue anyway - the upload will fail with proper error if token is truly invalid
+        }
+      }
+      
       // Create FormData for upload
       const formData = new FormData();
-      const fileName = `${type}_${Date.now()}.${audioBlob.type.includes('mp4') ? 'm4a' : 'webm'}`;
-      formData.append('files', audioBlob, fileName);
+      
+      // Determine file extension and ensure blob has correct type
+      const isMP4 = audioBlob.type.includes('mp4') || audioBlob.type.includes('m4a');
+      const ext = isMP4 ? 'm4a' : 'webm';
+      const contentType = isMP4 ? 'audio/mp4' : 'audio/webm';
+      
+      // Create a new blob with explicit content type to ensure proper upload
+      const typedBlob = new Blob([audioBlob], { type: contentType });
+      const fileName = `${type}_${Date.now()}.${ext}`;
+      
+      formData.append('files', typedBlob, fileName);
+      
+      // Add friendly name if provided
+      if (friendlyName && friendlyName.trim()) {
+        formData.append('friendly_names', JSON.stringify([friendlyName.trim()]));
+      }
+      
+      console.log('[VoiceRecorder] Uploading:', {
+        type,
+        fileName,
+        blobSize: audioBlob.size,
+        blobType: audioBlob.type,
+        endpoint: `/api/media/upload/${type}`,
+        hasToken: !!token
+      });
       
       // Upload to backend
       const response = await makeApi(token).raw(`/api/media/upload/${type}`, {
@@ -195,23 +248,65 @@ export default function VoiceRecorder({
         body: formData,
       });
       
-      if (response && response.length > 0) {
+      console.log('[VoiceRecorder] Upload response:', response);
+      
+      if (response && Array.isArray(response) && response.length > 0) {
         // Success! Return the media item
+        console.log('[VoiceRecorder] Upload successful, media item:', response[0]);
         onRecordingComplete(response[0]);
         toast({ 
           title: "Recording saved!", 
           description: `Your ${type} has been uploaded successfully.` 
         });
+      } else if (response && typeof response === 'object' && !Array.isArray(response)) {
+        // Single item response (not wrapped in array)
+        console.log('[VoiceRecorder] Upload successful (single item):', response);
+        onRecordingComplete(response);
+        toast({ 
+          title: "Recording saved!", 
+          description: `Your ${type} has been uploaded successfully.` 
+        });
       } else {
-        throw new Error('Upload failed - no response from server');
+        console.error('[VoiceRecorder] Unexpected response format:', response);
+        throw new Error('Upload failed - unexpected response format from server');
       }
       
     } catch (err) {
-      console.error('Failed to upload recording:', err);
-      setError('Failed to save recording. Please try again.');
+      console.error('[VoiceRecorder] Upload error:', {
+        error: err,
+        message: err?.message,
+        detail: err?.detail,
+        status: err?.status,
+        stack: err?.stack
+      });
+      
+      // More detailed error message
+      let errorMsg = 'Failed to save recording. Please try again.';
+      let actionAdvice = '';
+      
+      if (err?.status === 401) {
+        errorMsg = 'Your session has expired or is invalid.';
+        actionAdvice = 'Please refresh the page (F5 or Ctrl+R) and sign in again to continue.';
+      } else if (err?.status === 403) {
+        errorMsg = 'Permission denied.';
+        actionAdvice = 'You may not have permission to upload media. Please contact support.';
+      } else if (err?.status === 413) {
+        errorMsg = 'Recording is too large. Please record a shorter clip.';
+      } else if (err?.status === 400 && err?.detail) {
+        // Backend validation error
+        errorMsg = typeof err.detail === 'string' ? err.detail : 'Invalid recording format.';
+      } else if (err?.detail) {
+        errorMsg = typeof err.detail === 'string' ? err.detail : 'Failed to save recording. Please try again.';
+      } else if (err?.message && err.message !== 'Upload failed - unexpected response format from server') {
+        errorMsg = err.message;
+      }
+      
+      const fullMessage = actionAdvice ? `${errorMsg} ${actionAdvice}` : errorMsg;
+      
+      setError(fullMessage);
       toast({ 
         title: "Upload failed", 
-        description: "Could not save your recording. Please try again.",
+        description: fullMessage,
         variant: "destructive"
       });
     } finally {
@@ -285,8 +380,20 @@ export default function VoiceRecorder({
           )}
           
           {error && (
-            <div className="text-destructive text-sm bg-destructive/10 p-3 rounded">
-              {error}
+            <div className="space-y-3">
+              <div className="text-destructive text-sm bg-destructive/10 p-3 rounded border border-destructive/20">
+                {error}
+              </div>
+              {error.includes('session') && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => window.location.reload()}
+                  className="w-full"
+                >
+                  Refresh Page
+                </Button>
+              )}
             </div>
           )}
         </div>
@@ -299,6 +406,28 @@ export default function VoiceRecorder({
             </h4>
             <p className={`text-muted-foreground ${largeText ? 'text-lg' : 'text-sm'}`}>
               Play it back and make sure you're happy with it
+            </p>
+          </div>
+          
+          {/* Friendly Name Input */}
+          <div className="space-y-2">
+            <label 
+              htmlFor="friendlyName" 
+              className={`block font-medium ${largeText ? 'text-lg' : 'text-sm'}`}
+            >
+              Give this recording a name
+            </label>
+            <input
+              id="friendlyName"
+              type="text"
+              value={friendlyName}
+              onChange={(e) => setFriendlyName(e.target.value)}
+              placeholder={defaultFriendlyName}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              disabled={isUploading}
+            />
+            <p className="text-xs text-muted-foreground">
+              This helps you identify it later in your media library
             </p>
           </div>
           
@@ -371,8 +500,20 @@ export default function VoiceRecorder({
           </div>
           
           {error && (
-            <div className="text-destructive text-sm bg-destructive/10 p-3 rounded">
-              {error}
+            <div className="space-y-3">
+              <div className="text-destructive text-sm bg-destructive/10 p-3 rounded border border-destructive/20">
+                {error}
+              </div>
+              {error.includes('session') && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => window.location.reload()}
+                  className="w-full"
+                >
+                  Refresh Page
+                </Button>
+              )}
             </div>
           )}
         </div>

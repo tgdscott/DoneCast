@@ -11,8 +11,9 @@ import { WaveSurfer, RegionsPlugin } from '@/vendor/wavesurfer.js';
  * - onReady?: (ws) => void
  * - onMarkersChange?: ({start, end})
  * - onCut?: (currentTimeSecRelative: number) => void // called when Cut is pressed with current playhead (relative to snippet)
+ * - cutButtonLabel?: string // custom label for the cut button (default: "End of Request")
  */
-export default function Waveform({ src, height = 96, start, end, onReady, onMarkersChange, onCut, markerEnd }) {
+export default function Waveform({ src, height = 96, start, end, onReady, onMarkersChange, onCut, markerEnd, cutButtonLabel = "End of Request" }) {
   const containerRef = useRef(null);
   const wsRef = useRef(null);
   const regionsRef = useRef(null);
@@ -149,7 +150,7 @@ export default function Waveform({ src, height = 96, start, end, onReady, onMark
             onClick={handleCut}
             className="px-2 py-1 text-xs rounded border bg-red-50 text-red-700 hover:bg-red-100"
           >
-            End of Request
+            {cutButtonLabel}
           </button>
         )}
       </div>

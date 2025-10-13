@@ -790,6 +790,8 @@ def detect_and_prepare_ai_commands(
     if intern_overrides and isinstance(intern_overrides, list) and len(intern_overrides) > 0:
         # User has reviewed intern commands - use their approved responses instead of detecting
         log.append(f"[AI_CMDS] using {len(intern_overrides)} user-reviewed intern overrides")
+        for idx, ovr in enumerate(intern_overrides):
+            log.append(f"[AI_OVERRIDE_INPUT] [{idx}] cmd_id={ovr.get('command_id')} has_audio_url={bool(ovr.get('audio_url'))} has_voice_id={bool(ovr.get('voice_id'))} text_len={len(str(ovr.get('response_text') or ''))}")
         ai_cmds = []
         for override in intern_overrides:
             if not isinstance(override, dict):
@@ -805,6 +807,7 @@ def detect_and_prepare_ai_commands(
                 "local_context": str(override.get("prompt_text") or "").strip(),
                 "override_answer": str(override.get("response_text") or "").strip(),  # User-edited text
                 "override_audio_url": str(override.get("audio_url") or "").strip() or None,  # Pre-generated TTS
+                "voice_id": override.get("voice_id"),  # Voice ID for TTS generation
                 "mode": "audio",  # Explicitly audio mode, not shownote
             }
             ai_cmds.append(cmd)

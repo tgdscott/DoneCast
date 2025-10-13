@@ -15,14 +15,6 @@ export default function RssImporter({ onBack, token }) {
     const { toast } = useToast();
 
     const trimmedUrl = rssUrl.trim();
-    const detectedSpreaker = useMemo(() => {
-        if (!trimmedUrl) return false;
-        try {
-            return /spreaker\.com/i.test(new URL(trimmedUrl).hostname || "");
-        } catch {
-            return /spreaker\.com/i.test(trimmedUrl);
-        }
-    }, [trimmedUrl]);
 
     const handleImport = async () => {
         if (!trimmedUrl) {
@@ -33,8 +25,7 @@ export default function RssImporter({ onBack, token }) {
         try {
             const payload = {
                 rss_url: trimmedUrl,
-                attempt_link_spreaker: detectedSpreaker,
-                auto_publish_to_spreaker: autoPublish,
+                auto_publish: autoPublish,
                 publish_state: autoPublish ? publishState : null,
             };
             const result = await makeApi(token).post('/api/import/rss', payload);
@@ -42,7 +33,6 @@ export default function RssImporter({ onBack, token }) {
             const parts = [
               `Imported "${result.podcast_name}" with ${result.episodes_imported} episodes.`,
               (typeof result.mirrored_count === 'number' ? `${result.mirrored_count} mirrored` : null),
-              (typeof result.spreaker_linked === 'number' && result.spreaker_attempted ? `${result.spreaker_linked} linked to Spreaker` : null),
               (typeof result.auto_publish_started === 'number' && autoPublish ? `${result.auto_publish_started} publish jobs started` : null),
             ].filter(Boolean);
             const extra = [];
@@ -84,17 +74,15 @@ export default function RssImporter({ onBack, token }) {
                         />
                     </div>
                     <div className="rounded-lg border border-border bg-muted/40 p-4 space-y-1 text-sm">
-                        <p className="font-medium text-foreground">{detectedSpreaker ? 'Spreaker feed detected' : 'External feed detected'}</p>
+                        <p className="font-medium text-foreground">External feed detected</p>
                         <p className="text-muted-foreground">
-                            {detectedSpreaker
-                                ? 'We will link directly to your existing Spreaker show and skip mirroring audio.'
-                                : 'We will mirror audio locally for seven days so you can review and publish to Spreaker, then automatically clean it up.'}
+                            We will mirror audio locally for seven days so you can review and publish episodes, then automatically clean it up.
                         </p>
                     </div>
                     <div className="space-y-3">
                         <label className="flex items-center gap-2 text-sm">
                             <input type="checkbox" checked={autoPublish} onChange={e=>setAutoPublish(e.target.checked)} />
-                            Auto-publish preview episodes to Spreaker
+                            Auto-publish preview episodes
                         </label>
                         <div className="flex items-center gap-2 text-sm">
                             <span>Visibility</span>

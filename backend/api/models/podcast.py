@@ -136,7 +136,8 @@ class TemplateSegment(SQLModel):
 
 class BackgroundMusicRule(SQLModel):
     id: UUID = Field(default_factory=uuid4)
-    music_filename: str
+    music_filename: Optional[str] = None  # Deprecated: use music_asset_id instead
+    music_asset_id: Optional[str] = None  # New: reference to MusicAsset by ID
     apply_to_segments: List[Literal["intro", "content", "outro"]]
     start_offset_s: float = 0.0
     end_offset_s: float = 0.0
@@ -225,6 +226,9 @@ class MusicAsset(SQLModel, table=True):
     attribution: Optional[str] = None
     user_select_count: int = Field(default=0, description="How many times users picked this asset")
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    # Global vs user-owned music
+    is_global: bool = Field(default=False, description="True if this is a globally accessible music asset (admin-uploaded)")
+    owner_id: Optional[UUID] = Field(default=None, foreign_key="user.id", index=True, description="User who owns this asset; None for global/admin assets")
 
     def mood_tags(self) -> List[str]:
         try:

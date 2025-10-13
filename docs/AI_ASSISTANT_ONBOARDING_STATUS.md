@@ -67,12 +67,12 @@ if (highlight) {
 **Problem**: Generic "AI Assistant" label lacks personality
 
 **Solution Implemented**:
-- Changed to "Mike D. Rop" (mic drop pun)
-- Introduces himself as "Mike D. Rop" on first contact
+- Changed to "Mike Czech" (mic check pun)
+- Introduces himself as "Mike Czech" on first contact
 - Then just "Mike" in subsequent messages
 - Personality: Friendly podcast expert with subtle humor
 
-**Status**: ✅ Complete (in commit 1a48ca12)
+**Status**: ✅ Complete (updated Oct 12, 2025)
 
 ---
 
@@ -146,7 +146,7 @@ if (highlight) {
 - [ ] Ask "Can I skip this?" - does Mike say yes/no correctly?
 
 ### Mike's Personality
-- [ ] First message - does he introduce himself as "Mike D. Rop"?
+- [ ] First message - does he introduce himself as "Mike Czech"?
 - [ ] Subsequent messages - does he say "Mike"?
 - [ ] Tone - is he friendly, encouraging, casual?
 - [ ] Humor - does he make subtle podcast jokes?
@@ -201,7 +201,7 @@ if (highlight) {
 **Fix Priority**: High (users expect visual when Mike says "let me show you")
 
 ### 2. Character Icon Still Generic
-**Impact**: Purple character doesn't represent "Mike D. Rop" well
+**Impact**: Purple character doesn't represent "Mike Czech" well
 **Workaround**: Name in header + personality in text
 **Fix Priority**: Low (personality more important than icon)
 
@@ -235,7 +235,7 @@ if (highlight) {
 
 **What Changed**:
 - Backend: Mike's personality + onboarding knowledge
-- Frontend: "AI Assistant" → "Mike D. Rop" in header
+- Frontend: "AI Assistant" → "Mike Czech" in header
 - No breaking changes, fully backward compatible
 
 **What Still Needs Work**:

@@ -48,7 +48,6 @@ export default function DistributionChecklistDialog({ open, onOpenChange, podcas
   const [items, setItems] = useState([]);
   const [notesDraft, setNotesDraft] = useState({});
   const [rssFeedUrl, setRssFeedUrl] = useState("");
-  const [spreakerUrl, setSpreakerUrl] = useState("");
   const [savingKeys, setSavingKeys] = useState({});
   const [openKeys, setOpenKeys] = useState({});
 
@@ -62,7 +61,6 @@ export default function DistributionChecklistDialog({ open, onOpenChange, podcas
       setItems([]);
       setNotesDraft({});
       setRssFeedUrl("");
-      setSpreakerUrl("");
       return;
     }
 
@@ -78,7 +76,6 @@ export default function DistributionChecklistDialog({ open, onOpenChange, podcas
         setItems(list);
         setNotesDraft(Object.fromEntries(list.map((item) => [item.key, item.notes || ""])));
         setRssFeedUrl(data?.rss_feed_url || "");
-        setSpreakerUrl(data?.spreaker_show_url || "");
       })
       .catch((err) => {
         if (aborted) return;
@@ -184,14 +181,9 @@ export default function DistributionChecklistDialog({ open, onOpenChange, podcas
               </div>
             ) : (
               <div className="text-sm text-muted-foreground">
-                Publish your first episode or link a Spreaker show to generate the RSS feed automatically.
+                Publish your first episode to generate the RSS feed automatically.
               </div>
             )}
-            {spreakerUrl ? (
-              <div className="text-sm text-muted-foreground">
-                Spreaker show URL: <a href={spreakerUrl} target="_blank" rel="noreferrer" className="text-primary underline">{spreakerUrl}</a>
-              </div>
-            ) : null}
           </DialogDescription>
         </DialogHeader>
 

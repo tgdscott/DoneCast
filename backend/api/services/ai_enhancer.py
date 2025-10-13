@@ -144,39 +144,39 @@ def _translate_elevenlabs_error(exc: Exception, voice_id: str) -> AIEnhancerErro
     return AIEnhancerError(f"ElevenLabs API error: {exc}")
 
 
-def interpret_intern_command(prompt_text: str) -> Dict[str, str]:
-    """Lightweight interpretation for Intern commands.
+#def interpret_intern_command(prompt_text: str) -> Dict[str, str]:
+#    """Lightweight interpretation for Intern commands.
 
-    Determines whether the caller is requesting spoken audio or show-note style
-    output and returns a normalized topic string for downstream AI prompts.
-    """
+#    Determines whether the caller is requesting spoken audio or show-note style
+#    output and returns a normalized topic string for downstream AI prompts.
+#    """
 
-    text = (prompt_text or "").strip()
-    if not text:
-        return {"action": "generate_audio", "topic": ""}
+#    text = (prompt_text or "").strip()
+#    if not text:
+#        return {"action": "generate_audio", "topic": ""}
 
-    lowered = text.lower()
+#    lowered = text.lower()
     # Remove common lead-in phrases like "Hey intern," to keep the topic clean
-    stripped = re.sub(r"^(?:hey\s+)?intern[:,\s]*", "", text, flags=re.IGNORECASE).strip()
-    if not stripped:
-        stripped = text
+#    stripped = re.sub(r"^(?:hey\s+)?intern[:,\s]*", "", text, flags=re.IGNORECASE).strip()
+#    if not stripped:
+#        stripped = text
 
-    shownote_keywords = {
-        "show notes",
-        "shownotes",
-        "show-note",
-        "note",
-        "notes",
-        "summary",
-        "summarize",
-        "recap",
-        "bullet",
-    }
-    action = "generate_audio"
-    if any(keyword in lowered for keyword in shownote_keywords):
-        action = "add_to_shownotes"
+#    shownote_keywords = {
+#        "show notes",
+#        "shownotes",
+#        "show-note",
+#        "note",
+#        "notes",
+#        "summary",
+#        "summarize",
+#        "recap",
+#        "bullet",
+#    }
+#    action = "generate_audio"
+#    if any(keyword in lowered for keyword in shownote_keywords):
+#        action = "add_to_shownotes"
 
-    return {"action": action, "topic": stripped}
+#    return {"action": action, "topic": stripped}
 
 
 def get_answer_for_topic(
@@ -202,7 +202,7 @@ def get_answer_for_topic(
 
     prompt = dedent(
         f"""
-        You are Podcast Pro Plus's helpful intern. {guidance}
+        You are a helpful podcast intern. You research questions, and then provide the answer to a TTS service which will respond immediately after the request with the answer, so please format your response to be spoken-podcast friendly.  Make your response extremely brief and include nothing other than the response. {guidance}
         Topic: {topic_text or 'General request'}
         """
     ).strip()
@@ -241,6 +241,6 @@ def get_answer_for_topic(
 __all__ = [
     "AIEnhancerError",
     "generate_speech_from_text",
-    "interpret_intern_command",
+#   "interpret_intern_command",
     "get_answer_for_topic",
 ]

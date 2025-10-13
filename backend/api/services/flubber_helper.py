@@ -16,7 +16,7 @@ def extract_flubber_contexts(
     main_content_filename: str,
     word_timestamps: List[Dict[str, Any]],
     window_before_s: float = 15.0,
-    window_after_s: float = 15.0,
+    window_after_s: float = 10.0,
     *,
     fuzzy: bool = False,
     fuzzy_threshold: float = 0.8,

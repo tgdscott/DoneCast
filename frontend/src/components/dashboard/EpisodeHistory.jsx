@@ -218,7 +218,7 @@ export default function EpisodeHistory({ token, onBack }) {
       const poll = async () => {
         try {
           const st = await api.get(`/api/episodes/${episodeId}/publish/status`);
-          if (st && (st.status === 'published' || st.spreaker_episode_id || st.last_error)) {
+          if (st && (st.status === 'published' || st.last_error)) {
             await fetchEpisodes();
             if (st.last_error) alert(st.last_error);
             return;
@@ -657,14 +657,6 @@ export default function EpisodeHistory({ token, onBack }) {
         list = list.concat(items);
         if(items.length < 500) break;
       }
-      // Merge analytics plays totals if available
-      try {
-        const stats = await api.get('/api/spreaker/analytics/plays/episodes?window=last30d', { signal: controller.signal });
-        if (Array.isArray(stats?.items) && stats.items.length) {
-          const map = new Map(stats.items.map(it => [String(it.episode_id), it.plays_total]));
-          list = list.map(e => ({ ...e, plays_total: map.has(String(e.id)) ? map.get(String(e.id)) : e.plays_total }));
-        }
-      } catch {}
   setEpisodes(list);
   // recompute duplicates
   recomputeGlobalNumberingConflicts(list);
@@ -699,7 +691,7 @@ export default function EpisodeHistory({ token, onBack }) {
     try {
       const api = makeApi(token);
       await api.post(`/api/episodes/${unpublishEp.id}/unpublish`, { force });
-      setEpisodes(prev => prev.map(e => e.id===unpublishEp.id ? { ...e, status:'processed', publish_at:null, spreaker_episode_id:null } : e));
+      setEpisodes(prev => prev.map(e => e.id===unpublishEp.id ? { ...e, status:'processed', publish_at:null } : e));
       setUnpublishEp(null);
       setTimeout(fetchEpisodes, 800);
     } catch(e){
@@ -798,7 +790,6 @@ export default function EpisodeHistory({ token, onBack }) {
               <div className="hidden w-full h-full items-center justify-center text-gray-400">
                 <ImageOff className="w-8 h-8 mr-2"/> No cover
               </div>
-              {/* Cover always sourced from Spreaker or local upload; 'No Cover File' badge removed */}
               {showUnpublish && (
                 <button
                   className="absolute top-1 left-1 bg-white/85 hover:bg-white text-amber-700 border border-amber-300 rounded p-1 shadow-sm text-[11px] font-medium opacity-0 group-hover:opacity-100 transition-opacity"
@@ -858,7 +849,7 @@ export default function EpisodeHistory({ token, onBack }) {
                       <button
                         className="bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-medium px-2 py-1 rounded shadow disabled:opacity-60"
                         onClick={() => doRepublish(ep)}
-                        title="Retry publishing to Spreaker"
+                        title="Retry publishing"
                         disabled={republishingId === ep.id}
                       >{republishingId === ep.id ? 'Retrying…' : 'Retry Publish'}</button>
                     ) : (
@@ -899,7 +890,6 @@ export default function EpisodeHistory({ token, onBack }) {
                     <CalendarClock className="w-3 h-3"/> {ep.status === 'scheduled' ? 'Publishes' : 'Publish'}: {formatPublishAtForUser(ep.publish_at)}
                   </span>
                 )}
-                {/* Spreaker & Streaming badges intentionally removed (Option E: reduce redundant UI) */}
                 {ep.playback_type === 'local' && (
                   <span className="text-[10px] text-gray-500">Local file</span>
                 )}
@@ -1260,7 +1250,7 @@ export default function EpisodeHistory({ token, onBack }) {
                   disabled={saving || !editValues.cover_file}
                 />
               </div>
-              <div className="text-[11px] text-gray-500">Saving updates local DB & pushes supported fields (title, description, visibility, cover when implemented) to Spreaker immediately if already published.</div>
+              <div className="text-[11px] text-gray-500">Saving updates local DB and episode metadata if already published.</div>
             </div>
             <div className="px-4 py-3 border-t flex items-center justify-end gap-2">
               <Button variant="outline" size="sm" onClick={closeEdit} disabled={saving}>Cancel</Button>
@@ -1355,7 +1345,7 @@ export default function EpisodeHistory({ token, onBack }) {
                 <label className="text-xs font-medium text-gray-600">Time</label>
                 <input type="time" step={300} className="border rounded px-2 py-1 text-sm" value={scheduleTime} onChange={e=>setScheduleTime(e.target.value)} />
               </div>
-              <p className="text-[11px] text-gray-500">Must be at least 1 minute in the future. Local time is converted to exact UTC ISO for Spreaker.</p>
+              <p className="text-[11px] text-gray-500">Must be at least 1 minute in the future. Local time is converted to exact UTC ISO.</p>
               {scheduleError && (
                 <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
                   {scheduleError}

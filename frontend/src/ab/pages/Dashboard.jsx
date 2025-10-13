@@ -66,18 +66,8 @@ export default function Dashboard({ token, shows, drafts, onOpenDraft, setActive
           if (typeof userStatsPrime?.plays_last_30d === 'number') {
             playsLast30d = userStatsPrime.plays_last_30d;
           }
-          if (playsLast30d == null) {
-            const totals = await api.get('/api/spreaker/analytics/plays/shows?window=last30d');
-            if (totals && totals.totals) {
-              let sum = 0;
-              for (const k of Object.keys(totals.totals)) {
-                const v = totals.totals[k]?.plays_total;
-                if (typeof v === 'number') sum += v;
-              }
-              playsLast30d = isNaN(sum) ? null : sum;
-            }
-          }
-          const epTotals = await api.get('/api/spreaker/analytics/plays/episodes?window=last30d');
+          // Analytics fallback removed
+          const epTotals = null; // Analytics endpoint removed
           if (Array.isArray(epTotals?.items)) {
             const mapped = epTotals.items.map(it => ({
               ...it,

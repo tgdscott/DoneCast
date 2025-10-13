@@ -94,7 +94,6 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
       coverArt: ImageIcon,
       introOutro: Sparkles,
       music: Sparkles,
-      spreaker: Globe,
       elevenlabs: Sparkles,
       publishDay: CheckCircle2,
       finish: CheckCircle2,
@@ -191,14 +190,6 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
       steps: [
         "You can find the RSS link in Spotify for Podcasters, Apple Podcasts Connect, or your current host dashboard.",
         "We'll never publish to that feed—this is read-only for setup.",
-      ],
-    },
-    spreaker: {
-      headline: "Connect Spreaker",
-      summary: "Connecting lets us publish directly for you without manual uploads.",
-      steps: [
-        "Have your Spreaker login ready; we only request episode-management scopes.",
-        "Prefer to skip? You can connect later in Integrations.",
       ],
     },
     confirm: {

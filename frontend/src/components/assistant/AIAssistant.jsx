@@ -64,8 +64,8 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
       hasShownIntro.current = true;
       
       const introMessage = onboardingMode
-        ? `Hey ${user?.first_name || 'there'}! 👋 I'm Mike D. Rop, your podcast setup guide. I'm here to help you get your show set up. Click "Need Help?" anytime you have questions!`
-        : `Hi ${user?.first_name || 'there'}! 👋 I'm Mike D. Rop (but you can call me Mike), your podcast assistant. I'm here to help you with anything - uploading, editing, publishing, you name it! What can I help you with today?`;
+        ? `Hey ${user?.first_name || 'there'}! 👋 I'm Mike Czech, your podcast setup guide. I'm here to help you get your show set up. Click "Need Help?" anytime you have questions!`
+        : `Hi ${user?.first_name || 'there'}! 👋 I'm Mike Czech (but you can call me Mike), your podcast assistant. I'm here to help you with anything - uploading, editing, publishing, you name it! What can I help you with today?`;
       
       setMessages([{
         role: 'assistant',
@@ -458,7 +458,7 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
           <div className="flex items-center justify-between p-4 border-b bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-t-lg flex-shrink-0">
             <div className="flex items-center gap-2">
               <MessageCircle className="w-5 h-5" />
-              <span className="font-semibold">Mike D. Rop</span>
+              <span className="font-semibold">Mike Czech</span>
               {isLoading && (
                 <span className="text-xs bg-white/20 px-2 py-0.5 rounded-full">Thinking...</span>
               )}

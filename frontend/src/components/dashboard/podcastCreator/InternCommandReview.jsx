@@ -242,7 +242,6 @@ export default function InternCommandReview({
               </CardTitle>
               <p className="text-sm text-slate-600">
                 Mark where each spoken command ends, then generate or edit the intern's response.
-                {voiceName ? ` Responses will use the "${voiceName}" voice.` : " Responses use your template's intern voice."}
               </p>
             </div>
             <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -370,9 +369,8 @@ export default function InternCommandReview({
         </CardContent>
         <div className="border-t bg-white px-6 py-4 flex items-center justify-between">
           <div className="text-xs text-slate-500">
-            {voiceName ? `Intern voice: ${voiceName}` : 'Intern voice: template default'}
             {pendingContexts.length > 0 && (
-              <span className="ml-2 text-amber-600">{pendingContexts.length} response{pendingContexts.length === 1 ? '' : 's'} still need attention.</span>
+              <span className="text-amber-600">{pendingContexts.length} response{pendingContexts.length === 1 ? '' : 's'} still need attention.</span>
             )}
           </div>
           <div className="flex items-center gap-2">

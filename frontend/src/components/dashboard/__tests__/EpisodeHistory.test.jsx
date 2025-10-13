@@ -25,9 +25,6 @@ vi.mock('@/lib/apiClient', () => {
         if (path.startsWith('/api/episodes/')) {
           return { items: episodes, total: episodes.length };
         }
-        if (path.startsWith('/api/spreaker/analytics/plays/episodes')) {
-          return { items: [] };
-        }
         return {};
       },
     }),

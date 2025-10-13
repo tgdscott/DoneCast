@@ -15,6 +15,7 @@ import AIGuidanceCard from "./AIGuidanceCard";
 import EpisodeStructureCard from "./EpisodeStructureCard";
 import TemplateSidebar from "./TemplateSidebar";
 import MusicTimingSection from "./MusicTimingSection";
+import GlobalMusicBrowser from "./GlobalMusicBrowser";
 import GenerateVoiceDialog from "./GenerateVoiceDialog";
 import {
   AI_DEFAULT,
@@ -279,6 +280,34 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     const newRules = [...template.background_music_rules];
     newRules.splice(index, 1);
     setTemplate(prev => ({ ...prev, background_music_rules: newRules }));
+  };
+
+  const addGlobalMusicToTemplate = (musicAsset) => {
+    // Create a new music rule using the global music asset ID
+    const newRule = {
+      id: crypto.randomUUID(),
+      apply_to_segments: ['intro'], // Default to intro, user can change
+      music_asset_id: musicAsset.id,
+      start_offset_s: 0,
+      end_offset_s: 1,
+      fade_in_s: 1.5,
+      fade_out_s: 2.0,
+      volume_db: Number(volumeLevelToDb(DEFAULT_VOLUME_LEVEL).toFixed(1)),
+    };
+    setTemplate(prev => ({ ...prev, background_music_rules: [...(prev.background_music_rules || []), newRule] }));
+    
+    // Show success toast
+    try {
+      toast({
+        title: "Music Added",
+        description: `"${musicAsset.display_name}" has been added to your template.`,
+      });
+    } catch (e) {
+      // Toast failed, non-fatal
+    }
+    
+    // Expand music section if collapsed
+    setShowMusicOptions(true);
   };
 
   const [musicUploadIndex, setMusicUploadIndex] = useState(null);
@@ -766,6 +795,10 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
           onChooseVoice={() => setShowVoicePicker(true)}
           internVoiceDisplay={internVoiceDisplay}
           onChooseInternVoice={() => setShowInternVoicePicker(true)}
+        />
+        <GlobalMusicBrowser
+          token={token}
+          onAddMusicToRule={addGlobalMusicToTemplate}
         />
         <div className="flex justify-end items-center mt-6">
             <Button

@@ -22,9 +22,6 @@ export default function CreatorFinalize({ token, drafts, uploads, uploadById, go
   const [description, setDescription] = useState(meta.description || "In this episode we cover how to find a topic you can stick with...");
   const [tags, setTags] = useState(meta.tags || "");
   const transcriptReady = !!(meta?.transcript === 'ready');
-  // Spreaker publish wiring
-  const [spreakerShows, setSpreakerShows] = useState([]);
-  const [selectedSpreakerShow, setSelectedSpreakerShow] = useState(meta?.spreaker_show_id || null);
   const [scheduleAt, setScheduleAt] = useState(meta?.schedule_at || "");
 
   // Keep local state in sync if meta changes (e.g., when switching drafts later)
@@ -34,7 +31,6 @@ export default function CreatorFinalize({ token, drafts, uploads, uploadById, go
       if(meta.description) setDescription(meta.description);
       if(typeof meta.tags === 'string') setTags(meta.tags);
       else if(Array.isArray(meta.tags)) setTags(meta.tags.join(", "));
-      if(meta.spreaker_show_id) setSelectedSpreakerShow(meta.spreaker_show_id);
       if(meta.schedule_at) setScheduleAt(meta.schedule_at);
     }
   }, [meta]);
@@ -63,59 +59,16 @@ export default function CreatorFinalize({ token, drafts, uploads, uploadById, go
     return () => { cancelled = true; };
   }, [token, transcriptReady, fileId, showId, meta?.hint, uploadById, setDraftMeta]);
 
-  // Fetch Spreaker shows once when token available
-  useEffect(()=>{
-    let cancelled = false;
-    (async()=>{
-      try{
-        if(!token) return;
-        const res = await abApi(token).listSpreakerShows();
-        if(cancelled) return;
-        const items = Array.isArray(res) ? res : (Array.isArray(res?.shows) ? res.shows : []);
-        setSpreakerShows(items);
-        // If none selected yet and server mapped one, try to auto-select by meta or first
-        if(!selectedSpreakerShow && items?.length){
-          const match = items.find(s=> String(s.id) === String(meta?.spreaker_show_id || ''));
-          setSelectedSpreakerShow(match ? String(match.id) : String(items[0].id));
-        }
-      }catch{
-        if(!cancelled) setSpreakerShows([]);
-      }
-    })();
-    return ()=>{ cancelled = true; };
-  }, [token]);
+
 
   const onSave = () => {
     if (!showId || !fileId) return;
     const tagsValue = (tags || "").trim();
-    setDraftMeta(showId, fileId, { title: title?.trim(), description: description?.trim(), tags: tagsValue, spreaker_show_id: selectedSpreakerShow || null, schedule_at: scheduleAt || null });
+    setDraftMeta(showId, fileId, { title: title?.trim(), description: description?.trim(), tags: tagsValue, schedule_at: scheduleAt || null });
     window.alert('Saved');
   };
   const onPublish = async () => {
-    if (!fileId) { window.alert('Select an upload first.'); return; }
-    const file = uploadById[fileId];
-    const filename = file?.serverFilename || file?.fileName;
-    if (!filename) { window.alert('File not available.'); return; }
-    if (!selectedSpreakerShow) { window.alert('Choose a Spreaker show.'); return; }
-    try{
-      const payload = {
-        show_id: String(selectedSpreakerShow),
-        title: (title || filename).trim(),
-        description: (description || '').trim(),
-        filename,
-      };
-      const when = (scheduleAt || '').trim();
-      if (when) {
-        const dt = new Date(when);
-        if(!isNaN(dt.getTime())) payload.auto_published_at = dt.toISOString();
-      }
-      const res = await abApi(token).publishToSpreaker(payload);
-      // Persist basic publish metadata
-      if (showId && fileId) setDraftMeta(showId, fileId, { spreaker_show_id: String(selectedSpreakerShow), schedule_at: scheduleAt || null, last_publish_response: res || true });
-      window.alert(when ? 'Scheduled for Spreaker.' : 'Published to Spreaker.');
-    }catch(e){
-      window.alert(e?.message || 'Failed to publish.');
-    }
+    window.alert('Publishing feature removed.');
   };
   const onAISuggestTitle = async () => {
     if (!fileId) return;
@@ -411,15 +364,6 @@ export default function CreatorFinalize({ token, drafts, uploads, uploadById, go
         <section className="rounded-2xl border bg-card p-4 space-y-4">
           <h2 className="text-base font-semibold">Publish settings</h2>
           <div className="space-y-4 text-sm">
-            <div>
-              <label className="text-sm font-medium">Spreaker show</label>
-              <select className="mt-1 w-full rounded-lg border px-3 py-2" value={selectedSpreakerShow || ''} onChange={(e)=>setSelectedSpreakerShow(e.target.value || null)}>
-                <option value="">Select a show…</option>
-                {(spreakerShows||[]).map(s => (
-                  <option key={s.id} value={String(s.id)}>{s.title || s.name || s.id}</option>
-                ))}
-              </select>
-            </div>
             <div>
               <label className="text-sm font-medium">Visibility</label>
               <div className="mt-2 flex items-center gap-6">

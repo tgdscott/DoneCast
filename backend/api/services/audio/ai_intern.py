@@ -19,7 +19,7 @@ def execute_intern_commands(
     mutable_words: Optional[List[Dict[str, Any]]] = None,
     fast_mode: bool = False,
 ) -> AudioSegment:
-    """Execute Intern commands (audio or shownotes), preserving spoken prompt.
+    """Execute Intern commands (audio only), preserving spoken prompt.
     This code was extracted from commands.py to isolate Intern behavior.
     """
     out = cleaned_audio
@@ -192,6 +192,7 @@ def execute_intern_commands(
             cmd["skipped"] = "empty_prompt"
             log.append("[INTERN_SKIP] empty prompt_text; no action taken")
             continue
+        log.append(f"[INTERN_START] cmd_id={cmd.get('command_id')} time={cmd.get('time')} has_override_answer={bool(cmd.get('override_answer'))} has_override_audio={bool(cmd.get('override_audio_url'))}")
         log.append(f"[INTERN_PROMPT] '{prompt_text[:200]}'")
         
         # If user has explicitly set mode (from override review), respect it - don't let LLM override
@@ -315,8 +316,9 @@ def execute_intern_commands(
                         log.append(f"[INTERN_OVERRIDE_AUDIO] loaded {len(speech)}ms from URL")
                     except Exception as e:
                         log.append(f"[INTERN_OVERRIDE_AUDIO_ERROR] {e}; will generate fresh TTS")
+                        voice_id = cmd.get("voice_id")
                         speech = ai_enhancer.generate_speech_from_text(
-                            answer, provider=tts_provider, api_key=elevenlabs_api_key
+                            answer, voice_id=voice_id, provider=tts_provider, api_key=elevenlabs_api_key
                         )
                 elif fast_mode:
                     # Insert a short placeholder clip (silence) to avoid network calls in fast mode
@@ -330,9 +332,12 @@ def execute_intern_commands(
                     log.append("[INTERN_TTS_DISABLED] skipping TTS generation for this command")
                     speech = None
                 else:
+                    voice_id = cmd.get("voice_id")
+                    log.append(f"[INTERN_TTS_GENERATE] voice_id={voice_id} text_len={len(answer)} provider={tts_provider}")
                     speech = ai_enhancer.generate_speech_from_text(
-                        answer, provider=tts_provider, api_key=elevenlabs_api_key
+                        answer, voice_id=voice_id, provider=tts_provider, api_key=elevenlabs_api_key
                     )
+                    log.append(f"[INTERN_TTS_SUCCESS] generated {len(speech)}ms audio")
                 if speech is None:
                     log.append("[INTERN_NO_AUDIO_INSERTED]")
                     continue
@@ -389,8 +394,9 @@ def execute_intern_commands(
                         fb_speech = AudioSegment.silent(duration=500)
                     elif not bool(cmd.get("disable_tts")):
                         fb_text = "The intern is out to lunch."
+                        voice_id = cmd.get("voice_id")
                         fb_speech = ai_enhancer.generate_speech_from_text(
-                            fb_text, provider=tts_provider, api_key=elevenlabs_api_key
+                            fb_text, voice_id=voice_id, provider=tts_provider, api_key=elevenlabs_api_key
                         )
                     else:
                         fb_speech = None

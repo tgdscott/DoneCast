@@ -44,6 +44,10 @@ async def confirm_email(
 
     if payload.email is not None and isinstance(payload.email, str) and not payload.email.strip():
         payload.email = None
+    
+    # Trim whitespace from code if provided
+    if payload.code is not None and isinstance(payload.code, str):
+        payload.code = payload.code.strip()
 
     if payload.token:
         ev = session.exec(
@@ -57,11 +61,13 @@ async def confirm_email(
     else:
         if not payload.email:
             raise HTTPException(status_code=400, detail="Email is required when no token is provided")
+        # Trim email whitespace
+        email = payload.email.strip() if isinstance(payload.email, str) else payload.email
         try:
-            EmailStr(payload.email)  # type: ignore[arg-type]
+            EmailStr(email)  # type: ignore[arg-type]
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid email format")
-        user = crud.get_user_by_email(session=session, email=payload.email)
+        user = crud.get_user_by_email(session=session, email=email)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
@@ -76,14 +82,29 @@ async def confirm_email(
         ).first()
 
     if not ev:
-        # Log for debugging: check if code exists but is marked as used
+        # Log for debugging: check if code exists but is marked as used or expired
         all_matches = session.exec(
             select(EmailVerification)
             .where(EmailVerification.user_id == user.id)
             .where(EmailVerification.code == payload.code)
         ).all()
         if all_matches:
-            print(f"[VERIFICATION DEBUG] Code {payload.code} exists but all are used={[e.used for e in all_matches]}")
+            match_details = []
+            for e in all_matches:
+                expired = "expired" if e.expires_at < now else "valid"
+                match_details.append(f"used={e.used}, {expired}")
+            print(f"[VERIFICATION DEBUG] User {user.email} tried code '{payload.code}' - found {len(all_matches)} matches: {match_details}")
+        else:
+            # Check if there are ANY codes for this user
+            user_codes = session.exec(
+                select(EmailVerification)
+                .where(EmailVerification.user_id == user.id)
+                .where(EmailVerification.verified_at == None)  # noqa: E711
+            ).all()
+            if user_codes:
+                print(f"[VERIFICATION DEBUG] User {user.email} tried wrong code '{payload.code}' - they have {len(user_codes)} pending code(s)")
+            else:
+                print(f"[VERIFICATION DEBUG] User {user.email} tried code '{payload.code}' - no pending verification codes found")
         raise HTTPException(status_code=400, detail="Invalid or expired verification")
     if ev.expires_at < now:
         raise HTTPException(status_code=400, detail="Verification expired")

@@ -81,15 +81,22 @@ async def upload_media_files(
 	def _validate_meta(f: UploadFile, cat: MediaCategory) -> None:
 		ct = (getattr(f, "content_type", None) or "").lower()
 		type_prefix = CATEGORY_TYPE_PREFIX.get(cat)
-		if type_prefix and not ct.startswith(type_prefix):
-			expected = "audio" if type_prefix == AUDIO_PREFIX else "image"
-			raise HTTPException(status_code=400, detail=f"Invalid file type '{ct or 'unknown'}'. Expected {expected} file for category '{cat.value}'.")
+		
+		# Get file extension first for validation
 		ext = Path(f.filename or "").suffix.lower()
 		if not ext:
 			raise HTTPException(status_code=400, detail="File must have an extension.")
+		
+		# Determine allowed extensions based on category
 		allowed = AUDIO_EXTS if type_prefix == AUDIO_PREFIX else IMAGE_EXTS
 		if ext not in allowed:
 			raise HTTPException(status_code=400, detail=f"Unsupported file extension '{ext}'.")
+		
+		# If content type is provided, validate it matches the category
+		# But allow missing content type if extension is valid (for browser recordings)
+		if ct and type_prefix and not ct.startswith(type_prefix):
+			expected = "audio" if type_prefix == AUDIO_PREFIX else "image"
+			raise HTTPException(status_code=400, detail=f"Invalid file type '{ct}'. Expected {expected} file for category '{cat.value}'.")
 
 	for i, file in enumerate(files):
 		if not file.filename:

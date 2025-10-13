@@ -20,48 +20,21 @@ const INITIAL_FORM = {
 const NewUserWizard = ({ open, onOpenChange, token, onPodcastCreated }) => {
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState(() => ({ ...INITIAL_FORM }));
-  const [isSpreakerConnected, setIsSpreakerConnected] = useState(false);
   const { toast } = useToast();
 
-  const pollRef = useRef(null);
   const skipCloseConfirmRef = useRef(false);
 
   const resetWizard = useCallback(() => {
     setStep(1);
     setFormData(() => ({ ...INITIAL_FORM }));
-    setIsSpreakerConnected(false);
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
   }, []);
 
   const hasUnsaved = useMemo(() => {
     const nameFilled = formData.podcastName.trim().length > 0;
     const descFilled = formData.podcastDescription.trim().length > 0;
     const keyFilled = (formData.elevenlabsApiKey || '').trim().length > 0;
-    return step > 1 || nameFilled || descFilled || !!formData.coverArt || keyFilled || isSpreakerConnected;
-  }, [formData, step, isSpreakerConnected]);
-  const announceConnected = useCallback(() => {
-    setIsSpreakerConnected(prev => {
-      if (!prev) {
-        toast({ title: "Success!", description: "Your Spreaker account is now connected." });
-      }
-      return true;
-    });
-  }, [toast]);
-
-  const verifyConnection = useCallback(async () => {
-    if (!token) return false;
-    try {
-      const user = await makeApi(token).get('/api/auth/users/me');
-      if (user?.spreaker_access_token) {
-        announceConnected();
-        return true;
-      }
-    } catch (_) {}
-    return false;
-  }, [announceConnected, token]);
+    return step > 1 || nameFilled || descFilled || !!formData.coverArt || keyFilled;
+  }, [formData, step]);
 
   // Feature flag: hide BYOK (Bring Your Own Key) for ElevenLabs for now.
   // Toggle with VITE_ENABLE_BYOK=true if we want to re-enable the step.
@@ -71,7 +44,6 @@ const NewUserWizard = ({ open, onOpenChange, token, onPodcastCreated }) => {
     { id: 'welcome', title: 'Welcome' },
     { id: 'showDetails', title: 'About your show' },
     { id: 'coverArt', title: 'Podcast Cover Art (optional)' },
-    { id: 'spreaker', title: 'Connect hosting' },
     ...(
       ENABLE_BYOK
         ? [{ id: 'elevenlabs', title: 'AI voices (optional)' }]
@@ -82,64 +54,12 @@ const NewUserWizard = ({ open, onOpenChange, token, onPodcastCreated }) => {
   const totalSteps = wizardSteps.length;
   const stepId = wizardSteps[step - 1]?.id;
 
-  useEffect(() => {
-    const handleMessage = (event) => {
-      if (event.origin !== window.location.origin) return;
-      const data = event.data;
-      if (data === 'spreaker_connected' || (data && data.type === 'spreaker_connected')) {
-        announceConnected();
-        if (pollRef.current) {
-          clearInterval(pollRef.current);
-          pollRef.current = null;
-        }
-        verifyConnection().catch(() => {});
-      }
-    };
-
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [announceConnected, verifyConnection]);
-
-  useEffect(() => {
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-    };
-  }, []);
-
   const nextStep = () => setStep((prev) => Math.min(prev + 1, totalSteps));
   const prevStep = () => setStep((prev) => Math.max(prev - 1, 1));
 
   const handleChange = (e) => {
     const { id, value, files } = e.target;
     setFormData((prev) => ({ ...prev, [id]: files ? files[0] : value }));
-  };
-
-  const handleConnectSpreaker = async () => {
-    try {
-      if (!token) throw new Error('Not signed in');
-      const qs = new URLSearchParams({ access_token: token }).toString();
-      const popupUrl = buildApiUrl(`/api/auth/spreaker/start?${qs}`);
-      const popup = window.open(popupUrl, 'spreakerAuth', 'width=600,height=700');
-      if (!popup) throw new Error('Popup blocked. Please allow popups and try again.');
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-      pollRef.current = setInterval(async () => {
-        if (!popup || popup.closed) {
-          if (pollRef.current) {
-            clearInterval(pollRef.current);
-            pollRef.current = null;
-          }
-          await verifyConnection();
-        }
-      }, 1000);
-    } catch (error) {
-      toast({ title: 'Connection Error', description: error?.message || 'Could not connect to Spreaker.', variant: 'destructive' });
-    }
   };
 
 
@@ -270,26 +190,6 @@ const NewUserWizard = ({ open, onOpenChange, token, onPodcastCreated }) => {
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="coverArt" className="text-right">Image</Label>
               <Input id="coverArt" type="file" onChange={handleChange} className="col-span-3" accept="image/png, image/jpeg" />
-            </div>
-          </WizardStep>
-        )}
-
-  {stepId === 'spreaker' && (
-          <WizardStep>
-            <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">Connect hosting<HelpCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" title="Spreaker hosts your episodes and publishes them to podcast directories." /></h3>
-            <DialogDescription className="mb-2">
-              We partner with Spreaker to host your podcast.
-            </DialogDescription>
-            <p className="text-xs text-gray-500 mb-4">Keep your phone nearby in case a code is needed.</p>
-            <div className="flex justify-center items-center p-6 bg-gray-50 rounded-md">
-              {isSpreakerConnected ? (
-                <Button variant="secondary" disabled className="bg-green-500 text-white hover:bg-green-500">
-                  <CheckCircle className="w-5 h-5 mr-2" />
-                  Connected
-                </Button>
-              ) : (
-                <Button onClick={handleConnectSpreaker}>Connect to Spreaker</Button>
-              )}
             </div>
           </WizardStep>
         )}

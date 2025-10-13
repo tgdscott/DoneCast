@@ -37,7 +37,7 @@ class MusicAssetPayload(BaseModel):
     source_type: Optional[MusicAssetSource] = None
 
 
-@router.get("/music/assets", status_code=200)
+@router.get("", status_code=200)
 def admin_list_music_assets(
     session: Session = Depends(get_session),
     admin_user: User = Depends(get_current_admin_user),
@@ -68,7 +68,7 @@ def admin_list_music_assets(
     return {"assets": assets}
 
 
-@router.post("/music/assets", status_code=201)
+@router.post("", status_code=201)
 def admin_create_music_asset(
     payload: MusicAssetPayload,
     session: Session = Depends(get_session),
@@ -88,6 +88,8 @@ def admin_create_music_asset(
             source_type=payload.source_type or MusicAssetSource.external,
             license=payload.license,
             attribution=payload.attribution,
+            is_global=True,  # Admin-uploaded music is global by default
+            owner_id=None,  # No owner for global assets
         )
         session.add(asset)
         session.commit()
@@ -98,7 +100,7 @@ def admin_create_music_asset(
         raise HTTPException(status_code=500, detail=f"Failed to create asset: {exc}")
 
 
-@router.put("/music/assets/{asset_id}", status_code=200)
+@router.put("/{asset_id}", status_code=200)
 def admin_update_music_asset(
     asset_id: str,
     payload: MusicAssetPayload,
@@ -135,7 +137,7 @@ def admin_update_music_asset(
         raise HTTPException(status_code=500, detail=f"Failed to update asset: {exc}")
 
 
-@router.delete("/music/assets/{asset_id}", status_code=200)
+@router.delete("/{asset_id}", status_code=200)
 def admin_delete_music_asset(
     asset_id: str,
     session: Session = Depends(get_session),
@@ -182,7 +184,7 @@ def _unique_path(dirpath: Path, base: str) -> Path:
     return dirpath / f"{stem}-{uuid.uuid4().hex}{suf}"
 
 
-@router.post("/music/assets/upload", status_code=201)
+@router.post("/upload", status_code=201)
 def admin_upload_music_asset(
     file: UploadFile = File(...),
     display_name: Optional[str] = Form(None),
@@ -235,6 +237,8 @@ def admin_upload_music_asset(
             source_type=MusicAssetSource.external,
             license=license,
             attribution=attribution,
+            is_global=True,  # Admin-uploaded music is global
+            owner_id=None,
         )
         session.add(asset)
         session.commit()
@@ -255,7 +259,7 @@ class MusicAssetImportUrl(BaseModel):
     attribution: Optional[str] = None
 
 
-@router.post("/music/assets/import-url", status_code=201)
+@router.post("/import-url", status_code=201)
 def admin_import_music_asset_by_url(
     payload: MusicAssetImportUrl,
     session: Session = Depends(get_session),
@@ -306,6 +310,8 @@ def admin_import_music_asset_by_url(
             source_type=MusicAssetSource.external,
             license=payload.license,
             attribution=payload.attribution,
+            is_global=True,  # Admin-imported music is global
+            owner_id=None,
         )
         session.add(asset)
         session.commit()

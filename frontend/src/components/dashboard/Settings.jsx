@@ -30,7 +30,6 @@ export default function Settings({ token }) {
   const [timezone, setTimezone] = useState("");
   const [useDeviceTimezone, setUseDeviceTimezone] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
-  const [isSpreakerConnected, setIsSpreakerConnected] = useState(false);
   const pollRef = useRef(null);
   
   const deviceTimezoneInfo = detectDeviceTimezoneInfo();
@@ -38,7 +37,6 @@ export default function Settings({ token }) {
   useEffect(() => {
     setFirstName(authUser?.first_name || "");
     setLastName(authUser?.last_name || "");
-    setIsSpreakerConnected(!!authUser?.spreaker_access_token);
     
     // Initialize timezone settings
     const userTz = authUser?.timezone || "";
@@ -50,76 +48,6 @@ export default function Settings({ token }) {
       setTimezone(userTz);
     }
   }, [authUser, deviceTimezoneInfo.value]);
-
-  const announceConnected = useCallback(() => {
-    setIsSpreakerConnected((prev) => {
-      if (!prev) {
-        toast({
-          title: "Spreaker connected",
-          description: "Your account is ready for one-click publishing.",
-        });
-      }
-      return true;
-    });
-  }, [toast]);
-
-  const verifyConnection = useCallback(async () => {
-    if (!token) return false;
-    try {
-      const user = await makeApi(token).get("/api/auth/users/me");
-      if (user?.spreaker_access_token) {
-        announceConnected();
-        refreshUser?.({ force: true });
-        return true;
-      }
-    } catch {
-      // ignore errors, we will retry via polling
-    }
-    return false;
-  }, [announceConnected, refreshUser, token]);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("spreaker_connected") === "true") {
-      announceConnected();
-      verifyConnection().catch(() => {});
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
-  }, [announceConnected, verifyConnection]);
-
-  useEffect(() => {
-    const handleMessage = (event) => {
-      const allowed = new Set([window.location.origin]);
-      try {
-        const apiBase = buildApiUrl("");
-        if (apiBase) {
-          allowed.add(new URL(apiBase).origin);
-        }
-      } catch {}
-      if (!allowed.has(event.origin)) return;
-      const data = event.data;
-      if (data === "spreaker_connected" || (data && data.type === "spreaker_connected")) {
-        if (pollRef.current) {
-          clearInterval(pollRef.current);
-          pollRef.current = null;
-        }
-        announceConnected();
-        verifyConnection().catch(() => {});
-      }
-    };
-
-    window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
-  }, [announceConnected, verifyConnection]);
-
-  useEffect(() => {
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-    };
-  }, []);
 
   const handleSaveProfile = async () => {
     setProfileSaving(true);
@@ -141,60 +69,6 @@ export default function Settings({ token }) {
       });
     } finally {
       setProfileSaving(false);
-    }
-  };
-
-  const handleConnectSpreaker = async () => {
-    try {
-      let popupUrl = null;
-      if (token) {
-        const qs = new URLSearchParams({ access_token: token }).toString();
-        popupUrl = buildApiUrl(`/api/auth/spreaker/start?${qs}`);
-      }
-      if (!popupUrl) throw new Error("Could not start the Spreaker sign-in.");
-      const popup = window.open(popupUrl, "spreakerAuth", "width=600,height=700");
-      if (!popup) throw new Error("Popup blocked. Please allow popups and try again.");
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-      pollRef.current = setInterval(async () => {
-        if (!popup || popup.closed) {
-          if (pollRef.current) {
-            clearInterval(pollRef.current);
-            pollRef.current = null;
-          }
-          await verifyConnection();
-        }
-      }, 1000);
-    } catch (err) {
-      toast({
-        title: "Connection error",
-        description: err?.message || "An unexpected error occurred.",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleDisconnectSpreaker = async () => {
-    if (!window.confirm("Disconnect Spreaker? We will stop publishing automatically until you reconnect.")) {
-      return;
-    }
-    try {
-      const api = makeApi(token);
-      await api.post("/api/spreaker/disconnect", {});
-      toast({
-        title: "Spreaker disconnected",
-        description: "We will keep everything ready if you decide to reconnect later.",
-      });
-      refreshUser({ force: true });
-      setIsSpreakerConnected(false);
-    } catch (err) {
-      toast({
-        title: "Error",
-        description: err?.message || "An unexpected error occurred.",
-        variant: "destructive",
-      });
     }
   };
 
@@ -339,43 +213,6 @@ export default function Settings({ token }) {
         >
           <ComfortMenu inline className="mt-1" />
           <p className="text-xs text-muted-foreground">Changes apply instantly; no save button needed.</p>
-        </SectionItem>
-
-        <SectionItem
-          icon={<Radio className="h-4 w-4 text-white" />}
-          title="Spreaker Connect"
-          description="Link your Spreaker account so finished episodes can publish automatically."
-        >
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
-            <span
-              className={
-                "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-medium " +
-                (isSpreakerConnected
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-600"
-                  : "border-slate-200 bg-white text-slate-600")
-              }
-            >
-              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: isSpreakerConnected ? '#047857' : '#94a3b8' }} />
-              {isSpreakerConnected ? "Connected" : "Not connected"}
-            </span>
-            {isSpreakerConnected ? (
-              <div className="flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:gap-3">
-                <Button variant="secondary" onClick={handleDisconnectSpreaker}>
-                  Disconnect
-                </Button>
-                <span className="text-xs text-muted-foreground max-w-xs">
-                  We will pause auto-publishing until you reconnect.
-                </span>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:gap-3">
-                <Button onClick={handleConnectSpreaker}>Connect Spreaker</Button>
-                <span className="text-xs text-muted-foreground max-w-xs">
-                  A popup will open. If you do not see it, allow popups for this site and try again.
-                </span>
-              </div>
-            )}
-          </div>
         </SectionItem>
       </SectionCard>
 

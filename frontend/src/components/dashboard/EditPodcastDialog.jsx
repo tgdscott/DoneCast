@@ -10,7 +10,7 @@ import { Loader2 } from "lucide-react";
 import { makeApi, isApiError } from "@/lib/apiClient";
 import CoverCropper from "./CoverCropper";
 
-// Basic subset of Spreaker language codes; extend as needed
+// Language options for podcast metadata
 const LANG_OPTIONS = [
 	{ code: "en", label: "English" },
 	{ code: "es", label: "Spanish" },
@@ -50,7 +50,6 @@ export default function EditPodcastDialog({
 		copyright_line: "",
 		owner_name: "",
 		author_name: "",
-		spreaker_show_id: "",
 		contact_email: "",
 		category_id: "",
 		category_2_id: "",
@@ -64,8 +63,6 @@ export default function EditPodcastDialog({
 	});
 	const [lastRemote, setLastRemote] = useState(null);
 	const [isSaving, setIsSaving] = useState(false);
-	const [originalSpreakerId, setOriginalSpreakerId] = useState("");
-	const [confirmShowIdChange, setConfirmShowIdChange] = useState(false);
 	const [newCoverFile, setNewCoverFile] = useState(null);
 	const [coverPreview, setCoverPreview] = useState("");
 	const coverCropperRef = useRef(null);
@@ -73,7 +70,7 @@ export default function EditPodcastDialog({
 	const [coverMode, setCoverMode] = useState('crop');
 	const { toast } = useToast();
 
-	// Derived validation: Spreaker requires 4+ chars for title
+	// Validation: name should be at least 4 chars
 	const nameTooShort = (formData.name || "").trim().length < 4;
 
 	// Ensure we always present a readable error string (never [object Object])
@@ -121,70 +118,23 @@ export default function EditPodcastDialog({
 				cover_path: podcast.cover_path || "",
 				podcast_type: podcast.podcast_type || defaultType,
 				language: podcast.language || defaultLang,
-				copyright_line: podcast.copyright_line || "",
-				owner_name: owner || "",
-				author_name: author || "",
-			spreaker_show_id: podcast.spreaker_show_id || "",
-				contact_email: email,
+			copyright_line: podcast.copyright_line || "",
+			owner_name: owner || "",
+			author_name: author || "",
+			contact_email: email,
 			category_id: podcast.category_id ? String(podcast.category_id) : "",
 			category_2_id: podcast.category_2_id ? String(podcast.category_2_id) : "",
 			category_3_id: podcast.category_3_id ? String(podcast.category_3_id) : "",
 		});
-		setOriginalSpreakerId(podcast.spreaker_show_id || "");
 		setCoverPreview(resolveCoverURL(podcast.cover_path));
 	}, [podcast, remoteStatus.loaded, isOpen, userEmail]);
-
-	// Load remote Spreaker show mapping (preferred source) when dialog opens
-	useEffect(() => {
-		async function loadRemote() {
-			if (!isOpen || !podcast?.id || !token) return;
-			setRemoteStatus((s) => ({ ...s, loading: true, error: "" }));
-			try {
-				const api = makeApi(token);
-				const data = await api.get(`/api/spreaker/show/${podcast.id}?mapped=true`);
-				const m = data.mapped || {};
-				const mergeKeys = [
-					"name",
-					"description",
-					"language",
-					"author_name",
-					"owner_name",
-					"copyright_line",
-					"category_id",
-					"category_2_id",
-					"category_3_id",
-					"contact_email",
-					"podcast_type",
-					"spreaker_show_id",
-					"cover_path",
-				];
-				setFormData((prev) => {
-					const merged = { ...prev };
-					mergeKeys.forEach((k) => {
-						if (m[k] !== undefined && m[k] !== null) merged[k] = String(m[k]);
-					});
-					return merged;
-				});
-				setLastRemote(m);
-				if (m.cover_path) setCoverPreview(resolveCoverURL(m.cover_path));
-				setRemoteStatus({ loading: false, error: "", loaded: true });
-			} catch (e) {
-				const msg = toErrorText(isApiError(e) ? (e.detail || e.error || e.message || e) : e);
-				// Treat 404/Not Found (no mapping yet) as a soft miss, not a hard error for UI noise
-				const status = (e && typeof e === 'object' && 'status' in e) ? e.status : undefined;
-				setRemoteStatus({ loading: false, error: status === 404 ? "" : (msg || "Failed remote fetch"), loaded: false });
-			}
-		}
-		loadRemote();
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [isOpen, podcast?.id, token]);
 
 	// Fetch categories once
 	useEffect(() => {
 		async function loadCategories() {
 			try {
 				const api = makeApi(token);
-				const data = await api.get("/api/spreaker/categories");
+				const data = await api.get("/api/podcasts/categories");
 				setCategories(data.categories || []);
 			} catch (e) {
 				/* silent */
@@ -230,11 +180,6 @@ export default function EditPodcastDialog({
 			toast({ title: "Name too short", description: "Podcast title must be at least 4 characters.", variant: "destructive" });
 			return;
 		}
-		// Guard: if spreaker_show_id changed, require confirmation checkbox
-		if (originalSpreakerId && formData.spreaker_show_id && formData.spreaker_show_id !== originalSpreakerId && !confirmShowIdChange) {
-			toast({ title: "Confirmation Required", description: "Check the confirmation box to change the Spreaker Show ID.", variant: "destructive" });
-			return;
-		}
 		setIsSaving(true);
 		try {
 			let updatedPodcast;
@@ -254,15 +199,9 @@ export default function EditPodcastDialog({
 				} catch {
 					data.append("cover_image", newCoverFile);
 				}
-				if (originalSpreakerId && formData.spreaker_show_id !== originalSpreakerId && confirmShowIdChange) {
-					data.append("allow_spreaker_id_change", "true");
-				}
 				updatedPodcast = await api.raw(`/api/podcasts/${podcast.id}`, { method: "PUT", body: data });
 			} else {
 				const payload = { ...formData };
-				if (originalSpreakerId && formData.spreaker_show_id !== originalSpreakerId && confirmShowIdChange) {
-					payload.allow_spreaker_id_change = true;
-				}
 				updatedPodcast = await api.put(`/api/podcasts/${podcast.id}`, payload);
 			}
 
@@ -287,45 +226,11 @@ export default function EditPodcastDialog({
 					</DialogDescription>
 				</DialogHeader>
 				<form onSubmit={handleSubmit} className="space-y-4">
-					<div className="text-xs -mb-1 flex items-center justify-end">
-						<button
-							type="button"
-							className="underline text-blue-600"
-							onClick={async () => {
-								setRemoteStatus({ loading: true, error: "", loaded: false });
-								try {
-									const api = makeApi(token);
-									const data = await api.get(`/api/spreaker/show/${podcast.id}?mapped=true`);
-									const m = data.mapped || {};
-									const mergeKeys = ['name','description','language','author_name','owner_name','copyright_line','category_id','category_2_id','category_3_id','contact_email','podcast_type','spreaker_show_id','cover_path'];
-									setFormData(prev=>{
-										const merged={...prev};
-										mergeKeys.forEach(k=>{ if(m[k] !== undefined && m[k] !== null){ merged[k]=String(m[k]); } });
-										return merged;
-									});
-									setLastRemote(m);
-									if (m.cover_path) setCoverPreview(resolveCoverURL(m.cover_path));
-									setRemoteStatus({loading:false,error:"",loaded:true});
-								} catch(err){
-									const msg = toErrorText(isApiError(err) ? (err.detail || err.error || err.message || err) : err);
-									const status = (err && typeof err === 'object' && 'status' in err) ? err.status : undefined;
-									setRemoteStatus({loading:false,error: status === 404 ? "" : msg, loaded:false});
-								}
-							}}
-						>
-							Refresh
-						</button>
-					</div>
-
 					<div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
 						<div className="space-y-1">
 							<Label htmlFor="name">Name</Label>
 							<Input id="name" value={formData.name} onChange={handleChange} />
 							{nameTooShort && <p className="text-[11px] text-amber-700">Minimum 4 characters.</p>}
-						</div>
-						<div className="space-y-1">
-							<Label htmlFor="spreaker_show_id">Show ID</Label>
-							<Input id="spreaker_show_id" value={formData.spreaker_show_id} onChange={handleChange} />
 						</div>
 						<div className="space-y-1">
 							<Label htmlFor="description">Description</Label>
@@ -458,19 +363,7 @@ export default function EditPodcastDialog({
 											</a>
 										</div>
 									)}
-									{podcast.spreaker_show_id && (
-										<div className="space-y-1">
-											<p className="text-xs text-blue-700 font-medium">Alternate Feed (show-id-based):</p>
-											<a
-												href={`https://api.podcastplusplus.com/v1/rss/${podcast.spreaker_show_id}/feed.xml`}
-												target="_blank"
-												rel="noopener noreferrer"
-												className="text-xs text-blue-600 hover:underline break-all block"
-											>
-												https://api.podcastplusplus.com/v1/rss/{podcast.spreaker_show_id}/feed.xml
-											</a>
-										</div>
-									)}
+
 									<p className="text-[10px] text-blue-600 mt-2">
 										These are your Podcast++ RSS feeds. Share these URLs with podcast directories.
 									</p>
@@ -479,23 +372,7 @@ export default function EditPodcastDialog({
 						)}
 					</div>
 
-					{originalSpreakerId && formData.spreaker_show_id !== originalSpreakerId && (
-						<div className="col-span-4 -mt-2 mb-2 p-3 border border-amber-300 bg-amber-50 rounded text-xs space-y-2">
-							<p className="font-semibold text-amber-800">
-								Changing the Spreaker Show ID can break existing episode links.
-							</p>
-							<label className="flex items-start gap-2 text-amber-900">
-								<input
-									type="checkbox"
-									checked={confirmShowIdChange}
-									onChange={(e) => setConfirmShowIdChange(e.target.checked)}
-								/>
-								<span>
-									I understand the risk and want to proceed with changing the Show ID.
-								</span>
-							</label>
-						</div>
-					)}
+
 
 					<DialogFooter>
 						<Button type="button" variant="outline" onClick={onClose}>

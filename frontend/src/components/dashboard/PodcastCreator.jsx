@@ -367,6 +367,7 @@ export default function PodcastCreator({
             minutesRemaining={minutesRemainingPrecheck}
             formatDuration={formatDuration}
             audioDurationSec={audioDurationSec}
+            episodeStatus={assembledEpisode?.status}
           />
         );
       case 3:

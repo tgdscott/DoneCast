@@ -156,7 +156,7 @@ def main():
         size = local.stat().st_size
         print(f"  Downloaded: {size/1024/1024:.1f} MB")
         
-        gcs = f"gs://{args.bucket}/{args.user_id}/episodes/{ep.id}/audio/{fname}"
+        gcs = f"gs://{args.bucket}/podcasts/{podcast.slug}/episodes/{ep.id}/audio/{fname}"
         print(f"  Uploading...")
         if not upload(local, gcs):
             print("  Upload failed")

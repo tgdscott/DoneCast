@@ -605,7 +605,6 @@ export default function PodcastPlusDashboard() {
                 {statsError}
               </div>
             )}
-            {/* Removed top Connect Spreaker banner; pill moved into Create Episode section when applicable */}
             <div className="grid lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 space-y-6">
                 {/* Create Episode Card */}

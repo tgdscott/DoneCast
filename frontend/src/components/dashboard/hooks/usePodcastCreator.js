@@ -72,8 +72,6 @@ export default function usePodcastCreator({
   const autoRecurringRef = useRef({ templateId: null, date: null, time: null, manual: false });
   const transcriptReadyRef = useRef(false);
   const [jobId, setJobId] = useState(null);
-  const [spreakerShows, setSpreakerShows] = useState([]);
-  const [selectedSpreakerShow, setSelectedSpreakerShow] = useState(null);
   const [publishMode, setPublishMode] = useState('draft');
   const [publishVisibility, setPublishVisibility] = useState('public');
   const [scheduleDate, setScheduleDate] = useState('');
@@ -231,9 +229,7 @@ export default function usePodcastCreator({
         setError(err.message);
       }
     };
-    const fetchSpreakerShows = async () => {};
     fetchMedia();
-    fetchSpreakerShows();
     (async () => {
       try {
         const isAdmin = !!(authUser && (authUser.is_admin || authUser.role === 'admin'));
@@ -1420,6 +1416,15 @@ export default function usePodcastCreator({
       };
       let result;
       try {
+        console.log('[ASSEMBLE] Sending payload with intents:', {
+          intern_overrides_count: intents?.intern_overrides?.length || 0,
+          intern_overrides_sample: intents?.intern_overrides?.slice(0, 2).map(o => ({
+            command_id: o.command_id,
+            has_audio_url: !!o.audio_url,
+            has_voice_id: !!o.voice_id,
+            text_length: o.response_text?.length || 0
+          }))
+        });
         result = await api.post('/api/episodes/assemble', {
           template_id: selectedTemplate.id,
           main_content_filename: uploadedFilename,
@@ -1516,32 +1521,53 @@ export default function usePodcastCreator({
     const enriched = [];
     
     for (const result of safe) {
-      if (!result.audio_url && result.response_text && result.voice_id) {
+      if (!result.audio_url && result.response_text) {
         try {
           const ttsPayload = {
             text: result.response_text,
-            voice_id: result.voice_id,
+            voice_id: result.voice_id || resolveInternVoiceId() || undefined,
             category: 'intern',
             provider: 'elevenlabs',
             speaking_rate: 1.0,
             confirm_charge: false,
           };
+          console.log('[INTERN_TTS] Generating TTS:', { 
+            text_length: result.response_text.length, 
+            voice_id: ttsPayload.voice_id,
+            command_id: result.command_id 
+          });
           const ttsResult = await api.post('/api/media/tts', ttsPayload);
+          console.log('[INTERN_TTS] TTS generated:', { 
+            filename: ttsResult?.filename,
+            command_id: result.command_id 
+          });
           // MediaItem.filename contains the GCS URL after upload
           enriched.push({
             ...result,
             audio_url: ttsResult?.filename || null,
           });
         } catch (err) {
-          console.warn('Failed to generate TTS for intern response:', err);
+          console.error('[INTERN_TTS] Failed to generate TTS for intern response:', err);
+          // Still push the result even if TTS fails - backend will generate as fallback
           enriched.push(result);
         }
       } else {
+        if (!result.response_text) {
+          console.warn('[INTERN_TTS] Skipping TTS - no response text:', result.command_id);
+        } else if (result.audio_url) {
+          console.log('[INTERN_TTS] Using existing audio URL:', result.command_id);
+        }
         enriched.push(result);
       }
     }
     
     setStatusMessage('');
+    console.log('[INTERN_COMPLETE] Final enriched results:', enriched.map(r => ({ 
+      command_id: r.command_id, 
+      has_audio_url: !!r.audio_url,
+      has_voice_id: !!r.voice_id,
+      text_length: r.response_text?.length || 0
+    })));
     setInternResponses(enriched);
     setIntents((prev) => ({ ...prev, intern_overrides: enriched }));
     setShowInternReview(false);
@@ -1703,8 +1729,8 @@ export default function usePodcastCreator({
       setError('Assembled episode required.');
       return;
     }
-    let showId = selectedSpreakerShow;
-    if (!showId && selectedTemplate && selectedTemplate.podcast_id) {
+    let showId = null;
+    if (selectedTemplate && selectedTemplate.podcast_id) {
       showId = selectedTemplate.podcast_id;
     }
     if (!showId) {
@@ -1739,7 +1765,6 @@ export default function usePodcastCreator({
     try {
       const effectiveState = scheduleEnabled ? 'unpublished' : publishVisibility;
       const payload = {
-        spreaker_show_id: showId,
         publish_state: effectiveState,
       };
       if (publish_at) {
@@ -1753,7 +1778,7 @@ export default function usePodcastCreator({
       const wasPrivate = effectiveState === 'unpublished' && !scheduled;
       const msg = result.message || (scheduled
         ? 'Episode scheduled for future publish.'
-        : wasPrivate ? 'Episode uploaded privately to Spreaker.' : 'Episode published publicly.');
+        : wasPrivate ? 'Episode uploaded privately.' : 'Episode published publicly.');
       setStatusMessage(msg);
       toast({ title: 'Success!', description: msg });
       try { if(assembledEpisode?.id) setLastAutoPublishedEpisodeId(assembledEpisode.id); } catch {}
@@ -1821,7 +1846,6 @@ export default function usePodcastCreator({
 
   // Extract episode ID to prevent re-triggering when episode object changes
   const assembledEpisodeId = assembledEpisode?.id;
-  const assembledEpisodeSpreakerIdExists = Boolean(assembledEpisode?.spreaker_episode_id);
 
   useEffect(() => {
     if(!assemblyComplete || !autoPublishPending || !assembledEpisode) return;
@@ -1829,14 +1853,6 @@ export default function usePodcastCreator({
     // Guard 1: Check if publishing already triggered for this episode
     if(publishingTriggeredRef.current && assembledEpisode?.id === lastAutoPublishedEpisodeId){
       setAutoPublishPending(false);
-      return;
-    }
-    
-    // Guard 2: Check if episode already published to Spreaker (has spreaker_episode_id)
-    if(assembledEpisode?.spreaker_episode_id){
-      console.log('[Publishing Guard] Episode already has Spreaker ID:', assembledEpisode.spreaker_episode_id);
-      setAutoPublishPending(false);
-      publishingTriggeredRef.current = false; // Reset for next episode
       return;
     }
     
@@ -1883,14 +1899,14 @@ export default function usePodcastCreator({
   // Use assembledEpisodeId (string) instead of assembledEpisode (object) to prevent re-triggers on object changes
   // Do NOT include scheduleDate/scheduleTime as dependencies or we'll publish multiple times!
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assemblyComplete, autoPublishPending, assembledEpisodeId, assembledEpisodeSpreakerIdExists]);
+  }, [assemblyComplete, autoPublishPending, assembledEpisodeId]);
 
   const handlePublishInternal = async ({ scheduleEnabled, publish_at, publish_at_local }) => {
-    let showId = selectedSpreakerShow;
-    if (!showId && selectedTemplate && selectedTemplate.podcast_id) showId = selectedTemplate.podcast_id;
+    let showId = null;
+    if (selectedTemplate && selectedTemplate.podcast_id) showId = selectedTemplate.podcast_id;
     if (!showId) { toast({ variant:'destructive', title:'Missing show', description:'Template needs a show association.' }); return; }
     let effectiveState = scheduleEnabled ? 'unpublished' : publishVisibility;
-    const payload = { spreaker_show_id: showId, publish_state: effectiveState };
+    const payload = { publish_state: effectiveState };
     if(publish_at){ payload.publish_at = publish_at; if(publish_at_local) payload.publish_at_local = publish_at_local; }
     try {
       const api = makeApi(token);
@@ -1901,9 +1917,7 @@ export default function usePodcastCreator({
       try { if(assembledEpisode?.id) setLastAutoPublishedEpisodeId(assembledEpisode.id); } catch {}
       try {
         const pubData = await api.get(`/api/episodes/${assembledEpisode.id}/publish/status`);
-        if(pubData.spreaker_episode_id){
-          setStatusMessage(prev => prev.includes('Spreaker ID')? prev : prev + ' (Spreaker ID ' + pubData.spreaker_episode_id + ')');
-        } else if(pubData.last_error){
+        if(pubData.last_error){
           toast({ variant:'destructive', title:'Publish downstream error', description: pubData.last_error });
         }
       } catch {}
@@ -2112,8 +2126,6 @@ export default function usePodcastCreator({
     isAiTitleBusy,
     isAiDescBusy,
     jobId,
-    spreakerShows,
-    selectedSpreakerShow,
     publishMode,
     publishVisibility,
     scheduleDate,

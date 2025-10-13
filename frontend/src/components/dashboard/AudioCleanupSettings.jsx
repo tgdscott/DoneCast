@@ -24,6 +24,7 @@ const DEFAULT_SETTINGS = {
   censorWords: [],
   censorFuzzy: true,
   censorMatchThreshold: 0.8,
+  autoDeleteRawAudio: false,
   commands: {
     flubber: { action: "rollback_restart", trigger_keyword: "flubber" },
     intern: {
@@ -229,7 +230,7 @@ export default function AudioCleanupSettings({ className }) {
         <SectionItem
           icon={<Eraser className="h-4 w-4 text-white" />}
           title="Eliminate filler words"
-          description={'Let Flubber tidy the little "ums" and "uhs" without touching your tone.'}
+          description={'Tidy the little "ums" and "uhs" without touching your tone.'}
         >
           <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
             <div className="text-sm text-slate-700">Remove filler words</div>
@@ -430,6 +431,26 @@ export default function AudioCleanupSettings({ className }) {
             will keep working just like before. Reach out if you need us to expose advanced editing again.
           </div>
         )}
+
+        <SectionItem
+          icon={<Trash2 className="h-4 w-4 text-white" />}
+          title="Raw file cleanup"
+          description="Automatically delete uploaded raw audio files after episodes are processed."
+        >
+          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex-1">
+              <div className="text-sm font-medium text-slate-700">Automatically delete raw audio files after they are used</div>
+              <p className="text-xs text-slate-500 mt-1">
+                When enabled, uploaded raw audio files will be automatically deleted once an episode is successfully processed.
+                When disabled, you'll see a notification to manually delete them.
+              </p>
+            </div>
+            <Switch
+              checked={!!settings.autoDeleteRawAudio}
+              onCheckedChange={(value) => update({ autoDeleteRawAudio: value })}
+            />
+          </div>
+        </SectionItem>
 
         <div className="flex flex-col gap-3 pt-4 sm:flex-row sm:items-center sm:justify-between">
           <span className="text-xs text-muted-foreground">

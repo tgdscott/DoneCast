@@ -16,25 +16,6 @@ export default function EpisodeAssembler({ templates, onBack, token }) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState('');
   const [assembledEpisode, setAssembledEpisode] = useState(null);
-  const [spreakerShows, setSpreakerShows] = useState([]);
-  const [selectedShowId, setSelectedShowId] = useState('');
-  const [isPublishing, setIsPublishing] = useState(false);
-
-  useEffect(() => {
-    const fetchSpreakerShows = async () => {
-      try {
-  const api = makeApi(token);
-  const data = await api.get('/api/spreaker/shows');
-  setSpreakerShows(data.shows || []);
-      } catch (err) {
-        console.error("Failed to fetch Spreaker shows:", err);
-      }
-    };
-
-    if (token) {
-      fetchSpreakerShows();
-    }
-  }, [token]);
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
@@ -86,28 +67,10 @@ export default function EpisodeAssembler({ templates, onBack, token }) {
 
   const handlePublish = async () => {
     if (!assembledEpisode || !selectedShowId) {
-      setError("No assembled episode or show selected for publishing.");
+      setError("No assembled episode available for publishing.");
       return;
     }
-    setIsPublishing(true);
-    setError('');
-    setStatusMessage('Publishing to Spreaker...');
-    try {
-      const api = makeApi(token);
-      const result = await api.post('/api/spreaker/upload', {
-        show_id: selectedShowId,
-        title: outputFilename,
-        filename: assembledEpisode.output_path.split('/').pop(),
-        description: "Uploaded via Podcast Plus Plus",
-      });
-      setStatusMessage(`Successfully published to Spreaker! Details: ${result.details}`);
-      setAssembledEpisode(null); // Clear the episode after successful publish
-    } catch (err) {
-      const msg = isApiError(err) ? (err.detail || err.error || err.message) : String(err);
-      setError(msg);
-    } finally {
-      setIsPublishing(false);
-    }
+    setStatusMessage('Episode assembled successfully. Use Episode History to publish.');
   };
 
   return (
@@ -128,9 +91,9 @@ export default function EpisodeAssembler({ templates, onBack, token }) {
               <div className="p-4 text-center bg-green-100 text-green-800 rounded-md">
                 <h3 className="font-bold">Assembly Complete!</h3>
                 <p>Final file: <strong>{assembledEpisode.output_path}</strong></p>
+                <p className="text-sm mt-2">Visit Episode History to publish your episode.</p>
               </div>
-              <div className="space-y-2"><Label htmlFor="show-select">4. Select Spreaker Show</Label><Select onValueChange={setSelectedShowId} value={selectedShowId}><SelectTrigger id="show-select"><SelectValue placeholder="Choose a show to publish to..." /></SelectTrigger><SelectContent>{spreakerShows.length > 0 ? spreakerShows.map(s => <SelectItem key={s.show_id} value={s.show_id}>{s.title}</SelectItem>) : <SelectItem value="no-shows" disabled>No shows found or loaded.</SelectItem>}</SelectContent></Select></div>
-              <Button onClick={handlePublish} className="w-full" disabled={isPublishing || !selectedShowId}>{isPublishing ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Publishing...</> : "Publish to Spreaker"}</Button>
+              <Button onClick={onBack} className="w-full">Return to Dashboard</Button>
             </div>
           )}
           {statusMessage && <p className="text-sm text-center p-2 rounded-md bg-blue-100 text-blue-800">{statusMessage}</p>}

@@ -201,7 +201,7 @@ export default function BillingPage({ token, onBack }) {
       processing: '120 (2 hrs)', extraRate: '$6/hr', queue: '2 hrs, held 7 days',
       features: {
         uploadRecord: true, basicCleanup: true, manualPublish: true,
-        autopublishSpreaker: false, flubber: false, intern: false, advancedIntern: false,
+        flubber: false, intern: false, advancedIntern: false,
         sfxTemplates: false, analytics: false, multiUser: false, priorityQueue: false, premiumSupport: false,
       }
     },
@@ -210,7 +210,7 @@ export default function BillingPage({ token, onBack }) {
       processing: '600 (10 hrs)', extraRate: '$5/hr', queue: '10 hrs, held 14 days',
       features: {
         uploadRecord: true, basicCleanup: true, manualPublish: true,
-        autopublishSpreaker: true, flubber: true, intern: true, advancedIntern: false,
+        flubber: true, intern: true, advancedIntern: false,
         sfxTemplates: false, analytics: false, multiUser: false, priorityQueue: false, premiumSupport: false,
       },
       popular: true, badge: 'Most Popular',
@@ -220,7 +220,7 @@ export default function BillingPage({ token, onBack }) {
       processing: '1500 (25 hrs)', extraRate: '$4/hr', queue: '25 hrs, held 30 days',
       features: {
         uploadRecord: true, basicCleanup: true, manualPublish: true,
-        autopublishSpreaker: true, flubber: true, intern: true, advancedIntern: true,
+        flubber: true, intern: true, advancedIntern: true,
         sfxTemplates: true, analytics: true, multiUser: false, priorityQueue: false, premiumSupport: false,
       },
     },
@@ -229,7 +229,7 @@ export default function BillingPage({ token, onBack }) {
       processing: '3600 (60 hrs)', extraRate: '$3/hr', queue: '60 hrs, held 60 days',
       features: {
         uploadRecord: true, basicCleanup: true, manualPublish: true,
-        autopublishSpreaker: true, flubber: true, intern: true, advancedIntern: true,
+        flubber: true, intern: true, advancedIntern: true,
         sfxTemplates: true, analytics: true, multiUser: true, priorityQueue: true, premiumSupport: true,
       },
       contact: true,
@@ -244,12 +244,11 @@ export default function BillingPage({ token, onBack }) {
     { key: 'uploadRecord', label: 'Upload & record' },
     { key: 'basicCleanup', label: 'Basic cleanup (noise, trim)' },
     { key: 'manualPublish', label: 'Manual publish' },
-    { key: 'autopublishSpreaker', label: 'Auto-publish to Spreaker (+ linked platforms)' },
     { key: 'flubber', label: 'Flubber (filler removal)' },
     { key: 'intern', label: 'Intern (spoken edits)' },
     { key: 'advancedIntern', label: 'Advanced Intern (multi-step edits)' },
     { key: 'sfxTemplates', label: 'Sound Effects & templates' },
-    { key: 'analytics', label: 'Analytics (via Spreaker API)' },
+    { key: 'analytics', label: 'Analytics' },
     { key: 'multiUser', label: 'Multi-user accounts' },
     { key: 'priorityQueue', label: 'Priority processing queue' },
     { key: 'premiumSupport', label: 'Premium support' },

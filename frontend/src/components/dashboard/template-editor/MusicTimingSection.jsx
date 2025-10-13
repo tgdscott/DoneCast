@@ -143,37 +143,62 @@ const MusicTimingSection = ({
                         </div>
                         <div>
                           <Label>Music File</Label>
-                          <div className="flex items-center gap-2">
-                            <Select
-                              value={rule.music_filename}
-                              onValueChange={(v) => onBackgroundMusicChange(index, "music_filename", v)}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select music..." />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {musicFiles.map((f) => (
-                                  <SelectItem key={f.id} value={f.filename}>
-                                    {formatDisplayName(f, { fallback: f.friendly_name || 'Audio clip' }) || 'Audio clip'}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => onStartMusicUpload(index)}
-                              disabled={isUploadingMusic && musicUploadIndex === index}
-                            >
-                              {isUploadingMusic && musicUploadIndex === index ? (
-                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                              ) : (
-                                <Upload className="w-4 h-4 mr-2" />
-                              )}
-                              Upload
-                            </Button>
-                          </div>
+                          {rule.music_asset_id ? (
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 px-3 py-2 border rounded-md bg-blue-50 border-blue-200">
+                                <div className="flex items-center gap-2">
+                                  <Globe className="w-4 h-4 text-blue-600" />
+                                  <span className="text-sm">Global Music Track</span>
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  ID: {rule.music_asset_id.substring(0, 8)}...
+                                </p>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  onBackgroundMusicChange(index, "music_asset_id", null);
+                                }}
+                                title="Remove this global music and select a different track"
+                              >
+                                Change
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <Select
+                                value={rule.music_filename}
+                                onValueChange={(v) => onBackgroundMusicChange(index, "music_filename", v)}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select music..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {musicFiles.map((f) => (
+                                    <SelectItem key={f.id} value={f.filename}>
+                                      {formatDisplayName(f, { fallback: f.friendly_name || 'Audio clip' }) || 'Audio clip'}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => onStartMusicUpload(index)}
+                                disabled={isUploadingMusic && musicUploadIndex === index}
+                              >
+                                {isUploadingMusic && musicUploadIndex === index ? (
+                                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                ) : (
+                                  <Upload className="w-4 h-4 mr-2" />
+                                )}
+                                Upload
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       </div>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

@@ -61,6 +61,30 @@ def _cleanup_main_content(*, session, episode, main_content_filename: str) -> No
             logging.info("[cleanup] No main_content_filename provided, skipping cleanup")
             return
 
+        # Check user's auto_delete_raw_audio setting
+        from api.models.user import User
+        import json
+        
+        user = session.get(User, episode.user_id)
+        if not user:
+            logging.warning("[cleanup] Could not find user for episode, skipping cleanup check")
+            return
+            
+        auto_delete = False
+        try:
+            settings_json = getattr(user, 'audio_cleanup_settings_json', None)
+            if settings_json:
+                settings = json.loads(settings_json)
+                auto_delete = bool(settings.get('autoDeleteRawAudio', False))
+            logging.info("[cleanup] User auto_delete_raw_audio setting: %s", auto_delete)
+        except Exception as e:
+            logging.warning("[cleanup] Could not parse user settings, defaulting to not delete: %s", e)
+            auto_delete = False
+        
+        if not auto_delete:
+            logging.info("[cleanup] User has disabled auto-delete for raw audio files, skipping cleanup")
+            return
+
         logging.info("[cleanup] Starting cleanup for main_content_filename: %s", raw_value)
         
         main_fn = os.path.basename(raw_value)

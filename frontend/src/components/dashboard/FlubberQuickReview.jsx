@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Scissors, X } from 'lucide-react';
+import { Scissors, X, ChevronLeft } from 'lucide-react';
 import Waveform from '@/components/media/Waveform';
 
 export default function FlubberQuickReview({ contexts, open, onConfirm, onCancel }) {
@@ -14,10 +14,27 @@ export default function FlubberQuickReview({ contexts, open, onConfirm, onCancel
   const [startIdx, setStartIdx] = useState(null); // last interacted index (for subtle highlight)
   // Per-context marker overrides from waveform interactions: { [flubber_index]: { startAbs?:number, endAbs?:number } }
   const [markerOverrides, setMarkerOverrides] = useState({});
+  // Track window expansion per context: { [flubber_index]: seconds_expanded }
+  const [windowExpansion, setWindowExpansion] = useState({});
   // Waveform-only player now; no external <audio> refs.
 
   const chosen = useMemo(()=> (contexts||[]).filter(c=> selected[c.flubber_index]), [contexts, selected]);
   const chosenSorted = useMemo(()=> [...chosen].sort((a,b)=> (a.flubber_time_s||0)-(b.flubber_time_s||0)), [chosen]);
+
+  // Helper to compute the adjusted snippet window for display
+  const getAdjustedWindow = (ctx) => {
+    const flubberTime = ctx.flubber_time_s || 0;
+    const expansion = windowExpansion[ctx.flubber_index] || 0;
+    const originalStart = ctx.snippet_start_s || 0;
+    
+    // Start at flubber marker minus expansion, but not before the original snippet start
+    const adjustedStart = Math.max(originalStart, flubberTime - expansion);
+    
+    // End at flubber marker + 10 seconds, but not beyond the original snippet end
+    const adjustedEnd = Math.min(ctx.snippet_end_s || (flubberTime + 10), flubberTime + 10);
+    
+    return { adjustedStart, adjustedEnd };
+  };
 
   if (!open) return null;
 
@@ -36,14 +53,6 @@ export default function FlubberQuickReview({ contexts, open, onConfirm, onCancel
   };
 
   const canApply = chosenSorted.length >= 1;
-  const jumpTo = (idx, absSeconds) => {
-    try {
-      const el = audioRefs.current[idx];
-      if (!el) return;
-      el.currentTime = Math.max(0, absSeconds || 0);
-      el.play().catch(()=>{});
-    } catch {}
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -59,7 +68,7 @@ export default function FlubberQuickReview({ contexts, open, onConfirm, onCancel
             </div>
           </div>
           <div className="flex items-center gap-4 text-xs text-gray-700">
-            <div>Click Play, seek on waveform, then press Cut to mark from now to auto end.</div>
+            <div>Red line marks flubber. Review ~10s after. Use "Expand Mistake Window" for more context.</div>
             <span className="ml-auto">Marked: {chosenSorted.length}</span>
           </div>
         </CardHeader>
@@ -69,18 +78,24 @@ export default function FlubberQuickReview({ contexts, open, onConfirm, onCancel
           )}
           {(contexts||[]).map(ctx => {
             const isStart = startIdx === ctx.flubber_index;
+            const { adjustedStart, adjustedEnd } = getAdjustedWindow(ctx);
+            const expansion = windowExpansion[ctx.flubber_index] || 0;
+            const flubberTime = ctx.flubber_time_s || 0;
+            const originalStart = ctx.snippet_start_s || 0;
+            // Can expand if flubber marker minus current expansion is still greater than original start
+            const canExpandMore = (flubberTime - expansion) > originalStart;
+            
             return (
             <div key={ctx.flubber_index} className={`border rounded p-2 flex flex-col gap-2 bg-white ${isStart? 'border-green-500': ''}`}>
               <div className="flex items-center justify-between">
-                <div className="text-[11px] font-mono">t={Number(ctx.flubber_time_s||0).toFixed(2)}s window [{Number(ctx.snippet_start_s||0).toFixed(1)} – {Number(ctx.snippet_end_s||0).toFixed(1)}]</div>
+                <div className="text-[11px] font-mono">t={Number(ctx.flubber_time_s||0).toFixed(2)}s window [{Number(adjustedStart).toFixed(1)} – {Number(adjustedEnd).toFixed(1)}]</div>
                 <div className="flex items-center gap-2">
                   {!selected[ctx.flubber_index] ? (
                     <Button
                       size="xs"
                       onClick={()=>{
-                        const ref = audioRefs.current[ctx.flubber_index];
-                        const local = ref && typeof ref.currentTime === 'number' ? ref.currentTime : 0;
-                        const startAbs = Math.max(0, (ctx.snippet_start_s || 0) + local);
+                        // Mark this flubber for cutting with default start position
+                        const startAbs = ctx.flubber_time_s || 0;
                         const endAbs = (ctx.computed_end_s ?? ((ctx.flubber_end_s || (ctx.flubber_time_s || 0)) + 0.2));
                         setMarkerOverrides(prev => ({ ...prev, [ctx.flubber_index]: { startAbs, endAbs } }));
                         setSelected(cur => ({ ...cur, [ctx.flubber_index]: true }));
@@ -108,24 +123,25 @@ export default function FlubberQuickReview({ contexts, open, onConfirm, onCancel
                   <Waveform
                     src={ctx.url}
                     height={80}
-                    start={selected[ctx.flubber_index] && markerOverrides[ctx.flubber_index]?.startAbs != null ? (markerOverrides[ctx.flubber_index].startAbs - (ctx.snippet_start_s || 0)) : undefined}
-                    end={selected[ctx.flubber_index] && markerOverrides[ctx.flubber_index]?.endAbs != null ? (markerOverrides[ctx.flubber_index].endAbs - (ctx.snippet_start_s || 0)) : undefined}
-                    markerEnd={(ctx.computed_end_s ?? ((ctx.flubber_end_s || (ctx.flubber_time_s || 0)) + 0.2)) - (ctx.snippet_start_s || 0)}
+                    cutButtonLabel="Cut"
+                    start={selected[ctx.flubber_index] && markerOverrides[ctx.flubber_index]?.startAbs != null ? (markerOverrides[ctx.flubber_index].startAbs - adjustedStart) : undefined}
+                    end={selected[ctx.flubber_index] && markerOverrides[ctx.flubber_index]?.endAbs != null ? (markerOverrides[ctx.flubber_index].endAbs - adjustedStart) : undefined}
+                    markerEnd={(ctx.computed_end_s ?? ((ctx.flubber_end_s || (ctx.flubber_time_s || 0)) + 0.2)) - adjustedStart}
                     onMarkersChange={({start, end}) => {
                       // reflect to absolute seconds if user adjusts the region in snippet
                       if (typeof start === 'number') {
-                        const absS = Math.max(0, (ctx.snippet_start_s || 0) + start);
+                        const absS = Math.max(0, adjustedStart + start);
                         setStartIdx(ctx.flubber_index);
                         setMarkerOverrides(prev => ({ ...prev, [ctx.flubber_index]: { ...(prev[ctx.flubber_index]||{}), startAbs: absS } }));
                       }
                       if (typeof end === 'number') {
-                        const absE = Math.max(0, (ctx.snippet_start_s || 0) + end);
+                        const absE = Math.max(0, adjustedStart + end);
                         setMarkerOverrides(prev => ({ ...prev, [ctx.flubber_index]: { ...(prev[ctx.flubber_index]||{}), endAbs: absE } }));
                       }
                     }}
                     onCut={(relativeNowSec) => {
                       // When Cut is pressed, mark start at current playhead relative to snippet; end = auto end
-                      const startAbs = Math.max(0, (ctx.snippet_start_s || 0) + (relativeNowSec || 0));
+                      const startAbs = Math.max(0, adjustedStart + (relativeNowSec || 0));
                       const endAbs = (ctx.computed_end_s ?? ((ctx.flubber_end_s || (ctx.flubber_time_s || 0)) + 0.2));
                       setMarkerOverrides(prev => ({ ...prev, [ctx.flubber_index]: { ...(prev[ctx.flubber_index]||{}), startAbs, endAbs } }));
                       setSelected(cur => ({ ...cur, [ctx.flubber_index]: true }));
@@ -135,8 +151,24 @@ export default function FlubberQuickReview({ contexts, open, onConfirm, onCancel
                   <div className="flex items-center justify-between text-[11px] text-gray-600">
                     <div>
                       Auto end: {(ctx.computed_end_s ?? ((ctx.flubber_end_s||0) + 0.2)).toFixed(2)}s
+                      {expansion > 0 && <span className="ml-2 text-blue-600">(expanded {expansion}s)</span>}
                     </div>
-                    <div className="flex gap-2" />
+                    <div className="flex gap-2">
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        onClick={() => {
+                          setWindowExpansion(prev => ({
+                            ...prev,
+                            [ctx.flubber_index]: (prev[ctx.flubber_index] || 0) + 15
+                          }));
+                        }}
+                        disabled={!canExpandMore}
+                        title={canExpandMore ? "Show 15s more before the flubber" : "Already at the beginning"}
+                      >
+                        <ChevronLeft className="w-3 h-3 mr-1"/>Expand Mistake Window
+                      </Button>
+                    </div>
                   </div>
                 </div>
               ) : (

@@ -323,6 +323,27 @@ def resolve_media_context(
     try:
         _ = template.timing_json
         _ = template.segments_json
+        
+        # Resolve music_asset_id to music_filename in background_music_rules
+        import json
+        from api.models.podcast import MusicAsset
+        background_music_rules = json.loads(template.background_music_rules_json or "[]")
+        for rule in background_music_rules:
+            if rule.get("music_asset_id") and not rule.get("music_filename"):
+                # Resolve asset ID to filename
+                try:
+                    music_asset = session.exec(
+                        select(MusicAsset).where(MusicAsset.id == rule["music_asset_id"])
+                    ).first()
+                    if music_asset:
+                        rule["music_filename"] = music_asset.filename
+                        logging.info(f"[assemble] Resolved music_asset_id {rule['music_asset_id']} to {music_asset.filename}")
+                    else:
+                        logging.warning(f"[assemble] music_asset_id {rule['music_asset_id']} not found")
+                except Exception as e:
+                    logging.error(f"[assemble] Error resolving music_asset_id: {e}")
+        # Write back the resolved rules
+        template.background_music_rules_json = json.dumps(background_music_rules)
     except Exception:
         logging.warning("[assemble] Failed to eagerly load template attributes", exc_info=True)
 

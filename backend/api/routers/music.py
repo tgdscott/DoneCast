@@ -17,8 +17,26 @@ from infrastructure.gcs import download_gcs_bytes as download_bytes, make_signed
 router = APIRouter(prefix="/music", tags=["music"])
 
 @router.get("/assets")
-def list_music_assets(request: Request, session: Session = Depends(get_session), mood: Optional[str] = None) -> dict:
+def list_music_assets(
+    request: Request, 
+    session: Session = Depends(get_session), 
+    mood: Optional[str] = None,
+    scope: Optional[str] = None,  # 'global', 'user', or None (all)
+    current_user: User = Depends(get_current_user)
+) -> dict:
     query = select(MusicAsset)
+    
+    # Filter by scope
+    if scope == "global":
+        query = query.where(MusicAsset.is_global == True)
+    elif scope == "user":
+        query = query.where(MusicAsset.owner_id == current_user.id)
+    else:
+        # Return both global and user's own music
+        query = query.where(
+            (MusicAsset.is_global == True) | (MusicAsset.owner_id == current_user.id)
+        )
+    
     assets: Sequence[MusicAsset] = session.exec(query).all()
     out = []
     for a in assets:
@@ -76,6 +94,8 @@ def list_music_assets(request: Request, session: Session = Depends(get_session),
             "license": a.license,
             "attribution": a.attribution,
             "select_count": a.user_select_count,
+            "is_global": a.is_global,
+            "owner_id": str(a.owner_id) if a.owner_id else None,
         })
     return {"assets": out}
 

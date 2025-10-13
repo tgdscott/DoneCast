@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CheckCircle, Play, Pause, Mic } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useComfort } from '@/ComfortContext.jsx';
@@ -49,10 +50,7 @@ export default function Onboarding() {
     coverArt: null,
     elevenlabsApiKey: '',
   });
-  const [isSpreakerConnected, setIsSpreakerConnected] = useState(!!(user?.spreaker_access_token));
   const [saving, setSaving] = useState(false);
-  // Spreaker connect gating (require a click)
-  const [spreakerClicked, setSpreakerClicked] = useState(false);
 
   // Additional state for richer flow
   const [formatKey, setFormatKey] = useState('solo');
@@ -249,9 +247,7 @@ export default function Onboarding() {
       // Optional interstitial: show a one-off page when jumping here after import
       ...(showSkipNotice ? [{ id: 'skipNotice', title: 'Skipping ahead', description: "We imported your show. We'll jump to Step 6 so you can finish setup." }] : []),
       { id: 'introOutro', title: 'Intro & Outro' },
-      ...(needsTtsReview ? [{ id: 'ttsReview', title: 'Review your intro & outro', description: 'Please review these and make sure they are okay.' }] : []),
       { id: 'music', title: 'Music (optional)' },
-      { id: 'spreaker', title: 'Connect to Podcast Host' },
       { id: 'publishCadence', title: 'How often will you publish?' },
       { id: 'publishSchedule', title: 'Publishing days' },
       { id: 'finish', title: 'All done!' },
@@ -259,14 +255,10 @@ export default function Onboarding() {
 
     // If we launched from Podcast Manager, the user's name is already known; remove that step
     let filtered = fromManager ? newSteps.filter((s) => s.id !== 'yourName') : newSteps;
-    // If already connected to Spreaker, drop that step as well
-    if (fromManager && isSpreakerConnected) {
-      filtered = filtered.filter((s) => s.id !== 'spreaker');
-    }
 
     const includeSchedule = (freqUnit !== 'day' && freqUnit !== 'year');
     return includeSchedule ? filtered : filtered.filter((s) => s.id !== 'publishSchedule');
-  }, [firstName, lastName, nameError, freqUnit, path, token, refreshUser, fromManager, isSpreakerConnected, showSkipNotice, needsTtsReview]);
+  }, [firstName, lastName, nameError, freqUnit, path, token, refreshUser, fromManager, showSkipNotice]);
 
   const wizardSteps = useMemo(() => (
     path === 'import' ? importFlowSteps : newFlowSteps
@@ -332,7 +324,7 @@ export default function Onboarding() {
     return () => { if (stepSaveTimer.current) clearTimeout(stepSaveTimer.current); };
   }, [stepIndex]);
 
-  // Listen for AI-generated cover images from Mike D. Rop
+  // Listen for AI-generated cover images from Mike Czech
   useEffect(() => {
     const handleAiGeneratedCover = (event) => {
       const file = event.detail?.file;
@@ -355,14 +347,15 @@ export default function Onboarding() {
     return () => window.removeEventListener('ai-generated-cover', handleAiGeneratedCover);
   }, [stepId, wizardSteps]);
 
-  // When on the music step, fetch assets once
+  // When on the music step, fetch assets once (global music only)
   useEffect(() => {
     if (stepId === 'music' && musicAssets.length <= 1 && !musicLoading) {
       setMusicLoading(true);
       (async () => {
         try {
           const api = makeApi(token);
-          const data = await api.get('/api/music/assets');
+          // Fetch global music only for onboarding
+          const data = await api.get('/api/music/assets?scope=global');
           const assets = Array.isArray(data?.assets) ? data.assets : [];
           setMusicAssets([NO_MUSIC_OPTION, ...assets]);
         } catch (_) {
@@ -561,23 +554,7 @@ export default function Onboarding() {
     setFormData((prev) => ({ ...prev, [id]: files ? files[0] : value }));
   };
 
-  async function handleConnectSpreaker() {
-    try {
-      if (!token) throw new Error('Not signed in');
-      const qs = new URLSearchParams({ access_token: token }).toString();
-      const popupUrl = buildApiUrl(`/api/auth/spreaker/start?${qs}`);
-      const popup = window.open(popupUrl, 'spreakerAuth', 'width=600,height=700');
-      setSpreakerClicked(true);
-      const timer = setInterval(() => {
-        if (!popup || popup.closed) {
-          clearInterval(timer);
-          makeApi(token).get('/api/auth/users/me').then(user => { if (user?.spreaker_access_token) setIsSpreakerConnected(true); }).catch(()=>{});
-        }
-      }, 1000);
-    } catch (error) {
-      try { toast({ title: 'Connection Error', description: error.message, variant: 'destructive' }); } catch {}
-    }
-  }
+
 
   // Exit & Discard
   const handleExitDiscard = () => {
@@ -676,9 +653,9 @@ export default function Onboarding() {
           // Compose background music rules if a track was chosen
           const musicRules = [];
           const selectedMusic = (musicAssets || []).find(a => a.id === musicChoice && a.id !== 'none');
-          if (selectedMusic && selectedMusic.filename) {
+          if (selectedMusic && selectedMusic.id) {
             musicRules.push({
-              music_filename: selectedMusic.filename,
+              music_asset_id: selectedMusic.id,
               apply_to_segments: ['intro'],
               start_offset_s: 0,
               end_offset_s: 1,
@@ -687,7 +664,7 @@ export default function Onboarding() {
               volume_db: -4,
             });
             musicRules.push({
-              music_filename: selectedMusic.filename,
+              music_asset_id: selectedMusic.id,
               apply_to_segments: ['outro'],
               start_offset_s: -10,
               end_offset_s: 0,
@@ -757,7 +734,6 @@ export default function Onboarding() {
   s.id === 'coverArt' ? 'No artwork yet? You can skip this for now.' :
   s.id === 'introOutro' ? 'Start with our default scripts or upload your own audio.' :
   s.id === 'music' ? 'This is background music for your intro and outro. It can be changed or removed at any time.' :
-      s.id === 'spreaker' ? 'Click connect to open a popup; you can come back to this later.' :
   s.id === 'publishCadence' ? 'We ask to help keep you on track for publishing consistently' :
   s.id === 'publishSchedule' ? 'Consistency is more important than volume for a successful podcast' :
       s.id === 'rss' ? 'Paste your feed URL.' :
@@ -889,37 +865,28 @@ export default function Onboarding() {
             <div className="space-y-6">
               <div className="space-y-2">
                 <div className="font-medium">Intro</div>
-                <div className="flex gap-3 items-center flex-wrap">
-                  {introOptions.length > 0 && (
-                    <label className={`border rounded p-2 cursor-pointer ${introMode==='existing'? 'border-blue-600':'hover:border-gray-400'}`}>
-                      <input type="radio" name="introMode" value="existing" checked={introMode==='existing'} onChange={()=> setIntroMode('existing')} />
-                      <span className="ml-2">
-                        <span>Use current</span>
-                      </span>
-                    </label>
-                  )}
-                  <label className={`border rounded p-2 cursor-pointer ${introMode==='record'?'border-blue-600 bg-blue-50':'hover:border-gray-400'}`}>
-                    <input type="radio" name="introMode" value="record" checked={introMode==='record'} onChange={()=> setIntroMode('record')} />
-                    <span className="ml-2 inline-flex flex-col items-center text-center">
-                      <span className="flex items-center gap-1">
-                        <Mic className="h-4 w-4" />
-                        <span>Record Now</span>
-                        <span className="ml-1 px-1.5 py-0.5 bg-green-100 text-green-800 text-xs rounded font-medium">Easy!</span>
-                      </span>
-                      <span className="text-xs italic text-muted-foreground">(Use your own voice)</span>
-                    </span>
-                  </label>
-                  <label className={`border rounded p-2 cursor-pointer ${introMode==='tts'?'border-blue-600':'hover:border-gray-400'}`}>
-                    <input type="radio" name="introMode" value="tts" checked={introMode==='tts'} onChange={()=> setIntroMode('tts')} />
-                    <span className="ml-2 inline-flex flex-col items-center text-center">
-                      <span>Generate with AI voice</span>
-                      <span className="text-xs italic text-muted-foreground">(We read your script aloud)</span>
-                    </span>
-                  </label>
-                  <label className={`border rounded p-2 cursor-pointer ${introMode==='upload'?'border-blue-600':'hover:border-gray-400'}`}>
-                    <input type="radio" name="introMode" value="upload" checked={introMode==='upload'} onChange={()=> setIntroMode('upload')} />
-                    <span className="ml-2">Upload a file</span>
-                  </label>
+                <div className="flex items-center gap-2">
+                  <Select value={introMode} onValueChange={(value) => setIntroMode(value)}>
+                    <SelectTrigger className="w-[280px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {introOptions.length > 0 && (
+                        <SelectItem value="existing">
+                          Use Current Intro
+                        </SelectItem>
+                      )}
+                      <SelectItem value="record">
+                        <span className="flex items-center gap-2">
+                          <Mic className="h-4 w-4" />
+                          Record Now
+                          <span className="ml-1 px-1.5 py-0.5 bg-green-100 text-green-800 text-xs rounded font-medium">Easy!</span>
+                        </span>
+                      </SelectItem>
+                      <SelectItem value="tts">Generate with AI Voice</SelectItem>
+                      <SelectItem value="upload">Upload a File</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 {introMode==='existing' && (
                   <div className="flex items-center gap-2">
@@ -956,11 +923,21 @@ export default function Onboarding() {
                     token={token}
                     maxDuration={60}
                     largeText={largeText}
+                    userFirstName={firstName}
+                    refreshUser={refreshUser}
                     onRecordingComplete={(mediaItem) => {
                       setIntroAsset(mediaItem);
+                      // Add to intro options if not already there
+                      setIntroOptions(prev => {
+                        const exists = prev.some(x => (x.id || x.filename) === (mediaItem.id || mediaItem.filename));
+                        return exists ? prev : [...prev, mediaItem];
+                      });
+                      setSelectedIntroId(String(mediaItem.id || mediaItem.filename));
+                      // Switch to "existing" mode to show preview
+                      setIntroMode('existing');
                       toast({ 
                         title: "Perfect!", 
-                        description: "Your intro has been recorded and saved." 
+                        description: "Your intro has been recorded. Preview it below!" 
                       });
                     }}
                   />
@@ -974,37 +951,28 @@ export default function Onboarding() {
               </div>
               <div className="space-y-2">
                 <div className="font-medium">Outro</div>
-                <div className="flex gap-3 items-center flex-wrap">
-                  {outroOptions.length > 0 && (
-                    <label className={`border rounded p-2 cursor-pointer ${outroMode==='existing'? 'border-blue-600':'hover:border-gray-400'}`}>
-                      <input type="radio" name="outroMode" value="existing" checked={outroMode==='existing'} onChange={()=> setOutroMode('existing')} />
-                      <span className="ml-2">
-                        <span>Use current</span>
-                      </span>
-                    </label>
-                  )}
-                  <label className={`border rounded p-2 cursor-pointer ${outroMode==='record'?'border-blue-600 bg-blue-50':'hover:border-gray-400'}`}>
-                    <input type="radio" name="outroMode" value="record" checked={outroMode==='record'} onChange={()=> setOutroMode('record')} />
-                    <span className="ml-2 inline-flex flex-col items-center text-center">
-                      <span className="flex items-center gap-1">
-                        <Mic className="h-4 w-4" />
-                        <span>Record Now</span>
-                        <span className="ml-1 px-1.5 py-0.5 bg-green-100 text-green-800 text-xs rounded font-medium">Easy!</span>
-                      </span>
-                      <span className="text-xs italic text-muted-foreground">(Use your own voice)</span>
-                    </span>
-                  </label>
-                  <label className={`border rounded p-2 cursor-pointer ${outroMode==='tts'?'border-blue-600':'hover:border-gray-400'}`}>
-                    <input type="radio" name="outroMode" value="tts" checked={outroMode==='tts'} onChange={()=> setOutroMode('tts')} />
-                    <span className="ml-2 inline-flex flex-col items-center text-center">
-                      <span>Generate with AI voice</span>
-                      <span className="text-xs italic text-muted-foreground">(We read your script aloud)</span>
-                    </span>
-                  </label>
-                  <label className={`border rounded p-2 cursor-pointer ${outroMode==='upload'?'border-blue-600':'hover:border-gray-400'}`}>
-                    <input type="radio" name="outroMode" value="upload" checked={outroMode==='upload'} onChange={()=> setOutroMode('upload')} />
-                    <span className="ml-2">Upload a file</span>
-                  </label>
+                <div className="flex items-center gap-2">
+                  <Select value={outroMode} onValueChange={(value) => setOutroMode(value)}>
+                    <SelectTrigger className="w-[280px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {outroOptions.length > 0 && (
+                        <SelectItem value="existing">
+                          Use Current Outro
+                        </SelectItem>
+                      )}
+                      <SelectItem value="record">
+                        <span className="flex items-center gap-2">
+                          <Mic className="h-4 w-4" />
+                          Record Now
+                          <span className="ml-1 px-1.5 py-0.5 bg-green-100 text-green-800 text-xs rounded font-medium">Easy!</span>
+                        </span>
+                      </SelectItem>
+                      <SelectItem value="tts">Generate with AI Voice</SelectItem>
+                      <SelectItem value="upload">Upload a File</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 {outroMode==='existing' && (
                   <div className="flex items-center gap-2">
@@ -1041,11 +1009,21 @@ export default function Onboarding() {
                     token={token}
                     maxDuration={60}
                     largeText={largeText}
+                    userFirstName={firstName}
+                    refreshUser={refreshUser}
                     onRecordingComplete={(mediaItem) => {
                       setOutroAsset(mediaItem);
+                      // Add to outro options if not already there
+                      setOutroOptions(prev => {
+                        const exists = prev.some(x => (x.id || x.filename) === (mediaItem.id || mediaItem.filename));
+                        return exists ? prev : [...prev, mediaItem];
+                      });
+                      setSelectedOutroId(String(mediaItem.id || mediaItem.filename));
+                      // Switch to "existing" mode to show preview
+                      setOutroMode('existing');
                       toast({ 
                         title: "Perfect!", 
-                        description: "Your outro has been recorded and saved." 
+                        description: "Your outro has been recorded. Preview it below!" 
                       });
                     }}
                   />
@@ -1057,96 +1035,32 @@ export default function Onboarding() {
                 )}
                 {/* Prepared helper removed per request */}
               </div>
-              <div className="space-y-2">
-                <div className="space-y-1">
-                  <Label className="">Voice</Label>
-                  <div className="flex items-center gap-2">
-                    <select className="border rounded p-2 min-w-[220px]" value={selectedVoiceId} onChange={(e)=> setSelectedVoiceId(e.target.value)} disabled={voicesLoading || (voices?.length||0)===0}>
-                      <option value="default">Default</option>
-                      {voices.map((v)=>{
-                        const id = v.voice_id || v.id || v.name;
-                        const label = v.name || v.label || id;
-                        return <option key={id} value={id}>{label}</option>;
-                      })}
-                    </select>
-                    <Button type="button" variant="outline" onClick={previewSelectedVoice} disabled={voicesLoading || !getVoiceById(selectedVoiceId)?.preview_url}>
-                      {voicePreviewing ? <Pause className="w-4 h-4 mr-2"/> : <Play className="w-4 h-4 mr-2"/>}
-                      Preview
-                    </Button>
+              {(introMode === 'tts' || outroMode === 'tts') && (
+                <div className="space-y-2">
+                  <div className="space-y-1">
+                    <Label className="">Voice</Label>
+                    <div className="flex items-center gap-2">
+                      <select className="border rounded p-2 min-w-[220px]" value={selectedVoiceId} onChange={(e)=> setSelectedVoiceId(e.target.value)} disabled={voicesLoading || (voices?.length||0)===0}>
+                        <option value="default">Default</option>
+                        {voices.map((v)=>{
+                          const id = v.voice_id || v.id || v.name;
+                          const label = v.name || v.label || id;
+                          return <option key={id} value={id}>{label}</option>;
+                        })}
+                      </select>
+                      <Button type="button" variant="outline" onClick={previewSelectedVoice} disabled={voicesLoading || !getVoiceById(selectedVoiceId)?.preview_url}>
+                        {voicePreviewing ? <Pause className="w-4 h-4 mr-2"/> : <Play className="w-4 h-4 mr-2"/>}
+                        Preview
+                      </Button>
+                    </div>
                   </div>
+                  {voicesLoading && <div className="text-xs text-muted-foreground">Loading voices…</div>}
+                  {voicesError && <div className="text-xs text-yellow-700">{voicesError}</div>}
                 </div>
-                {voicesLoading && <div className="text-xs text-muted-foreground">Loading voices…</div>}
-                {voicesError && <div className="text-xs text-yellow-700">{voicesError}</div>}
-              </div>
+              )}
               <p className="text-xs text-muted-foreground">We’ll create simple defaults if you leave the scripts unchanged.</p>
             </div>
           );
-        case 'ttsReview': {
-          const hasIntro = !!ttsGeneratedIntro;
-          const hasOutro = !!ttsGeneratedOutro;
-          const tryPatchName = async (itm, name) => {
-            if (!itm || !name) return;
-            const id = itm.id || itm.media_id;
-            if (!id) return;
-            try { await makeApi(token).patch(`/api/media/${id}`, { display_name: name }); } catch (_) { /* non-fatal */ }
-          };
-          const retry = async (discard) => {
-            // Optionally try to delete
-            if (discard) {
-              try { if (ttsGeneratedIntro?.id) await makeApi(token).delete(`/api/media/${ttsGeneratedIntro.id}`); } catch(_){}
-              try { if (ttsGeneratedOutro?.id) await makeApi(token).delete(`/api/media/${ttsGeneratedOutro.id}`); } catch(_){}
-            }
-            if (hasIntro) {
-              const ia = await generateOrUploadTTS('intro', 'tts', introScript, null);
-              if (ia) { setIntroAsset(ia); setTtsGeneratedIntro(ia); setRenameIntro(formatMediaDisplayName(ia, false)); }
-            }
-            if (hasOutro) {
-              const oa = await generateOrUploadTTS('outro', 'tts', outroScript, null);
-              if (oa) { setOutroAsset(oa); setTtsGeneratedOutro(oa); setRenameOutro(formatMediaDisplayName(oa, false)); }
-            }
-          };
-          const goNext = () => setStepIndex(n => Math.min(n + 1, wizardSteps.length - 1));
-          const onContinue = async () => {
-            if (hasIntro && renameIntro && formatMediaDisplayName(ttsGeneratedIntro, false) !== renameIntro) await tryPatchName(ttsGeneratedIntro, renameIntro);
-            if (hasOutro && renameOutro && formatMediaDisplayName(ttsGeneratedOutro, false) !== renameOutro) await tryPatchName(ttsGeneratedOutro, renameOutro);
-            setNeedsTtsReview(false);
-            goNext();
-          };
-          return (
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">Please review these and make sure they are okay.</p>
-              <div className="grid gap-4">
-                {hasIntro && (
-                  <div className="p-3 border rounded">
-                    <div className="flex items-center gap-2 mb-2"><span className="font-medium">Intro</span>
-                      <button type="button" aria-label={introPreviewing? 'Pause preview':'Play preview'} onClick={()=>toggleIoPreview('intro')} className={`inline-flex items-center justify-center h-8 w-8 rounded border ${introPreviewing? 'bg-blue-600 text-white border-blue-600':'bg-white text-foreground border-muted-foreground/30'}`}>
-                        {introPreviewing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                      </button>
-                    </div>
-                    <Label htmlFor="renameIntro" className="text-sm">Name (optional)</Label>
-                    <Input id="renameIntro" value={renameIntro} onChange={(e)=> setRenameIntro(e.target.value)} placeholder={formatMediaDisplayName(ttsGeneratedIntro, false)} />
-                  </div>
-                )}
-                {hasOutro && (
-                  <div className="p-3 border rounded">
-                    <div className="flex items-center gap-2 mb-2"><span className="font-medium">Outro</span>
-                      <button type="button" aria-label={outroPreviewing? 'Pause preview':'Play preview'} onClick={()=>toggleIoPreview('outro')} className={`inline-flex items-center justify-center h-8 w-8 rounded border ${outroPreviewing? 'bg-blue-600 text-white border-blue-600':'bg-white text-foreground border-muted-foreground/30'}`}>
-                        {outroPreviewing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                      </button>
-                    </div>
-                    <Label htmlFor="renameOutro" className="text-sm">Name (optional)</Label>
-                    <Input id="renameOutro" value={renameOutro} onChange={(e)=> setRenameOutro(e.target.value)} placeholder={formatMediaDisplayName(ttsGeneratedOutro, false)} />
-                  </div>
-                )}
-              </div>
-              <div className="flex gap-2 pt-2">
-                <Button onClick={onContinue} className="text-white">Continue</Button>
-                <Button variant="secondary" onClick={()=> retry(false)}>Keep and Retry</Button>
-                <Button variant="destructive" onClick={()=> retry(true)}>Discard and Retry</Button>
-              </div>
-            </div>
-          );
-        }
         case 'music':
           return (
             <div className="space-y-3">
@@ -1183,18 +1097,6 @@ export default function Onboarding() {
                   );
                 })}
               </div>
-            </div>
-          );
-        case 'spreaker':
-          return (
-            <div className="flex justify-center items-center p-6 bg-accent/30 rounded-[var(--radius)]">
-              {isSpreakerConnected ? (
-                <Button variant="secondary" disabled className="bg-green-600 text-white hover:bg-green-600">
-                  <CheckCircle className="w-5 h-5 mr-2" /> Connected
-                </Button>
-              ) : (
-                <Button onClick={handleConnectSpreaker} className="text-white">Connect to Podcast Host</Button>
-              )}
             </div>
           );
         
@@ -1447,7 +1349,7 @@ export default function Onboarding() {
       if (formData.coverArt || skipCoverNow) return true;
       return false;
     } : s.id === 'introOutro' ? async () => {
-      // Prepare assets as needed; if created via TTS now, insert review step
+      // Prepare assets as needed
       let createdIntro = null;
       let createdOutro = null;
       // If upload mode is chosen, enforce selecting a file
@@ -1456,25 +1358,55 @@ export default function Onboarding() {
       // If record mode is chosen, ensure recording was completed
       if (introMode === 'record' && !introAsset) return false;
       if (outroMode === 'record' && !outroAsset) return false;
-      if (!introAsset) {
+      
+      // Handle intro generation/upload
+      if (introMode !== 'existing' && !introAsset) {
         const ia = await generateOrUploadTTS('intro', introMode, introScript, introFile, introAsset);
-        if (ia) { setIntroAsset(ia); createdIntro = ia; }
+        if (ia) { 
+          setIntroAsset(ia); 
+          createdIntro = ia;
+          // Add to intro options if not already there
+          setIntroOptions(prev => {
+            const exists = prev.some(x => (x.id || x.filename) === (ia.id || ia.filename));
+            return exists ? prev : [...prev, ia];
+          });
+          setSelectedIntroId(String(ia.id || ia.filename));
+          // Switch to "existing" mode for preview
+          setIntroMode('existing');
+        }
       }
-      if (!outroAsset) {
+      
+      // Handle outro generation/upload
+      if (outroMode !== 'existing' && !outroAsset) {
         const oa = await generateOrUploadTTS('outro', outroMode, outroScript, outroFile, outroAsset);
-        if (oa) { setOutroAsset(oa); createdOutro = oa; }
+        if (oa) { 
+          setOutroAsset(oa); 
+          createdOutro = oa;
+          // Add to outro options if not already there
+          setOutroOptions(prev => {
+            const exists = prev.some(x => (x.id || x.filename) === (oa.id || oa.filename));
+            return exists ? prev : [...prev, oa];
+          });
+          setSelectedOutroId(String(oa.id || oa.filename));
+          // Switch to "existing" mode for preview
+          setOutroMode('existing');
+        }
       }
+      
+      // Show success toast if anything was created
       if (createdIntro || createdOutro) {
-        setTtsGeneratedIntro(createdIntro || ttsGeneratedIntro);
-        setTtsGeneratedOutro(createdOutro || ttsGeneratedOutro);
-        setRenameIntro(createdIntro ? formatMediaDisplayName(createdIntro, false) : renameIntro);
-        setRenameOutro(createdOutro ? formatMediaDisplayName(createdOutro, false) : renameOutro);
-        setNeedsTtsReview(true);
+        const parts = [];
+        if (createdIntro) parts.push('intro');
+        if (createdOutro) parts.push('outro');
+        toast({ 
+          title: "Success!", 
+          description: `Your ${parts.join(' and ')} ${parts.length === 1 ? 'has' : 'have'} been created. Preview below!` 
+        });
+        // Don't navigate away - stay on this step to allow preview
+        return false;
       }
+      
       return true;
-    } : s.id === 'spreaker' ? async () => {
-      // Must click connect at least once to proceed
-      return !!spreakerClicked || !!isSpreakerConnected;
     } : undefined,
   }));
 
@@ -1534,11 +1466,6 @@ export default function Onboarding() {
         // Special UX: hide Continue; use Start new / Import existing buttons
         hide = true;
         break;
-      case 'ttsReview': {
-        // Custom actions within the step; hide wrapper Next
-        hide = true;
-        break;
-      }
       case 'confirm': {
         if (path === 'import') {
           disabled = importLoading;
@@ -1559,11 +1486,6 @@ export default function Onboarding() {
         disabled = !(formData.coverArt || skipCoverNow);
         break;
       }
-      case 'spreaker': {
-        // If user is already connected, allow continue immediately
-        disabled = !(spreakerClicked || isSpreakerConnected);
-        break;
-      }
       case 'publishCadence': {
         disabled = !freqUnit || (freqUnit === 'bi-weekly' && Number(freqCount) !== 1);
         break;
@@ -1578,7 +1500,7 @@ export default function Onboarding() {
         break;
     }
     return { nextDisabled: !!disabled, hideNext: !!hide };
-  }, [stepId, path, importLoading, firstName, formData.podcastName, formData.podcastDescription, formData.coverArt, skipCoverNow, spreakerClicked, isSpreakerConnected, freqUnit, freqCount, notSureSchedule, selectedWeekdays.length, selectedDates.length]);
+  }, [stepId, path, importLoading, firstName, formData.podcastName, formData.podcastDescription, formData.coverArt, skipCoverNow, freqUnit, freqCount, notSureSchedule, selectedWeekdays.length, selectedDates.length]);
 
   // Auto-advance the skip notice after a short delay
   useEffect(() => {

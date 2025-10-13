@@ -142,6 +142,7 @@ async def get_audio_cleanup_settings(
         "removePauses": True,
         "maxPauseSeconds": 1.5,
         "targetPauseSeconds": 0.5,
+        "autoDeleteRawAudio": False,
         "commands": {
             "flubber": {"action": "rollback_restart", "trigger_keyword": "flubber"},
             "intern": {

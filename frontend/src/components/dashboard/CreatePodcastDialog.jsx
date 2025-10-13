@@ -19,7 +19,6 @@ export default function CreatePodcastDialog({ isOpen, onClose, onSave, token }) 
     copyright_line: "",
     owner_name: "",
     author_name: "",
-    spreaker_show_id: "",
   });
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
@@ -123,12 +122,6 @@ export default function CreatePodcastDialog({ isOpen, onClose, onSave, token }) 
                 Author Name
               </Label>
               <Input id="author_name" value={formData.author_name} onChange={handleChange} className="col-span-3" />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="spreaker_show_id" className="text-right">
-                Spreaker Show ID
-              </Label>
-              <Input id="spreaker_show_id" value={formData.spreaker_show_id} onChange={handleChange} className="col-span-3" />
             </div>
           </div>
           <DialogFooter>
