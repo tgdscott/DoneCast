@@ -174,21 +174,28 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 except Exception:
                     effective_origin = None
 
-        selected_origin = _select_origin(effective_origin, allowed_origins)
-        if not selected_origin:
-            existing = response.headers.get('access-control-allow-origin') or response.headers.get('Access-Control-Allow-Origin')
-            if existing:
-                selected_origin = existing
+        # Check if CORSMiddleware already set the CORS headers correctly
+        existing_acao = response.headers.get('access-control-allow-origin') or response.headers.get('Access-Control-Allow-Origin')
+        
+        # If CORSMiddleware already handled it, don't interfere
+        if existing_acao and existing_acao != '*':
+            # CORSMiddleware already set a specific origin, leave it alone
+            pass
+        else:
+            # CORSMiddleware didn't set it or set it to *, try to be more specific
+            selected_origin = _select_origin(effective_origin, allowed_origins)
+            if not selected_origin and existing_acao:
+                selected_origin = existing_acao
 
-        if selected_origin:
-            response.headers['Access-Control-Allow-Origin'] = selected_origin
-            response.headers.setdefault('Access-Control-Allow-Credentials', 'true')
-            existing_vary = response.headers.get('Vary')
-            vary_values = [] if not existing_vary else [v.strip() for v in existing_vary.split(',') if v.strip()]
-            for v in ("Origin", "Referer"):
-                if v not in vary_values:
-                    vary_values.append(v)
-            response.headers['Vary'] = ", ".join(vary_values)
+            if selected_origin:
+                response.headers['Access-Control-Allow-Origin'] = selected_origin
+                response.headers.setdefault('Access-Control-Allow-Credentials', 'true')
+                existing_vary = response.headers.get('Vary')
+                vary_values = [] if not existing_vary else [v.strip() for v in existing_vary.split(',') if v.strip()]
+                for v in ("Origin", "Referer"):
+                    if v not in vary_values:
+                        vary_values.append(v)
+                response.headers['Vary'] = ", ".join(vary_values)
         response.headers.setdefault("Permissions-Policy", "camera=(), microphone=()")
         # HSTS header expected by tests
         response.headers.setdefault("Strict-Transport-Security", "max-age=15552000; includeSubDomains")
