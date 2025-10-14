@@ -91,7 +91,7 @@ class Settings(BaseSettings):
 
     # --- JWT Settings ---
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 30  # 30 days (increased from 7 for better UX)
 
     @property
     def cors_allowed_origin_list(self) -> list[str]:

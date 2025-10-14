@@ -12,6 +12,7 @@ import {
   volumeDbToLevel,
 } from "./constants";
 import {
+  Globe,
   HelpCircle,
   Lightbulb,
   ListChecks,
@@ -42,6 +43,7 @@ const MusicTimingSection = ({
   onChooseVoice,
   internVoiceDisplay,
   onChooseInternVoice,
+  globalMusicAssets = [],
 }) => (
   <div data-tour="template-advanced">
     <div className="mt-10 flex items-center justify-between">
@@ -148,11 +150,26 @@ const MusicTimingSection = ({
                               <div className="flex-1 px-3 py-2 border rounded-md bg-blue-50 border-blue-200">
                                 <div className="flex items-center gap-2">
                                   <Globe className="w-4 h-4 text-blue-600" />
-                                  <span className="text-sm">Global Music Track</span>
+                                  <span className="text-sm font-medium">
+                                    {(() => {
+                                      const asset = globalMusicAssets.find(a => a.id === rule.music_asset_id);
+                                      return asset?.display_name || 'Global Music Track';
+                                    })()}
+                                  </span>
                                 </div>
-                                <p className="text-xs text-muted-foreground mt-1">
-                                  ID: {rule.music_asset_id.substring(0, 8)}...
-                                </p>
+                                {(() => {
+                                  const asset = globalMusicAssets.find(a => a.id === rule.music_asset_id);
+                                  if (asset?.duration_s) {
+                                    const mins = Math.floor(asset.duration_s / 60);
+                                    const secs = Math.floor(asset.duration_s % 60);
+                                    return (
+                                      <p className="text-xs text-muted-foreground mt-1">
+                                        Duration: {mins}:{String(secs).padStart(2, '0')}
+                                      </p>
+                                    );
+                                  }
+                                  return null;
+                                })()}
                               </div>
                               <Button
                                 type="button"

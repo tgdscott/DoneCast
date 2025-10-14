@@ -82,8 +82,8 @@ def list_flubber_contexts(episode_id: str, session=Depends(get_session), current
 @router.post("/prepare/{episode_id}", status_code=status.HTTP_200_OK, summary="Prepare flubber contexts and persist in Episode.meta_json")
 def prepare_flubber_contexts(
     episode_id: str,
-    window_before_s: float = Body(15.0),
-    window_after_s: float = Body(15.0),
+    window_before_s: float = Body(45.0),
+    window_after_s: float = Body(10.0),
     session=Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
@@ -349,18 +349,52 @@ def apply_flubber_cuts(
             merged[-1][1] = max(merged[-1][1], e)
     if AudioSegment is None:
         raise HTTPException(status_code=503, detail="Audio processing unavailable (pydub not installed)")
+    
+    # Apply cuts with crossfade smoothing to avoid harsh pops/clicks
     cursor_ms = 0
     out_audio = AudioSegment.empty()
     removed_ms = 0
+    crossfade_ms = 15  # 15ms crossfade at boundaries for smooth transitions
+    
     for s,e in merged:
         s_ms = int(s*1000); e_ms = int(e*1000)
         if s_ms > cursor_ms:
-            out_audio += audio[cursor_ms:s_ms]
+            # Get the segment before the cut
+            segment = audio[cursor_ms:s_ms]
+            
+            # Apply crossfade at cut boundaries if we have previous audio
+            if len(out_audio) > crossfade_ms and len(segment) > crossfade_ms:
+                # Smooth transition: fade out end of previous, fade in start of new
+                fade_len = min(crossfade_ms, len(out_audio), len(segment))
+                # Keep everything before fade zone
+                before_fade = out_audio[:-fade_len]
+                # Fade out last portion of previous audio
+                fade_out_portion = out_audio[-fade_len:].fade_out(fade_len)
+                # Fade in first portion of new segment  
+                fade_in_portion = segment[:fade_len].fade_in(fade_len)
+                # Overlay the faded portions
+                crossfaded = fade_out_portion.overlay(fade_in_portion)
+                # Combine: before_fade + crossfaded + rest_of_segment
+                out_audio = before_fade + crossfaded + segment[fade_len:]
+            else:
+                out_audio += segment
+        
         if e_ms > s_ms:
             removed_ms += (e_ms - s_ms)
         cursor_ms = e_ms
+    
     if cursor_ms < len(audio):
-        out_audio += audio[cursor_ms:]
+        final_segment = audio[cursor_ms:]
+        # Apply crossfade for final segment too
+        if len(out_audio) > crossfade_ms and len(final_segment) > crossfade_ms:
+            fade_len = min(crossfade_ms, len(out_audio), len(final_segment))
+            before_fade = out_audio[:-fade_len]
+            fade_out_portion = out_audio[-fade_len:].fade_out(fade_len)
+            fade_in_portion = final_segment[:fade_len].fade_in(fade_len)
+            crossfaded = fade_out_portion.overlay(fade_in_portion)
+            out_audio = before_fade + crossfaded + final_segment[fade_len:]
+        else:
+            out_audio += final_segment
     # Export to cleaned_audio and also copy to media_uploads for preview via /static/media
     new_name = (base_path.stem + "_flubberfix.mp3") if base_path.suffix else (str(base_path.name) + "_flubberfix.mp3")
     new_path = cleaned_dir / new_name
@@ -397,8 +431,8 @@ def prepare_flubber_by_file(
     filename = (payload or {}).get('filename')
     if not filename or not isinstance(filename, str):
         raise HTTPException(status_code=400, detail="filename is required")
-    window_before_s = float((payload or {}).get('window_before_s', 15.0))
-    window_after_s = float((payload or {}).get('window_after_s', 15.0))
+    window_before_s = float((payload or {}).get('window_before_s',45.0))
+    window_after_s = float((payload or {}).get('window_after_s', 10.0))
     
     # If frontend passes full GCS URL, extract just the base filename
     original_filename = filename

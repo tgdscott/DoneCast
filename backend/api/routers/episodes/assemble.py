@@ -26,6 +26,10 @@ async def assemble_episode(
     output_filename = payload.get("output_filename")
     tts_values = payload.get("tts_values") or {}
     episode_details = payload.get("episode_details") or {}
+    
+    # Include flubber_cuts_ms in episode_details so the assembler can apply them
+    if payload.get("flubber_cuts_ms"):
+        episode_details["flubber_cuts_ms"] = payload.get("flubber_cuts_ms")
 
     if not template_id or not main_content_filename or not output_filename:
         raise HTTPException(status_code=400, detail="template_id, main_content_filename, output_filename are required.")

@@ -37,8 +37,13 @@ def publish_episode_endpoint(
     if not ep:
         raise HTTPException(status_code=404, detail="Episode not found")
 
-    if not ep.final_audio_path:
-        raise HTTPException(status_code=400, detail="Episode is not processed yet")
+    # REQUIRE GCS audio path - no fallbacks, no local files
+    # GCS is the sole source of truth for all media
+    if not ep.gcs_audio_path or not str(ep.gcs_audio_path).startswith("gs://"):
+        raise HTTPException(
+            status_code=400, 
+            detail="Episode has no GCS audio file. Episode must be properly assembled with audio uploaded to GCS before publishing. Local files and Spreaker-only episodes are no longer supported."
+        )
 
     spreaker_access_token = getattr(current_user, "spreaker_access_token", None)
     if not spreaker_access_token:

@@ -88,9 +88,10 @@ export default function EmailVerification() {
             // Clean up stored credentials
             sessionStorage.removeItem('pendingVerificationEmail');
             sessionStorage.removeItem('pendingVerificationPassword');
-            // Store token and redirect to onboarding
-            localStorage.setItem('token', data.access_token);
-            navigate('/onboarding', { replace: true });
+            // Store token
+            localStorage.setItem('authToken', data.access_token);
+            // Redirect to root with verified flag - let App.jsx route to onboarding
+            window.location.href = '/?verified=1';
             return;
           }
         }
@@ -99,10 +100,8 @@ export default function EmailVerification() {
       // If auto-login failed or no password, clean up and redirect
       sessionStorage.removeItem('pendingVerificationEmail');
       sessionStorage.removeItem('pendingVerificationPassword');
-      navigate('/', { 
-        replace: true,
-        state: { message: 'Email verified! Please sign in to continue.' }
-      });
+      // Redirect to home with verified flag so onboarding triggers after they log in
+      window.location.href = '/?verified=1&login=1';
     } catch (err) {
       setError('Network error. Please check your connection and try again.');
       setIsSubmitting(false);

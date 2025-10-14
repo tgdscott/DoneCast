@@ -59,6 +59,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     const [showEpisodeStructure, setShowEpisodeStructure] = useState(true);
     const [runTemplateTour, setRunTemplateTour] = useState(false);
     const [scheduleDirty, setScheduleDirty] = useState(false);
+    const [globalMusicAssets, setGlobalMusicAssets] = useState([]); // Track global music for display names
 
         // Load voices when AI voice modal opens
         useEffect(() => {
@@ -137,16 +138,19 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
       setIsLoading(true);
       try {
         const api = makeApi(token);
-        const [mediaData, podcastsData, templateData] = await Promise.all([
+        const [mediaData, podcastsData, templateData, globalMusicData] = await Promise.all([
           api.get('/api/media/'),
           api.get('/api/podcasts/'),
           isNewTemplate ? Promise.resolve(null) : api.get(`/api/templates/${templateId}`),
+          api.get('/api/music/assets?scope=global'),
         ]);
 
         const mediaArr = Array.isArray(mediaData) ? mediaData : mediaData?.items || [];
         const podcastsArr = Array.isArray(podcastsData) ? podcastsData : podcastsData?.items || [];
+        const globalMusicArr = globalMusicData?.assets || [];
         setMediaFiles(mediaArr);
         setPodcasts(podcastsArr);
+        setGlobalMusicAssets(globalMusicArr);
 
         if (isNewTemplate) {
           setTemplate({
@@ -795,6 +799,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
           onChooseVoice={() => setShowVoicePicker(true)}
           internVoiceDisplay={internVoiceDisplay}
           onChooseInternVoice={() => setShowInternVoicePicker(true)}
+          globalMusicAssets={globalMusicAssets}
         />
         <GlobalMusicBrowser
           token={token}

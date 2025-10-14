@@ -8,9 +8,7 @@ from api.core.database import get_session
 from api.routers.auth import get_current_user
 from api.models.user import User
 from api.models.podcast import Episode
-from api.core.paths import FINAL_DIR, MEDIA_DIR
-from .common import _final_url_for
-from pathlib import Path
+from .common import compute_playback_info
 
 log = logging.getLogger("ppp.episodes.edit")
 router = APIRouter(tags=["episodes"])  # parent provides /episodes prefix
@@ -34,42 +32,23 @@ async def get_edit_context(episode_id: str, session: Session = Depends(get_sessi
         raise HTTPException(status_code=404, detail="Episode not found")
 
     duration_ms = getattr(ep, 'duration_ms', None)
-    # Resolve playback URL similar to list endpoint: prefer remote stream if linked, else local final audio if present
-    playback_url = None
-    playback_type = 'none'
-    final_audio_exists = False
-    try:
-        fa = getattr(ep, 'final_audio_path', None)
-        if fa:
-            base = Path(str(fa)).name
-            candidates = []
-            try:
-                candidates.append((FINAL_DIR / base).resolve())
-            except Exception:
-                candidates.append(FINAL_DIR / base)
-            candidates.append(MEDIA_DIR / base)
-            found = next((c for c in candidates if c.is_file()), None)
-            if found is not None:
-                final_audio_exists = True
-                playback_url = _final_url_for(fa)
-                playback_type = 'local'
-        if not playback_url:
-            spk_id = getattr(ep, 'spreaker_episode_id', None)
-            if spk_id:
-                playback_url = f"https://api.spreaker.com/v2/episodes/{spk_id}/play"
-                playback_type = 'stream'
-    except Exception:
-        pass
+    
+    # Use the same playback resolution logic as the episode list endpoint
+    # This properly handles GCS URLs, local files, and Spreaker streams
+    playback_info = compute_playback_info(ep)
+    
+    # Extract playback info directly from compute_playback_info result
+    # This ensures consistent URL resolution logic across all endpoints
+    playback_url = playback_info.get("playback_url")
+    playback_type = playback_info.get("playback_type", "none")
+    final_audio_exists = playback_info.get("final_audio_exists", False)
+    
+    log.info(f"Manual editor context for episode {ep.id}: playback_url={playback_url}, type={playback_type}, exists={final_audio_exists}")
+    
     transcript_segments = []  # placeholder: would load from transcript store
     existing_cuts = _CUT_STATE.get(str(ep.id), [])
     flubber_keyword = 'flubber'
     flubber_detected = False  # server-side detection TBD
-
-    # CRITICAL: Ensure audio_url is absolute for frontend waveform
-    if playback_url and playback_type == 'local' and not playback_url.startswith('http'):
-        # Make it absolute if relative
-        if not playback_url.startswith('/'):
-            playback_url = f"/{playback_url}"
 
     return {
         "episode_id": str(ep.id),

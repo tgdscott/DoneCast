@@ -51,13 +51,6 @@ export default function VoiceRecorder({
   const timerRef = useRef(null);
   const audioRef = useRef(null);
   
-  // Check for valid token on mount
-  useEffect(() => {
-    if (!token) {
-      setError('No authentication session found. Please refresh the page and sign in again.');
-    }
-  }, [token]);
-  
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -199,19 +192,9 @@ export default function VoiceRecorder({
     setError('');
     
     try {
-      // Verify token exists before uploading
+      // Verify we have a token before attempting upload
       if (!token) {
         throw new Error('No authentication token available. Please refresh the page and sign in again.');
-      }
-      
-      // Try to refresh the user session to ensure token is valid
-      if (refreshUser) {
-        try {
-          await refreshUser({ force: false });
-        } catch (refreshErr) {
-          console.warn('[VoiceRecorder] Token refresh failed:', refreshErr);
-          // Continue anyway - the upload will fail with proper error if token is truly invalid
-        }
       }
       
       // Create FormData for upload
@@ -285,8 +268,21 @@ export default function VoiceRecorder({
       let actionAdvice = '';
       
       if (err?.status === 401) {
-        errorMsg = 'Your session has expired or is invalid.';
-        actionAdvice = 'Please refresh the page (F5 or Ctrl+R) and sign in again to continue.';
+        // Check if it's a token issue or another auth problem
+        const detailMsg = typeof err?.detail === 'string' ? err.detail.toLowerCase() : '';
+        const errMsg = typeof err?.message === 'string' ? err.message.toLowerCase() : '';
+        
+        // Only show "session expired" if the error clearly indicates token expiration
+        if (detailMsg.includes('expired') || detailMsg.includes('invalid') || 
+            errMsg.includes('expired') || errMsg.includes('invalid') ||
+            detailMsg.includes('token') || errMsg.includes('token')) {
+          errorMsg = 'Your session has expired or is invalid.';
+          actionAdvice = 'Please refresh the page (F5 or Ctrl+R) and sign in again to continue.';
+        } else {
+          // Generic auth error - might be temporary
+          errorMsg = 'Authentication failed.';
+          actionAdvice = 'Please try again. If the problem persists, refresh the page.';
+        }
       } else if (err?.status === 403) {
         errorMsg = 'Permission denied.';
         actionAdvice = 'You may not have permission to upload media. Please contact support.';

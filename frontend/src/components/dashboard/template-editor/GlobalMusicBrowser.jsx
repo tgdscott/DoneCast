@@ -26,7 +26,9 @@ const GlobalMusicBrowser = ({ token, onAddMusicToRule }) => {
     try {
       const api = makeApi(token);
       const data = await api.get('/api/music/assets?scope=global');
-      setGlobalMusic(Array.isArray(data) ? data : []);
+      // API returns { assets: [...] }, not a plain array
+      const assets = data?.assets || [];
+      setGlobalMusic(Array.isArray(assets) ? assets : []);
     } catch (err) {
       console.error('Failed to fetch global music:', err);
     } finally {

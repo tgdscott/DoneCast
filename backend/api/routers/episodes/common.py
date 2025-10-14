@@ -128,24 +128,24 @@ def _local_final_candidates(path: Optional[str]) -> list[Path]:
 
 
 def compute_playback_info(episode: Any, *, now: Optional[datetime] = None) -> dict[str, Any]:
-    """Determine playback preference between local and Spreaker audio.
+    """Determine playback URL from GCS or legacy Spreaker stream.
 
     Priority order for audio URLs:
-    1. GCS URL (gcs_audio_path) - survives container restarts
-    2. Local file (final_audio_path) - dev only
-    3. Spreaker stream URL - published episodes
+    1. GCS URL (gcs_audio_path) - REQUIRED for all new episodes
+    2. Spreaker stream URL - LEGACY ONLY for old imported episodes
 
-    Applies a 7-day grace period after publish where local audio remains the
-    primary source, unless the local asset is missing. Returns keys compatible
-    with existing episode serializers.
+    GCS is the sole source of truth. Local files are NO LONGER SUPPORTED.
+    If GCS upload fails, episode assembly fails - no fallbacks.
+    
+    Returns keys compatible with existing episode serializers.
     """
 
     now_utc = _as_utc(now) or datetime.now(timezone.utc)
     
-    # Priority 1: Check GCS URL (survives container restarts)
+    # Priority 1: GCS URL - THE ONLY SOURCE FOR NEW EPISODES
     gcs_audio_path = getattr(episode, "gcs_audio_path", None)
     final_audio_url = None
-    local_final_exists = False
+    gcs_exists = False
     
     if gcs_audio_path and str(gcs_audio_path).startswith("gs://"):
         try:
@@ -156,23 +156,15 @@ def compute_playback_info(episode: Any, *, now: Optional[datetime] = None) -> di
             if len(parts) == 2:
                 bucket, key = parts
                 final_audio_url = get_signed_url(bucket, key, expiration=3600)
-                local_final_exists = True  # Treat GCS as "available"
-        except Exception:
-            pass  # Fall back to local file check
-    
-    # Priority 2: Check local file (dev mode)
-    if not final_audio_url:
-        final_path = getattr(episode, "final_audio_path", None)
-        local_candidates = _local_final_candidates(final_path)
-        for cand in local_candidates:
-            try:
-                if cand.is_file():
-                    local_final_exists = True
-                    final_audio_url = _final_url_for(final_path)
-                    break
-            except Exception:
-                continue
+                gcs_exists = True
+        except Exception as gcs_err:
+            # GCS failure is CRITICAL - log as error, not warning
+            from api.core.logging import get_logger
+            logger = get_logger("api.episodes.common")
+            logger.error("CRITICAL: GCS signed URL generation failed for %s: %s", gcs_audio_path, gcs_err)
+            # Don't fall back - if GCS fails, the episode is broken
 
+    # Priority 2: Spreaker stream URL - LEGACY ONLY (for old imported episodes)
     stream_url = None
     try:
         spk_id = getattr(episode, "spreaker_episode_id", None)
@@ -181,58 +173,20 @@ def compute_playback_info(episode: Any, *, now: Optional[datetime] = None) -> di
     except Exception:
         stream_url = None
 
-    status_str = _status_value(getattr(episode, "status", None))
-    publish_at = _as_utc(getattr(episode, "publish_at", None))
-    processed_at = _as_utc(getattr(episode, "processed_at", None))
-    is_published_flag = bool(getattr(episode, "is_published_to_spreaker", False)) or status_str == "published"
-
-    meta_force_local = False
-    meta_force_remote = False
-    remote_first_seen = None
-    try:
-        meta = json.loads(getattr(episode, "meta_json", "{}") or "{}")
-        spreaker_meta = meta.get("spreaker") or {}
-        if isinstance(spreaker_meta, dict):
-            meta_force_local = bool(spreaker_meta.get("force_local_audio"))
-            meta_force_remote = bool(spreaker_meta.get("force_remote_audio"))
-            remote_first_seen = _parse_iso_datetime(spreaker_meta.get("remote_audio_first_seen"))
-    except Exception:
-        pass
-
-    prefer_remote = False
-    if stream_url and not meta_force_local:
-        if meta_force_remote:
-            prefer_remote = True
-        elif not local_final_exists:
-            prefer_remote = True
-        else:
-            # Respect scheduling: do not use remote audio before publish time.
-            if publish_at and publish_at > now_utc:
-                prefer_remote = False
-            else:
-                if is_published_flag:
-                    reference = publish_at or remote_first_seen or processed_at
-                    if reference and now_utc - reference >= timedelta(days=7):
-                        prefer_remote = True
-                # If publish metadata unavailable, fall back to local unless missing.
-
-    playback_url = final_audio_url
-    playback_type = "local" if final_audio_url else "none"
-
-    if stream_url and (prefer_remote or (not final_audio_url and stream_url)):
-        playback_url = stream_url
-        playback_type = "stream"
-
-    audio_available = local_final_exists or playback_type == "stream"
+    # Determine final playback URL
+    # Prefer GCS (always), fall back to Spreaker ONLY for legacy episodes
+    playback_url = final_audio_url if final_audio_url else stream_url
+    playback_type = "gcs" if final_audio_url else ("stream" if stream_url else "none")
+    audio_available = bool(gcs_exists or stream_url)
 
     return {
-        "final_audio_url": final_audio_url,
-        "stream_url": stream_url,
-        "playback_url": playback_url,
-        "playback_type": playback_type,
-        "final_audio_exists": audio_available,
-        "local_final_exists": local_final_exists,
-        "prefer_remote_audio": playback_type == "stream" and stream_url is not None,
+        "final_audio_url": final_audio_url,  # GCS signed URL or None
+        "stream_url": stream_url,  # Spreaker stream (legacy only) or None
+        "playback_url": playback_url,  # The actual URL to use
+        "playback_type": playback_type,  # "gcs", "stream", or "none"
+        "final_audio_exists": audio_available,  # True if any audio source exists
+        "gcs_exists": gcs_exists,  # True if GCS file exists (replaces local_final_exists)
+        "prefer_remote_audio": False,  # Deprecated - always prefer GCS
     }
 
 

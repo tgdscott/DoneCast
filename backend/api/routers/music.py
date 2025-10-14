@@ -5,7 +5,7 @@ from typing import Optional, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
-from sqlmodel import Session, select
+from sqlmodel import Session, select, col
 
 from api.routers.auth import get_current_user
 from api.core.database import get_session
@@ -36,6 +36,10 @@ def list_music_assets(
         query = query.where(
             (MusicAsset.is_global == True) | (MusicAsset.owner_id == current_user.id)
         )
+    
+    # Sort: user's own music first, then global music (alphabetically by display_name within each group)
+    # is_global=False (user music) comes before is_global=True (global music)
+    query = query.order_by(col(MusicAsset.is_global).asc(), col(MusicAsset.display_name).asc())
     
     assets: Sequence[MusicAsset] = session.exec(query).all()
     out = []

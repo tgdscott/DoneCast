@@ -19,9 +19,19 @@ export default function ManualEditor({ episodeId, token, onClose }) {
         const api = makeApi(token);
         const j = await api.get(`/api/episodes/${episodeId}/edit-context`);
         if (!live) return;
+        console.log('[ManualEditor] Received edit context:', {
+          episode_id: j?.episode_id,
+          duration_ms: j?.duration_ms,
+          audio_url: j?.audio_url,
+          playback_type: j?.playback_type,
+          final_audio_exists: j?.final_audio_exists,
+        });
         setDuration(j?.duration_ms ?? null);
         setCuts(Array.isArray(j?.existing_cuts) ? j.existing_cuts : []);
         setAudioUrl(j?.audio_url || '');
+        if (!j?.audio_url) {
+          setErr('No audio URL available for this episode. Please ensure the episode has been processed and has audio uploaded.');
+        }
       } catch (e) {
         const msg = isApiError(e) ? (e.detail || e.error || e.message) : String(e);
         setErr(msg || 'Failed to load edit context');

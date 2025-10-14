@@ -37,7 +37,7 @@ export default function FlubberReview({ episodeId, token, onClose }) {
   const submitCuts = async () => {
     const cuts = contexts.filter(c => selected[c.flubber_index]).map(c => ({
       start_s: Math.max(0, c.flubber_time_s - 0.75),
-      end_s: c.flubber_time_s + 0.25,
+      end_s: c.computed_end_s ?? ((c.flubber_end_s || c.flubber_time_s) + 0.25),
     }))
     if (!cuts.length) { setError('No cuts selected'); return }
     setSubmitting(true); setError(''); setResult(null)
@@ -69,9 +69,9 @@ export default function FlubberReview({ episodeId, token, onClose }) {
   return (
     <Card className="mt-4">
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-base">Manual Flubber Review</CardTitle>
+        <CardTitle className="text-base">Review Flubber Markers</CardTitle>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={prepare} disabled={loading}><Scissors className="w-4 h-4 mr-1"/>Prepare</Button>
+          <Button variant="outline" size="sm" onClick={prepare} disabled={loading}><Scissors className="w-4 h-4 mr-1"/>Find Markers</Button>
           <Button variant="outline" size="sm" onClick={load} disabled={loading}><RefreshCw className="w-4 h-4 mr-1"/>Reload</Button>
           <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
         </div>
@@ -85,13 +85,12 @@ export default function FlubberReview({ episodeId, token, onClose }) {
             {contexts.map(ctx => (
               <div key={ctx.flubber_index} className="border rounded p-2 flex flex-col gap-2 bg-white">
                 <div className="flex items-center justify-between">
-                  <div className="text-xs font-mono">t={ctx.flubber_time_s.toFixed(2)}s window [{ctx.snippet_start_s.toFixed(1)} – {ctx.snippet_end_s.toFixed(1)}]</div>
+                  <div className="text-xs">Around {Math.floor(ctx.flubber_time_s)} seconds</div>
                   <label className="flex items-center gap-1 text-xs cursor-pointer">
                     <Checkbox checked={!!selected[ctx.flubber_index]} onCheckedChange={()=>toggle(ctx.flubber_index)} /> Cut
                   </label>
                 </div>
                 <audio controls className="w-full" src={ctx.url} preload="metadata" />
-                <div className="text-[10px] text-gray-500">Relative flubber @ {ctx.relative_flubber_ms}ms inside snippet</div>
               </div>
             ))}
           </div>

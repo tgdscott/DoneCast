@@ -824,8 +824,8 @@ export default function EpisodeHistory({ token, onBack }) {
               )}
               <div className="absolute bottom-1 right-1 flex gap-1 items-center">
                 {(ep.status === 'processed' || 
-                  (statusLabel(ep.status) === 'published' && isWithin7Days(ep.publish_at)) ||
-                  (statusLabel(ep.status) === 'scheduled' && isWithin7Days(ep.publish_at))) && (
+                  statusLabel(ep.status) === 'published' ||
+                  statusLabel(ep.status) === 'scheduled') && (
                   <>
                     {/* Cut for edits - ONLY show if transcript contains "flubber" */}
                     {ep.has_flubber && (
@@ -1250,7 +1250,7 @@ export default function EpisodeHistory({ token, onBack }) {
                   disabled={saving || !editValues.cover_file}
                 />
               </div>
-              <div className="text-[11px] text-gray-500">Saving updates local DB and episode metadata if already published.</div>
+              <div className="text-[11px] text-gray-500">Saving updates local database and episode details if already published.</div>
             </div>
             <div className="px-4 py-3 border-t flex items-center justify-end gap-2">
               <Button variant="outline" size="sm" onClick={closeEdit} disabled={saving}>Cancel</Button>

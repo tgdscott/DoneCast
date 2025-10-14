@@ -289,7 +289,14 @@ export default function RecurringScheduleManager({
     <Card className="shadow-sm">
       <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <CardTitle>Recurring Publish Schedule</CardTitle>
+          <CardTitle>
+            Recurring Publish Schedule
+            {slots.length > 0 && (
+              <span className="ml-2 text-sm font-normal text-muted-foreground">
+                ({slots.length} {slots.length === 1 ? 'slot' : 'slots'})
+              </span>
+            )}
+          </CardTitle>
           <CardDescription>
             Tell Plus Plus when episodes made from this template should go live. We&rsquo;ll skip conflicts with already scheduled
             episodes.

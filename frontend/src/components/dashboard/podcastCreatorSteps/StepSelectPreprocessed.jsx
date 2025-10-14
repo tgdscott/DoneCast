@@ -166,7 +166,7 @@ export default function StepSelectPreprocessed({
     ? `${remainingMinutesDisplay} minute${remainingMinutesDisplay === 1 ? '' : 's'}`
     : null;
   const showPrecheckCard = !!selected && (minutesPrecheckPending || minutesPrecheck || minutesPrecheckError);
-  const blockingMessage = minutesBlockingMessage || 'Not enough processing minutes remain to assemble this episode.';
+  const blockingMessage = minutesBlockingMessage || 'Not enough processing minutes remain to create this episode.';
 
   return (
     <div className="space-y-6">

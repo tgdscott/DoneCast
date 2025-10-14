@@ -185,7 +185,7 @@ def _unique_path(dirpath: Path, base: str) -> Path:
 
 
 @router.post("/upload", status_code=201)
-def admin_upload_music_asset(
+async def admin_upload_music_asset(
     file: UploadFile = File(...),
     display_name: Optional[str] = Form(None),
     mood_tags: Optional[str] = Form(None),
@@ -194,30 +194,54 @@ def admin_upload_music_asset(
     session: Session = Depends(get_session),
     admin_user: User = Depends(get_current_admin_user),
 ):
+    import logging
+    import tempfile
+    import traceback
+    
+    log = logging.getLogger(__name__)
     del admin_user
+    temp_path = None
+    
     try:
         original = file.filename or "uploaded.mp3"
         base = _sanitize_filename(original)
         if "." not in base:
             base += ".mp3"
 
+        # Read file contents into memory first
+        file_content = await file.read()
+        if not file_content:
+            raise HTTPException(status_code=400, detail="Empty file received")
+        
+        log.info(f"[admin-music-upload] Uploading: {original} ({len(file_content)} bytes)")
+
         bucket = os.getenv("MEDIA_BUCKET")
         if bucket:
             key = f"music/{uuid.uuid4().hex}_{base}"
-            stored_uri = gcs_upload_fileobj(
-                bucket,
-                key,
-                file.file,
-                content_type=(file.content_type or "audio/mpeg"),
-            )
+            
+            # Create temp file for reliable GCS upload
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp.write(file_content)
+                temp_path = tmp.name
+            
+            # Upload to GCS using the temp file
+            with open(temp_path, "rb") as f:
+                stored_uri = gcs_upload_fileobj(
+                    bucket,
+                    key,
+                    f,
+                    content_type=(file.content_type or "audio/mpeg"),
+                )
+            
             filename_stored = (
                 stored_uri if stored_uri.startswith("gs://") else f"/static/media/{Path(stored_uri).name}"
             )
         else:
+            # Fallback: save locally
             music_dir = _ensure_music_dir()
             out_path = _unique_path(music_dir, base)
             with out_path.open("wb") as output:
-                shutil.copyfileobj(file.file, output)
+                output.write(file_content)
             filename_stored = f"/static/media/music/{out_path.name}"
 
         if mood_tags:
@@ -243,12 +267,23 @@ def admin_upload_music_asset(
         session.add(asset)
         session.commit()
         session.refresh(asset)
-        return {"id": str(asset.id), "filename": filename_stored}
+        
+        log.info(f"[admin-music-upload] Success: {asset.id} -> {filename_stored}")
+        return {"id": str(asset.id), "filename": filename_stored, "display_name": asset.display_name}
     except HTTPException:
         raise
     except Exception as exc:
         session.rollback()
-        raise HTTPException(status_code=500, detail=f"Upload failed: {exc}")
+        error_detail = f"Upload failed: {str(exc)}"
+        log.error(f"[admin-music-upload] {error_detail}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=error_detail)
+    finally:
+        # Clean up temp file
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except Exception:
+                pass
 
 
 class MusicAssetImportUrl(BaseModel):

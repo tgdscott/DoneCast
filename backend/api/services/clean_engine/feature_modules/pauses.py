@@ -22,6 +22,7 @@ def compress_dead_air_middle(
     edits: List[Tuple[int, int, int]] = []
     out = AudioSegment.silent(duration=0)
     cursor = 0
+    crossfade_ms = 15  # 15ms crossfade for smooth transitions
 
     for s, e in silences:
         pause_len = e - s
@@ -40,9 +41,34 @@ def compress_dead_air_middle(
         cut_start = s + left_keep
         cut_end = e - right_keep
         if cut_end > cut_start:
-            out += audio[cursor:cut_start]
+            # Get segment before the cut
+            segment = audio[cursor:cut_start]
+            
+            # Apply crossfade at cut boundaries to smooth the transition
+            if len(out) > crossfade_ms and len(segment) > crossfade_ms:
+                fade_len = min(crossfade_ms, len(out), len(segment))
+                before_fade = out[:-fade_len]
+                fade_out_portion = out[-fade_len:].fade_out(fade_len)
+                fade_in_portion = segment[:fade_len].fade_in(fade_len)
+                crossfaded = fade_out_portion.overlay(fade_in_portion)
+                out = before_fade + crossfaded + segment[fade_len:]
+            else:
+                out += segment
+            
             cursor = cut_end
             edits.append((cut_start, cut_end, cut_end - cut_start))
 
-    out += audio[cursor:]
+    # Handle final segment with crossfade
+    if cursor < len(audio):
+        final_segment = audio[cursor:]
+        if len(out) > crossfade_ms and len(final_segment) > crossfade_ms:
+            fade_len = min(crossfade_ms, len(out), len(final_segment))
+            before_fade = out[:-fade_len]
+            fade_out_portion = out[-fade_len:].fade_out(fade_len)
+            fade_in_portion = final_segment[:fade_len].fade_in(fade_len)
+            crossfaded = fade_out_portion.overlay(fade_in_portion)
+            out = before_fade + crossfaded + final_segment[fade_len:]
+        else:
+            out += final_segment
+    
     return out, edits

@@ -113,7 +113,7 @@ export default function StepUploadAudio({
     : null;
   const showPrecheckCard = (uploadedFile || uploadedFilename)
     && (minutesPrecheckPending || minutesPrecheck || minutesPrecheckError);
-  const blockingMessage = minutesBlockingMessage || 'Not enough processing minutes remain to assemble this episode.';
+  const blockingMessage = minutesBlockingMessage || 'Not enough processing minutes remain to create this episode.';
 
   return (
     <div className="space-y-8">
@@ -161,7 +161,7 @@ export default function StepUploadAudio({
             <div className="mt-2 space-y-2 text-slate-600">
               <p>
                 When we ask about episode intent or offers, those answers steer intro/outro copy, ad reads, and show notes.
-                Update them any time before you assemble.
+                Update them any time before you create your episode.
               </p>
               <p>
                 Skip for now if you’re unsure—we’ll remind you before publishing and you can fill them in from Automations.

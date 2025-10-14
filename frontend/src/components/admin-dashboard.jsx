@@ -37,6 +37,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Database,
+  Trash,
 } from "lucide-react";
 import React, { useState, useEffect } from "react";
 import { useAuth } from "@/AuthContext";
@@ -243,6 +244,71 @@ export default function AdminDashboard() {
       setSavingIds(prev => { const n = new Set(prev); n.delete(id); return n; });
     }
   }
+
+  const deleteUser = async (userId, userEmail) => {
+    const confirmEmail = window.prompt(
+      `⚠️ WARNING: This will PERMANENTLY delete this user and ALL their data!\n\n` +
+      `This includes:\n` +
+      `• User account\n` +
+      `• All podcasts\n` +
+      `• All episodes\n` +
+      `• All media items\n\n` +
+      `Type the user's email address to confirm deletion:\n` +
+      `${userEmail}`
+    );
+
+    if (!confirmEmail) {
+      return; // User cancelled
+    }
+
+    if (confirmEmail !== userEmail) {
+      try {
+        toast({
+          title: 'Confirmation failed',
+          description: `Email does not match. Expected "${userEmail}"`,
+          variant: 'destructive'
+        });
+      } catch {}
+      return;
+    }
+
+    setSavingIds(prev => new Set([...prev, userId]));
+    try {
+      const api = makeApi(token);
+      const result = await api.del(`/api/admin/users/${userId}`, { confirm_email: confirmEmail });
+      
+      // Remove user from the list
+      setUsers(u => u.filter(x => x.id !== userId));
+      
+      // Refresh summary and metrics to reflect deleted data
+      api.get('/api/admin/summary')
+        .then((d) => setSummary(d))
+        .catch((e) => { /* silently fail, not critical */ });
+      
+      // Show success message with GCS cleanup info
+      const gcsCommand = result?.gcs_cleanup_command;
+      try {
+        toast({
+          title: 'User deleted',
+          description: gcsCommand 
+            ? `User deleted. GCS files may need manual cleanup. Check console for command.`
+            : 'User and all associated data deleted successfully.',
+        });
+      } catch {}
+      
+      // Log the full result for admin reference with GCS cleanup command
+      console.log('[ADMIN] User deletion result:', result);
+      if (gcsCommand) {
+        console.log('[ADMIN] GCS Cleanup Command:', gcsCommand);
+      }
+      
+    } catch(e) {
+      toastApiError(e, 'Failed to delete user');
+    } finally {
+      setSavingIds(prev => { const n = new Set(prev); n.delete(userId); return n; });
+    }
+  };
+
   const formatDateInput = (iso) => iso ? iso.slice(0,10) : '';
   // Validate ISO (YYYY-MM-DD)
   const isValidDateString = (s) => /^(\d{4})-(\d{2})-(\d{2})$/.test(s);
@@ -673,6 +739,17 @@ export default function AdminDashboard() {
                                       updateUser(user.id,{ subscription_expires_at: '' });
                                     }}>Clear</button>
                                 </div>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                  disabled={savingIds.has(user.id)}
+                                  onClick={() => deleteUser(user.id, user.email)}
+                                  title="Delete user and all their data (permanent)"
+                                  aria-label={`Delete user ${displayName}`}
+                                >
+                                  <Trash className="h-4 w-4" />
+                                </Button>
                                 {savingIds.has(user.id) && <span className="text-[10px] text-gray-400">Saving…</span>}
                                 {saveErrors[user.id] && <span className="text-[10px] text-red-500" title={saveErrors[user.id]}>Err</span>}
                               </div>

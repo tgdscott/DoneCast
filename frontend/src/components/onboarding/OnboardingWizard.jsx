@@ -225,15 +225,17 @@ export default function OnboardingWizard(){
     const segs = [];
     if(introMode==='upload' && introUploadedFilename){
       segs.push({ segment_type:'intro', source:{ source_type:'static', filename:introUploadedFilename } });
-    } else if(introMode==='script' && introScript.trim()){
-      segs.push({ segment_type:'intro', source:{ source_type:'tts', script:introScript.trim(), voice_id: selectedVoiceId || 'default' } });
+    } else if(introMode==='script' && introUploadedFilename){
+      // Use the generated TTS file as a static segment
+      segs.push({ segment_type:'intro', source:{ source_type:'static', filename:introUploadedFilename } });
     }
     // Placeholder content segment (kept minimal)
     segs.push({ segment_type:'content', source:{ source_type:'tts', script:'', voice_id: selectedVoiceId || 'default' } });
     if(outroMode==='upload' && outroUploadedFilename){
       segs.push({ segment_type:'outro', source:{ source_type:'static', filename:outroUploadedFilename } });
-    } else if(outroMode==='script' && outroScript.trim()){
-      segs.push({ segment_type:'outro', source:{ source_type:'tts', script:outroScript.trim(), voice_id: selectedVoiceId || 'default' } });
+    } else if(outroMode==='script' && outroUploadedFilename){
+      // Use the generated TTS file as a static segment
+      segs.push({ segment_type:'outro', source:{ source_type:'static', filename:outroUploadedFilename } });
     }
     return segs;
   }
@@ -242,9 +244,121 @@ export default function OnboardingWizard(){
   async function createTemplateFromGreeting(){
     setSaving(true); setError(null);
     let introFilename=null, outroFilename=null;
+    
     // Upload files if provided
-    try { if(introMode==='upload' && introFile){ const fd=new FormData(); fd.append('files', introFile); const r=await makeApi(token).raw('/api/media/upload/intro',{method:'POST',body:fd}); if(r && Array.isArray(r) && r[0]) { introFilename=r[0]?.filename; } } } catch{}
-    try { if(outroMode==='upload' && outroFile){ const fd=new FormData(); fd.append('files', outroFile); const r=await makeApi(token).raw('/api/media/upload/outro',{method:'POST',body:fd}); if(r && Array.isArray(r) && r[0]) { outroFilename=r[0]?.filename; } } } catch{}
+    try { 
+      if(introMode==='upload' && introFile){ 
+        const fd=new FormData(); 
+        fd.append('files', introFile); 
+        const r=await makeApi(token).raw('/api/media/upload/intro',{method:'POST',body:fd}); 
+        if(r && Array.isArray(r) && r[0]) { 
+          introFilename=r[0]?.filename; 
+        } 
+      } 
+    } catch(e) {
+      console.error('[Onboarding] Failed to upload intro:', e);
+      // Continue without blocking - template will work without intro
+    }
+    
+    try { 
+      if(outroMode==='upload' && outroFile){ 
+        const fd=new FormData(); 
+        fd.append('files', outroFile); 
+        const r=await makeApi(token).raw('/api/media/upload/outro',{method:'POST',body:fd}); 
+        if(r && Array.isArray(r) && r[0]) { 
+          outroFilename=r[0]?.filename; 
+        } 
+      } 
+    } catch(e) {
+      console.error('[Onboarding] Failed to upload outro:', e);
+      // Continue without blocking - template will work without outro
+    }
+    
+    // Generate TTS audio if script mode is selected
+    try {
+      if(introMode==='script' && introScript.trim()){
+        const api = makeApi(token);
+        const ttsResult = await api.post('/api/media/tts', {
+          text: introScript.trim(),
+          voice_id: selectedVoiceId || 'default',
+          provider: 'elevenlabs',
+          category: 'intro',
+          friendly_name: 'Intro - Generated',
+          confirm_charge: false  // First-time onboarding shouldn't trigger charge warnings
+        });
+        if(ttsResult && ttsResult.filename){
+          introFilename = ttsResult.filename;
+          console.log('[Onboarding] Generated intro TTS:', introFilename);
+        }
+      }
+    } catch(e) {
+      console.error('[Onboarding] Failed to generate intro TTS:', e);
+      // Check if this is a confirmation required error
+      if(e?.detail?.code === 'tts_confirm_required'){
+        // Retry with confirmation
+        try {
+          const api = makeApi(token);
+          const ttsResult = await api.post('/api/media/tts', {
+            text: introScript.trim(),
+            voice_id: selectedVoiceId || 'default',
+            provider: 'elevenlabs',
+            category: 'intro',
+            friendly_name: 'Intro - Generated',
+            confirm_charge: true
+          });
+          if(ttsResult && ttsResult.filename){
+            introFilename = ttsResult.filename;
+          }
+        } catch(retryErr){
+          console.error('[Onboarding] Failed to generate intro TTS after retry:', retryErr);
+          // Don't block onboarding - just log the error
+        }
+      }
+      // Continue even if TTS generation fails - the template will work without it
+    }
+    
+    try {
+      if(outroMode==='script' && outroScript.trim()){
+        const api = makeApi(token);
+        const ttsResult = await api.post('/api/media/tts', {
+          text: outroScript.trim(),
+          voice_id: selectedVoiceId || 'default',
+          provider: 'elevenlabs',
+          category: 'outro',
+          friendly_name: 'Outro - Generated',
+          confirm_charge: false
+        });
+        if(ttsResult && ttsResult.filename){
+          outroFilename = ttsResult.filename;
+          console.log('[Onboarding] Generated outro TTS:', outroFilename);
+        }
+      }
+    } catch(e) {
+      console.error('[Onboarding] Failed to generate outro TTS:', e);
+      // Check if this is a confirmation required error
+      if(e?.detail?.code === 'tts_confirm_required'){
+        // Retry with confirmation
+        try {
+          const api = makeApi(token);
+          const ttsResult = await api.post('/api/media/tts', {
+            text: outroScript.trim(),
+            voice_id: selectedVoiceId || 'default',
+            provider: 'elevenlabs',
+            category: 'outro',
+            friendly_name: 'Outro - Generated',
+            confirm_charge: true
+          });
+          if(ttsResult && ttsResult.filename){
+            outroFilename = ttsResult.filename;
+          }
+        } catch(retryErr){
+          console.error('[Onboarding] Failed to generate outro TTS after retry:', retryErr);
+          // Don't block onboarding - just log the error
+        }
+      }
+      // Continue even if TTS generation fails - the template will work without it
+    }
+    
     const segments = buildSegmentsFromGreeting(introFilename, outroFilename);
     setTemplateSegmentsDraft(segments);
     try{

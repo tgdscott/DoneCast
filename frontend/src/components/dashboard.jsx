@@ -446,7 +446,7 @@ export default function PodcastPlusDashboard() {
   try {
     const api = makeApi(token);
     await api.del(`/api/templates/${templateId}`);
-    toast({ title: "Success", description: "Template deleted." });
+    toast({ title: "All done!", description: "Template deleted." });
     fetchData(); 
   } catch (err) {
     const msg = (err && err.message) || '';
@@ -611,7 +611,7 @@ export default function PodcastPlusDashboard() {
                 <Card className="shadow-sm border border-gray-200">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-lg">Create Episode</CardTitle>
-                    <CardDescription>Assemble a new episode from your shows & templates.</CardDescription>
+                    <CardDescription>Create a new episode from your shows & templates.</CardDescription>
                   </CardHeader>
                   <CardContent className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                     <div className="flex items-center gap-6 text-sm">

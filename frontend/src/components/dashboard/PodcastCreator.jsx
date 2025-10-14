@@ -272,7 +272,7 @@ export default function PodcastCreator({
   };
 
   const minutesBlockingMessage = minutesPrecheck?.detail?.message
-    || (minutesBlocking ? 'Not enough processing minutes remain to assemble this episode.' : '');
+    || (minutesBlocking ? 'Not enough processing minutes remain to create this episode.' : '');
 
   const minutesDialogDuration = minutesDialog?.durationSeconds != null
     ? formatDuration(minutesDialog.durationSeconds)
@@ -544,7 +544,7 @@ export default function PodcastCreator({
           <DialogHeader>
             <DialogTitle>Not enough processing minutes</DialogTitle>
             <DialogDescription>
-              {minutesDialog?.message || 'This episode cannot be assembled because it exceeds your remaining processing minutes.'}
+              {minutesDialog?.message || 'This episode cannot be created because it exceeds your remaining processing minutes.'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 text-sm">

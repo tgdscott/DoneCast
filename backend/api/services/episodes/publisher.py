@@ -241,7 +241,12 @@ def unpublish(session: Session, current_user, episode_id: UUID, force: bool = Fa
         except Exception:
             ep.status = 'processed'  # type: ignore[assignment]
         ep.is_published_to_spreaker = False
-        ep.spreaker_episode_id = None
+        
+        # Only clear Spreaker episode ID if we successfully removed it from Spreaker
+        # Otherwise keep it as a fallback audio source (stream URL)
+        if removed_remote:
+            ep.spreaker_episode_id = None
+        
         ep.publish_at = None
         # Clear user-facing local time string as well
         if hasattr(ep, 'publish_at_local'):

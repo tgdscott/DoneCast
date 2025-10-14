@@ -551,38 +551,46 @@ def _finalize_episode(
 
     episode.final_audio_path = final_basename
 
-    # Upload final audio to GCS for 7-day retention (survives container restarts)
+    # Upload final audio to GCS - REQUIRED, NO FALLBACK
+    # GCS is the sole source of truth for all media files
+    user_id = str(episode.user_id)
+    episode_id = str(episode.id)
+    gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+    
+    # Upload audio file
+    audio_src = fallback_candidate if fallback_candidate and fallback_candidate.is_file() else None
+    if not audio_src:
+        raise RuntimeError(f"[assemble] Audio file not found at {fallback_candidate}. Cannot proceed without audio source.")
+    
+    # Get audio file size for RSS feed
     try:
-        user_id = str(episode.user_id)
-        episode_id = str(episode.id)
-        gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
-        
-        # Upload audio file
-        audio_src = fallback_candidate if fallback_candidate and fallback_candidate.is_file() else None
-        if audio_src:
-            # Get audio file size for RSS feed
-            try:
-                episode.audio_file_size = audio_src.stat().st_size
-                logging.info("[assemble] Audio file size: %d bytes", episode.audio_file_size)
-            except Exception as size_err:
-                logging.warning("[assemble] Could not get audio file size: %s", size_err)
-            
-            # Get audio duration for RSS feed
-            try:
-                from pydub import AudioSegment
-                audio = AudioSegment.from_file(str(audio_src))
-                episode.duration_ms = len(audio)
-                logging.info("[assemble] Audio duration: %d ms (%.1f minutes)", episode.duration_ms, episode.duration_ms / 1000 / 60)
-            except Exception as dur_err:
-                logging.warning("[assemble] Could not get audio duration: %s", dur_err)
-            
-            gcs_audio_key = f"{user_id}/episodes/{episode_id}/audio/{final_basename}"
-            with open(audio_src, "rb") as f:
-                gcs_audio_url = gcs.upload_fileobj(gcs_bucket, gcs_audio_key, f, content_type="audio/mpeg")  # type: ignore[attr-defined]
-            episode.gcs_audio_path = gcs_audio_url
-            logging.info("[assemble] Uploaded audio to %s", gcs_audio_url)
-    except Exception:
-        logging.warning("[assemble] Failed to upload audio to GCS (will rely on local files)", exc_info=True)
+        episode.audio_file_size = audio_src.stat().st_size
+        logging.info("[assemble] Audio file size: %d bytes", episode.audio_file_size)
+    except Exception as size_err:
+        raise RuntimeError(f"[assemble] Could not get audio file size: {size_err}") from size_err
+    
+    # Get audio duration for RSS feed
+    try:
+        from pydub import AudioSegment
+        audio = AudioSegment.from_file(str(audio_src))
+        episode.duration_ms = len(audio)
+        logging.info("[assemble] Audio duration: %d ms (%.1f minutes)", episode.duration_ms, episode.duration_ms / 1000 / 60)
+    except Exception as dur_err:
+        raise RuntimeError(f"[assemble] Could not get audio duration: {dur_err}") from dur_err
+    
+    # Upload to GCS - if this fails, the entire assembly fails
+    gcs_audio_key = f"{user_id}/episodes/{episode_id}/audio/{final_basename}"
+    try:
+        with open(audio_src, "rb") as f:
+            gcs_audio_url = gcs.upload_fileobj(gcs_bucket, gcs_audio_key, f, content_type="audio/mpeg")  # type: ignore[attr-defined]
+    except Exception as gcs_err:
+        raise RuntimeError(f"[assemble] CRITICAL: Failed to upload audio to GCS. Episode assembly cannot complete. Error: {gcs_err}") from gcs_err
+    
+    if not gcs_audio_url or not str(gcs_audio_url).startswith("gs://"):
+        raise RuntimeError(f"[assemble] CRITICAL: GCS upload returned invalid URL: {gcs_audio_url}")
+    
+    episode.gcs_audio_path = gcs_audio_url
+    logging.info("[assemble] ✅ Audio uploaded to GCS: %s", gcs_audio_url)
 
     cover_value = media_context.cover_image_path
     if cover_value:

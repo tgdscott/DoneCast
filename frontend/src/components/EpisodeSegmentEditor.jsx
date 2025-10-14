@@ -92,7 +92,7 @@ export default function EpisodeSegmentEditor({ totalSeconds, segments, onChange 
     <Card className="border-0 shadow-lg bg-white">
       <CardHeader>
         <CardTitle className="flex items-center justify-between" style={{ color: '#2C3E50' }}>
-          <span>Episode Structure</span>
+          <span>Episode Sections</span>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" className="bg-transparent" onClick={addAdBreak} disabled={!segments.some(s=>s.type==='main')}>
               <Plus className="w-4 h-4 mr-1" /> Ad Break

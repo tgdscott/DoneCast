@@ -36,6 +36,14 @@ export default function Onboarding() {
       return 0;
     }
   });
+  
+  // Auth check - redirect to login if no token
+  useEffect(() => {
+    if (!token && !user) {
+      console.warn('[Onboarding] No authentication token found, redirecting to login');
+      window.location.href = '/?login=1';
+    }
+  }, [token, user]);
   const stepSaveTimer = useRef(null);
   const importResumeTimerRef = useRef(null);
   const { largeText, setLargeText, highContrast, setHighContrast } = useComfort();
@@ -460,16 +468,25 @@ export default function Onboarding() {
       }
       if (!asset) return;
 
-      // If we have an id (persisted media), attempt to resolve an authoritative preview path like MediaLibrary does
+      // Resolve preview URL exactly like MediaLibrary does (which works!)
       const resolvePreviewUrl = async () => {
-        if (asset.id) {
-          try {
-            const api = makeApi(token);
-            const res = await api.get(`/api/media/preview?id=${encodeURIComponent(asset.id)}&resolve=true`);
-            return res?.path || res?.url || asset.preview_url || asset.url || asset.filename || null;
-          } catch { /* fall through to local fields */ }
+        if (!asset?.id) {
+          console.error('[Onboarding] Cannot resolve preview URL - asset has no ID:', asset);
+          return null;
         }
-        return asset.preview_url || asset.url || asset.filename || null;
+        try {
+          const api = makeApi(token);
+          const res = await api.get(`/api/media/preview?id=${encodeURIComponent(asset.id)}&resolve=true`);
+          const url = res?.path || res?.url;
+          if (!url) {
+            console.error('[Onboarding] Preview endpoint returned no URL for ID:', asset.id, 'Response:', res);
+          }
+          return url || null;
+        } catch (err) {
+          console.error('[Onboarding] Failed to resolve preview URL for ID:', asset.id, 'Error:', err);
+          toast?.({ variant: 'destructive', title: 'Preview failed', description: err?.message || 'Could not resolve preview URL' });
+          return null;
+        }
       };
 
       const run = async () => {
@@ -574,6 +591,17 @@ export default function Onboarding() {
     // kind: 'intro' | 'outro'
     // mode: 'tts' | 'upload' | 'record' | 'existing'
     try {
+      // Check for authentication token before making any API calls
+      if (!token) {
+        const errorMsg = 'Your session has expired. Please refresh the page (F5 or Ctrl+R) and sign in again.';
+        toast({ 
+          title: 'Session Expired', 
+          description: errorMsg, 
+          variant: 'destructive' 
+        });
+        throw new Error(errorMsg);
+      }
+      
       if (mode === 'record') {
         // Recording already uploaded via VoiceRecorder component
         return recordedAsset || null;
@@ -590,10 +618,34 @@ export default function Onboarding() {
         if (selectedVoiceId && selectedVoiceId !== 'default') body.voice_id = selectedVoiceId;
         if (firstTimeUser) body.free_override = true;
         const item = await makeApi(token).post('/api/media/tts', body);
+        console.log('[Onboarding] TTS response for', kind, ':', item);
+        console.log('[Onboarding] TTS response keys:', item ? Object.keys(item) : 'null');
+        console.log('[Onboarding] TTS response id:', item?.id, 'filename:', item?.filename, 'category:', item?.category);
+        if (!item?.id) {
+          console.error('[Onboarding] TTS response missing ID! Full object:', JSON.stringify(item, null, 2));
+        }
         return item || null;
       }
     } catch (e) {
-      try { toast({ title: `Could not prepare ${kind}`, description: e?.message || String(e), variant: 'destructive' }); } catch {}
+      // Enhanced error handling with specific messages for auth failures
+      const status = e?.status;
+      let errorMsg = e?.message || String(e);
+      
+      if (status === 401) {
+        errorMsg = 'Your session has expired. Please refresh the page (F5 or Ctrl+R) and sign in again.';
+      } else if (status === 403) {
+        errorMsg = 'Permission denied. You may not have access to this feature.';
+      } else if (status === 429) {
+        errorMsg = e?.detail?.message || 'Too many requests. Please wait a moment and try again.';
+      }
+      
+      try { 
+        toast({ 
+          title: `Could not prepare ${kind}`, 
+          description: errorMsg, 
+          variant: 'destructive' 
+        }); 
+      } catch {}
       return null;
     }
   }
@@ -614,9 +666,19 @@ export default function Onboarding() {
         } catch {}
       }
       if (path === 'new' && existingShows.length === 0) {
+        // Validate podcast name and description before attempting to create
+        const nameClean = (formData.podcastName || '').trim();
+        const descClean = (formData.podcastDescription || '').trim();
+        if (!nameClean || nameClean.length < 4) {
+          throw new Error('Podcast name must be at least 4 characters.');
+        }
+        if (!descClean) {
+          throw new Error('Podcast description is required.');
+        }
+        
         const podcastPayload = new FormData();
-        podcastPayload.append('name', formData.podcastName);
-        podcastPayload.append('description', formData.podcastDescription);
+        podcastPayload.append('name', nameClean);
+        podcastPayload.append('description', descClean);
         if (formData.coverArt) {
           try {
             const blob = await coverCropperRef.current?.getProcessedBlob?.();
@@ -637,18 +699,30 @@ export default function Onboarding() {
           throw new Error(detail || 'Failed to create the podcast show.');
         }
         targetPodcast = createdPodcast;
-        try { toast({ title: 'Success!', description: 'Your new podcast show has been created.' }); } catch {}
+        try { toast({ title: 'Great!', description: 'Your new podcast show has been created.' }); } catch {}
 
         // Create a default template "My First Template" with intro/outro segments and background music rules
         try {
+          console.log('[Onboarding] Creating template with:', {
+            introAsset,
+            outroAsset,
+            introFilename: introAsset?.filename,
+            outroFilename: outroAsset?.filename
+          });
           const segments = [];
           if (introAsset?.filename) {
+            console.log('[Onboarding] Adding intro segment with filename:', introAsset.filename);
             segments.push({ segment_type: 'intro', source: { source_type: 'static', filename: introAsset.filename } });
+          } else {
+            console.warn('[Onboarding] NO intro added to template - introAsset:', introAsset);
           }
           // Always include a content segment placeholder using TTS (empty script) for broad compatibility
           segments.push({ segment_type: 'content', source: { source_type: 'tts', script: '', voice_id: (selectedVoiceId && selectedVoiceId !== 'default') ? selectedVoiceId : 'default' } });
           if (outroAsset?.filename) {
+            console.log('[Onboarding] Adding outro segment with filename:', outroAsset.filename);
             segments.push({ segment_type: 'outro', source: { source_type: 'static', filename: outroAsset.filename } });
+          } else {
+            console.warn('[Onboarding] NO outro added to template - outroAsset:', outroAsset);
           }
           // Compose background music rules if a track was chosen
           const musicRules = [];
@@ -705,7 +779,7 @@ export default function Onboarding() {
             try { toast({ title: 'Template not saved', description: e?.message || 'We could not save your default template.', variant: 'destructive' }); } catch {}
           }
         }
-        try { toast({ title: 'Imported', description: 'Your show has been imported.' }); } catch {}
+        try { toast({ title: 'All done!', description: 'Your show has been imported.' }); } catch {}
       }
       // Mark onboarding complete and avoid reopening wizard if podcast count hasn't propagated yet
       try {
@@ -776,7 +850,7 @@ export default function Onboarding() {
                   onClick={() => { setPath('import'); setStepIndex(0); }}
                 >Import existing</Button>
               </div>
-              <p className="text-sm text-muted-foreground">You can't break anything. We save as you go.</p>
+              <p className="text-sm text-muted-foreground">Don't worry about breaking anything, and we're going to save as you go.</p>
             </div>
           );
         case 'showDetails':
@@ -824,7 +898,7 @@ export default function Onboarding() {
                       onChange={handleChange}
                       accept="image/png, image/jpeg,image/jpg"
                     />
-                    <p className="text-xs text-muted-foreground mt-2">You can crop your image if it's not the right size.</p>
+                    <p className="text-xs text-muted-foreground mt-2">You can resize and position your image below.</p>
                   </div>
                   <div className="flex items-center gap-2 mt-2">
                     <input id="skipCoverNow" type="checkbox" checked={skipCoverNow} onChange={(e)=> setSkipCoverNow(e.target.checked)} />
@@ -910,8 +984,8 @@ export default function Onboarding() {
                       }}
                     >
                       {introOptions.map((itm)=>{
-                        const key = String(itm.id || itm.filename);
-                        const base = itm.display_name || itm.original_name || itm.filename || key;
+                        const key = String(itm?.id || itm?.filename || 'unknown');
+                        const base = itm?.friendly_name || itm?.display_name || itm?.original_name || itm?.filename || 'Intro';
                         return <option key={key} value={key}>{formatMediaDisplayName(base, true)}</option>;
                       })}
                     </select>
@@ -996,8 +1070,8 @@ export default function Onboarding() {
                       }}
                     >
                       {outroOptions.map((itm)=>{
-                        const key = String(itm.id || itm.filename);
-                        const base = itm.display_name || itm.original_name || itm.filename || key;
+                        const key = String(itm?.id || itm?.filename || 'unknown');
+                        const base = itm?.friendly_name || itm?.display_name || itm?.original_name || itm?.filename || 'Outro';
                         return <option key={key} value={key}>{formatMediaDisplayName(base, true)}</option>;
                       })}
                     </select>
@@ -1249,11 +1323,27 @@ export default function Onboarding() {
             </div>
           );
         case 'finish':
+          const nameOk = (formData.podcastName || '').trim().length >= 4;
+          const descOk = (formData.podcastDescription || '').trim().length > 0;
+          const missingData = path === 'new' && (!nameOk || !descOk);
           return (
             <div className="space-y-2">
               <h3 className="text-lg font-semibold">Finish</h3>
-              <p className="text-sm text-muted-foreground">Nice work. You can publish now or explore your dashboard.</p>
-              {saving && <div className="text-xs text-muted-foreground">Working...</div>}
+              {missingData ? (
+                <div className="space-y-2">
+                  <p className="text-sm text-destructive">We're missing some required information:</p>
+                  <ul className="text-sm text-muted-foreground list-disc list-inside">
+                    {!nameOk && <li>Podcast name (at least 4 characters)</li>}
+                    {!descOk && <li>Podcast description</li>}
+                  </ul>
+                  <p className="text-sm text-muted-foreground">Please go back and fill in these details.</p>
+                </div>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">Nice work. You can publish now or explore your dashboard.</p>
+                  {saving && <div className="text-xs text-muted-foreground">Working...</div>}
+                </>
+              )}
             </div>
           );
         // Import flow renders
@@ -1360,9 +1450,11 @@ export default function Onboarding() {
       if (outroMode === 'record' && !outroAsset) return false;
       
       // Handle intro generation/upload
-      if (introMode !== 'existing' && !introAsset) {
+      // Generate/upload if mode is not 'existing' OR if mode is 'tts'/'upload' and user wants to regenerate
+      if (introMode === 'tts' || introMode === 'upload' || introMode === 'record') {
         const ia = await generateOrUploadTTS('intro', introMode, introScript, introFile, introAsset);
         if (ia) { 
+          console.log('[Onboarding] Intro created:', ia);
           setIntroAsset(ia); 
           createdIntro = ia;
           // Add to intro options if not already there
@@ -1373,23 +1465,46 @@ export default function Onboarding() {
           setSelectedIntroId(String(ia.id || ia.filename));
           // Switch to "existing" mode for preview
           setIntroMode('existing');
+        } else {
+          console.error('[Onboarding] Failed to create intro');
+          toast({ 
+            title: "Intro creation failed", 
+            description: "Please try again or choose a different option.",
+            variant: "destructive"
+          });
+          return false;
         }
       }
       
       // Handle outro generation/upload
-      if (outroMode !== 'existing' && !outroAsset) {
+      // Generate/upload if mode is not 'existing' OR if mode is 'tts'/'upload' and user wants to regenerate
+      if (outroMode === 'tts' || outroMode === 'upload' || outroMode === 'record') {
+        console.log('[Onboarding] Generating outro with mode:', outroMode);
         const oa = await generateOrUploadTTS('outro', outroMode, outroScript, outroFile, outroAsset);
         if (oa) { 
+          console.log('[Onboarding] Outro created successfully:', oa);
+          console.log('[Onboarding] Outro has id?', !!oa.id, 'filename?', !!oa.filename);
           setOutroAsset(oa); 
           createdOutro = oa;
           // Add to outro options if not already there
           setOutroOptions(prev => {
             const exists = prev.some(x => (x.id || x.filename) === (oa.id || oa.filename));
+            console.log('[Onboarding] Adding outro to options. Already exists?', exists);
             return exists ? prev : [...prev, oa];
           });
-          setSelectedOutroId(String(oa.id || oa.filename));
+          const selectedId = String(oa.id || oa.filename);
+          console.log('[Onboarding] Setting selectedOutroId to:', selectedId);
+          setSelectedOutroId(selectedId);
           // Switch to "existing" mode for preview
           setOutroMode('existing');
+        } else {
+          console.error('[Onboarding] Failed to create outro - generateOrUploadTTS returned null/undefined');
+          toast({ 
+            title: "Outro creation failed", 
+            description: "Please try again or choose a different option.",
+            variant: "destructive"
+          });
+          return false;
         }
       }
       
@@ -1403,6 +1518,24 @@ export default function Onboarding() {
           description: `Your ${parts.join(' and ')} ${parts.length === 1 ? 'has' : 'have'} been created. Preview below!` 
         });
         // Don't navigate away - stay on this step to allow preview
+        return false;
+      }
+      
+      // If in 'existing' mode, validate that assets are selected
+      if (introMode === 'existing' && !introAsset) {
+        toast({ 
+          title: "Intro required", 
+          description: "Please select an intro or choose a different option.",
+          variant: "destructive"
+        });
+        return false;
+      }
+      if (outroMode === 'existing' && !outroAsset) {
+        toast({ 
+          title: "Outro required", 
+          description: "Please select an outro or choose a different option.",
+          variant: "destructive"
+        });
         return false;
       }
       
@@ -1496,11 +1629,40 @@ export default function Onboarding() {
         }
         break;
       }
+      case 'introOutro': {
+        // Only block continue if user is in TTS/upload/record mode but hasn't completed the action
+        // If they have existing intro/outro selected, they're good to go
+        if (introMode === 'tts' && !introScript.trim()) {
+          disabled = true;
+        } else if (introMode === 'upload' && !introFile) {
+          disabled = true;
+        } else if (introMode === 'record' && !introAsset) {
+          disabled = true;
+        } else if (outroMode === 'tts' && !outroScript.trim()) {
+          disabled = true;
+        } else if (outroMode === 'upload' && !outroFile) {
+          disabled = true;
+        } else if (outroMode === 'record' && !outroAsset) {
+          disabled = true;
+        }
+        // If mode is 'existing', no validation needed - they already have intro/outro
+        break;
+      }
+      case 'finish': {
+        // On the finish step, validate that we have required data if creating a new podcast
+        // This is a safety check in case the user somehow bypassed earlier validation
+        if (path === 'new') {
+          const nameOk = (formData.podcastName || '').trim().length >= 4;
+          const descOk = (formData.podcastDescription || '').trim().length > 0;
+          disabled = !(nameOk && descOk);
+        }
+        break;
+      }
       default:
         break;
     }
     return { nextDisabled: !!disabled, hideNext: !!hide };
-  }, [stepId, path, importLoading, firstName, formData.podcastName, formData.podcastDescription, formData.coverArt, skipCoverNow, freqUnit, freqCount, notSureSchedule, selectedWeekdays.length, selectedDates.length]);
+  }, [stepId, path, importLoading, firstName, formData.podcastName, formData.podcastDescription, formData.coverArt, skipCoverNow, freqUnit, freqCount, notSureSchedule, selectedWeekdays.length, selectedDates.length, introMode, outroMode, introScript, outroScript, introFile, outroFile, introAsset, outroAsset]);
 
   // Auto-advance the skip notice after a short delay
   useEffect(() => {

@@ -111,7 +111,7 @@ const NewUserWizard = ({ open, onOpenChange, token, onPodcastCreated }) => {
       if (podcastRes && podcastRes.status && podcastRes.status >= 400) { const errorData = podcastRes; throw new Error(errorData.detail || 'Failed to create the podcast show.'); }
       const newPodcast = podcastRes;
 
-  toast({ title: "Success!", description: "Your new podcast show has been created." });
+  toast({ title: "Great!", description: "Your new podcast show has been created." });
       onPodcastCreated(newPodcast); // Pass the new podcast object back to the parent
 
     } catch (error) {
@@ -156,7 +156,7 @@ const NewUserWizard = ({ open, onOpenChange, token, onPodcastCreated }) => {
           <WizardStep>
             <h3 className="text-lg font-semibold mb-2">Welcome</h3>
             <p className="text-sm text-gray-600">
-              We'll guide you one step at a time. You can't break anything, and we save as you go.
+              We'll guide you one step at a time. Don't worry about breaking anything, and we're going to save as you go.
             </p>
           </WizardStep>
         )}
@@ -200,7 +200,7 @@ const NewUserWizard = ({ open, onOpenChange, token, onPodcastCreated }) => {
             <DialogDescription className="mb-2">
               Want AI voices? You can always turn this on later.
             </DialogDescription>
-            <p className="text-xs text-gray-500 mb-4">If you're not sure, choose 'Skip'-you won't lose anything.</p>
+            <p className="text-xs text-gray-500 mb-4">This is for advanced users—skip if you're not sure.</p>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="elevenlabsApiKey" className="text-right">ElevenLabs API Key</Label>
               <Input id="elevenlabsApiKey" type="password" value={formData.elevenlabsApiKey} onChange={handleChange} className="col-span-3" placeholder="(Optional) Paste your key here" />

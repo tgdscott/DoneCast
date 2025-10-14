@@ -45,16 +45,16 @@ export default function EpisodeAssembler({ templates, onBack, token }) {
       });
       const uploadedFilename = uploadResult?.[0]?.filename;
       if (!uploadedFilename) {
-        throw new Error('Upload did not return a filename.');
+        throw new Error('Upload incomplete. Please try again or contact support if this continues.');
       }
-      setStatusMessage(`Step 2/2: Assembling episode... This may take a moment.`);
+      setStatusMessage(`Step 2/2: Creating your episode... This may take a moment.`);
       const assembleResult = await api.post('/api/episodes/assemble', {
         template_id: selectedTemplateId,
         main_content_filename: uploadedFilename,
         output_filename: outputFilename,
         cleanup_options: { removePauses: true, removeFillers: true },
       });
-      setStatusMessage(`Success! Episode assembled.`);
+      setStatusMessage(`Nice work! Your episode is ready.`);
       setAssembledEpisode(assembleResult);
     } catch (err) {
       const msg = isApiError(err) ? (err.detail || err.error || err.message) : String(err);
@@ -67,10 +67,10 @@ export default function EpisodeAssembler({ templates, onBack, token }) {
 
   const handlePublish = async () => {
     if (!assembledEpisode || !selectedShowId) {
-      setError("No assembled episode available for publishing.");
+      setError("No episode available for publishing.");
       return;
     }
-    setStatusMessage('Episode assembled successfully. Use Episode History to publish.');
+    setStatusMessage('Episode created successfully. Use Episode History to publish.');
   };
 
   return (
@@ -84,12 +84,12 @@ export default function EpisodeAssembler({ templates, onBack, token }) {
               <div className="space-y-2"><Label htmlFor="template-select">1. Select a Template</Label><Select onValueChange={setSelectedTemplateId} value={selectedTemplateId}><SelectTrigger id="template-select"><SelectValue placeholder="Choose a template..." /></SelectTrigger><SelectContent>{templates.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent></Select></div>
               <div className="space-y-2"><Label htmlFor="main-audio-upload">2. Upload Main Content Audio</Label><Input id="main-audio-upload" type="file" onChange={handleFileChange} accept="audio/mp3,audio/wav" disabled={isProcessing} /></div>
               <div className="space-y-2"><Label htmlFor="output-filename">3. Enter Episode Title</Label><Input id="output-filename" type="text" placeholder="e.g., My Awesome Episode 1" value={outputFilename} onChange={e => setOutputFilename(e.target.value)} disabled={isProcessing} /></div>
-              <Button type="submit" className="w-full" disabled={isProcessing}>{isProcessing ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Assembling...</> : "Assemble Episode"}</Button>
+              <Button type="submit" className="w-full" disabled={isProcessing}>{isProcessing ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creating your episode...</> : "Create Episode"}</Button>
             </form>
           ) : (
             <div className="space-y-6">
               <div className="p-4 text-center bg-green-100 text-green-800 rounded-md">
-                <h3 className="font-bold">Assembly Complete!</h3>
+                <h3 className="font-bold">All done!</h3>
                 <p>Final file: <strong>{assembledEpisode.output_path}</strong></p>
                 <p className="text-sm mt-2">Visit Episode History to publish your episode.</p>
               </div>

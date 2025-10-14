@@ -251,7 +251,19 @@ async def create_tts_media(
         # Non-fatal; ensure we don't break the happy path
         log.exception("Failed to finalize TTS usage/billing")
 
-    return item
+    # DEBUG: Log what we're returning
+    log.info(f"[tts] Returning MediaItem: id={item.id}, filename={item.filename}, category={item.category}")
+    
+    # Convert to dict to ensure proper serialization (SQLModel sometimes has issues with FastAPI response_model)
+    try:
+        # Try model_dump() first (Pydantic v2 / SQLModel 0.0.14+)
+        result = item.model_dump() if hasattr(item, 'model_dump') else item.dict()
+        log.info(f"[tts] Serialized to dict with keys: {list(result.keys())}")
+        return result
+    except Exception as e:
+        log.error(f"[tts] Failed to serialize MediaItem: {e}", exc_info=True)
+        # Fallback: return item directly and let FastAPI handle it
+        return item
 
 
 @router.post("/tts/precheck")
