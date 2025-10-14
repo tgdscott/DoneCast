@@ -66,10 +66,8 @@ async def confirm_email(
             raise HTTPException(status_code=400, detail="Email is required when no token is provided")
         # Trim email whitespace
         email = payload.email.strip() if isinstance(payload.email, str) else payload.email
-        try:
-            EmailStr(email)  # type: ignore[arg-type]
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid email format")
+        # Email validation is already done by Pydantic in ConfirmEmailPayload model
+        # No need to validate again here - just use it
         user = crud.get_user_by_email(session=session, email=email)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")

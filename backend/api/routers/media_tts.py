@@ -154,20 +154,36 @@ async def create_tts_media(
     import os as _os
     gcs_bucket = _os.getenv("GCS_BUCKET", "ppp-media-us-west1")
     final_filename = filename  # Will be replaced with gs:// URL if GCS upload succeeds
+    
+    # **CRITICAL**: Intro/outro/music MUST be in GCS for production
     if gcs_bucket and body.category in ("intro", "outro", "music", "sfx", "commercial"):
         try:
             from infrastructure import gcs
             # Use consistent path format: {user_id}/media/{category}/{filename}
             # This matches the manual upload path format in media_write.py
             gcs_key = f"{current_user.id.hex}/media/{body.category.value}/{filename}"
+            log.info(f"[tts] Uploading {body.category.value} to GCS: gs://{gcs_bucket}/{gcs_key}")
             with open(out_path, "rb") as f:
                 gcs_url = gcs.upload_fileobj(gcs_bucket, gcs_key, f, content_type="audio/mpeg")
-            if gcs_url:
+            if gcs_url and gcs_url.startswith("gs://"):
                 final_filename = gcs_url
-                log.info(f"[tts] Uploaded {body.category.value} to GCS: {gcs_url}")
+                log.info(f"[tts] SUCCESS: Uploaded {body.category.value} to GCS: {gcs_url}")
+            else:
+                # GCS upload returned non-GCS URL (local fallback) - this is a problem
+                log.error(f"[tts] GCS upload returned non-GCS URL: {gcs_url}. This will break preview in production!")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"GCS upload failed - {body.category} files must be in GCS for production use"
+                )
+        except HTTPException:
+            raise
         except Exception as e:
-            log.warning(f"[tts] Failed to upload {body.category.value} to GCS: {e}")
-            # Fallback to local filename - non-fatal in dev
+            log.error(f"[tts] CRITICAL: Failed to upload {body.category.value} to GCS: {e}", exc_info=True)
+            # DO NOT fallback to local filename - this breaks production
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to upload {body.category} to GCS: {str(e)}"
+            )
 
     # Friendly name fallback
     if body.friendly_name and body.friendly_name.strip():
