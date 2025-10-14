@@ -18,6 +18,8 @@ import Pricing from '@/pages/Pricing.jsx';
 import PodcastWebsiteBuilder from '@/pages/PodcastWebsiteBuilder.jsx';
 import NewLanding from '@/pages/NewLanding.jsx';
 import InDevelopment from '@/pages/InDevelopment.jsx';
+import Contact from '@/pages/Contact.jsx';
+import Guides from '@/pages/Guides.jsx';
 import { AuthProvider } from './AuthContext.jsx';
 import { BrandProvider } from './brand/BrandContext.jsx';
 import { ComfortProvider } from './ComfortContext.jsx';
@@ -116,6 +118,9 @@ const router = createBrowserRouter([
   { path: '/email-verification', element: <EmailVerification /> },
   { path: '/pricing', element: <Pricing /> },
   { path: '/subscriptions', element: <Pricing /> },
+  { path: '/contact', element: <Contact /> },
+  { path: '/guides', element: <Guides /> },
+  { path: '/help', element: <Guides /> },
   { path: '/docs/podcast-website-builder', element: <PodcastWebsiteBuilder /> },
   { path: '/in-development', element: <InDevelopment /> },
   // Fallback 404 for any unknown route

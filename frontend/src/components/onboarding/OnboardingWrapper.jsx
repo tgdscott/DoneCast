@@ -477,10 +477,10 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
               </p>
               <div className="flex gap-2">
                 <Button variant="outline" className="rounded-[var(--radius)] h-11 min-h-[44px] px-5" asChild>
-                  <a href="/help" target="_blank" rel="noreferrer">Guides</a>
+                  <a href="/guides" target="_blank" rel="noreferrer">Guides</a>
                 </Button>
                 <Button className="rounded-[var(--radius)] h-11 min-h-[44px] px-5 text-white" asChild>
-                  <a href="mailto:support@example.com">Contact</a>
+                  <a href="/contact" target="_blank" rel="noreferrer">Contact</a>
                 </Button>
                 <Button
                   variant="secondary"
