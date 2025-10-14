@@ -42,6 +42,7 @@ export default function StepCustomizeSegments({
   }, [selectedTemplate?.segments, computeSegmentKey]);
 
   const missingSegmentKeys = React.useMemo(() => {
+    // If there are no TTS segments at all, nothing is missing
     if (!ttsSegmentsWithKey.length) return [];
     return ttsSegmentsWithKey
       .filter(({ key }) => {
@@ -52,7 +53,8 @@ export default function StepCustomizeSegments({
   }, [ttsSegmentsWithKey, ttsValues]);
 
   const missingKeysSet = React.useMemo(() => new Set(missingSegmentKeys), [missingSegmentKeys]);
-  const canContinue = missingSegmentKeys.length === 0;
+  // Allow continue if: (1) no TTS segments exist, OR (2) all TTS segments have scripts
+  const canContinue = ttsSegmentsWithKey.length === 0 || missingSegmentKeys.length === 0;
 
   const renderSegmentContent = React.useCallback(
     (segment, { fieldId, isMissing, promptKey }) => {
