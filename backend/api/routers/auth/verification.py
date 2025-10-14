@@ -45,9 +45,12 @@ async def confirm_email(
     if payload.email is not None and isinstance(payload.email, str) and not payload.email.strip():
         payload.email = None
     
-    # Trim whitespace from code if provided
+    # Trim whitespace from code if provided and ensure it's a string
     if payload.code is not None and isinstance(payload.code, str):
         payload.code = payload.code.strip()
+    elif payload.code is not None:
+        # Coerce to string if it somehow came in as int/other type
+        payload.code = str(payload.code).strip()
 
     if payload.token:
         ev = session.exec(
@@ -74,12 +77,15 @@ async def confirm_email(
     now = datetime.utcnow()
     if not ev and payload.code:
         # Query for matching code that hasn't been used yet
+        print(f"[VERIFICATION] Looking for code '{payload.code}' (type={type(payload.code)}, repr={repr(payload.code)}) for user {user.email} (id={user.id})")
         ev = session.exec(
             select(EmailVerification)
             .where(EmailVerification.user_id == user.id)
             .where(EmailVerification.code == payload.code)
             .where(EmailVerification.used == False)  # noqa: E712
         ).first()
+        if ev:
+            print(f"[VERIFICATION] ✅ Found matching code: id={ev.id}, code={repr(ev.code)}, expires_at={ev.expires_at}")
 
     if not ev:
         # Log for debugging: check if code exists but is marked as used or expired
@@ -92,8 +98,8 @@ async def confirm_email(
             match_details = []
             for e in all_matches:
                 expired = "expired" if e.expires_at < now else "valid"
-                match_details.append(f"used={e.used}, {expired}")
-            print(f"[VERIFICATION DEBUG] User {user.email} tried code '{payload.code}' - found {len(all_matches)} matches: {match_details}")
+                match_details.append(f"id={e.id}, code={repr(e.code)}, used={e.used}, {expired}, expires_at={e.expires_at}")
+            print(f"[VERIFICATION] ❌ User {user.email} tried code '{payload.code}' - found {len(all_matches)} matches but all invalid: {match_details}")
         else:
             # Check if there are ANY codes for this user
             user_codes = session.exec(
@@ -102,10 +108,11 @@ async def confirm_email(
                 .where(EmailVerification.verified_at == None)  # noqa: E711
             ).all()
             if user_codes:
-                print(f"[VERIFICATION DEBUG] User {user.email} tried wrong code '{payload.code}' - they have {len(user_codes)} pending code(s)")
+                codes_info = [(c.code, repr(c.code), c.expires_at, c.used) for c in user_codes]
+                print(f"[VERIFICATION] ❌ User {user.email} tried WRONG code '{payload.code}' - they have {len(user_codes)} pending code(s): {codes_info}")
             else:
-                print(f"[VERIFICATION DEBUG] User {user.email} tried code '{payload.code}' - no pending verification codes found")
-        raise HTTPException(status_code=400, detail="Invalid or expired verification")
+                print(f"[VERIFICATION] ❌ User {user.email} tried code '{payload.code}' - NO pending verification codes found in database")
+        raise HTTPException(status_code=400, detail="Invalid or expired code. Please check and try again.")
     if ev.expires_at < now:
         raise HTTPException(status_code=400, detail="Verification expired")
     if ev.used:

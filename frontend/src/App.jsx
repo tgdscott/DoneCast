@@ -208,30 +208,46 @@ export default function App() {
     if (!isAuthenticated && !token) return <LandingPage />;
     if (isLoading) return <div className="flex items-center justify-center h-screen">Loading...</div>;
     if (!isAuthenticated) return <LandingPage />;
+    
+    // CRITICAL: Wait for AuthContext to hydrate before making routing decisions
+    // This prevents race conditions where we render based on stale/null user data
+    // (e.g., after email verification when user is freshly logged in)
+    if (isAuthenticated && !hydrated) {
+        return <div className="flex items-center justify-center h-screen">Preparing your account...</div>;
+    }
+    
     if (user) {
         // If the account is inactive, show the closed alpha gate page
         if (user.is_active === false) {
             return <ClosedAlphaGate />;
         }
         if (podcastCheck.loading) return <div className="flex items-center justify-center h-screen">Preparing your workspace...</div>;
-        // Only show onboarding if explicitly requested via query param and/or no podcasts exist
+        
+        // CRITICAL: Check onboarding FIRST before anything else (including ToS)
+        // This ensures new users who just verified their email go through onboarding
         const params = new URLSearchParams(window.location.search);
         const onboardingParam = params.get('onboarding');
         const forceOnboarding = onboardingParam === '1';
         const skipOnboarding = onboardingParam === '0' || params.get('skip_onboarding') === '1';
+        const justVerified = params.get('verified') === '1';
+        
         // Honor a persisted completion flag so users who chose to skip aren't forced back into onboarding
         let completedFlag = false;
         try { completedFlag = localStorage.getItem('ppp.onboarding.completed') === '1'; } catch {}
-        if (!skipOnboarding && !completedFlag && (podcastCheck.count === 0 || forceOnboarding)) {
-            // Always use the new full-page onboarding; retire the legacy wizard
+        
+        // New users (no podcasts) OR just verified their email OR explicitly requested onboarding
+        // should go through onboarding BEFORE seeing ToS or dashboard
+        if (!skipOnboarding && !completedFlag && (podcastCheck.count === 0 || forceOnboarding || justVerified)) {
             return <Onboarding />;
         }
-        // If Terms require acceptance, gate here before dashboard/admin
+        
+        // If Terms require acceptance, gate here AFTER onboarding check
         const requiredVersion = user?.terms_version_required;
         const acceptedVersion = user?.terms_version_accepted;
         if (requiredVersion && requiredVersion !== acceptedVersion) {
             return <TermsGate />;
         }
+        
         // Admin gating: render Admin only after user is loaded and if checks pass
         if (isAdmin(user)) {
             if (!adminCheck.checked) return <div className="flex items-center justify-center h-screen">Checking admin access...</div>;

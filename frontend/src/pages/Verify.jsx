@@ -78,8 +78,66 @@ export default function Verify() {
           );
           return;
         }
+        
+        // Email verified successfully! Now try to auto-login the user.
+        // Check if we have stored credentials from the registration/login flow
+        const storedEmail = sessionStorage.getItem('pendingVerificationEmail');
+        const storedPassword = sessionStorage.getItem('pendingVerificationPassword');
+        
+        if (storedEmail && storedPassword) {
+          try {
+            // Auto-login the user
+            const formData = new URLSearchParams();
+            formData.append('username', storedEmail);
+            formData.append('password', storedPassword);
+
+            const loginRes = await fetch('/api/auth/token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: formData.toString(),
+              credentials: 'include',
+            });
+
+            if (loginRes.ok) {
+              const data = await loginRes.json();
+              if (data.access_token) {
+                // Clean up stored credentials
+                sessionStorage.removeItem('pendingVerificationEmail');
+                sessionStorage.removeItem('pendingVerificationPassword');
+                // Store token
+                localStorage.setItem('authToken', data.access_token);
+                
+                // CRITICAL: Pre-fetch user data to ensure AuthContext has fresh data
+                // This prevents race condition where App.jsx renders with stale/null user
+                try {
+                  const userRes = await fetch('/api/users/me', {
+                    headers: { 'Authorization': `Bearer ${data.access_token}` }
+                  });
+                  if (userRes.ok) {
+                    const userData = await userRes.json();
+                    console.log('[Verify] User verified and active:', userData.is_active);
+                  }
+                } catch (err) {
+                  console.warn('[Verify] Could not pre-fetch user data (will retry):', err);
+                }
+                
+                // Redirect to root with onboarding flag - let App.jsx handle routing
+                // This ensures new users go through onboarding
+                window.location.href = '/?verified=1';
+                return;
+              }
+            }
+          } catch (loginErr) {
+            console.error('Auto-login failed:', loginErr);
+            // Fall through to manual login prompt
+          }
+        }
+        
+        // If auto-login didn't work, show success message and prompt manual login
+        sessionStorage.removeItem('pendingVerificationEmail');
+        sessionStorage.removeItem('pendingVerificationPassword');
         setStatus('success');
-        setMessage('Your email has been confirmed. You can continue onboarding.');
+        setMessage('Your email has been confirmed! Please log in to continue.');
       } catch (e) {
         setStatus('error');
         setMessage('Verification request failed. Check your connection and try again.');
@@ -100,7 +158,11 @@ export default function Verify() {
             <div className="space-y-4">
               <div className={status === 'success' ? 'text-emerald-700' : 'text-red-700'}>{message}</div>
               <div className="flex gap-2">
-                <Button onClick={() => navigate('/onboarding')}>Continue</Button>
+                {status === 'success' ? (
+                  <Button onClick={() => navigate('/?login=1')}>Log In to Continue</Button>
+                ) : (
+                  <Button onClick={() => navigate('/')}>Go Home</Button>
+                )}
                 <Button variant="outline" onClick={() => navigate('/')}>Home</Button>
               </div>
             </div>

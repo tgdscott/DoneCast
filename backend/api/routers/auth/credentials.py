@@ -91,13 +91,22 @@ async def register_user(
 
     user = crud.create_user(session=session, user_create=base_user)
 
+    # Record terms acceptance if provided during registration
+    # This prevents users from seeing TermsGate after email verification
+    if user_in.accept_terms and user_in.terms_version:
+        user.terms_version_accepted = user_in.terms_version
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+
     if is_admin_email(user.email):
         user.is_admin = True
         session.add(user)
         session.commit()
         session.refresh(user)
 
-    code = f"{random.randint(100000, 999999)}"
+    # Generate 6-digit code as string (ensure it stays as string type)
+    code = str(random.randint(100000, 999999))
     expires = datetime.utcnow() + timedelta(minutes=15)
     token = create_access_token(
         {"sub": user.email, "purpose": "email_verify"},
@@ -116,9 +125,16 @@ async def register_user(
         session.commit()
     except Exception:
         session.rollback()
-    ev = EmailVerification(user_id=user.id, code=code, jwt_token=token, expires_at=expires)
+    # Explicitly ensure code is string type
+    ev = EmailVerification(user_id=user.id, code=str(code), jwt_token=token, expires_at=expires)
     session.add(ev)
     session.commit()
+    
+    # Log what we stored for debugging
+    logging.getLogger(__name__).info(
+        f"[REGISTRATION] Created verification code for {user.email}: "
+        f"code={repr(code)} (type={type(code).__name__}), id={ev.id}, expires={expires}"
+    )
 
     app_base = (settings.APP_BASE_URL or "https://app.podcastplusplus.com").rstrip("/")
     verify_url = f"{app_base}/verify?token={token}"
