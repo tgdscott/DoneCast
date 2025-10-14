@@ -1630,22 +1630,34 @@ export default function Onboarding() {
         break;
       }
       case 'introOutro': {
-        // Only block continue if user is in TTS/upload/record mode but hasn't completed the action
-        // If they have existing intro/outro selected, they're good to go
-        if (introMode === 'tts' && !introScript.trim()) {
+        // Allow Continue if:
+        // 1. Mode is 'existing' and they have options to choose from
+        // 2. They have completed TTS/upload/record and have an asset
+        // 3. Mode is 'tts' and they have a script (ready to generate)
+        
+        // Simplified logic: only block if they're in a mode but haven't provided the required input
+        // AND they don't have any intro/outro assets already
+        
+        const hasIntroAsset = introAsset || ttsGeneratedIntro || (introMode === 'existing' && introOptions.length > 0);
+        const hasOutroAsset = outroAsset || ttsGeneratedOutro || (outroMode === 'existing' && outroOptions.length > 0);
+        
+        // Block if missing required inputs
+        if (introMode === 'tts' && !introScript.trim() && !hasIntroAsset) {
           disabled = true;
-        } else if (introMode === 'upload' && !introFile) {
+        } else if (introMode === 'upload' && !introFile && !hasIntroAsset) {
           disabled = true;
-        } else if (introMode === 'record' && !introAsset) {
-          disabled = true;
-        } else if (outroMode === 'tts' && !outroScript.trim()) {
-          disabled = true;
-        } else if (outroMode === 'upload' && !outroFile) {
-          disabled = true;
-        } else if (outroMode === 'record' && !outroAsset) {
+        } else if (introMode === 'record' && !hasIntroAsset) {
           disabled = true;
         }
-        // If mode is 'existing', no validation needed - they already have intro/outro
+        
+        if (outroMode === 'tts' && !outroScript.trim() && !hasOutroAsset) {
+          disabled = true;
+        } else if (outroMode === 'upload' && !outroFile && !hasOutroAsset) {
+          disabled = true;
+        } else if (outroMode === 'record' && !hasOutroAsset) {
+          disabled = true;
+        }
+        
         break;
       }
       case 'finish': {
@@ -1662,7 +1674,7 @@ export default function Onboarding() {
         break;
     }
     return { nextDisabled: !!disabled, hideNext: !!hide };
-  }, [stepId, path, importLoading, firstName, formData.podcastName, formData.podcastDescription, formData.coverArt, skipCoverNow, freqUnit, freqCount, notSureSchedule, selectedWeekdays.length, selectedDates.length, introMode, outroMode, introScript, outroScript, introFile, outroFile, introAsset, outroAsset]);
+  }, [stepId, path, importLoading, firstName, formData.podcastName, formData.podcastDescription, formData.coverArt, skipCoverNow, freqUnit, freqCount, notSureSchedule, selectedWeekdays.length, selectedDates.length, introMode, outroMode, introScript, outroScript, introFile, outroFile, introAsset, outroAsset, ttsGeneratedIntro, ttsGeneratedOutro, introOptions.length, outroOptions.length]);
 
   // Auto-advance the skip notice after a short delay
   useEffect(() => {
