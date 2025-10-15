@@ -176,13 +176,9 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts, o
                   <Card key={podcast.id} className="p-6">
                     <div className="flex flex-col lg:flex-row gap-6">
                       <div className="flex gap-4 lg:w-1/2">
-                        {podcast.cover_path ? (
+                        {podcast.cover_url ? (
                           <img
-                            src={
-                              podcast.cover_path.startsWith('http')
-                                ? podcast.cover_path
-                                : `/static/media/${podcast.cover_path.replace(/^\/+/, '').split('/').pop()}`
-                            }
+                            src={podcast.cover_url}
                             alt={`${podcast.name} cover`}
                             className="w-24 h-24 rounded-md object-cover"
                             onError={(e)=>{e.currentTarget.style.display='none'; const sib=e.currentTarget.nextSibling; if(sib) sib.style.display='flex';}}

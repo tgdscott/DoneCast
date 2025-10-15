@@ -252,6 +252,33 @@ async def get_user_podcasts(
                 }
             else:
                 payload["import_status"] = None
+            
+            # Add cover_url field with GCS URL resolution
+            cover_url = None
+            try:
+                # Priority 1: Remote cover (already public URL)
+                if pod.remote_cover_url:
+                    cover_url = pod.remote_cover_url
+                # Priority 2: GCS path → generate signed URL
+                elif pod.cover_path and str(pod.cover_path).startswith("gs://"):
+                    from infrastructure.gcs import get_signed_url
+                    gcs_str = str(pod.cover_path)[5:]  # Remove "gs://"
+                    parts = gcs_str.split("/", 1)
+                    if len(parts) == 2:
+                        bucket, key = parts
+                        cover_url = get_signed_url(bucket, key, expiration=3600)
+                # Priority 3: HTTP URL in cover_path
+                elif pod.cover_path and str(pod.cover_path).startswith("http"):
+                    cover_url = pod.cover_path
+                # Priority 4: Local file (dev only)
+                elif pod.cover_path:
+                    import os
+                    filename = os.path.basename(str(pod.cover_path))
+                    cover_url = f"/static/media/{filename}"
+            except Exception as e:
+                log.warning(f"[podcasts.list] Failed to resolve cover URL for podcast {pod.id}: {e}")
+            
+            payload["cover_url"] = cover_url
             enriched.append(payload)
 
         return enriched

@@ -3,6 +3,7 @@
 ## Project Overview
 Self-hosted podcast creation platform with AI-powered features. Full-stack app: FastAPI backend + React frontend, deployed on Google Cloud Run.
 
+**Production Domain**: `podcastplusplus.com` (primary), `getpodcastplus.com` (legacy, maintained for backward compatibility)  
 **Key Tech:** Python 3.11+, FastAPI, SQLAlchemy 2.0/SQLModel, PostgreSQL, React 18, Vite, TailwindCSS, GCS, Cloud Tasks
 
 ## ⚠️ Critical Constraints

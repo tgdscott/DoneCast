@@ -126,7 +126,8 @@ export default function EditPodcastDialog({
 			category_2_id: podcast.category_2_id ? String(podcast.category_2_id) : "",
 			category_3_id: podcast.category_3_id ? String(podcast.category_3_id) : "",
 		});
-		setCoverPreview(resolveCoverURL(podcast.cover_path));
+		// Use cover_url if available (already resolved), otherwise fallback to cover_path
+		setCoverPreview(podcast.cover_url || resolveCoverURL(podcast.cover_path));
 	}, [podcast, remoteStatus.loaded, isOpen, userEmail]);
 
 	// Fetch categories once
@@ -145,6 +146,12 @@ export default function EditPodcastDialog({
 
 	const resolveCoverURL = (path) => {
 		if (!path) return "";
+		// GCS URLs should be resolved by backend, but handle gracefully
+		if (path.startsWith("gs://")) {
+			// Backend should provide cover_url instead, but log warning
+			console.warn("EditPodcastDialog: Received gs:// URL, should use cover_url field instead");
+			return ""; // Don't try to render gs:// URLs directly
+		}
 		if (path.startsWith("http")) return path;
 		const filename = path.replace(/^\/+/, "").split("/").pop();
 		return `/static/media/${filename}`;
