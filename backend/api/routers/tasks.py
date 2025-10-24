@@ -36,6 +36,7 @@ _IS_DEV = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") o
 
 class TranscribeIn(BaseModel):
     filename: str
+    user_id: str | None = None  # Optional: determines which transcription service to use
 
 
 def _validate_payload(data: Dict[str, Any]) -> TranscribeIn:
@@ -46,12 +47,18 @@ def _validate_payload(data: Dict[str, Any]) -> TranscribeIn:
         return TranscribeIn.parse_obj(data)  # type: ignore[attr-defined]
 
 
-async def _dispatch_transcription(filename: str, request_id: str | None, *, suppress_errors: bool) -> None:
+async def _dispatch_transcription(
+    filename: str, 
+    user_id: str | None,
+    request_id: str | None, 
+    *, 
+    suppress_errors: bool
+) -> None:
     """Execute transcription in a worker thread, optionally suppressing exceptions."""
     loop = asyncio.get_running_loop()
-    log.info("event=tasks.transcribe.start filename=%s request_id=%s", filename, request_id)
+    log.info("event=tasks.transcribe.start filename=%s user_id=%s request_id=%s", filename, user_id, request_id)
     try:
-        await loop.run_in_executor(None, transcribe_media_file, filename)
+        await loop.run_in_executor(None, transcribe_media_file, filename, user_id)
         log.info("event=tasks.transcribe.done filename=%s request_id=%s", filename, request_id)
     except FileNotFoundError as err:
         log.warning("event=tasks.transcribe.not_found filename=%s request_id=%s", filename, request_id)
@@ -125,6 +132,8 @@ async def transcribe_endpoint(request: Request, x_tasks_auth: str | None = Heade
         raise HTTPException(status_code=400, detail="filename required")
 
     filename = (payload.filename or "").strip()
+    user_id = (payload.user_id or "").strip() or None  # Extract user_id from payload
+    
     if not filename:
         raise HTTPException(status_code=400, detail="filename required")
 
@@ -132,11 +141,11 @@ async def transcribe_endpoint(request: Request, x_tasks_auth: str | None = Heade
 
     if _IS_DEV:
         _ensure_local_media_present(filename)
-        asyncio.create_task(_dispatch_transcription(filename, request_id, suppress_errors=True))
+        asyncio.create_task(_dispatch_transcription(filename, user_id, request_id, suppress_errors=True))
         return {"started": True, "async": True}
 
     try:
-        await _dispatch_transcription(filename, request_id, suppress_errors=False)
+        await _dispatch_transcription(filename, user_id, request_id, suppress_errors=False)
         return {"started": True}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="file not found")
@@ -243,7 +252,7 @@ async def assemble_episode_task(request: Request, x_tasks_auth: str | None = Hea
     process = multiprocessing.Process(
         target=_run_assembly,
         name=f"assemble-{payload.episode_id}",
-        daemon=True,
+        daemon=False,  # Allow process to finish even if parent exits
     )
     process.start()
     log.info("event=tasks.assemble.dispatched episode_id=%s pid=%s", payload.episode_id, process.pid)
@@ -469,7 +478,7 @@ async def process_chunk_task(request: Request, x_tasks_auth: str | None = Header
     process = multiprocessing.Process(
         target=_run_chunk_processing,
         name=f"chunk-{payload.chunk_id}",
-        daemon=True,
+        daemon=False,  # CRITICAL: Allow process to finish even if parent exits
     )
     process.start()
     log.info("event=chunk.dispatched episode_id=%s chunk_id=%s pid=%s",
