@@ -78,6 +78,34 @@ def is_admin_email(email: str | None) -> bool:
     return bool(email and admin_email and email.lower() == admin_email.lower())
 
 
+def is_superadmin(user: Any) -> bool:
+    """Check if user has superadmin role."""
+    return str(getattr(user, "role", "")).lower() == "superadmin"
+
+
+def is_admin(user: Any) -> bool:
+    """Check if user has admin or superadmin role (or legacy is_admin flag)."""
+    role = str(getattr(user, "role", "")).lower()
+    is_flag = bool(getattr(user, "is_admin", False))
+    email_ok = is_admin_email(getattr(user, "email", None))
+    return role in ("admin", "superadmin") or is_flag or email_ok
+
+
+def get_user_role(user: Any) -> str:
+    """Get user's role. Returns 'superadmin', 'admin', or 'user'."""
+    role = str(getattr(user, "role", "")).lower()
+    if role == "superadmin":
+        return "superadmin"
+    if role == "admin":
+        return "admin"
+    # Check legacy flags
+    if is_admin_email(getattr(user, "email", None)):
+        return "superadmin"  # ADMIN_EMAIL gets superadmin role
+    if getattr(user, "is_admin", False):
+        return "admin"  # Legacy is_admin flag gets admin role
+    return "user"
+
+
 def create_access_token(data: Mapping[str, Any], expires_delta: timedelta | None = None) -> str:
     """Create a JWT access token."""
 
@@ -105,10 +133,31 @@ get_current_user = core_get_current_user
 
 def to_user_public(user: User) -> UserPublic:
     """Build a safe public view from DB User without leaking hashed_password."""
+    
+    # DEBUG: Log what we're getting from the database
+    db_role = getattr(user, "role", None)
+    logger.info(f"[to_user_public] DB user {user.email}: role={db_role}, tier={user.tier}, is_admin={user.is_admin}")
 
     public = UserPublic.model_validate(user, from_attributes=True)
+    
+    # DEBUG: Log what model_validate gave us
+    logger.info(f"[to_user_public] After model_validate: role={public.role}")
+    
+    # CRITICAL: Force the role field from DB (model_validate is broken)
+    public.role = db_role
+    logger.info(f"[to_user_public] After forcing role from DB: role={public.role}")
+    
+    # Set is_admin flag (legacy support)
     public.is_admin = is_admin_email(user.email) or bool(getattr(user, "is_admin", False))
-    public.terms_version_required = getattr(settings, "TERMS_VERSION", None)
+    
+    # Skip terms enforcement in dev mode (dev/prod share same DB, constant re-acceptance is annoying)
+    env = (settings.APP_ENV or "dev").strip().lower()
+    if env in {"dev", "development", "local", "test", "testing"}:
+        public.terms_version_required = None
+    else:
+        public.terms_version_required = getattr(settings, "TERMS_VERSION", None)
+    
+    logger.info(f"[to_user_public] Final result: role={public.role}, is_admin={public.is_admin}")
     return public
 
 
@@ -186,8 +235,22 @@ def external_base_url(request: Request) -> str:
     return f"{proto}://{host}".rstrip("/")
 
 
+# Global cache for OAuth client to avoid repeated metadata fetching
+_oauth_client_cache: tuple[OAuthType, str] | None = None
+
+
 def build_oauth_client() -> tuple[OAuthType, str]:
-    """Construct a new OAuth client registered for Google."""
+    """Construct a new OAuth client registered for Google with custom timeout.
+    
+    Caches the OAuth client globally since Google's metadata rarely changes and
+    fetching it on every request causes 30+ second delays on slow networks.
+    """
+    global _oauth_client_cache
+    
+    # Return cached client if available
+    if _oauth_client_cache is not None:
+        logger.debug("OAuth: Returning cached OAuth client")
+        return _oauth_client_cache
 
     if _OAuthFactory is None:
         message = "Google OAuth is unavailable because authlib is not installed."
@@ -197,14 +260,39 @@ def build_oauth_client() -> tuple[OAuthType, str]:
             logger.warning(message)
         raise RuntimeError(message)
 
+    # Create custom httpx client with longer timeout to handle slow network/firewall
+    try:
+        import httpx
+        custom_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0, connect=15.0),  # 30s total, 15s connect
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+        )
+        logger.info("OAuth: Created custom httpx client with 30s timeout")
+    except Exception as exc:
+        logger.warning("Failed to create custom httpx client, using defaults: %s", exc)
+        custom_client = None
+
     oauth_client = _OAuthFactory()
-    oauth_client.register(
-        name="google",
-        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-        client_id=settings.GOOGLE_CLIENT_ID,
-        client_secret=settings.GOOGLE_CLIENT_SECRET,
-        client_kwargs={"scope": "openid email profile"},
-    )
+    
+    # Configure the OAuth client with custom httpx client if available
+    register_kwargs = {
+        "name": "google",
+        "server_metadata_url": "https://accounts.google.com/.well-known/openid-configuration",
+        "client_id": settings.GOOGLE_CLIENT_ID,
+        "client_secret": settings.GOOGLE_CLIENT_SECRET,
+        "client_kwargs": {"scope": "openid email profile"},
+    }
+    
+    # Authlib's AsyncClient accepts a custom httpx client via the 'client' parameter
+    if custom_client:
+        register_kwargs["client"] = custom_client
+    
+    oauth_client.register(**register_kwargs)
+    
+    # Cache the client for future requests
+    _oauth_client_cache = (oauth_client, settings.GOOGLE_CLIENT_ID)
+    logger.info("OAuth: Client initialized and cached")
+    
     return oauth_client, settings.GOOGLE_CLIENT_ID
 
 

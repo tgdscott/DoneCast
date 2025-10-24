@@ -17,11 +17,12 @@ import { makeApi } from "@/lib/apiClient";
 const DEFAULT_SETTINGS = {
   test_mode: false,
   default_user_active: true,
+  default_user_tier: 'unlimited',
   max_upload_mb: 500,
   browser_audio_conversion_enabled: false,
 };
 
-export default function AdminFeatureToggles({ token, initial = null, onSaved }) {
+export default function AdminFeatureToggles({ token, initial = null, onSaved, readOnly = false, allowMaintenanceToggle = false }) {
   const { toast } = useToast();
   const [settings, setSettings] = React.useState(
     initial ? { ...DEFAULT_SETTINGS, ...initial } : null
@@ -101,8 +102,20 @@ export default function AdminFeatureToggles({ token, initial = null, onSaved }) 
     onMaxUploadChange._t = setTimeout(() => save(next, prev), 400);
   };
 
+  const onDefaultTierChange = (tier) => {
+    const prev = { ...(settings || {}) };
+    const next = { ...prev, default_user_tier: tier };
+    setSettings(next);
+    save(next, prev);
+  };
+
   return (
     <div className="space-y-6">
+      {readOnly && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm text-yellow-800">
+          <strong>Restricted Access:</strong> You can only toggle maintenance mode. Other settings are read-only for admin users. Only superadmin can modify all settings.
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <Label htmlFor="admin-test-mode" className="text-base font-medium text-gray-700">Test Mode (Admin)</Label>
@@ -116,7 +129,7 @@ export default function AdminFeatureToggles({ token, initial = null, onSaved }) 
           <Switch
             id="admin-test-mode"
             checked={!!(settings && settings.test_mode)}
-            disabled={saving}
+            disabled={saving || readOnly}
             onCheckedChange={onToggle}
           />
         </div>
@@ -134,9 +147,33 @@ export default function AdminFeatureToggles({ token, initial = null, onSaved }) 
           <Switch
             id="admin-default-user-active"
             checked={!!(settings && settings.default_user_active)}
-            disabled={saving}
+            disabled={saving || readOnly}
             onCheckedChange={onDefaultActiveToggle}
           />
+        </div>
+      </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <Label htmlFor="admin-default-tier" className="text-base font-medium text-gray-700">Default User Tier</Label>
+          <p className="text-sm text-gray-500 mt-1">
+            All newly registered users will be assigned this tier. Existing users are not affected.
+          </p>
+        </div>
+        <div className="flex items-center space-x-2">
+          {saving && <span className="text-xs text-gray-400">Saving…</span>}
+          {err && <span className="text-xs text-red-500" title={err}>Err</span>}
+          <select
+            id="admin-default-tier"
+            value={(settings && settings.default_user_tier) || 'unlimited'}
+            onChange={(e) => onDefaultTierChange(e.target.value)}
+            disabled={saving || readOnly}
+            className="border rounded px-3 py-1.5 text-sm"
+          >
+            <option value="free">Free</option>
+            <option value="creator">Creator</option>
+            <option value="pro">Pro</option>
+            <option value="unlimited">Unlimited</option>
+          </select>
         </div>
       </div>
       <div className="flex items-center justify-between">
@@ -152,7 +189,7 @@ export default function AdminFeatureToggles({ token, initial = null, onSaved }) 
           <Switch
             id="admin-browser-audio-conversion"
             checked={!!(settings && settings.browser_audio_conversion_enabled)}
-            disabled={saving}
+            disabled={saving || readOnly}
             onCheckedChange={onBrowserConversionToggle}
           />
         </div>
@@ -173,6 +210,7 @@ export default function AdminFeatureToggles({ token, initial = null, onSaved }) 
             max={2048}
             value={(settings && settings.max_upload_mb) ?? 500}
             onChange={(e)=> onMaxUploadChange(e.target.value)}
+            disabled={readOnly}
             className="w-28 border rounded px-2 py-1 text-sm"
           />
         </div>

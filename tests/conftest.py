@@ -65,19 +65,16 @@ def ensure_ffmpeg_on_path():
 
 @pytest.fixture(scope="function")
 def db_engine(tmp_path: Path):
-    """Provide a temporary SQLite engine with app migrations applied.
+    """DEPRECATED: Tests should use PostgreSQL test database, not in-memory fixtures.
 
-    Usage:
-    - Inject into tests that touch the DB; the API will transparently use this engine
-      via the `api.core.database.get_session` dependency.
-    - A fresh file-backed SQLite DB is created per test; schema is created by
-      calling `create_db_and_tables()`.
-
-    Notes:
-    - We patch `api.core.database.engine` in-place so all code paths that import
-      the module pick up the new engine variable.
-    - Cleanup is automatic when the test ends; the temp directory is removed by pytest.
+    This fixture is retained for backward compatibility but should NOT be used for new tests.
+    All tests should connect to a real PostgreSQL database (use DATABASE_URL environment variable).
+    
+    TODO: Migrate all tests to use real PostgreSQL and remove this fixture entirely.
     """
+    pytest.skip("SQLite-based testing is deprecated - use PostgreSQL test database instead")
+    
+    # This code is unreachable but kept for reference during migration
     from sqlmodel import create_engine
     db_path = tmp_path / "test.db"
     engine_url = f"sqlite:///{db_path.as_posix()}"

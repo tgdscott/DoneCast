@@ -42,14 +42,9 @@ export default function StepCustomizeSegments({
   }, [selectedTemplate?.segments, computeSegmentKey]);
 
   const missingSegmentKeys = React.useMemo(() => {
-    // If there are no TTS segments at all, nothing is missing
-    if (!ttsSegmentsWithKey.length) return [];
-    return ttsSegmentsWithKey
-      .filter(({ key }) => {
-        const value = ttsValues?.[key];
-        return !(typeof value === 'string' && value.trim());
-      })
-      .map(({ key }) => key);
+    // TTS segments are OPTIONAL - users don't need to fill them if they don't want them
+    // Return empty array so nothing is "missing" - allow continuation regardless
+    return [];
   }, [ttsSegmentsWithKey, ttsValues]);
 
   const missingKeysSet = React.useMemo(() => new Set(missingSegmentKeys), [missingSegmentKeys]);
@@ -59,10 +54,21 @@ export default function StepCustomizeSegments({
   const renderSegmentContent = React.useCallback(
     (segment, { fieldId, isMissing, promptKey }) => {
       if (segment.segment_type === 'content') {
-        const contentLabel = uploadedAudioLabel || uploadedFile?.name || 'Audio not selected yet';
+        // Priority order: explicit label > file name > fallback message
+        const contentLabel = 
+          (uploadedAudioLabel && uploadedAudioLabel.trim()) || 
+          (uploadedFile?.name && uploadedFile.name.trim()) || 
+          (uploadedFile?.friendly_name && uploadedFile.friendly_name.trim()) ||
+          'Audio not selected yet';
+        
         return (
           <div className="mt-2 bg-blue-50 p-3 rounded-md">
             <p className="text-gray-700 font-semibold">{contentLabel}</p>
+            {contentLabel === 'Audio not selected yet' && (
+              <p className="text-xs text-gray-500 mt-1">
+                Go back to upload or select your main audio file
+              </p>
+            )}
           </div>
         );
       }
@@ -112,11 +118,11 @@ export default function StepCustomizeSegments({
               </Button>
             </div>
             <Label htmlFor={fieldId} className="text-sm font-medium text-gray-700 mb-2 block">
-              {segment.source.text_prompt || 'AI voice script'}
+              {segment.source.text_prompt || 'AI voice script'} <span className="text-gray-400 font-normal">(optional)</span>
             </Label>
             <Textarea
               id={fieldId}
-              placeholder="Enter text to be converted to speech..."
+              placeholder="Leave blank to skip this segment, or enter text to include it..."
               className={cn(
                 'min-h-[100px] resize-none text-base bg-white',
                 isMissing && 'border-red-500 focus-visible:ring-red-500'

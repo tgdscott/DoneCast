@@ -4,7 +4,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import {
   Info,
-  HelpCircle,
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
@@ -19,6 +18,7 @@ import {
   CalendarDays,
   Lightbulb,
   ClipboardList,
+  HelpCircle,
 } from "lucide-react";
 import ComfortControls from "./ComfortControls.jsx";
 
@@ -350,18 +350,6 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
                   )}
                 </h2>
               </div>
-              {/* AI Assistant Help Button */}
-              <button
-                onClick={() => {
-                  // Trigger AI Assistant to open (via custom event)
-                  window.dispatchEvent(new CustomEvent('ppp:open-ai-assistant'));
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-md transition-colors"
-                title="Get help from AI Assistant"
-              >
-                <HelpCircle className="h-4 w-4" />
-                <span className="hidden sm:inline">Need help?</span>
-              </button>
             </div>
             {step?.description && (
               <p className="text-muted-foreground">{step.description}</p>

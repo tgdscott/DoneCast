@@ -13,117 +13,60 @@ import {
   TrendingUp,
   Users,
   Zap,
+  Star,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import './new-landing.css';
 import LoginModal from '@/components/LoginModal.jsx';
+import { makeApi } from '@/lib/apiClient';
+import { defaultLandingContent, mergeLandingContent } from '@/lib/landingDefaults';
 
-const heroMeta = [
-  { icon: <Sparkles size={18} />, text: 'Anyone can do this' },
-  { icon: <Zap size={18} />, text: 'Setup in 5 minutes' },
-];
+// Icon mapping helper (for features/pillars/differentiators that store tone but need icons)
+const getIconForFeature = (title, tone) => {
+  const iconMap = {
+    'Unlimited Hosting': <Mic size={26} />,
+    'AI-Powered Editing': <Sparkles size={26} />,
+    'Global Distribution': <Globe size={26} />,
+    'Lightning Fast': <Zap size={26} />,
+    'Team Collaboration': <Users size={26} />,
+    'Custom Player': <Headphones size={26} />,
+  };
+  return iconMap[title] || <Sparkles size={26} />;
+};
 
-const pillars = [
-  {
-    title: 'Faster',
-    description: 'Record, edit, and publish in minutes. No back-and-forth with editors. No waiting days for revisions.',
-    icon: <Zap size={28} />,
-    tone: 'primary',
-  },
-  {
-    title: 'Cheaper',
-    description: 'One affordable subscription replaces expensive editors, hosting fees, and distribution services.',
-    icon: <TrendingUp size={28} />,
-    tone: 'secondary',
-  },
-  {
-    title: 'Easier',
-    description: 'So simple, your grandparents could use it. So powerful, professionals choose it. That\'s the magic.',
-    icon: <Sparkles size={28} />,
-    tone: 'accent',
-  },
-];
+const getIconForPillar = (title, tone) => {
+  const iconMap = {
+    'Faster': <Zap size={28} />,
+    'Cheaper': <TrendingUp size={28} />,
+    'Easier': <Sparkles size={28} />,
+  };
+  return iconMap[title] || <Sparkles size={28} />;
+};
 
-const features = [
-  {
-    title: 'Unlimited Hosting',
-    description: 'Upload unlimited episodes with no storage limits. Your content, your way, without restrictions.',
-    icon: <Mic size={26} />,
-    tone: 'primary',
-  },
-  {
-    title: 'AI-Powered Editing',
-    description: 'Edit while you record with AI that removes mistakes, adds effects, and polishes your audio in real-time.',
-    icon: <Sparkles size={26} />,
-    tone: 'secondary',
-  },
-  {
-    title: 'Global Distribution',
-    description: 'Automatically distribute to Spotify, Apple Podcasts, Google Podcasts, and 20+ platforms.',
-    icon: <Globe size={26} />,
-    tone: 'accent',
-  },
-  {
-    title: 'Lightning Fast',
-    description: 'Global CDN ensures your episodes load instantly for listeners anywhere in the world.',
-    icon: <Zap size={26} />,
-    tone: 'primary',
-  },
-  {
-    title: 'Team Collaboration',
-    description: 'Invite team members, manage permissions, and collaborate seamlessly on your podcast.',
-    icon: <Users size={26} />,
-    tone: 'secondary',
-  },
-  {
-    title: 'Custom Player',
-    description: 'Beautiful, embeddable podcast player that matches your brand and engages listeners.',
-    icon: <Headphones size={26} />,
-    tone: 'accent',
-  },
-];
-
-const differentiators = [
-  {
-    title: 'Patent-Pending Innovation',
-    description: 'Technology you literally can\'t get anywhere else. We invented it.',
-    icon: <Shield size={24} />,
-    tone: 'primary',
-  },
-  {
-    title: 'Built For Everyone',
-    description: 'From first-timers to seasoned pros. From teens to retirees. Anyone can create here.',
-    icon: <Users size={24} />,
-    tone: 'secondary',
-  },
-  {
-    title: 'Unbeatable Value',
-    description: 'Replace your editor, hosting, and distribution services with one affordable platform.',
-    icon: <TrendingUp size={24} />,
-    tone: 'accent',
-  },
-  {
-    title: 'AI That Actually Works',
-    description: 'Not gimmicky features. Real AI that saves you hours and makes you sound professional.',
-    icon: <Sparkles size={24} />,
-    tone: 'primary',
-  },
-];
+const getIconForDifferentiator = (title, tone) => {
+  const iconMap = {
+    'Patent-Pending Innovation': <Shield size={24} />,
+    'Built For Everyone': <Users size={24} />,
+    'Unbeatable Value': <TrendingUp size={24} />,
+    'AI That Actually Works': <Sparkles size={24} />,
+  };
+  return iconMap[title] || <Sparkles size={24} />;
+};
 
 const footerLinks = [
   {
     title: 'Product',
     links: [
-      { label: 'Features', href: '#features' },
-      { label: 'Pricing', href: '/pricing' },
-      { label: 'FAQ', href: '/in-development' },
+      { label: 'Features', href: '/features' },
+      { label: 'FAQ', href: '/faq' },
     ],
   },
   {
     title: 'Company',
     links: [
-      { label: 'About', href: '/in-development' },
-      { label: 'Blog', href: '/in-development' },
-      { label: 'Contact', href: '/in-development' },
+      { label: 'About', href: '/about' },
+      { label: 'Contact', href: '/contact' },
     ],
   },
   {
@@ -228,6 +171,25 @@ export default function NewLanding() {
   const [loginModalMode, setLoginModalMode] = useState('login'); // Track whether to show login or signup
   const navigate = useNavigate();
   const { isAuthenticated, hydrated } = useAuth();
+  const [landingContent, setLandingContent] = useState(defaultLandingContent);
+  const [expandedFaq, setExpandedFaq] = useState(null);
+
+  // Fetch landing page content from API (all sections)
+  useEffect(() => {
+    let cancelled = false;
+    const api = makeApi(null); // Public endpoint, no auth needed
+    api.get('/api/landing')
+      .then((data) => {
+        if (!cancelled && data) {
+          setLandingContent(mergeLandingContent(data));
+        }
+      })
+      .catch((err) => {
+        // Silently fall back to defaults - don't break the page
+        console.warn('Failed to load landing content:', err);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   // If a user is already authenticated (e.g., after OAuth redirect or returning visit),
   // move them into the application dashboard automatically instead of showing marketing.
@@ -292,9 +254,9 @@ export default function NewLanding() {
               Podcast Plus Plus
             </div>
             <div className="nl-nav-links">
-              <a href="#features">Features</a>
-              <a href="#pricing">Pricing</a>
-              <a href="#about">About</a>
+              <Link to="/features">Features</Link>
+              <Link to="/faq">FAQ</Link>
+              <Link to="/about">About</Link>
             </div>
             <div className="nl-nav-cta">
               <button type="button" className="nl-button-outline" onClick={openLoginModal}>
@@ -318,35 +280,32 @@ export default function NewLanding() {
         <div className="nl-container nl-hero-grid">
           <div>
             <span className="nl-hero-label">
-              <Sparkles size={16} /> Patent-Pending AI Technology
+              <Sparkles size={16} /> {landingContent.hero.label}
             </span>
             <h1 className="nl-hero-title">
-              Professional Podcasting <span>For Everyone</span>
+              {landingContent.hero.title} <span>{landingContent.hero.title_highlight}</span>
             </h1>
             <p className="nl-hero-description">
-              No experience needed. No technical skills required. No age limit. Just your voice and our patent-pending technology. PodcastPlusPlus
-              makes professional podcasting so easy, it's faster and cheaper than hiring someone else to do it.
+              {landingContent.hero.description}
             </p>
             <div className="nl-hero-actions">
               {isAuthenticated ? (
                 <Link to="/onboarding" className="nl-button">
-                  Start Your Free Trial
+                  {landingContent.hero.cta_text}
                   <ArrowRight size={18} />
                 </Link>
               ) : (
                 <button type="button" className="nl-button" onClick={openSignupModal}>
-                  Start Your Free Trial
+                  {landingContent.hero.cta_text}
                   <ArrowRight size={18} />
                 </button>
               )}
-              <Link to="/in-development" className="nl-button-outline">
-                <Play size={16} /> Watch Demo
-              </Link>
+
             </div>
             <div className="nl-hero-meta">
-              {heroMeta.map(({ icon, text }) => (
-                <div className="nl-hero-meta-item" key={text}>
-                  {icon}
+              {landingContent.hero.meta_items.map((text, idx) => (
+                <div className="nl-hero-meta-item" key={idx}>
+                  {idx === 0 ? <Sparkles size={18} /> : <Zap size={18} />}
                   {text}
                 </div>
               ))}
@@ -415,18 +374,17 @@ export default function NewLanding() {
             </div>
           </div>
           <div className="nl-split-content">
-            <div className="nl-pill">AI That Works For You</div>
+            <div className="nl-pill">{landingContent.ai_editing.pill_text}</div>
             <h2 className="nl-hero-title" style={{ fontSize: 'clamp(2.2rem, 4vw, 3.1rem)', marginBottom: '1.5rem' }}>
-              Edit in Real-Time While You Record
+              {landingContent.ai_editing.title}
             </h2>
             <p className="nl-lead" style={{ marginBottom: '1.75rem' }}>
-              Our AI removes awkward pauses, balances audio levels, writes show notes, and adds start-of-the-art features all as you speak.
-              It&apos;s like having an entire production team behind the scenes—without the cost.
+              {landingContent.ai_editing.description}
             </p>
             <ul className="nl-bullets">
-              <li>Smart cleanup removes filler words and awkward silence automatically</li>
-              <li>Automatically generate show notes and SEO tags for every episode</li>
-              <li>Our one-stop shop lets you take care of everything in just a few clicks.</li>
+              {landingContent.ai_editing.bullets.map((bullet, idx) => (
+                <li key={idx}>{bullet}</li>
+              ))}
             </ul>
           </div>
         </div>
@@ -436,17 +394,15 @@ export default function NewLanding() {
         <div className="nl-container">
           <div className="nl-section-title">
             <h2>
-              Done For You, <span>By You</span>
+              {landingContent.done_for_you.title} <span>{landingContent.done_for_you.title_highlight}</span>
             </h2>
             <p>
-              Why pay someone else when you can do it yourself—faster, cheaper, and with complete creative control?
-              Podcast Plus Plus is so intuitive that publishing your podcast takes less time and effort than explaining it to
-              someone else.
+              {landingContent.done_for_you.description}
             </p>
           </div>
           <div className="nl-grid nl-grid-3">
-            {pillars.map((pillar) => (
-              <PillarCard key={pillar.title} {...pillar} />
+            {landingContent.done_for_you.pillars.map((pillar) => (
+              <PillarCard key={pillar.title} {...pillar} icon={getIconForPillar(pillar.title, pillar.tone)} />
             ))}
           </div>
           <div className="nl-media-highlight">
@@ -471,34 +427,19 @@ export default function NewLanding() {
         <div className="nl-container">
           <div className="nl-section-title">
             <h2>
-              From Idea to Published in <span>3 Simple Steps</span>
+              {landingContent.three_steps.title} <span>{landingContent.three_steps.title_highlight}</span>
             </h2>
-            <p>Seriously, it\'s this easy. No technical knowledge required. No learning curve. Just start talking.</p>
+            <p>{landingContent.three_steps.description}</p>
           </div>
           <div className="nl-grid nl-grid-3 nl-steps">
             <span className="nl-step-connector" aria-hidden="true" />
-            <Step
-              number="1"
-              color="primary"
-              title="Record"
-              description="Hit record and start talking. Our AI handles the rest—removing mistakes, enhancing audio, and creating chapters."
-            />
-            <Step
-              number="2"
-              color="secondary"
-              title="Review"
-              description="Preview your episode with AI-applied edits. Make any final tweaks with our simple, intuitive editor."
-            />
-            <Step
-              number="3"
-              color="accent"
-              title="Publish"
-              description="One click distributes your podcast to Spotify, Apple Podcasts, and 20+ platforms. You're live!"
-            />
+            {landingContent.three_steps.steps.map((step) => (
+              <Step key={step.number} {...step} />
+            ))}
           </div>
           <div className="nl-cta">
             <Link to="/onboarding" className="nl-button">
-              Start Your First Episode Now
+              {landingContent.three_steps.cta_text}
               <ArrowRight size={18} />
             </Link>
           </div>
@@ -509,13 +450,13 @@ export default function NewLanding() {
         <div className="nl-container">
           <div className="nl-section-title">
             <h2>
-              Everything You Need to <span>Succeed</span>
+              {landingContent.features.title} <span>{landingContent.features.title_highlight}</span>
             </h2>
-            <p>Professional-grade tools that would normally cost thousands. All included in one simple platform.</p>
+            <p>{landingContent.features.description}</p>
           </div>
           <div className="nl-grid nl-grid-3">
-            {features.map((feature) => (
-              <FeatureCard key={feature.title} {...feature} />
+            {landingContent.features.features.map((feature) => (
+              <FeatureCard key={feature.title} {...feature} icon={getIconForFeature(feature.title, feature.tone)} />
             ))}
           </div>
         </div>
@@ -525,15 +466,14 @@ export default function NewLanding() {
         <div className="nl-container grid gap-10 lg:grid-cols-2 lg:items-center">
           <div>
             <h2 className="nl-hero-title" style={{ fontSize: 'clamp(2.2rem, 4vw, 3.2rem)', marginBottom: '1.5rem' }}>
-              Why <span>Podcast Plus Plus</span>?
+              {landingContent.why.title} <span>{landingContent.why.title_highlight}</span>{landingContent.why.title_suffix}
             </h2>
             <p className="nl-lead" style={{ marginBottom: '2rem' }}>
-              We've built something truly special here. Technology that doesn't exist anywhere else. A platform that makes the
-              impossible feel effortless. This is podcasting, reimagined.
+              {landingContent.why.description}
             </p>
             <div className="grid gap-6">
-              {differentiators.map((item) => (
-                <Differentiator key={item.title} {...item} />
+              {landingContent.why.differentiators.map((item) => (
+                <Differentiator key={item.title} {...item} icon={getIconForDifferentiator(item.title, item.tone)} />
               ))}
             </div>
           </div>
@@ -555,33 +495,115 @@ export default function NewLanding() {
         </div>
       </section>
 
+      {/* Testimonials/Reviews Section (editable via admin) */}
+      {landingContent.reviews && landingContent.reviews.length > 0 && (
+        <section className="nl-section nl-section-muted">
+          <div className="nl-container">
+            <div className="nl-section-title">
+              <h2>{landingContent.reviews_heading || 'What Our Users Say'}</h2>
+              {landingContent.reviews_summary && (
+                <p className="flex items-center justify-center gap-2 text-yellow-600 font-semibold">
+                  <Star size={20} fill="currentColor" />
+                  {landingContent.reviews_summary}
+                </p>
+              )}
+            </div>
+            <div className="nl-grid nl-grid-3">
+              {landingContent.reviews.map((review, index) => (
+                <div key={index} className="nl-card" style={{ padding: '2rem' }}>
+                  <div className="flex items-center gap-3 mb-4">
+                    {review.avatar_url ? (
+                      <img 
+                        src={review.avatar_url} 
+                        alt={review.author} 
+                        className="w-14 h-14 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-lg">
+                        {review.author.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                      </div>
+                    )}
+                    <div>
+                      <p className="font-semibold text-base">{review.author}</p>
+                      {review.role && <p className="text-sm text-muted-foreground">{review.role}</p>}
+                    </div>
+                  </div>
+                  {review.rating && review.rating > 0 && (
+                    <div className="flex gap-1 mb-3">
+                      {[...Array(Math.floor(review.rating))].map((_, i) => (
+                        <Star key={i} size={16} fill="currentColor" className="text-yellow-500" />
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-base leading-relaxed text-foreground/90">{review.quote}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* FAQ Section (editable via admin) */}
+      {landingContent.faqs && landingContent.faqs.length > 0 && (
+        <section className="nl-section">
+          <div className="nl-container" style={{ maxWidth: '800px' }}>
+            <div className="nl-section-title">
+              <h2>{landingContent.faq_heading || 'Frequently Asked Questions'}</h2>
+              {landingContent.faq_subheading && (
+                <p>{landingContent.faq_subheading}</p>
+              )}
+            </div>
+            <div className="space-y-3">
+              {landingContent.faqs.map((faq, index) => (
+                <div 
+                  key={index}
+                  className="border border-border rounded-lg overflow-hidden bg-card"
+                >
+                  <button
+                    type="button"
+                    className="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-muted/50 transition-colors"
+                    onClick={() => setExpandedFaq(expandedFaq === index ? null : index)}
+                  >
+                    <span className="font-semibold text-base">{faq.question}</span>
+                    {expandedFaq === index ? (
+                      <ChevronUp size={20} className="text-muted-foreground flex-shrink-0" />
+                    ) : (
+                      <ChevronDown size={20} className="text-muted-foreground flex-shrink-0" />
+                    )}
+                  </button>
+                  {expandedFaq === index && (
+                    <div className="px-6 pb-4 pt-2 text-base leading-relaxed text-foreground/80 border-t border-border/50">
+                      {faq.answer}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
       <section className="nl-section nl-section-cta" style={{ position: 'relative', overflow: 'hidden' }}>
         <div className="nl-cta-pattern" aria-hidden="true" />
         <div className="nl-container" style={{ textAlign: 'center' }}>
           <div className="nl-pill" style={{ justifyContent: 'center', marginBottom: '1.5rem' }}>
-            Ready when you are
+            {landingContent.final_cta.pill_text}
           </div>
           <h2 className="nl-hero-title" style={{ fontSize: 'clamp(2.5rem, 4vw, 3.6rem)', marginBottom: '1.25rem' }}>
-            Ready to Take Your Podcast to the Next Level?
+            {landingContent.final_cta.title}
           </h2>
           <p className="nl-lead" style={{ margin: '0 auto 2.25rem', maxWidth: '560px', color: 'hsl(var(--foreground) / 0.85)' }}>
-            Join the next generation of podcasters who are building their audience with Podcast Plus Plus.
+            {landingContent.final_cta.description}
           </p>
           <div className="nl-hero-actions" style={{ justifyContent: 'center' }}>
             <Link to="/onboarding" className="nl-button" style={{ fontSize: '1.05rem', padding: '0.85rem 2.3rem' }}>
-              Start Your Free Trial
+              {landingContent.final_cta.cta_text}
               <ArrowRight size={18} />
             </Link>
-            <Link
-              to="/in-development"
-              className="nl-button-outline"
-              style={{ fontSize: '1.05rem', padding: '0.85rem 2.3rem', borderColor: 'hsl(var(--primary) / 0.6)' }}
-            >
-              Schedule a Demo
-            </Link>
+
           </div>
           <p className="text-sm text-muted-foreground" style={{ marginTop: '1.75rem' }}>
-            14-day free trial • No credit card required • Cancel anytime
+            {landingContent.final_cta.fine_print}
           </p>
         </div>
       </section>

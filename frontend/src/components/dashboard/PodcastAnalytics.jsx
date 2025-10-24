@@ -28,13 +28,13 @@ export default function PodcastAnalytics({ podcastId, token, onBack }) {
     try {
       const api = makeApi(token);
       
-      // Fetch show-level stats
+      // Fetch show-level stats (includes top episodes now)
       const showData = await api.get(`/api/analytics/podcast/${podcastId}/downloads?days=${timeRange}`);
       setShowStats(showData);
       
-      // Fetch episode-level summary
-      const episodesData = await api.get(`/api/analytics/podcast/${podcastId}/episodes-summary?limit=10`);
-      setEpisodesStats(episodesData.episodes || []);
+      // Top episodes are now included in showData.top_episodes
+      // No need for separate episodes-summary call
+      setEpisodesStats(showData.top_episodes || []);
       
     } catch (err) {
       console.error('Failed to fetch analytics:', err);
@@ -60,21 +60,52 @@ export default function PodcastAnalytics({ podcastId, token, onBack }) {
   if (error) {
     return (
       <div className="container mx-auto p-6">
+        <div className="flex items-center justify-between mb-6">
+          <Button variant="outline" onClick={onBack}>← Back</Button>
+        </div>
         <Card>
           <CardHeader>
-            <CardTitle>Analytics Error</CardTitle>
+            <CardTitle>Analytics Not Available Yet</CardTitle>
+            <CardDescription>Your podcast analytics will appear once episodes are downloaded by listeners</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-red-600 mb-4">{error}</div>
-            <div className="space-y-2 text-sm text-gray-600">
-              <p><strong>Note:</strong> Analytics data comes from OP3 (Open Podcast Prefix Project).</p>
-              <p>If you're not seeing data, make sure:</p>
-              <ul className="list-disc list-inside ml-4">
-                <li>Your RSS feed has been deployed with OP3 prefixes</li>
-                <li>Podcast apps are downloading episodes (data appears after first downloads)</li>
-                <li>You've waited at least 24 hours after deployment</li>
-              </ul>
-              <Button onClick={fetchAnalytics} className="mt-4">Retry</Button>
+            <div className="space-y-4 text-sm text-gray-600">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <p className="font-medium text-blue-900 mb-2">📊 How Podcast Analytics Work</p>
+                <p className="text-blue-800">Analytics data comes from OP3 (Open Podcast Prefix Project), which tracks downloads across all podcast apps.</p>
+              </div>
+              
+              <div>
+                <p className="font-medium text-gray-900 mb-2">If you're not seeing data yet, this is normal! Analytics appear when:</p>
+                <ul className="list-disc list-inside ml-4 space-y-1">
+                  <li>Your RSS feed has been published with episodes</li>
+                  <li>Listeners discover and download your episodes from podcast apps</li>
+                  <li>At least 24-48 hours have passed since your first downloads</li>
+                  <li>OP3 has processed the download data (updates daily)</li>
+                </ul>
+              </div>
+              
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <p className="font-medium text-gray-900 mb-2">🚀 Quick Tips to Get Started:</p>
+                <ul className="list-decimal list-inside ml-2 space-y-1">
+                  <li>Share your podcast RSS feed on social media</li>
+                  <li>Submit to Apple Podcasts, Spotify, and other directories</li>
+                  <li>Test by downloading an episode yourself from a podcast app</li>
+                  <li>Check back in 24-48 hours to see your analytics</li>
+                </ul>
+              </div>
+              
+              <div className="flex gap-3 mt-6">
+                <Button onClick={fetchAnalytics} variant="default">Check Again</Button>
+                <Button variant="outline" onClick={onBack}>Back to Dashboard</Button>
+              </div>
+              
+              {error && (
+                <details className="mt-4">
+                  <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600">Technical details</summary>
+                  <pre className="text-xs text-gray-500 mt-2 p-2 bg-gray-100 rounded overflow-x-auto">{error}</pre>
+                </details>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -86,6 +117,14 @@ export default function PodcastAnalytics({ podcastId, token, onBack }) {
   const downloadsData = showStats?.downloads_by_day || [];
   const topCountries = showStats?.top_countries || [];
   const topApps = showStats?.top_apps || [];
+  
+  // Check if we have any meaningful data
+  const hasData = showStats && (
+    showStats.downloads_all_time > 0 || 
+    showStats.downloads_30d > 0 || 
+    showStats.downloads_7d > 0 ||
+    (showStats.top_episodes && showStats.top_episodes.length > 0)
+  );
 
   return (
     <div className="container mx-auto p-6 space-y-6">
@@ -94,6 +133,9 @@ export default function PodcastAnalytics({ podcastId, token, onBack }) {
         <div>
           <h1 className="text-3xl font-bold">{showStats?.podcast_name || 'Podcast Analytics'}</h1>
           <p className="text-gray-600 mt-1">Download statistics powered by OP3</p>
+          {!hasData && showStats?.note && (
+            <p className="text-sm text-amber-600 mt-2">💡 {showStats.note}</p>
+          )}
         </div>
         <div className="flex gap-3 items-center">
           <Select value={timeRange} onValueChange={setTimeRange}>
@@ -112,43 +154,30 @@ export default function PodcastAnalytics({ podcastId, token, onBack }) {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
               <Download className="w-4 h-4" />
-              Total Downloads
+              Last 7 Days
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{totalDownloads.toLocaleString()}</div>
-            <p className="text-xs text-gray-500 mt-1">Last {timeRange} days</p>
+            <div className="text-3xl font-bold">{(showStats?.downloads_7d || 0).toLocaleString()}</div>
+            <p className="text-xs text-gray-500 mt-1">Weekly downloads</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
-              <Globe className="w-4 h-4" />
-              Countries
+              <Calendar className="w-4 h-4" />
+              Last 30 Days
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{topCountries.length}</div>
-            <p className="text-xs text-gray-500 mt-1">Geographic reach</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
-              <Smartphone className="w-4 h-4" />
-              Podcast Apps
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">{topApps.length}</div>
-            <p className="text-xs text-gray-500 mt-1">Different apps</p>
+            <div className="text-3xl font-bold">{(showStats?.downloads_30d || 0).toLocaleString()}</div>
+            <p className="text-xs text-gray-500 mt-1">Monthly downloads</p>
           </CardContent>
         </Card>
 
@@ -156,16 +185,25 @@ export default function PodcastAnalytics({ podcastId, token, onBack }) {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
               <TrendingUp className="w-4 h-4" />
-              Average/Day
+              Last Year
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">
-              {downloadsData.length > 0
-                ? Math.round(totalDownloads / downloadsData.length).toLocaleString()
-                : '0'}
-            </div>
-            <p className="text-xs text-gray-500 mt-1">Daily average</p>
+            <div className="text-3xl font-bold">{(showStats?.downloads_365d || 0).toLocaleString()}</div>
+            <p className="text-xs text-gray-500 mt-1">Yearly downloads</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
+              <BarChart className="w-4 h-4" />
+              All-Time
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold">{(showStats?.downloads_all_time || 0).toLocaleString()}</div>
+            <p className="text-xs text-gray-500 mt-1">Total downloads</p>
           </CardContent>
         </Card>
       </div>
@@ -196,6 +234,53 @@ export default function PodcastAnalytics({ podcastId, token, onBack }) {
           )}
         </CardContent>
       </Card>
+
+      {/* Top Episodes Section */}
+      {showStats?.top_episodes && showStats.top_episodes.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="w-5 h-5" />
+              Top Performing Episodes
+            </CardTitle>
+            <CardDescription>Your most popular episodes by all-time downloads</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {showStats.top_episodes.map((ep, idx) => (
+                <div key={ep.episode_id || idx} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-shrink-0 w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                      #{idx + 1}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-semibold text-gray-900 mb-2 truncate" title={ep.title}>{ep.title}</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+                        <div className="bg-gray-50 p-2 rounded">
+                          <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Last 24h</div>
+                          <div className="font-semibold text-gray-900">{(ep.downloads_1d || 0).toLocaleString()}</div>
+                        </div>
+                        <div className="bg-gray-50 p-2 rounded">
+                          <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Last 7d</div>
+                          <div className="font-semibold text-gray-900">{(ep.downloads_7d || 0).toLocaleString()}</div>
+                        </div>
+                        <div className="bg-gray-50 p-2 rounded">
+                          <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Last 30d</div>
+                          <div className="font-semibold text-gray-900">{(ep.downloads_30d || 0).toLocaleString()}</div>
+                        </div>
+                        <div className="bg-blue-50 p-2 rounded col-span-2 md:col-span-2">
+                          <div className="text-[10px] text-blue-600 uppercase tracking-wide mb-1 font-semibold">All-Time</div>
+                          <div className="font-bold text-blue-900 text-lg">{(ep.downloads_all_time || 0).toLocaleString()}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Two-column layout for geographic and app data */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -231,7 +316,7 @@ export default function PodcastAnalytics({ podcastId, token, onBack }) {
                 ))}
               </div>
             ) : (
-              <div className="text-center text-gray-500 py-8">No geographic data available</div>
+              <div className="text-center text-gray-500 py-8">No geographic data available yet</div>
             )}
           </CardContent>
         </Card>
@@ -274,59 +359,27 @@ export default function PodcastAnalytics({ podcastId, token, onBack }) {
         </Card>
       </div>
 
-      {/* Top Episodes */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <TrendingUp className="w-5 h-5" />
-            Top Episodes
-          </CardTitle>
-          <CardDescription>Most downloaded episodes in the last 30 days</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {episodesStats.length > 0 ? (
-            <div className="space-y-2">
-              {episodesStats.map((episode, idx) => (
-                <div key={episode.episode_id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50">
-                  <div className="flex-1">
-                    <div className="font-medium text-sm">
-                      {episode.episode_number && `Episode ${episode.episode_number}: `}
-                      {episode.title}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1 flex gap-4">
-                      <span>24h: {episode.downloads_24h}</span>
-                      <span>7d: {episode.downloads_7d}</span>
-                      <span>30d: {episode.downloads_30d}</span>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-lg font-bold">{episode.downloads_total.toLocaleString()}</div>
-                    <div className="text-xs text-gray-500">total</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center text-gray-500 py-8">No episode data available</div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* OP3 Attribution */}
-      <Card className="bg-gray-50">
+      {/* OP3 Attribution & Cache Notice */}
+      <Card className="bg-gray-50 border-gray-200">
         <CardContent className="pt-6">
-          <div className="flex items-center justify-between text-sm text-gray-600">
-            <div>
-              <p className="font-medium">Analytics powered by OP3</p>
-              <p className="text-xs mt-1">Open Podcast Prefix Project - Privacy-respecting podcast analytics</p>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-sm text-gray-600">
+              <div>
+                <p className="font-medium">Analytics powered by OP3</p>
+                <p className="text-xs mt-1">Open Podcast Prefix Project - Privacy-respecting podcast analytics</p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open('https://op3.dev', '_blank')}
+              >
+                Learn More
+              </Button>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => window.open('https://op3.dev', '_blank')}
-            >
-              Learn More
-            </Button>
+            <div className="border-t border-gray-200 pt-3 text-xs text-gray-500">
+              <p>📊 Analytics data is cached and updates every <strong>3 hours</strong> to reduce API load.</p>
+              <p className="mt-1">🔄 Refresh this page to check for new data if it's been more than 3 hours since your last visit.</p>
+            </div>
           </div>
         </CardContent>
       </Card>

@@ -25,6 +25,8 @@ class UserBase(SQLModel):
     first_name: Optional[str] = Field(default=None, max_length=80, description="User given name for personalization")
     last_name: Optional[str] = Field(default=None, max_length=120, description="User family name")
     timezone: Optional[str] = Field(default=None, description="IANA timezone string for scheduling display")
+    # Role field for admin/superadmin access (distinct from tier which is for billing)
+    role: Optional[str] = Field(default=None, max_length=50, description="User role: 'admin', 'superadmin', or None for regular users")
 
 class User(UserBase, table=True):
     """The database model for a User."""
@@ -37,7 +39,7 @@ class User(UserBase, table=True):
     terms_version_accepted: Optional[str] = Field(default=None, max_length=64, description="App terms version the user last accepted")
     terms_accepted_at: Optional[datetime] = Field(default=None, description="When the user accepted the current terms")
     terms_accepted_ip: Optional[str] = Field(default=None, max_length=64, description="IP address at latest acceptance")
-    is_admin: bool = Field(default=False, description="Whether this user has admin privileges")
+    is_admin: bool = Field(default=False, description="Whether this user has admin privileges (legacy field, use role field instead)")
 
     # This creates the link back to the templates that belong to this user
     templates: List["PodcastTemplate"] = Relationship(back_populates="user")
@@ -57,7 +59,7 @@ class UserPublic(UserBase):
     terms_version_required: Optional[str] = None
     # Admin flags exposed for frontend gating
     is_admin: bool = Field(default=False, description="Whether this user has admin privileges")
-    role: Optional[str] = Field(default=None, description="Normalized role label, e.g., 'admin'")
+    # role field inherited from UserBase
 
 class UserTermsAcceptance(SQLModel, table=True):
     """Audit log of terms of use acceptance events."""

@@ -429,9 +429,9 @@ export default function OnboardingWizard(){
             // Apply distinct defaults per segment as requested
             background_music_rules = [
               // Intro rule: fade in 1.5s, no start offset, fade out 2s, end offset -1s (bleeds 1s into content)
-              { music_filename: musicChoice, apply_to_segments: ['intro'], start_offset_s: 0, end_offset_s: -1, fade_in_s: 1.5, fade_out_s: 2, volume_db: -4 },
+              { music_filename: musicChoice, apply_to_segments: ['intro'], start_offset_s: 0, end_offset_s: -1, fade_in_s: 1.5, fade_out_s: 2, volume_db: -1.4 },  // Level 5.5 on 1-11 scale
               // Outro rule: fade in 3s with -10s start offset (plays over last 10s of main content), fade out 1s, no end offset
-              { music_filename: musicChoice, apply_to_segments: ['outro'], start_offset_s: -10, end_offset_s: 0, fade_in_s: 3, fade_out_s: 1, volume_db: -4 },
+              { music_filename: musicChoice, apply_to_segments: ['outro'], start_offset_s: -10, end_offset_s: 0, fade_in_s: 3, fade_out_s: 1, volume_db: -1.4 },  // Level 5.5 on 1-11 scale
             ];
           }
           // Use last known segments draft if available

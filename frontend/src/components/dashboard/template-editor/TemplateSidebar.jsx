@@ -15,14 +15,18 @@ const TemplateSidebar = ({ template, onToggleActive, onStartTour }) => (
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 text-sm text-slate-700">
+        <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <p className="text-sm font-medium text-blue-900 mb-1">✨ Your template is ready!</p>
+          <p className="text-xs text-blue-700">The onboarding wizard created this template with basic segments. Everything here is easy to customize and change.</p>
+        </div>
         <ol className="list-decimal space-y-1 pl-5">
           <li>Name the template and attach it to the show it powers.</li>
           <li>Add intro, content, and outro segments—drag to match your flow.</li>
           <li>Open Music &amp; Timing Options to dial in fades, offsets, and beds.</li>
         </ol>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <span className="text-xs text-slate-500">Prefer a tour? We’ll highlight each area for you.</span>
-          <Button variant="outline" size="sm" onClick={onStartTour}>
+          <span className="text-xs text-slate-500">New to templates? Take the tour!</span>
+          <Button variant="outline" size="sm" onClick={onStartTour} data-tour-id="template-restart-tour">
             Start guided tour
           </Button>
         </div>

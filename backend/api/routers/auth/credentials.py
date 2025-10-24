@@ -46,10 +46,10 @@ class UserRegisterResponse(BaseModel):
 
 
 @router.post("/register", response_model=UserRegisterResponse, status_code=status.HTTP_201_CREATED)
-@limiter.limit("5/minute")  # coarse cap; relies on IP key func
+# @limiter.limit("5/minute")  # TEMPORARILY DISABLED FOR DEBUGGING
 async def register_user(
-    user_in: UserRegisterPayload,
     request: Request,
+    user_in: UserRegisterPayload,
     session: Session = Depends(get_session),
 ) -> UserRegisterResponse:
     """Register a new user with email and password."""
@@ -82,12 +82,16 @@ async def register_user(
     try:
         admin_settings = load_admin_settings(session)
         default_active = False
+        default_tier = admin_settings.default_user_tier
     except Exception:
         default_active = False
+        default_tier = "unlimited"  # Fallback to unlimited if settings can't be loaded
 
     base_user = UserCreate(**user_in.model_dump(exclude={"accept_terms", "terms_version"}))
     # Users must verify their email before they can log in
     base_user.is_active = False
+    # Set tier from admin settings
+    base_user.tier = default_tier
 
     user = crud.create_user(session=session, user_create=base_user)
 
@@ -213,7 +217,7 @@ async def login_for_access_token(
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Please confirm your email to sign in.",
+            detail="Please verify your email to sign in. Check your inbox for the verification code, or request a new one if it expired.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     if is_admin_email(user.email):
@@ -227,10 +231,10 @@ async def login_for_access_token(
 
 
 @router.post("/login", response_model=dict)
-@limiter.limit("10/minute")
+# @limiter.limit("10/minute")  # DISABLED - breaks FastAPI param detection
 async def login_for_access_token_json(
-    payload: LoginRequest,
     request: Request,
+    payload: LoginRequest,
     session: Session = Depends(get_session),
 ) -> dict:
     """Login user with email/password from a JSON body."""
@@ -251,7 +255,7 @@ async def login_for_access_token_json(
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Please confirm your email to sign in.",
+            detail="Please verify your email to sign in. Check your inbox for the verification code, or request a new one if it expired.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     if is_admin_email(user.email):

@@ -16,6 +16,7 @@ from api.models.podcast import Podcast, Episode
 from api.routers.auth import get_current_user
 from api.models.user import User
 from api.services.op3_analytics import OP3Analytics, OP3ShowStats, OP3EpisodeStats
+from api.services.op3_historical_data import get_historical_data
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -28,13 +29,21 @@ async def get_podcast_downloads(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Get download statistics for a podcast show from OP3.
+    Get comprehensive download statistics for a podcast show from OP3.
+    
+    Uses cached OP3 data (3-hour TTL) to provide:
+    - Total downloads for requested period
+    - 7d/30d/365d/all-time breakdowns
+    - Top episodes
+    - Downloads trend (if available)
+    - Geographic and app breakdowns (if available)
     
     Returns:
-        - total_downloads: Total downloads in the time period
-        - downloads_trend: Daily download counts
-        - top_countries: Geographic breakdown
-        - top_apps: Podcast app breakdown
+        - podcast_id, podcast_name
+        - total_downloads: Downloads in requested time period
+        - downloads_7d, downloads_30d, downloads_365d, downloads_all_time
+        - top_episodes: Top performing episodes
+        - downloads_by_day, top_countries, top_apps
     """
     # Get podcast and verify ownership
     podcast = session.get(Podcast, podcast_id)
@@ -49,39 +58,108 @@ async def get_podcast_downloads(
         )
     
     # Construct RSS feed URL for OP3 lookup
-    # This should match the URL that podcast apps use
     from api.core.config import settings
+    import logging
     
-    # Try to get the canonical RSS URL
-    # Option 1: If podcast has a custom domain/URL
-    if hasattr(podcast, 'feed_url') and podcast.feed_url:
-        rss_url = podcast.feed_url
-    # Option 2: Use our own RSS feed URL
-    else:
-        # Get podcast slug or use ID
-        identifier = getattr(podcast, 'slug', None) or str(podcast.id)
-        rss_url = f"{settings.BASE_URL}/v1/rss/{identifier}/feed.xml"
+    logger = logging.getLogger(__name__)
     
-    # Fetch stats from OP3
-    start_date = datetime.utcnow() - timedelta(days=days)
-    client = OP3Analytics()
+    # Get podcast slug or use ID as identifier
+    identifier = getattr(podcast, 'slug', None) or str(podcast.id)
+    
+    # ALWAYS use production domain for RSS feed URL (dev uses localhost which breaks OP3 lookups)
+    rss_url = f"https://podcastplusplus.com/rss/{identifier}/feed.xml"
+    
+    logger.info(f"Analytics request for podcast {podcast_id} - RSS URL: {rss_url}")
+    
+    # Use cached sync fetch (respects 3-hour cache)
+    from api.services.op3_analytics import get_show_stats_sync
+    
     try:
-        stats = await client.get_show_downloads(
-            show_url=rss_url,
-            start_date=start_date,
-        )
+        stats = get_show_stats_sync(rss_url, days=days)
+    except Exception as e:
+        logger.error(f"OP3 stats fetch failed for {rss_url}: {e}", exc_info=True)
+        # Return empty stats instead of failing completely
+        stats = None
+    
+    if not stats or (hasattr(stats, 'downloads_30d') and stats.downloads_30d == 0 and stats.downloads_all_time == 0):
+        logger.warning(f"No OP3 stats available for {rss_url} - checking historical fallback")
+        
+        # Try historical TSV fallback
+        historical = get_historical_data()
+        downloads_7d = historical.get_total_downloads(days=7)
+        downloads_30d = historical.get_total_downloads(days=30)
+        downloads_all_time = historical.get_total_downloads()
+        
+        if downloads_all_time > 0:
+            logger.info(f"Historical fallback: 7d={downloads_7d}, 30d={downloads_30d}, all-time={downloads_all_time}")
+            # Return historical stats
+            return {
+                "podcast_id": str(podcast_id),
+                "podcast_name": podcast.name,
+                "rss_url": rss_url,
+                "period_days": days,
+                "downloads_7d": downloads_7d,
+                "downloads_30d": downloads_30d,
+                "downloads_365d": 0,  # TSV doesn't have 365-day data
+                "downloads_all_time": downloads_all_time,
+                "total_downloads": downloads_30d if days == 30 else downloads_7d if days == 7 else downloads_all_time,
+                "top_episodes": [],  # Could parse from TSV but keep simple for now
+                "downloads_by_day": [],
+                "weekly_downloads": [],
+                "top_countries": [],
+                "top_apps": [],
+                "cached": True,
+                "last_updated": "Historical data (pre-migration)",
+                "note": "Showing historical analytics data. New downloads will be tracked in real-time once RSS feed is updated."
+            }
+        
+        # No historical data either - return zeros
+        logger.warning(f"No historical data available either - returning zero stats")
         return {
             "podcast_id": str(podcast_id),
             "podcast_name": podcast.name,
             "rss_url": rss_url,
             "period_days": days,
-            "total_downloads": stats.total_downloads,
-            "downloads_by_day": stats.downloads_trend,
-            "top_countries": stats.top_countries,
-            "top_apps": stats.top_apps,
+            "downloads_7d": 0,
+            "downloads_30d": 0,
+            "downloads_365d": 0,
+            "downloads_all_time": 0,
+            "total_downloads": 0,
+            "top_episodes": [],
+            "downloads_by_day": [],
+            "weekly_downloads": [],
+            "top_countries": [],
+            "top_apps": [],
+            "cached": False,
+            "last_updated": "No data available yet",
+            "note": "Analytics data will appear after your RSS feed has been published and episodes have been downloaded by listeners."
         }
-    finally:
-        await client.close()
+    
+    # Return comprehensive stats
+    return {
+        "podcast_id": str(podcast_id),
+        "podcast_name": podcast.name,
+        "rss_url": rss_url,
+        "period_days": days,
+        # Time period breakdowns
+        "downloads_7d": stats.downloads_7d,
+        "downloads_30d": stats.downloads_30d,
+        "downloads_365d": stats.downloads_365d,
+        "downloads_all_time": stats.downloads_all_time,
+        # Legacy field for requested period (use 30d as baseline)
+        "total_downloads": stats.downloads_30d if days == 30 else stats.downloads_7d if days == 7 else stats.downloads_all_time,
+        # Top episodes
+        "top_episodes": stats.top_episodes,
+        # Trend data
+        "downloads_by_day": stats.downloads_trend,
+        "weekly_downloads": stats.weekly_downloads,
+        # Breakdowns (not yet implemented in enhanced fetch)
+        "top_countries": stats.top_countries,
+        "top_apps": stats.top_apps,
+        # Metadata
+        "cached": True,  # All data comes from cache (3h TTL)
+        "last_updated": "Updates every 3 hours"
+    }
 
 
 @router.get("/episode/{episode_id}/downloads")
@@ -117,19 +195,19 @@ async def get_episode_downloads(
             detail="Not authorized to view analytics for this episode"
         )
     
-    # Get the episode's audio URL (OP3-prefixed)
+    # Get the episode's audio URL (OP3-prefixed, same as RSS feed)
     # OP3 tracks by the enclosure URL in the RSS feed
     if not episode.gcs_audio_path:
         raise HTTPException(status_code=404, detail="Episode has no audio file")
     
-    # Generate the same URL that would be in the RSS feed
+    # Generate the same URL that would be in the RSS feed (with OP3 prefix)
     from infrastructure.gcs import get_public_audio_url
     audio_url = get_public_audio_url(episode.gcs_audio_path, expiration_days=7)
     if not audio_url:
         raise HTTPException(status_code=500, detail="Failed to generate audio URL")
     
-    # Add OP3 prefix (same as RSS feed does)
-    op3_url = f"https://op3.dev/e/{audio_url}"
+    # Add self-hosted OP3 prefix (same as RSS feed does)
+    op3_url = f"https://analytics.podcastplusplus.com/e/{audio_url}"
     
     # Fetch stats from OP3
     start_date = datetime.utcnow() - timedelta(days=days)
@@ -163,6 +241,10 @@ async def get_podcast_episodes_summary(
     """
     Get download summary for multiple episodes in a podcast.
     
+    NOTE: This endpoint is currently deprecated in favor of the top_episodes data
+    returned from /analytics/podcast/{id}/downloads which uses the enhanced
+    OP3 API that doesn't require authentication for individual episodes.
+    
     Returns a list of episodes with their download stats.
     Useful for dashboard "Top Episodes" widgets.
     """
@@ -178,70 +260,14 @@ async def get_podcast_episodes_summary(
             detail="Not authorized to view analytics for this podcast"
         )
     
-    # Get recent published episodes
-    from api.models.podcast import EpisodeStatus
-    stmt = (
-        select(Episode)
-        .where(Episode.podcast_id == podcast_id)
-        .where(Episode.status == EpisodeStatus.published)
-        .where(Episode.gcs_audio_path.is_not(None))
-        .order_by(Episode.publish_at.desc())
-        .limit(limit)
-    )
-    episodes = session.exec(stmt).all()
+    # Return empty for now - frontend should use top_episodes from main analytics endpoint
+    # TODO: Remove this endpoint entirely after frontend migration complete
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"episodes-summary endpoint called (deprecated) - returning empty list")
     
-    if not episodes:
-        return {
-            "podcast_id": str(podcast_id),
-            "episodes": [],
-        }
-    
-    # Generate OP3 URLs for all episodes
-    from infrastructure.gcs import get_public_audio_url
-    episode_urls = []
-    episode_map = {}
-    
-    for episode in episodes:
-        if episode.gcs_audio_path:
-            audio_url = get_public_audio_url(episode.gcs_audio_path, expiration_days=7)
-            if audio_url:
-                op3_url = f"https://op3.dev/e/{audio_url}"
-                episode_urls.append(op3_url)
-                episode_map[op3_url] = episode
-    
-    # Fetch stats for all episodes in parallel
-    client = OP3Analytics()
-    try:
-        start_date = datetime.utcnow() - timedelta(days=30)
-        stats_list = await client.get_multiple_episodes(
-            episode_urls,
-            start_date=start_date,
-        )
-        
-        # Build response
-        results = []
-        for url, stats in zip(episode_urls, stats_list):
-            if isinstance(stats, Exception):
-                continue  # Skip failed requests
-            
-            episode = episode_map[url]
-            results.append({
-                "episode_id": str(episode.id),
-                "title": episode.title,
-                "episode_number": episode.episode_number,
-                "publish_date": episode.publish_at.isoformat() if episode.publish_at else None,
-                "downloads_24h": stats.downloads_24h,
-                "downloads_7d": stats.downloads_7d,
-                "downloads_30d": stats.downloads_30d,
-                "downloads_total": stats.downloads_total,
-            })
-        
-        # Sort by total downloads descending
-        results.sort(key=lambda x: x["downloads_total"], reverse=True)
-        
-        return {
-            "podcast_id": str(podcast_id),
-            "episodes": results,
-        }
-    finally:
-        await client.close()
+    return {
+        "podcast_id": str(podcast_id),
+        "episodes": [],
+        "note": "This endpoint is deprecated. Use /analytics/podcast/{id}/downloads which includes top_episodes data."
+    }

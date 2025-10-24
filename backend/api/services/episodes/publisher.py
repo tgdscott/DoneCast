@@ -95,7 +95,7 @@ def _ensure_publish_task_available() -> None:
     )
 
 
-def publish(session: Session, current_user, episode_id: UUID, derived_show_id: str, publish_state: Optional[str], auto_publish_iso: Optional[str]) -> Dict[str, Any]:
+def publish(session: Session, current_user, episode_id: UUID, derived_show_id: Optional[str], publish_state: Optional[str], auto_publish_iso: Optional[str]) -> Dict[str, Any]:
     _ensure_publish_task_available()
 
     ep = repo.get_episode_by_id(session, episode_id, user_id=current_user.id)
@@ -107,10 +107,27 @@ def publish(session: Session, current_user, episode_id: UUID, derived_show_id: s
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Episode is not processed yet")
 
+    # Spreaker is now OPTIONAL - allow RSS-only publishing
     spreaker_access_token = getattr(current_user, "spreaker_access_token", None)
-    if not spreaker_access_token:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=401, detail="User is not connected to Spreaker")
+    
+    # Skip Spreaker task if no token or no show ID (RSS-only mode)
+    if not spreaker_access_token or not derived_show_id:
+        logger.info(
+            "publish: RSS-only mode (spreaker_token=%s show_id=%s) episode_id=%s",
+            bool(spreaker_access_token),
+            derived_show_id,
+            episode_id
+        )
+        # Just update episode status and publish to RSS feed
+        from api.models.podcast import EpisodeStatus
+        ep.status = EpisodeStatus.published
+        session.add(ep)
+        session.commit()
+        session.refresh(ep)
+        return {
+            "job_id": "rss-only",
+            "message": "Episode published to RSS feed only (Spreaker not configured)"
+        }
 
     task_kwargs = {
         'episode_id': str(ep.id),

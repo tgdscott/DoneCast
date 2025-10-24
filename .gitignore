@@ -59,11 +59,7 @@ secrets/*.key
 *.crt
 gcs-signer-key.json
 
-# Databases and local storage
-*.sqlite3
-*.db
-database.db
-database.sqlite
+# Local storage (PostgreSQL only - no SQLite)
 
 # Logs and runtime files
 *.log
@@ -88,10 +84,13 @@ transcripts/
 # Docker
 .dockerignore
 docker-compose.override.yml
+docker-compose.yaml.disabled
 
 # Google Cloud and local SDKs
 .config/gcloud/
 gcloud-*
+cloud-sql-proxy.exe
+C:/Tools/
 
 # Build outputs, coverage, caches
 .cache/
@@ -99,6 +98,35 @@ dist/
 
 # Ignore environment for editors
 *.vsix
+
+# Development/debugging scripts (one-off, archive locally)
+tmp_*.py
+test_*.py  # Root level only, not tests/ directory
+check_*.py  # Root level only
+debug_*.py
+fix_*.py  # Root level only
+query_db.py
+get_podcast_id.py
+migrate_spreaker.py
+run_production_migrations.py
+run_rss_migrations.py
+*.sql  # Root level SQL scripts only, not backend/migrations/
+
+# Temporary PowerShell scripts
+*_fixes_*.ps1
+deploy-emergency-*.ps1
+restore-env-vars.ps1
+restart_api_*.ps1
+
+# Archive directory (keep locally for reference)
+_archive/
+.cleanup_analysis.md
+
+# Deployment/fix documentation (too many, keep locally)
+*_OCT*.md
+*_DEPLOYMENT_*.md
+CRITICAL_FIX_*.md
+CRITICAL_DEPLOYMENT_*.md
 
 # End of aggressive .gitignore
 

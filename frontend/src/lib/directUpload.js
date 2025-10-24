@@ -128,7 +128,7 @@ function uploadWithXmlHttpRequest(url, file, headers = {}, { onProgress, signal,
     };
 
     xhr.onerror = () => {
-      reject(new Error('Upload failed. Please try again.'));
+      reject(new Error('Network error during upload'));
     };
 
     xhr.onabort = () => {
@@ -143,8 +143,10 @@ function uploadWithXmlHttpRequest(url, file, headers = {}, { onProgress, signal,
         resolve(true);
         return;
       }
-      const message = `Upload failed with status ${xhr.status}`;
-      reject(new Error(message));
+      // Include status code in error for better error handling upstream
+      const error = new Error(`Upload failed with status ${xhr.status}`);
+      error.status = xhr.status;
+      reject(error);
     };
 
     try {
@@ -275,12 +277,14 @@ export async function uploadMediaDirect({
             reject(new Error('Failed to parse upload response'));
           }
         } else {
-          reject(new Error(`Upload failed with status ${xhr.status}`));
+          const error = new Error(`Upload failed with status ${xhr.status}`);
+          error.status = xhr.status;
+          reject(error);
         }
       });
 
       xhr.addEventListener('error', () => {
-        reject(new Error('Upload failed due to network error'));
+        reject(new Error('Network error during upload'));
       });
 
       xhr.addEventListener('abort', () => {

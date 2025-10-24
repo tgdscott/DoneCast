@@ -17,6 +17,7 @@ import TermsGate from '@/components/common/TermsGate.jsx';
 import AppAB from '@/ab/AppAB.jsx';
 import { useLayout } from '@/layout/LayoutContext.jsx';
 import BuildInfo from '@/components/admin/BuildInfo.jsx';
+import { initBugReportCapture } from '@/lib/bugReportCapture.js'; // NEW: Bug reporting
 
 // --- IMPORTANT ---
 // Admin is determined by backend role; no hard-coded emails.
@@ -32,6 +33,11 @@ export default function App() {
     // Podcast existence check always declared so hooks order stable
     const [podcastCheck, setPodcastCheck] = React.useState({ loading: true, count: 0, fetched: false });
     const { layoutKey } = useLayout();
+
+    // Initialize global bug report capture system (runs once at app start)
+    useEffect(() => {
+        initBugReportCapture();
+    }, []);
 
     // Handle navigation messages from popped-out AI Assistant window
     useEffect(() => {
@@ -231,29 +237,68 @@ export default function App() {
         const skipOnboarding = onboardingParam === '0' || params.get('skip_onboarding') === '1';
         const justVerified = params.get('verified') === '1';
         
+        // CRITICAL: Users with ZERO podcasts MUST complete onboarding - no escape routes
+        // This ensures every user creates at least one podcast before accessing dashboard
+        if (podcastCheck.count === 0 && !skipOnboarding) {
+            return <Onboarding />;
+        }
+        
         // Honor a persisted completion flag so users who chose to skip aren't forced back into onboarding
         let completedFlag = false;
         try { completedFlag = localStorage.getItem('ppp.onboarding.completed') === '1'; } catch {}
         
-        // New users (no podcasts) OR just verified their email OR explicitly requested onboarding
+        // Users with podcasts OR just verified their email OR explicitly requested onboarding
         // should go through onboarding BEFORE seeing ToS or dashboard
-        if (!skipOnboarding && !completedFlag && (podcastCheck.count === 0 || forceOnboarding || justVerified)) {
+        if (!skipOnboarding && !completedFlag && (forceOnboarding || justVerified)) {
             return <Onboarding />;
         }
         
         // If Terms require acceptance, gate here AFTER onboarding check
         const requiredVersion = user?.terms_version_required;
         const acceptedVersion = user?.terms_version_accepted;
-        if (requiredVersion && requiredVersion !== acceptedVersion) {
+        
+        // Debug logging to track Terms bypass issues
+        if (import.meta.env.DEV || requiredVersion) {
+            console.log('[TermsGate Check]', {
+                email: user?.email,
+                requiredVersion,
+                acceptedVersion,
+                match: requiredVersion === acceptedVersion,
+                shouldShowGate: !!(requiredVersion && requiredVersion !== acceptedVersion)
+            });
+        }
+        
+        // CRITICAL: Block access if terms not accepted (strict comparison)
+        // FIX (Oct 21): Only enforce if requiredVersion is actually set AND is a non-empty string
+        // This prevents null/undefined from blocking users when TERMS_VERSION isn't configured
+        if (requiredVersion && typeof requiredVersion === 'string' && requiredVersion.trim() !== '' && requiredVersion !== acceptedVersion) {
+            console.warn('[TermsGate] Blocking user - terms acceptance required:', user?.email);
             return <TermsGate />;
         }
         
-        // Admin gating: render Admin only after user is loaded and if checks pass
-        if (isAdmin(user)) {
+        // Admin gating: SUPERADMINS start on admin dashboard, regular admins start on user dashboard
+        // CRITICAL: Allow opt-in/opt-out via ?admin=1 (force admin view) or ?view=user (force user view)
+        const urlParams = new URLSearchParams(window.location.search);
+        const forceAdminView = urlParams.get('admin') === '1';
+        const forceUserView = urlParams.get('admin') === '0' || urlParams.get('view') === 'user';
+        
+        const isSuperAdmin = user?.role === 'superadmin';
+        const isRegularAdmin = user?.role === 'admin' || (user?.is_admin && !isSuperAdmin);
+        
+        // Superadmins: Default to admin dashboard (unless ?view=user)
+        if (isSuperAdmin && !forceUserView) {
             if (!adminCheck.checked) return <div className="flex items-center justify-center h-screen">Checking admin access...</div>;
             if (adminCheck.allowed) return <AdminDashboard />;
             // If not allowed, fall through to regular dashboard
         }
+        
+        // Regular admins: Default to user dashboard (unless ?admin=1)
+        if (isRegularAdmin && forceAdminView) {
+            if (!adminCheck.checked) return <div className="flex items-center justify-center h-screen">Checking admin access...</div>;
+            if (adminCheck.allowed) return <AdminDashboard />;
+            // If not allowed, fall through to regular dashboard
+        }
+        
         return layoutKey === 'ab' ? <AppAB token={token} /> : <PodcastPlusDashboard />;
     }
         return <div className="flex items-center justify-center h-screen">Loading...</div>;

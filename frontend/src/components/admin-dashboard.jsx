@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Headphones,
   Users,
@@ -38,6 +39,10 @@ import {
   ChevronRight,
   Database,
   Trash,
+  Bug,
+  Mail,
+  MailCheck,
+  ArrowLeft,
 } from "lucide-react";
 import React, { useState, useEffect } from "react";
 import { useAuth } from "@/AuthContext";
@@ -47,19 +52,30 @@ import { useToast } from '@/hooks/use-toast';
 import AdminFeatureToggles from '@/components/admin/AdminFeatureToggles.jsx';
 import AdminLayoutToggle from '@/components/admin/AdminLayoutToggle.jsx';
 import AdminTierEditor from '@/components/admin/AdminTierEditor.jsx';
+import AdminTierEditorV2 from '@/components/admin/AdminTierEditorV2.jsx';
 import AdminMusicLibrary from '@/components/admin/AdminMusicLibrary.jsx';
 import AdminLandingEditor from '@/components/admin/AdminLandingEditor.jsx';
 import { useResolvedTimezone } from '@/hooks/useResolvedTimezone';
 import { formatInTimezone } from '@/lib/timezone';
 
 export default function AdminDashboard() {
-  const { token, logout } = useAuth();
+  const { token, logout, user: authUser } = useAuth();
   const { toast } = useToast();
   const resolvedTimezone = useResolvedTimezone();
-  const [activeTab, setActiveTab] = useState("users")
+  
+  // Determine admin role (superadmin has full access, admin has restrictions)
+  const userRole = authUser?.role?.toLowerCase() || (authUser?.is_admin ? 'admin' : 'user');
+  const isSuperAdmin = userRole === 'superadmin';
+  const isAdmin = userRole === 'admin' || isSuperAdmin;
+  
+  // Check for ?tab= query parameter to auto-navigate to specific tab
+  const urlParams = new URLSearchParams(window.location.search);
+  const initialTab = urlParams.get('tab') || 'users';
+  const [activeTab, setActiveTab] = useState(initialTab)
   const [searchTerm, setSearchTerm] = useState("")
   const [tierFilter, setTierFilter] = useState("all")
   const [statusFilter, setStatusFilter] = useState("all")
+  const [verificationFilter, setVerificationFilter] = useState("all")  // NEW: Email verification filter
   const [currentPage, setCurrentPage] = useState(1)
   const [usersPerPage] = useState(10)
 
@@ -202,9 +218,10 @@ export default function AdminDashboard() {
   const navigationItems = [
     { id: "dashboard", label: "Dashboard Overview", icon: BarChart3 },
     { id: "users", label: "Users", icon: Users },
-  { id: "podcasts", label: "Podcasts", icon: Play },
+    { id: "podcasts", label: "Podcasts", icon: Play },
     { id: "analytics", label: "Analytics", icon: TrendingUp },
-  { id: "tiers", label: "Tier Editor", icon: SettingsIcon },
+    { id: "bugs", label: "Bug Reports", icon: Bug },
+    { id: "tiers", label: "Tier Editor", icon: SettingsIcon },
     { id: "music", label: "Music Library", icon: Headphones },
     { id: "landing", label: "Front Page Content", icon: MessageSquare },
     { id: "db", label: "DB Explorer", icon: Database },
@@ -213,7 +230,7 @@ export default function AdminDashboard() {
     { id: "help", label: "Help & Docs", icon: HelpCircle },
   ]
 
-  // Filter users based on search + tier + status
+  // Filter users based on search + tier + status + verification
   const filteredUsers = users.filter((user) => {
     const q = searchTerm.trim().toLowerCase();
     const email = (user.email || '').toLowerCase();
@@ -223,49 +240,152 @@ export default function AdminDashboard() {
     const matchesStatus = (statusFilter === 'all')
       || (statusFilter === 'active' && !!user.is_active)
       || ((statusFilter === 'inactive' || statusFilter === 'suspended') && !user.is_active);
-    return matchesSearch && matchesTier && matchesStatus;
+    const matchesVerification = (verificationFilter === 'all')
+      || (verificationFilter === 'verified' && !!user.email_verified)
+      || (verificationFilter === 'unverified' && !user.email_verified);
+    return matchesSearch && matchesTier && matchesStatus && matchesVerification;
   })
 
   const [savingIds, setSavingIds] = useState(new Set());
   const [saveErrors, setSaveErrors] = useState({});
   // Local edit buffer for date inputs so we don't PATCH on every keystroke
   const [editingDates, setEditingDates] = useState({});
+  
+  // Admin tier confirmation dialog state
+  const [adminTierDialog, setAdminTierDialog] = useState({ open: false, userId: null, userName: '', confirmText: '' });
 
   const updateUser = async (id, payload) => {
+    // Special handling for admin tier assignment - requires confirmation
+    if (payload.tier === 'admin') {
+      const targetUser = users.find(u => u.id === id);
+      if (!targetUser) return;
+      
+      setAdminTierDialog({
+        open: true,
+        userId: id,
+        userName: targetUser.email || 'this user',
+        confirmText: ''
+      });
+      return; // Will complete after dialog confirmation
+    }
+    
     setSavingIds(prev => new Set([...prev, id]));
     setSaveErrors(e => ({...e, [id]: null}));
     try {
       const api = makeApi(token);
       const updated = await api.patch(`/api/admin/users/${id}`, payload);
       setUsers(u => u.map(x => x.id === id ? updated : x));
+      
+      // Show success message for admin tier changes
+      if (payload.tier && payload.tier !== 'admin') {
+        try { toast({ title: 'Tier updated', description: `User tier changed to ${payload.tier}` }); } catch {}
+      }
     } catch(e) {
       setSaveErrors(errs => ({...errs, [id]: e.message || 'Network error'}));
+      toastApiError(e, 'Failed to update user');
     } finally {
       setSavingIds(prev => { const n = new Set(prev); n.delete(id); return n; });
     }
   }
+  
+  const confirmAdminTier = async () => {
+    if (adminTierDialog.confirmText.toLowerCase() !== 'yes') {
+      try { toast({ title: 'Confirmation required', description: 'You must type "yes" to confirm', variant: 'destructive' }); } catch {}
+      return;
+    }
+    
+    const { userId } = adminTierDialog;
+    setAdminTierDialog({ open: false, userId: null, userName: '', confirmText: '' });
+    
+    setSavingIds(prev => new Set([...prev, userId]));
+    setSaveErrors(e => ({...e, [userId]: null}));
+    try {
+      const api = makeApi(token);
+      const updated = await api.patch(`/api/admin/users/${userId}`, { tier: 'admin' });
+      setUsers(u => u.map(x => x.id === userId ? updated : x));
+      try { toast({ title: 'Admin access granted', description: 'User has been granted admin privileges' }); } catch {}
+    } catch(e) {
+      setSaveErrors(errs => ({...errs, [userId]: e.message || 'Network error'}));
+      toastApiError(e, 'Failed to grant admin access');
+    } finally {
+      setSavingIds(prev => { const n = new Set(prev); n.delete(userId); return n; });
+    }
+  }
 
-  const deleteUser = async (userId, userEmail) => {
-    const confirmEmail = window.prompt(
+  const prepareUserForDeletion = async (userId, userEmail, userIsActive, userTier) => {
+    // Check if user needs to be prepared (set to inactive + free tier)
+    const needsPrep = userIsActive || (userTier && userTier.toLowerCase() !== 'free');
+    
+    if (!needsPrep) {
+      // User is already inactive and free tier, proceed with deletion
+      deleteUser(userId, userEmail, false);
+      return;
+    }
+    
+    // Show warning that user needs to be prepared first
+    const prepConfirm = window.confirm(
+      `⚠️ SAFETY CHECK: This user must be INACTIVE and on FREE tier before deletion.\n\n` +
+      `User: ${userEmail}\n` +
+      `Current Status: ${userIsActive ? 'ACTIVE' : 'INACTIVE'}\n` +
+      `Current Tier: ${userTier || 'unknown'}\n\n` +
+      `Click OK to automatically set this user to INACTIVE + FREE tier, then you can delete them.\n` +
+      `Click Cancel to abort.`
+    );
+    
+    if (!prepConfirm) {
+      return; // User cancelled
+    }
+    
+    setSavingIds(prev => new Set([...prev, userId]));
+    try {
+      const api = makeApi(token);
+      
+      // Set user to inactive + free tier
+      const payload = {
+        is_active: false,
+        tier: 'free'
+      };
+      
+      await api.patch(`/api/admin/users/${userId}`, payload);
+      
+      // Update local state
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_active: false, tier: 'free' } : u));
+      
+      try {
+        toast({
+          title: 'User prepared for deletion',
+          description: `${userEmail} is now INACTIVE and on FREE tier. You can now delete this user.`,
+        });
+      } catch {}
+      
+    } catch (e) {
+      toastApiError(e, 'Failed to prepare user for deletion');
+    } finally {
+      setSavingIds(prev => { const n = new Set(prev); n.delete(userId); return n; });
+    }
+  };
+
+  const deleteUser = async (userId, userEmail, showPrep = true) => {
+    const confirmation = window.prompt(
       `⚠️ WARNING: This will PERMANENTLY delete this user and ALL their data!\n\n` +
+      `User: ${userEmail}\n\n` +
       `This includes:\n` +
       `• User account\n` +
       `• All podcasts\n` +
       `• All episodes\n` +
       `• All media items\n\n` +
-      `Type the user's email address to confirm deletion:\n` +
-      `${userEmail}`
+      `Type "yes" to confirm deletion:`
     );
 
-    if (!confirmEmail) {
+    if (!confirmation) {
       return; // User cancelled
     }
 
-    if (confirmEmail !== userEmail) {
+    if (confirmation.toLowerCase() !== 'yes') {
       try {
         toast({
           title: 'Confirmation failed',
-          description: `Email does not match. Expected "${userEmail}"`,
+          description: `Please type "yes" to confirm deletion.`,
           variant: 'destructive'
         });
       } catch {}
@@ -275,7 +395,11 @@ export default function AdminDashboard() {
     setSavingIds(prev => new Set([...prev, userId]));
     try {
       const api = makeApi(token);
-      const result = await api.del(`/api/admin/users/${userId}`, { confirm_email: confirmEmail });
+      console.log('[DEBUG] Deleting user:', userId, 'Email:', userEmail);
+      console.log('[DEBUG] Request URL:', `/api/admin/users/${userId}`);
+      console.log('[DEBUG] Request body:', { confirm_email: userEmail });
+      const result = await api.del(`/api/admin/users/${userId}`, { confirm_email: userEmail });
+      console.log('[DEBUG] Delete successful:', result);
       
       // Remove user from the list
       setUsers(u => u.filter(x => x.id !== userId));
@@ -303,7 +427,65 @@ export default function AdminDashboard() {
       }
       
     } catch(e) {
-      toastApiError(e, 'Failed to delete user');
+      console.error('[DEBUG] Delete failed:', e);
+      console.error('[DEBUG] Error status:', e?.status);
+      console.error('[DEBUG] Error detail:', e?.detail);
+      console.error('[DEBUG] Error message:', e?.message);
+      console.error('[DEBUG] Error object full:', JSON.stringify(e, null, 2));
+      // Check if error is about safety guardrails
+      const errorDetail = e?.detail || e?.message || e?.error?.detail || '';
+      const isSafetyError = errorDetail.includes('inactive') || errorDetail.includes('free tier');
+      
+      if (isSafetyError && showPrep) {
+        // Offer to prepare user for deletion
+        try {
+          toast({
+            title: 'Safety check failed',
+            description: errorDetail + ' Use the "Prepare for Deletion" button first.',
+            variant: 'destructive',
+            duration: 6000,
+          });
+        } catch {}
+      } else {
+        toastApiError(e, 'Failed to delete user');
+      }
+    } finally {
+      setSavingIds(prev => { const n = new Set(prev); n.delete(userId); return n; });
+    }
+  };
+
+  const verifyUserEmail = async (userId, userEmail) => {
+    const confirmed = window.confirm(
+      `Manually verify email for ${userEmail}?\n\n` +
+      `This will mark their email as verified, allowing them to access the platform.\n\n` +
+      `Use this for users who are having trouble with automated verification.`
+    );
+    
+    if (!confirmed) return;
+    
+    setSavingIds(prev => new Set([...prev, userId]));
+    try {
+      const api = makeApi(token);
+      const result = await api.post(`/api/admin/users/${userId}/verify-email`);
+      
+      // Update local user state
+      setUsers(prev => prev.map(u => 
+        u.id === userId ? { ...u, email_verified: true } : u
+      ));
+      
+      try {
+        toast({
+          title: 'Email verified',
+          description: result.already_verified 
+            ? `${userEmail} was already verified.`
+            : `${userEmail} has been manually verified.`,
+        });
+      } catch {}
+      
+      console.log('[ADMIN] Email verification result:', result);
+      
+    } catch (e) {
+      toastApiError(e, 'Failed to verify email');
     } finally {
       setSavingIds(prev => { const n = new Set(prev); n.delete(userId); return n; });
     }
@@ -388,6 +570,8 @@ export default function AdminDashboard() {
   if (t === 'creator') return <Badge className="bg-blue-100 text-blue-800">Creator</Badge>;
   if (t === 'free') return <Badge className="bg-gray-100 text-gray-800">Free</Badge>;
   if (t === 'unlimited') return <Badge className="bg-yellow-100 text-yellow-800">Unlimited</Badge>;
+  if (t === 'admin') return <Badge className="bg-orange-100 text-orange-800">Admin</Badge>;
+  if (t === 'superadmin') return <Badge className="bg-red-100 text-red-800">Super Admin</Badge>;
   return <Badge variant="secondary">{tier || '—'}</Badge>;
   }
 
@@ -444,6 +628,15 @@ export default function AdminDashboard() {
               <p className="text-xs text-gray-500">Platform Administrator</p>
             </div>
           </div>
+          <Button 
+            onClick={() => window.location.href = '/dashboard?view=user'} 
+            variant="ghost" 
+            size="sm" 
+            className="w-full justify-start text-gray-600 mb-2"
+          >
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to Dashboard
+          </Button>
           <Button onClick={logout} variant="ghost" size="sm" className="w-full justify-start text-gray-600">
             <LogOut className="w-4 h-4 mr-2" />
             Logout
@@ -462,7 +655,8 @@ export default function AdminDashboard() {
               <p className="text-gray-600 mt-1">
                 {activeTab === "users" && "Manage platform users and their accounts"}
                 {activeTab === "analytics" && "Monitor platform performance and user engagement"}
-                {activeTab === "tiers" && "Define features per tier (placeholder, not enforced yet)"}
+                {activeTab === "bugs" && "View and manage bug reports and user feedback from Mike"}
+                {activeTab === "tiers" && "Configure tier features, credits, and processing pipelines (database-driven)"}
                 {activeTab === "db" && "Browse & edit core tables (safe fields only)"}
                 {activeTab === "music" && "Curate previewable background tracks for onboarding/templates"}
                 {activeTab === "settings" && "Configure platform settings and features"}
@@ -586,6 +780,16 @@ export default function AdminDashboard() {
                             <SelectItem value="inactive">Inactive</SelectItem>
                           </SelectContent>
                         </Select>
+            <Select value={verificationFilter} onValueChange={setVerificationFilter}>
+                          <SelectTrigger className="w-32" aria-label="Filter by email verification">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Users</SelectItem>
+                            <SelectItem value="verified">Verified</SelectItem>
+                            <SelectItem value="unverified">Unverified</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
 
@@ -616,6 +820,7 @@ export default function AdminDashboard() {
                       <TableRow className="border-b border-gray-200">
                         <TableHead className="font-semibold text-gray-700">User</TableHead>
                         <TableHead className="font-semibold text-gray-700">Email</TableHead>
+                        <TableHead className="font-semibold text-gray-700">Verified</TableHead>
                         <TableHead className="font-semibold text-gray-700">Tier</TableHead>
                         <TableHead className="font-semibold text-gray-700">Status</TableHead>
                         <TableHead className="font-semibold text-gray-700">Episodes</TableHead>
@@ -645,19 +850,41 @@ export default function AdminDashboard() {
                               </div>
                             </TableCell>
                             <TableCell className="text-gray-600">{user.email}</TableCell>
+                            <TableCell>
+                              {user.email_verified ? (
+                                <div className="flex items-center text-green-600" title="Email verified">
+                                  <MailCheck className="w-4 h-4 mr-1" />
+                                  <span className="text-xs">Yes</span>
+                                </div>
+                              ) : (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 px-2 text-[10px] text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                                  disabled={savingIds.has(user.id)}
+                                  onClick={() => verifyUserEmail(user.id, user.email)}
+                                  title="Manually verify this user's email"
+                                >
+                                  <Mail className="w-3 h-3 mr-1" />
+                                  Verify
+                                </Button>
+                              )}
+                            </TableCell>
                             <TableCell>{getTierBadge(user.tier || 'free')}</TableCell>
                             <TableCell>{getStatusBadge(user.is_active ? 'Active' : 'Inactive')}</TableCell>
                             <TableCell className="text-gray-600">{user.episode_count}</TableCell>
                             <TableCell className="text-gray-600">{user.last_activity ? user.last_activity.slice(0,10) : '—'}</TableCell>
                             <TableCell>
                               <div className="flex items-center space-x-2">
-                <Select defaultValue={user.tier || 'free'} onValueChange={val => updateUser(user.id,{tier: val})} disabled={savingIds.has(user.id)}>
+                <Select defaultValue={user.tier || 'free'} onValueChange={val => updateUser(user.id,{tier: val})} disabled={savingIds.has(user.id) || (user.tier === 'superadmin')}>
                                   <SelectTrigger className="w-24 h-8 text-xs" aria-label={`Tier for ${displayName}`}><SelectValue /></SelectTrigger>
                                   <SelectContent>
                                     <SelectItem value="free">Free</SelectItem>
                                     <SelectItem value="creator">Creator</SelectItem>
                                     <SelectItem value="pro">Pro</SelectItem>
                   <SelectItem value="unlimited">Unlimited</SelectItem>
+                                    {isSuperAdmin && <SelectItem value="admin">Admin</SelectItem>}
+                                    {user.tier === 'superadmin' && <SelectItem value="superadmin" disabled>Super Admin</SelectItem>}
                                   </SelectContent>
                                 </Select>
                                 <Switch aria-label={`Active status for ${displayName}`} checked={!!user.is_active} disabled={savingIds.has(user.id)} onCheckedChange={v => updateUser(user.id,{is_active: v})} />
@@ -739,17 +966,38 @@ export default function AdminDashboard() {
                                       updateUser(user.id,{ subscription_expires_at: '' });
                                     }}>Clear</button>
                                 </div>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
-                                  disabled={savingIds.has(user.id)}
-                                  onClick={() => deleteUser(user.id, user.email)}
-                                  title="Delete user and all their data (permanent)"
-                                  aria-label={`Delete user ${displayName}`}
-                                >
-                                  <Trash className="h-4 w-4" />
-                                </Button>
+                                {(user.is_active || (user.tier && user.tier.toLowerCase() !== 'free')) && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 px-2 text-[10px] text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                                    disabled={savingIds.has(user.id)}
+                                    onClick={() => prepareUserForDeletion(user.id, user.email, user.is_active, user.tier)}
+                                    title="Set user to INACTIVE + FREE tier (required before deletion)"
+                                  >
+                                    Prep
+                                  </Button>
+                                )}
+                                {isSuperAdmin && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                    disabled={savingIds.has(user.id)}
+                                    onClick={() => prepareUserForDeletion(user.id, user.email, user.is_active, user.tier)}
+                                    title={
+                                      (user.is_active || (user.tier && user.tier.toLowerCase() !== 'free'))
+                                        ? "User must be INACTIVE + FREE tier to delete. Click to prepare first."
+                                        : "Delete user and all their data (permanent)"
+                                    }
+                                    aria-label={`Delete user ${displayName}`}
+                                  >
+                                    <Trash className="h-4 w-4" />
+                                  </Button>
+                                )}
+                                {!isSuperAdmin && isAdmin && (
+                                  <span className="text-[10px] text-gray-500 italic px-2" title="Only superadmin can delete users">Delete restricted</span>
+                                )}
                                 {savingIds.has(user.id) && <span className="text-[10px] text-gray-400">Saving…</span>}
                                 {saveErrors[user.id] && <span className="text-[10px] text-red-500" title={saveErrors[user.id]}>Err</span>}
                               </div>
@@ -768,9 +1016,6 @@ export default function AdminDashboard() {
                   )}
 
                   {/* Pagination */}
-                      {activeTab === 'tiers' && (
-                        <AdminTierEditor />
-                      )}
                   <div
                     className="flex items-center justify-between px-6 py-4 border-t border-gray-200">
                     <div className="text-sm text-gray-600">
@@ -803,6 +1048,16 @@ export default function AdminDashboard() {
               </Card>
             </div>
           )}
+          {activeTab === 'tiers' && (
+            <div className="space-y-4">
+              <AdminTierEditorV2 />
+              <div className="mt-8 pt-8 border-t">
+                <div className="text-sm text-gray-500 mb-4">Legacy Editor (Deprecated)</div>
+                <AdminTierEditor />
+              </div>
+            </div>
+          )}
+
           {activeTab === 'music' && (
             <div className="space-y-4">
               <AdminMusicLibrary />
@@ -818,8 +1073,13 @@ export default function AdminDashboard() {
           {/* DB Explorer Tab */}
           {activeTab === "db" && (
             <div className="space-y-4">
-              <DbExplorer />
+              <DbExplorer readOnly={!isSuperAdmin} />
             </div>
+          )}
+
+          {/* Bug Reports Tab (Admin) */}
+          {activeTab === "bugs" && (
+            <AdminBugsTab token={token} />
           )}
 
           {/* Podcasts Tab (Admin) */}
@@ -1396,7 +1656,13 @@ export default function AdminDashboard() {
                 </CardHeader>
                 <CardContent className="space-y-6">
                   {adminSettings ? (
-                    <AdminFeatureToggles token={token} initial={adminSettings} onSaved={(s)=>setAdminSettings(s)} />
+                    <AdminFeatureToggles 
+                      token={token} 
+                      initial={adminSettings} 
+                      onSaved={(s)=>setAdminSettings(s)} 
+                      readOnly={!isSuperAdmin}
+                      allowMaintenanceToggle={true}
+                    />
                   ) : (
                     <p className="text-sm text-gray-500">Loading admin settings…</p>
                   )}
@@ -1522,7 +1788,7 @@ export default function AdminDashboard() {
           )}
 
           {/* Other tabs placeholder */}
-          {!["users", "analytics", "settings", "dashboard", "music"].includes(activeTab) && (
+          {!["users", "analytics", "settings", "dashboard", "music", "tiers", "landing", "db", "podcasts", "bugs", "billing", "help"].includes(activeTab) && (
             <div className="text-center py-12">
               <h3 className="text-xl font-semibold text-gray-600 mb-2">
                 {navigationItems.find((item) => item.id === activeTab)?.label} Coming Soon
@@ -1532,6 +1798,524 @@ export default function AdminDashboard() {
           )}
         </main>
       </div>
+      
+      {/* Admin Tier Confirmation Dialog */}
+      <Dialog open={adminTierDialog.open} onOpenChange={(open) => !open && setAdminTierDialog({ open: false, userId: null, userName: '', confirmText: '' })}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Grant Admin Access</DialogTitle>
+            <DialogDescription>
+              You are about to grant admin privileges to <strong>{adminTierDialog.userName}</strong>.
+              <br /><br />
+              Admin users will have access to:
+              <ul className="list-disc list-inside mt-2 text-sm space-y-1">
+                <li>User management (view, edit, deactivate)</li>
+                <li>Analytics dashboard</li>
+                <li>DB Explorer (read-only)</li>
+                <li>Settings (limited to maintenance mode)</li>
+              </ul>
+              <br />
+              <strong>Admin users CANNOT:</strong>
+              <ul className="list-disc list-inside mt-2 text-sm space-y-1">
+                <li>Delete users</li>
+                <li>Edit settings (except maintenance mode)</li>
+                <li>Modify database records</li>
+              </ul>
+              <br />
+              Type <strong>yes</strong> to confirm.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="my-4">
+            <Input
+              placeholder="Type 'yes' to confirm"
+              value={adminTierDialog.confirmText}
+              onChange={(e) => setAdminTierDialog(prev => ({ ...prev, confirmText: e.target.value }))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && adminTierDialog.confirmText.toLowerCase() === 'yes') {
+                  confirmAdminTier();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAdminTierDialog({ open: false, userId: null, userName: '', confirmText: '' })}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={confirmAdminTier}
+              disabled={adminTierDialog.confirmText.toLowerCase() !== 'yes'}
+              className="bg-orange-600 hover:bg-orange-700"
+            >
+              Grant Admin Access
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function AdminBugsTab({ token }) {
+  const { toast } = useToast();
+  const [feedback, setFeedback] = React.useState([]);
+  const [stats, setStats] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [filterType, setFilterType] = React.useState('all');
+  const [filterSeverity, setFilterSeverity] = React.useState('all');
+  const [filterStatus, setFilterStatus] = React.useState('new');
+  const [selectedFeedback, setSelectedFeedback] = React.useState(null);
+  const [detailsLoading, setDetailsLoading] = React.useState(false);
+  const [adminData, setAdminData] = React.useState({});
+  const [savingAdmin, setSavingAdmin] = React.useState(false);
+
+  const loadFeedback = async () => {
+    if (!token) return;
+    setLoading(true);
+    try {
+      const api = makeApi(token);
+      const params = new URLSearchParams();
+      if (filterType !== 'all') params.set('type', filterType);
+      if (filterSeverity !== 'all') params.set('severity', filterSeverity);
+      if (filterStatus !== 'all') params.set('status', filterStatus);
+      
+      const [feedbackData, statsData] = await Promise.all([
+        api.get(`/api/admin/feedback?${params.toString()}`),
+        api.get('/api/admin/feedback/stats'),
+      ]);
+      
+      setFeedback(feedbackData);
+      setStats(statsData);
+    } catch (err) {
+      console.error('Failed to load feedback:', err);
+      toast({ variant: 'destructive', title: 'Failed to load bug reports', description: err.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadFeedbackDetail = async (feedbackId) => {
+    setDetailsLoading(true);
+    try {
+      const api = makeApi(token);
+      const detail = await api.get(`/api/admin/feedback/${feedbackId}/detail`);
+      setSelectedFeedback(detail);
+      setAdminData({
+        admin_notes: detail.admin_notes || '',
+        assigned_to: detail.assigned_to || '',
+        priority: detail.priority || 'medium',
+        related_issues: detail.related_issues || '',
+        fix_version: detail.fix_version || '',
+        status: detail.status || 'new'
+      });
+    } catch (err) {
+      toast({ variant: 'destructive', title: 'Failed to load details', description: err.message });
+    } finally {
+      setDetailsLoading(false);
+    }
+  };
+
+  React.useEffect(() => {
+    loadFeedback();
+  }, [token, filterType, filterSeverity, filterStatus]);
+
+  const updateStatus = async (feedbackId, newStatus) => {
+    try {
+      const api = makeApi(token);
+      await api.patch(`/api/admin/feedback/${feedbackId}/status?status=${newStatus}`);
+      toast({ title: 'Status updated', description: `Marked as ${newStatus}` });
+      loadFeedback(); // Reload
+    } catch (err) {
+      toast({ variant: 'destructive', title: 'Failed to update status', description: err.message });
+    }
+  };
+
+  const saveAdminData = async (feedbackId) => {
+    setSavingAdmin(true);
+    try {
+      const api = makeApi(token);
+      // Filter out empty strings - backend expects null for optional fields
+      const payload = Object.fromEntries(
+        Object.entries(adminData).filter(([_, v]) => v !== '')
+      );
+      console.log('[Admin Data Save] Sending:', payload); // DEBUG
+      await api.patch(`/api/admin/feedback/${feedbackId}/admin-data`, payload);
+      toast({ title: 'Saved', description: 'Admin data updated successfully' });
+      loadFeedback(); // Reload list
+      if (selectedFeedback?.id === feedbackId) {
+        loadFeedbackDetail(feedbackId); // Reload details
+      }
+    } catch (err) {
+      console.error('[Admin Data Save] Error:', err); // DEBUG
+      const errorMsg = err.detail || err.message || 'Unknown error';
+      toast({ variant: 'destructive', title: 'Failed to save', description: errorMsg });
+    } finally {
+      setSavingAdmin(false);
+    }
+  };
+
+  const getSeverityColor = (severity) => {
+    switch (severity) {
+      case 'critical': return 'bg-red-100 text-red-800';
+      case 'high': return 'bg-orange-100 text-orange-800';
+      case 'medium': return 'bg-yellow-100 text-yellow-800';
+      case 'low': return 'bg-blue-100 text-blue-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getTypeIcon = (type) => {
+    switch (type) {
+      case 'bug': return <Bug className="h-4 w-4 text-red-600" />;
+      case 'feature_request': return <Zap className="h-4 w-4 text-blue-600" />;
+      default: return <MessageSquare className="h-4 w-4 text-gray-600" />;
+    }
+  };
+
+  // Generate short bug ID from UUID (e.g., "BUG-ef781d48")
+  const getBugId = (uuid) => {
+    const shortId = uuid.split('-')[0];
+    return `BUG-${shortId}`;
+  };
+
+  if (loading) return <div className="text-center p-8">Loading bug reports...</div>;
+
+  return (
+    <div className="space-y-6">
+      {/* Stats Overview - Bugs vs Feature Requests */}
+      {stats && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-2xl font-bold text-red-600">{stats.bugs}</div>
+              <div className="text-xs text-gray-600">Bugs</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-2xl font-bold text-blue-600">{stats.feature_requests}</div>
+              <div className="text-xs text-gray-600">Feature Requests</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-2xl font-bold text-orange-600">{stats.critical}</div>
+              <div className="text-xs text-gray-600">Critical</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-2xl font-bold text-yellow-600">{stats.unresolved}</div>
+              <div className="text-xs text-gray-600">Unresolved</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-2xl font-bold text-green-600">{stats.resolved}</div>
+              <div className="text-xs text-gray-600">Resolved</div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="flex gap-4 items-center">
+        <Select value={filterType} onValueChange={setFilterType}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="Type" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Types</SelectItem>
+            <SelectItem value="bug">Bugs</SelectItem>
+            <SelectItem value="feature_request">Features</SelectItem>
+            <SelectItem value="question">Questions</SelectItem>
+            <SelectItem value="complaint">Complaints</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select value={filterSeverity} onValueChange={setFilterSeverity}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="Severity" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Severities</SelectItem>
+            <SelectItem value="critical">Critical</SelectItem>
+            <SelectItem value="high">High</SelectItem>
+            <SelectItem value="medium">Medium</SelectItem>
+            <SelectItem value="low">Low</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select value={filterStatus} onValueChange={setFilterStatus}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Statuses</SelectItem>
+            <SelectItem value="new">New</SelectItem>
+            <SelectItem value="acknowledged">Acknowledged</SelectItem>
+            <SelectItem value="investigating">Investigating</SelectItem>
+            <SelectItem value="resolved">Resolved</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Feedback List */}
+      <div className="space-y-4">
+        {feedback.length === 0 ? (
+          <Card>
+            <CardContent className="p-8 text-center text-gray-500">
+              No bug reports found with current filters.
+            </CardContent>
+          </Card>
+        ) : (
+          feedback.map((item) => (
+            <Card key={item.id} className="hover:shadow-md transition-shadow">
+              <CardContent className="p-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 space-y-2">
+                    <div className="flex items-center gap-2">
+                      {getTypeIcon(item.type)}
+                      <Badge variant="outline" className="font-mono text-xs">{getBugId(item.id)}</Badge>
+                      <h3 className="font-semibold text-lg">{item.title}</h3>
+                      <Badge className={getSeverityColor(item.severity)}>
+                        {item.severity}
+                      </Badge>
+                      <Badge variant="outline">{item.status}</Badge>
+                      {item.priority && item.priority !== 'medium' && (
+                        <Badge variant="secondary">P: {item.priority}</Badge>
+                      )}
+                    </div>
+                    
+                    <p className="text-gray-700">{item.description}</p>
+                    
+                    <div className="grid grid-cols-2 gap-2 text-sm text-gray-600">
+                      <div><strong>User:</strong> {item.user_email} ({item.user_name})</div>
+                      <div><strong>Date:</strong> {new Date(item.created_at).toLocaleDateString()}</div>
+                      {item.assigned_to && <div><strong>Assigned:</strong> {item.assigned_to}</div>}
+                      {item.fix_version && <div><strong>Fix Version:</strong> {item.fix_version}</div>}
+                      {item.page_url && <div><strong>Page:</strong> {item.page_url}</div>}
+                      {item.category && <div><strong>Category:</strong> {item.category}</div>}
+                      {item.browser_info && <div className="col-span-2"><strong>Browser:</strong> {item.browser_info}</div>}
+                      {item.error_logs && <div className="col-span-2"><strong>Error:</strong> <code className="text-xs bg-gray-100 px-1">{item.error_logs}</code></div>}
+                    </div>
+
+                    {/* Technical Details - Collapsible */}
+                    {(selectedFeedback?.id === item.id) && (
+                      <div className="mt-4 space-y-4 border-t pt-4">
+                        {detailsLoading ? (
+                          <div className="text-center text-gray-500">Loading details...</div>
+                        ) : (
+                          <>
+                            {/* Technical Context Section */}
+                            {(selectedFeedback.user_agent || selectedFeedback.console_errors || selectedFeedback.network_errors) && (
+                              <details className="border rounded-lg p-3">
+                                <summary className="cursor-pointer font-semibold text-sm">
+                                  🔍 Technical Context
+                                </summary>
+                                <div className="mt-3 space-y-2 text-sm">
+                                  {selectedFeedback.user_agent && (
+                                    <div><strong>User Agent:</strong> <code className="text-xs bg-gray-100 px-1">{selectedFeedback.user_agent}</code></div>
+                                  )}
+                                  {selectedFeedback.viewport_size && (
+                                    <div><strong>Viewport:</strong> {selectedFeedback.viewport_size}</div>
+                                  )}
+                                  {selectedFeedback.console_errors && Array.isArray(selectedFeedback.console_errors) && selectedFeedback.console_errors.length > 0 && (
+                                    <div>
+                                      <strong>Console Errors:</strong>
+                                      <ul className="list-disc list-inside mt-1 space-y-1">
+                                        {selectedFeedback.console_errors.slice(0, 5).map((err, idx) => (
+                                          <li key={idx} className="text-xs text-red-600 font-mono bg-red-50 p-1">{err}</li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                  {selectedFeedback.network_errors && Array.isArray(selectedFeedback.network_errors) && selectedFeedback.network_errors.length > 0 && (
+                                    <div>
+                                      <strong>Network Errors:</strong>
+                                      <ul className="list-disc list-inside mt-1 space-y-1">
+                                        {selectedFeedback.network_errors.slice(0, 5).map((err, idx) => (
+                                          <li key={idx} className="text-xs text-orange-600 font-mono bg-orange-50 p-1">{err.url || err}</li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                  {selectedFeedback.local_storage_data && (
+                                    <div>
+                                      <strong>Local Storage:</strong>
+                                      <pre className="text-xs bg-gray-100 p-2 mt-1 rounded overflow-auto max-h-32">
+                                        {selectedFeedback.local_storage_data}
+                                      </pre>
+                                    </div>
+                                  )}
+                                </div>
+                              </details>
+                            )}
+
+                            {/* Reproduction Steps */}
+                            {selectedFeedback.reproduction_steps && (
+                              <details className="border rounded-lg p-3">
+                                <summary className="cursor-pointer font-semibold text-sm">
+                                  📝 Reproduction Steps
+                                </summary>
+                                <div className="mt-3 whitespace-pre-wrap text-sm bg-gray-50 p-2 rounded">
+                                  {selectedFeedback.reproduction_steps}
+                                </div>
+                              </details>
+                            )}
+
+                            {/* Status History */}
+                            {selectedFeedback.status_history && Array.isArray(selectedFeedback.status_history) && selectedFeedback.status_history.length > 0 && (
+                              <details className="border rounded-lg p-3">
+                                <summary className="cursor-pointer font-semibold text-sm">
+                                  📅 Status History
+                                </summary>
+                                <div className="mt-3 space-y-2">
+                                  {selectedFeedback.status_history.map((entry, idx) => (
+                                    <div key={idx} className="text-xs border-l-2 border-blue-400 pl-3 py-1">
+                                      <div className="text-gray-500">{new Date(entry.timestamp).toLocaleString()}</div>
+                                      <div><strong>{entry.user}</strong></div>
+                                      <div className="text-gray-700">
+                                        {Object.entries(entry.changes).map(([field, change]) => (
+                                          <div key={field}>{field}: {change}</div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </details>
+                            )}
+
+                            {/* Admin Workflow Section */}
+                            <div className="border rounded-lg p-4 bg-blue-50">
+                              <h4 className="font-semibold mb-3 text-sm">🛠️ Admin Workflow</h4>
+                              <div className="space-y-3">
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <Label className="text-xs">Priority</Label>
+                                    <Select
+                                      value={adminData.priority}
+                                      onValueChange={(val) => setAdminData({...adminData, priority: val})}
+                                    >
+                                      <SelectTrigger className="h-8">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="low">Low</SelectItem>
+                                        <SelectItem value="medium">Medium</SelectItem>
+                                        <SelectItem value="high">High</SelectItem>
+                                        <SelectItem value="critical">Critical</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs">Status</Label>
+                                    <Select
+                                      value={adminData.status}
+                                      onValueChange={(val) => setAdminData({...adminData, status: val})}
+                                    >
+                                      <SelectTrigger className="h-8">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="new">New</SelectItem>
+                                        <SelectItem value="acknowledged">Acknowledged</SelectItem>
+                                        <SelectItem value="investigating">Investigating</SelectItem>
+                                        <SelectItem value="resolved">Resolved</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs">Assigned To</Label>
+                                    <Input
+                                      className="h-8"
+                                      value={adminData.assigned_to}
+                                      onChange={(e) => setAdminData({...adminData, assigned_to: e.target.value})}
+                                      placeholder="Email or name"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs">Fix Version</Label>
+                                    <Input
+                                      className="h-8"
+                                      value={adminData.fix_version}
+                                      onChange={(e) => setAdminData({...adminData, fix_version: e.target.value})}
+                                      placeholder="e.g., v1.2.3"
+                                    />
+                                  </div>
+                                </div>
+                                <div>
+                                  <Label className="text-xs">Related Issues (comma-separated)</Label>
+                                  <Input
+                                    className="h-8"
+                                    value={adminData.related_issues}
+                                    onChange={(e) => setAdminData({...adminData, related_issues: e.target.value})}
+                                    placeholder="e.g., BUG-ef781d48, BUG-a09f069c"
+                                  />
+                                  <p className="text-xs text-gray-500 mt-1">Use bug IDs shown at top of each report</p>
+                                </div>
+                                <div>
+                                  <Label className="text-xs">Admin Notes</Label>
+                                  <Textarea
+                                    className="h-24"
+                                    value={adminData.admin_notes}
+                                    onChange={(e) => setAdminData({...adminData, admin_notes: e.target.value})}
+                                    placeholder="Internal notes about investigation, workarounds, etc..."
+                                  />
+                                </div>
+                                <Button
+                                  size="sm"
+                                  onClick={() => saveAdminData(selectedFeedback.id)}
+                                  disabled={savingAdmin}
+                                >
+                                  {savingAdmin ? 'Saving...' : 'Save Admin Data'}
+                                </Button>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="flex flex-col gap-2">
+                    <Button
+                      size="sm"
+                      variant={selectedFeedback?.id === item.id ? "secondary" : "outline"}
+                      onClick={() => {
+                        if (selectedFeedback?.id === item.id) {
+                          setSelectedFeedback(null);
+                        } else {
+                          loadFeedbackDetail(item.id);
+                        }
+                      }}
+                    >
+                      {selectedFeedback?.id === item.id ? 'Hide' : 'Details'}
+                    </Button>
+                    {item.status !== 'resolved' && (
+                      <>
+                        <Button size="sm" variant="outline" onClick={() => updateStatus(item.id, 'acknowledged')}>
+                          Acknowledge
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => updateStatus(item.id, 'investigating')}>
+                          Investigating
+                        </Button>
+                        <Button size="sm" variant="default" onClick={() => updateStatus(item.id, 'resolved')}>
+                          Resolve
+                        </Button>
+                      </>
+                    )}
+                    {item.status === 'resolved' && (
+                      <Button size="sm" variant="outline" onClick={() => updateStatus(item.id, 'new')}>
+                        Reopen
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))
+        )}
+      </div>
     </div>
   );
 }
@@ -1539,6 +2323,7 @@ export default function AdminDashboard() {
 function AdminPodcastsTab() {
   const { token } = useAuth();
   const { toast } = useToast();
+  const resolvedTimezone = useResolvedTimezone(); // Add timezone hook
   const [rows, setRows] = React.useState([]);
   const [total, setTotal] = React.useState(0);
   const [limit, setLimit] = React.useState(25);
@@ -1552,12 +2337,15 @@ function AdminPodcastsTab() {
     try {
       const api = makeApi(token);
       const qs = new URLSearchParams({ limit: String(limit), offset: String(newOffset), ...(qOwner ? { owner_email: qOwner } : {}) });
+      console.log('[AdminPodcastsTab] Loading podcasts:', `/api/admin/podcasts?${qs.toString()}`);
       const data = await api.get(`/api/admin/podcasts?${qs.toString()}`);
+      console.log('[AdminPodcastsTab] Response:', data);
       setRows(data.items || []);
       setTotal(Number(data.total) || 0);
       setOffset(Number(data.offset) || 0);
     } catch (e) {
-      try { toast({ title: 'Failed to load podcasts', description: e?.message || 'Error' }); } catch {}
+      console.error('[AdminPodcastsTab] Load failed:', e);
+      try { toast({ title: 'Failed to load podcasts', description: e?.detail || e?.message || 'Error', variant: 'destructive' }); } catch {}
     } finally {
       setLoading(false);
     }
@@ -1607,8 +2395,20 @@ function AdminPodcastsTab() {
                   <TableCell className="font-medium">{row.name || '—'}</TableCell>
                   <TableCell>{row.owner_email || '—'}</TableCell>
                   <TableCell>{row.episode_count ?? 0}</TableCell>
-                  <TableCell>{row.created_at ? formatInTimezone(row.created_at, { dateStyle: 'medium', timeStyle: 'short' }, resolvedTimezone) : '—'}</TableCell>
-                  <TableCell>{row.last_episode_at ? formatInTimezone(row.last_episode_at, { dateStyle: 'medium', timeStyle: 'short' }, resolvedTimezone) : '—'}</TableCell>
+                  <TableCell>
+                    {row.created_at ? (
+                      resolvedTimezone ? 
+                        formatInTimezone(row.created_at, { dateStyle: 'medium', timeStyle: 'short' }, resolvedTimezone) : 
+                        new Date(row.created_at).toLocaleString()
+                    ) : '—'}
+                  </TableCell>
+                  <TableCell>
+                    {row.last_episode_at ? (
+                      resolvedTimezone ? 
+                        formatInTimezone(row.last_episode_at, { dateStyle: 'medium', timeStyle: 'short' }, resolvedTimezone) : 
+                        new Date(row.last_episode_at).toLocaleString()
+                    ) : '—'}
+                  </TableCell>
                   <TableCell className="text-right space-x-2">
                     <Button size="sm" variant="outline" onClick={()=>openManager(row.id)}>Open in Podcast Manager</Button>
                     <Button size="sm" variant="secondary" onClick={()=>copyId(row.id)}>Copy ID</Button>
@@ -1793,3 +2593,4 @@ function AdminHelpTab() {
     </div>
   );
 }
+

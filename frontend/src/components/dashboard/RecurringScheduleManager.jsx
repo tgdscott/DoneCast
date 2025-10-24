@@ -253,7 +253,7 @@ export default function RecurringScheduleManager({
 
   if (!templateId || templateId === 'new' || isNewTemplate) {
     return (
-      <Card className="shadow-sm">
+      <Card className="shadow-sm" data-tour="template-schedule" data-tour-id="template-publish-schedule">
         <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <CardTitle>Recurring Publish Schedule</CardTitle>
@@ -286,7 +286,7 @@ export default function RecurringScheduleManager({
   }
 
   return (
-    <Card className="shadow-sm">
+    <Card className="shadow-sm" data-tour="template-schedule" data-tour-id="template-publish-schedule">
       <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <CardTitle>

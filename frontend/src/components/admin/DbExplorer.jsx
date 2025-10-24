@@ -3,7 +3,7 @@ import { useAuth } from '@/AuthContext';
 import { makeApi } from '@/lib/apiClient';
 import { useToast } from '@/hooks/use-toast';
 
-export default function DbExplorer() {
+export default function DbExplorer({ readOnly = false }) {
   const { token } = useAuth();
   const api = token ? makeApi(token) : null;
   const { toast } = useToast();
@@ -104,7 +104,11 @@ export default function DbExplorer() {
 
   return (
     <div className="space-y-4">
-      {/* DB Explorer enabled by default for admin; edits allowed */}
+      {readOnly && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm text-yellow-800">
+          <strong>Read-Only Mode:</strong> You can view database records but cannot edit or delete them. Only superadmin can modify the database.
+        </div>
+      )}
       <div className="flex items-center gap-2 flex-wrap">
         {tables.map(t=> (
           <button key={t} onClick={()=> loadTable(t,0)} className={`px-3 py-1 rounded text-sm border ${t===activeTable? 'bg-blue-600 text-white':'bg-white hover:bg-blue-50'}`}>{t}</button>
@@ -118,20 +122,22 @@ export default function DbExplorer() {
             <thead>
               <tr className="bg-gray-100">
                 {columns.map(c=> <th key={c} className="text-left px-2 py-1 font-medium">{c}</th>)}
-                <th className="px-2 py-1"/> 
+                {!readOnly && <th className="px-2 py-1"/>}
               </tr>
             </thead>
             <tbody>
               {rows.map(r=> (
                 <tr key={r.id || JSON.stringify(r)} className="border-t hover:bg-gray-50">
                   {columns.map(c=> <td key={c} className="px-2 py-1 whitespace-nowrap max-w-[240px] truncate" title={r[c]}>{r[c]===null? 'NULL': String(r[c])}</td>)}
-                  <td className="px-2 py-1 flex gap-1">
-                    <button onClick={()=> openEdit(r)} className={`hover:underline text-blue-600`}>edit</button>
-                    <button onClick={()=> setDeleteConfirm(r)} className={`hover:underline text-red-600`}>del</button>
-                  </td>
+                  {!readOnly && (
+                    <td className="px-2 py-1 flex gap-1">
+                      <button onClick={()=> openEdit(r)} className={`hover:underline text-blue-600`}>edit</button>
+                      <button onClick={()=> setDeleteConfirm(r)} className={`hover:underline text-red-600`}>del</button>
+                    </td>
+                  )}
                 </tr>
               ))}
-              {rows.length===0 && <tr><td colSpan={columns.length+1} className="px-2 py-4 text-center text-gray-500">No rows</td></tr>}
+              {rows.length===0 && <tr><td colSpan={columns.length+(readOnly?0:1)} className="px-2 py-4 text-center text-gray-500">No rows</td></tr>}
             </tbody>
           </table>
         </div>

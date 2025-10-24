@@ -69,24 +69,32 @@ def _get_signing_credentials():
         except Exception as e:
             logger.warning(f"Failed to load signing credentials from GCS_SIGNER_KEY_JSON: {e}")
     
-    # Try loading from Secret Manager directly (fallback for Cloud Run)
-    try:
-        from google.cloud import secretmanager
-        
-        client = secretmanager.SecretManagerServiceClient()
-        project_id = os.getenv("GCP_PROJECT", "podcast612")
-        secret_name = f"projects/{project_id}/secrets/gcs-signer-key/versions/latest"
-        
-        response = client.access_secret_version(request={"name": secret_name})
-        key_json = response.payload.data.decode("UTF-8")
-        key_dict = json.loads(key_json)
-        
-        credentials = service_account.Credentials.from_service_account_info(key_dict)
-        _SIGNING_CREDENTIALS = credentials
-        logger.info("Loaded signing credentials from Secret Manager")
-        return credentials
-    except Exception as e:
-        logger.warning(f"Failed to load signing credentials from Secret Manager: {e}")
+    # Try loading from Secret Manager directly (fallback for Cloud Run only)
+    # Skip Secret Manager in local dev to avoid CORS issues with presigned URLs
+    app_env = os.getenv("APP_ENV", os.getenv("ENV", "")).lower()
+    is_local_dev = app_env in ("local", "development", "dev")
+    
+    if not is_local_dev:
+        try:
+            from google.cloud import secretmanager
+            
+            client = secretmanager.SecretManagerServiceClient()
+            project_id = os.getenv("GCP_PROJECT", "podcast612")
+            secret_name = f"projects/{project_id}/secrets/gcs-signer-key/versions/latest"
+            
+            response = client.access_secret_version(request={"name": secret_name})
+            key_json = response.payload.data.decode("UTF-8")
+            key_dict = json.loads(key_json)
+            
+            credentials = service_account.Credentials.from_service_account_info(key_dict)
+            _SIGNING_CREDENTIALS = credentials
+            logger.info("Loaded signing credentials from Secret Manager")
+            return credentials
+        except Exception as e:
+            logger.warning(f"Failed to load signing credentials from Secret Manager: {e}")
+            return None
+    else:
+        logger.info("Skipping Secret Manager in local development - presigned uploads disabled")
         return None
 
 
@@ -384,7 +392,7 @@ def _generate_signed_url(
 
 
 def get_signed_url(bucket_name: str, key: str, expiration: int = 3600) -> Optional[str]:
-    """Generate a signed URL for a GCS object, with optional local fallback."""
+    """Generate a signed URL for a GCS object, with fallback to public URL or local media."""
 
     expiration = max(1, int(expiration or 0))
     try:
@@ -407,6 +415,13 @@ def get_signed_url(bucket_name: str, key: str, expiration: int = 3600) -> Option
 
     if url:
         return url
+    
+    # If signed URL generation returned None (no private key in Cloud Run),
+    # fall back to public GCS URL (works if bucket is publicly readable)
+    if not _is_dev_env():
+        public_url = f"https://storage.googleapis.com/{bucket_name}/{key}"
+        logger.info("No private key available; using public URL for GET (bucket is publicly readable)")
+        return public_url
 
     return _local_media_url(key)
 
@@ -500,9 +515,25 @@ def upload_fileobj(
     key: str,
     fileobj: IO,
     content_type: Optional[str] = None,
+    allow_fallback: bool = True,
     **kwargs,
 ) -> str:
-    """Upload a file-like object to GCS, with a local development fallback."""
+    """Upload a file-like object to GCS, with optional local development fallback.
+    
+    Args:
+        bucket_name: GCS bucket name
+        key: Object key/path within bucket
+        fileobj: File-like object to upload
+        content_type: MIME type for the object
+        allow_fallback: If False, raise exception instead of falling back to local storage.
+                       Set to False for production-critical uploads that MUST be in GCS.
+    
+    Returns:
+        GCS URL (gs://...) or local path if fallback is allowed and triggered
+        
+    Raises:
+        RuntimeError: If GCS upload fails and allow_fallback=False
+    """
 
     client = _get_gcs_client()
     if client:
@@ -513,8 +544,8 @@ def upload_fileobj(
             logger.info("Uploaded to gs://%s/%s", bucket_name, key)
             return f"gs://{bucket_name}/{key}"
         except Exception as exc:
-            if not _should_fallback(bucket_name, exc):
-                raise
+            if not allow_fallback or not _should_fallback(bucket_name, exc):
+                raise RuntimeError(f"GCS upload failed for gs://{bucket_name}/{key}: {exc}") from exc
             logger.warning(
                 "GCS upload failed for gs://%s/%s: %s -- writing to local media",
                 bucket_name,
@@ -526,7 +557,7 @@ def upload_fileobj(
                     fileobj.seek(0)
             except Exception:
                 pass
-    elif not _should_fallback(bucket_name):
+    elif not allow_fallback or not _should_fallback(bucket_name):
         raise RuntimeError("GCS client unavailable and fallback is disabled")
 
     return _write_local_stream(bucket_name, key, fileobj)
@@ -537,8 +568,24 @@ def upload_bytes(
     key: str,
     data: bytes,
     content_type: Optional[str] = None,
+    allow_fallback: bool = True,
 ) -> str:
-    """Upload raw bytes to GCS, with a local development fallback."""
+    """Upload raw bytes to GCS, with optional local development fallback.
+    
+    Args:
+        bucket_name: GCS bucket name
+        key: Object key/path within bucket
+        data: Bytes to upload
+        content_type: MIME type for the object
+        allow_fallback: If False, raise exception instead of falling back to local storage.
+                       Set to False for production-critical uploads that MUST be in GCS.
+    
+    Returns:
+        GCS URL (gs://...) or local path if fallback is allowed and triggered
+        
+    Raises:
+        RuntimeError: If GCS upload fails and allow_fallback=False
+    """
 
     client = _get_gcs_client()
     if client:
@@ -549,15 +596,15 @@ def upload_bytes(
             logger.info("Uploaded to gs://%s/%s", bucket_name, key)
             return f"gs://{bucket_name}/{key}"
         except Exception as exc:
-            if not _should_fallback(bucket_name, exc):
-                raise
+            if not allow_fallback or not _should_fallback(bucket_name, exc):
+                raise RuntimeError(f"GCS upload failed for gs://{bucket_name}/{key}: {exc}") from exc
             logger.warning(
                 "GCS upload failed for gs://%s/%s: %s -- writing to local media",
                 bucket_name,
                 key,
                 exc,
             )
-    elif not _should_fallback(bucket_name):
+    elif not allow_fallback or not _should_fallback(bucket_name):
         raise RuntimeError("GCS client unavailable and fallback is disabled")
 
     return _write_local_bytes(bucket_name, key, data)

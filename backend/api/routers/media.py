@@ -279,7 +279,10 @@ async def upload_media_files(
             if category == MediaCategory.main_content:
                 # Use Cloud Tasks to schedule transcription
                 from infrastructure.tasks_client import enqueue_http_task  # type: ignore
-                enqueue_http_task("/api/tasks/transcribe", {"filename": safe_filename})
+                enqueue_http_task("/api/tasks/transcribe", {
+                    "filename": safe_filename,
+                    "user_id": str(current_user.id)  # Pass user_id for tier-based routing
+                })
         except Exception:
             # Non-fatal; upload should still succeed
             pass
@@ -748,11 +751,15 @@ async def register_upload(
             # Trigger transcription if requested and category is main_content
             if request.notify_when_ready and category == MediaCategory.main_content:
                 try:
-                    # Use Cloud Tasks to schedule transcription
+                    # Schedule transcription - pass user_id so transcription service knows which API to call
+                    # Pro users → Auphonic transcription API
+                    # Free/Creator/Unlimited → AssemblyAI transcription API
                     from infrastructure.tasks_client import enqueue_http_task  # type: ignore
-                    # Pass the full GCS path so transcription service can download it
-                    enqueue_http_task("/api/tasks/transcribe", {"filename": gcs_url})
-                    log.info(f"Scheduled transcription for media_id={media_item.id}, gcs_path={gcs_url}")
+                    enqueue_http_task("/api/tasks/transcribe", {
+                        "filename": gcs_url,
+                        "user_id": str(current_user.id)
+                    })
+                    log.info(f"Scheduled transcription for media_id={media_item.id}, user_id={current_user.id}, gcs_path={gcs_url}")
                 except Exception as trans_err:
                     log.warning(f"Failed to schedule transcription: {trans_err}")
         

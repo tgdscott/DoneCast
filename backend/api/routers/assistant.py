@@ -226,6 +226,66 @@ def _log_to_google_sheets(feedback: FeedbackSubmission, user: User) -> Optional[
         return None
 
 
+def _detect_bug_report(message: str, context: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    """Detect if user is reporting a bug and extract details.
+    
+    Returns dict with keys: type, title, description, severity if bug detected, else None.
+    """
+    message_lower = message.lower()
+    
+    # Bug keywords that indicate a problem report
+    bug_keywords = ['bug', 'broken', 'not working', 'doesnt work', "doesn't work", 'error', 'issue', 
+                   'problem', 'glitch', 'crash', 'fail', 'wrong', 'cant', "can't", 'unable to']
+    
+    # Check if message contains bug keywords
+    has_bug_keyword = any(keyword in message_lower for keyword in bug_keywords)
+    
+    if not has_bug_keyword:
+        return None
+    
+    # Check for severity indicators
+    severity = "medium"
+    if any(word in message_lower for word in ['critical', 'urgent', 'major', 'serious', 'completely broken']):
+        severity = "critical"
+    elif any(word in message_lower for word in ['high', 'important', 'very', 'really']):
+        severity = "high"
+    elif any(word in message_lower for word in ['minor', 'small', 'little', 'cosmetic']):
+        severity = "low"
+    
+    # Extract category from context or keywords
+    category = None
+    if context and context.get('page'):
+        page = context.get('page', '')
+        if '/dashboard' in page:
+            category = 'dashboard'
+        elif '/creator' in page or '/episode' in page:
+            category = 'editor'
+        elif '/media' in page or 'upload' in message_lower:
+            category = 'upload'
+        elif '/publish' in page or 'publish' in message_lower:
+            category = 'publish'
+    
+    # Infer type (mostly bugs, but sometimes feature requests)
+    feedback_type = "bug"
+    if any(word in message_lower for word in ['feature', 'wish', 'could you', 'would be nice', 'suggestion']):
+        feedback_type = "feature_request"
+    elif any(word in message_lower for word in ['confused', 'dont understand', "don't understand", 'unclear']):
+        feedback_type = "question"
+    
+    # Generate title (first sentence or first 100 chars)
+    title = message.split('.')[0].split('!')[0].split('?')[0]
+    if len(title) > 100:
+        title = title[:97] + "..."
+    
+    return {
+        'type': feedback_type,
+        'title': title.strip(),
+        'description': message,
+        'severity': severity,
+        'category': category,
+    }
+
+
 def _get_or_create_conversation(
     session: Session,
     user_id: UUID,
@@ -267,8 +327,45 @@ def _get_or_create_conversation(
     return conversation
 
 
-def _get_system_prompt(user: User, conversation: AssistantConversation, guidance: Optional[AssistantGuidance] = None) -> str:
+def _get_system_prompt(user: User, conversation: AssistantConversation, guidance: Optional[AssistantGuidance] = None, db_session: Optional[Session] = None) -> str:
     """Generate context-aware system prompt for the AI assistant."""
+    
+    # Get user statistics if session provided
+    podcast_count = 0
+    episode_count = 0
+    published_count = 0
+    
+    if db_session:
+        try:
+            from api.models.podcast import Podcast, Episode
+            
+            # Count user's podcasts
+            podcast_stmt = select(Podcast).where(Podcast.user_id == user.id)
+            podcast_count = len(db_session.exec(podcast_stmt).all())
+            
+            # Count user's total episodes
+            episode_stmt = select(Episode).join(Podcast).where(Podcast.user_id == user.id)
+            all_episodes = db_session.exec(episode_stmt).all()
+            episode_count = len(all_episodes)
+            
+            # Count published episodes
+            published_count = len([ep for ep in all_episodes if ep.status == 'published'])
+        except Exception as e:
+            log.warning(f"Failed to fetch user statistics: {e}")
+    
+    # Determine user experience level based on stats
+    if episode_count == 0:
+        experience_level = "NEW USER - No episodes created yet"
+        user_context = "This user is brand new and just getting started. Focus on onboarding help and first steps."
+    elif episode_count < 5:
+        experience_level = "BEGINNER - Learning the platform"
+        user_context = "This user has created a few episodes and is learning. Provide clear guidance and celebrate progress."
+    elif episode_count < 20:
+        experience_level = "INTERMEDIATE - Regular user"
+        user_context = "This user knows the basics. Provide intermediate tips and help optimize their workflow."
+    else:
+        experience_level = "EXPERIENCED - Power user"
+        user_context = "This user is experienced with the platform. Focus on advanced features and efficiency."
     
     base_prompt = f"""You are a helpful AI assistant for Podcast Plus Plus, a podcast creation and editing platform.
 
@@ -279,6 +376,13 @@ CRITICAL RULES - READ CAREFULLY:
 3. Do NOT provide general podcast advice unrelated to this platform
 4. Do NOT help with other podcast platforms or tools
 5. Stay focused on: uploading, editing, publishing, troubleshooting, and using features of THIS platform
+
+**ABSOLUTELY NO HALLUCINATION - THIS IS CRITICAL:**
+- NEVER make up features, capabilities, or information that isn't explicitly documented below
+- If you DON'T KNOW something, say "I'm not sure about that" or "I don't have that information"
+- If asked about something not in your knowledge base, say: "I don't have information about that feature. Let me know if there's something else I can help with!"
+- ACCURACY is more important than being helpful - wrong information damages trust
+- Better to admit you don't know than to guess or make assumptions
 
 **MEMORY & CONTEXT - CRITICAL:**
 6. You have access to the FULL conversation history below
@@ -292,6 +396,18 @@ User Information:
 - Email: {user.email}
 - Tier: {user.tier or 'free'}
 - Account created: {user.created_at.strftime('%Y-%m-%d') if user.created_at else 'recently'}
+- Podcasts: {podcast_count}
+- Total Episodes: {episode_count} ({published_count} published)
+- Experience Level: {experience_level}
+
+**CRITICAL - TAILOR YOUR RESPONSES:**
+{user_context}
+DO NOT suggest basic onboarding steps to experienced users with many episodes!
+DO NOT assume they haven't done anything if they have {episode_count} episodes!
+
+**CRITICAL - BRANDING:**
+ALWAYS refer to the platform as "Podcast Plus Plus" or "Plus Plus"
+NEVER use "Podcast++" - this is incorrect branding and confuses users with URLs
 
 Your Name & Personality:
 - Your name is Mike Czech (short for "Mic Check" - get it?)
@@ -319,8 +435,6 @@ Your Capabilities (ONLY for Podcast Plus Plus):
 Platform Knowledge (Podcast Plus Plus specific):
 - Users upload audio files (recordings or pre-recorded shows)
 - Transcription happens automatically (2-3 min per hour of audio)
-- "Intern" feature detects spoken editing commands in audio
-- "Flubber" removes filler words and awkward pauses
 - Templates define show structure (intro, content, outro, music)
 - Episodes are assembled from templates + audio + edits
 - Publishing goes to Spreaker (and then to all platforms)
@@ -328,6 +442,47 @@ Platform Knowledge (Podcast Plus Plus specific):
 - AI features: title/description generation, transcript editing
 - Media library stores uploads with 14-day expiration
 - Episodes published to Spreaker are kept for 7 days with clean audio for editing
+
+**CRITICAL - Flubber Feature (READ CAREFULLY - DO NOT CONFUSE WITH FILLER WORD REMOVAL):**
+- Flubber is a MANUAL, USER-TRIGGERED editing tool
+- User says the word "flubber" OUT LOUD during recording when they make a mistake
+- System detects the spoken keyword "flubber" in the transcript
+- Cuts out several seconds (typically 5-30 seconds) BEFORE the "flubber" marker
+- This removes the mistake section (mispronunciations, wrong names, stumbled sentences)
+- Example: "Welcome to episode 42 with John... wait no... flubber... Welcome to episode 42 with Sarah Johnson"
+  → System detects "flubber" at 0:15, cuts from 0:10 to 0:15, final audio is seamless
+- **FLUBBER IS NOT:**
+  - ❌ NOT automatic filler word removal ("um", "uh", "like", "you know")
+  - ❌ NOT AI-powered mistake detection
+  - ❌ NOT continuous throughout the episode
+  - ❌ NOT the same as Auphonic's automatic filler word cutting
+  - ❌ NOT silence removal or breath removal
+- **IF USER ASKS ABOUT FILLER WORD REMOVAL:**
+  - Say: "We don't currently have automatic filler word removal for all tiers"
+  - Say: "Pro tier users get Auphonic processing which includes automatic filler word removal"
+  - Say: "Flubber is different - it's for marking specific mistakes you want cut out"
+  - Do NOT claim Flubber removes filler words - it does not
+
+**Intern Feature (Spoken Editing Commands):**
+- Detects spoken editing commands in audio (e.g., "insert intro here", "add music here")
+- Analyzes transcript for user intentions during recording
+- Marks timestamps where user wants edits made
+- Assembler uses these markers to splice audio at specified points
+
+**Recent Features & Updates:**
+When users ask "What's new?" or "Have you added any features lately?":
+- Admit you don't have access to a real-time changelog yet
+- Say: "I don't have access to a live changelog yet, but that's coming soon! For now, you can check with the dev team or look for announcements."
+- Do NOT make up or guess what features have been added recently
+- Do NOT hallucinate feature lists or update dates
+
+**Subscription Tiers & Transcription:**
+- **Pro tier ($79/mo):** Uses Auphonic for transcription AND professional audio processing (denoise, leveling, EQ, automatic filler word removal)
+- **Free tier (30 min):** Uses AssemblyAI for transcription, custom processing (Flubber, Intern, manual cleanup)
+- **Creator tier ($39/mo):** Uses AssemblyAI for transcription, custom processing
+- **Unlimited tier (custom):** Uses AssemblyAI for transcription, custom processing
+- ONLY Pro tier gets Auphonic's automatic filler word removal
+- All other tiers use custom processing pipeline (NOT automatic filler word removal)
 
 **About Spreaker (IMPORTANT - How to discuss it):**
 - Spreaker is a hosting service from iHeartRadio that stores your podcast files
@@ -339,22 +494,41 @@ Platform Knowledge (Podcast Plus Plus specific):
 - Keep it transparent: Don't oversell Spreaker, keep focus on OUR platform doing the real work
 - If they want alternatives: "Spreaker is currently our distribution partner. We chose them because they're reliable and have a great free tier."
 
-Navigation & UI Structure (IMPORTANT - BE SPECIFIC):
-Dashboard has these main sections:
-- "Media" tab → All uploaded files (intros, outros, background music, episode audio)
-  - Upload button is HERE to add new audio files
-  - Shows list of all your uploaded media
-- "Episodes" tab → Your podcast episodes (draft, processing, published)
-  - Create/edit episode descriptions
-  - Publish episodes to Spreaker
-- "Templates" tab → Episode templates (structure with intro/outro/music)
-  - Create templates to reuse for multiple episodes
-- "Settings" → Account settings, podcast details, API connections
-- Record button (microphone icon) → Record audio directly in browser
+Navigation & UI Structure (CRITICAL - BE ACCURATE):
+**Dashboard Homepage Layout:**
+- **Top-right header:** User email, Admin Panel link (if admin), Logout button
+- **Center area:** "Create Episode" section with big purple "Record or Upload Audio" button (mic icon)
+- **Center area:** "Assemble New Episode" button (library icon) - only shows when you have ready audio
+- **Center area:** "Recent Activity" stats (episodes published, scheduled, downloads, top episodes)
+- **Right sidebar:** "Quick Tools" - clickable boxes that take you to different sections
 
-To upload audio: Go to "Media" tab, click "Upload Audio" button
-To publish: Go to "Episodes" tab, find your episode, click "Publish"
-To create template: Go to "Templates" tab, click "Create Template"
+**CRITICAL: There are NO TABS. The dashboard is a single-page app that switches between full-page views.**
+
+**Quick Tools Section (Right Sidebar):**
+Each button opens a FULL-PAGE view (not a tab, replaces the entire dashboard):
+- **Podcasts** → Podcast management page (view/edit your shows)
+- **Templates** → Template management page (view/create/edit episode templates)
+- **Media** → Media library page (all uploaded files: intros, outros, music)
+- **Episodes** → Episode history page (all episodes: draft, processing, published)
+- **Analytics** → Analytics dashboard (download stats, listener data)
+- **Subscription** → Billing page (subscription management, upgrade/downgrade)
+- **Settings** → Settings page (account details, API connections)
+- **Website Builder** → Website builder page (create podcast website)
+- **Guides & Help** → Help resources
+- **Admin Panel** → Admin dashboard (only for admins)
+
+**How Navigation Works:**
+- You're on the dashboard homepage (what you see in screenshot)
+- Click a Quick Tools button → full page changes to that view
+- Each view has a "Back to Dashboard" button or arrow to return
+
+**Where to find things:**
+- Upload audio: Click big "Record or Upload Audio" button in center
+- View all media: Click "Media" in Quick Tools (right sidebar)
+- See all episodes: Click "Episodes" in Quick Tools (right sidebar)
+- Create template: Click "Templates" in Quick Tools (right sidebar)
+- Publish episode: Click "Episodes" in Quick Tools, find episode, click Publish
+- Settings: Click "Settings" in Quick Tools (right sidebar)
 
 CRITICAL: Visual Highlighting & Navigation - HOW TO USE IT:
 When user asks WHERE something is (location/navigation questions):
@@ -488,6 +662,29 @@ Guidelines:
 - When guiding, use numbered steps and check if they succeeded before moving on
 - If you detect user is stuck (same page for 10+ min, repeated errors), proactively offer help
 
+🐛 BUG REPORTING & TRACKING (CRITICAL - YOUR PROMISE TO USERS):
+You tell users: "Found a bug? Just tell me and I'll report it!"
+
+**HOW IT WORKS:**
+- When users report bugs/issues, the backend AUTOMATICALLY submits them to our bug tracker
+- You don't need to do anything special - just respond helpfully
+- If user says "X is broken" or "Y doesn't work" or "error with Z"
+  → System detects it and creates a bug report automatically
+  → You'll see confirmation that bug was logged
+  → Reassure them it's been reported
+
+**WHAT YOU SHOULD DO:**
+1. Acknowledge the problem empathetically ("That's frustrating!")
+2. Ask clarifying questions if needed (What happened? Expected behavior? Screenshot?)
+3. If you know a workaround, share it immediately
+4. Confirm the bug has been logged
+5. Example: "That shouldn't happen! I've logged this for the dev team. Can you tell me exactly what you clicked before it broke? In the meantime, try [workaround]."
+
+**WHEN TO REFERENCE KNOWN BUGS:**
+- If user reports something that sounds familiar, say: "We're tracking that issue - the team is working on it"
+- Don't make up bug numbers or statuses - only reference what you know for certain
+- If unsure, just say: "I've logged it and the team will investigate"
+
 CRITICAL: When answering WHERE/HOW TO FIND questions:
 - ALWAYS use HIGHLIGHT syntax at the end of your response
 - Be SPECIFIC about which tab/section they need
@@ -529,6 +726,61 @@ async def chat_with_assistant(
     guidance_stmt = select(AssistantGuidance).where(AssistantGuidance.user_id == current_user.id)
     guidance = session.exec(guidance_stmt).first()
     
+    # Check if user is reporting a bug and auto-submit it
+    bug_detected = _detect_bug_report(request.message, request.context)
+    bug_submission_id = None
+    if bug_detected:
+        try:
+            # Create feedback submission automatically
+            feedback = FeedbackSubmission(
+                user_id=current_user.id,
+                conversation_id=conversation.id,
+                type=bug_detected.get('type', 'bug'),
+                title=bug_detected.get('title', 'Bug report'),
+                description=bug_detected.get('description', request.message),
+                page_url=request.context.get("page") if request.context else None,
+                user_action=request.context.get("action") if request.context else None,
+                browser_info=request.context.get("browser") if request.context else None,
+                error_logs=request.context.get("error") if request.context else None,
+                severity=bug_detected.get('severity', 'medium'),
+                category=bug_detected.get('category'),
+            )
+            session.add(feedback)
+            session.flush()  # Get ID without committing yet
+            bug_submission_id = str(feedback.id)
+            log.info(f"Bug report created: {bug_submission_id} - {feedback.title}")
+            
+            # Send email for critical bugs (non-blocking)
+            if feedback.severity == "critical":
+                try:
+                    _send_critical_bug_email(feedback, current_user)
+                    feedback.admin_notified = True
+                    log.info(f"Critical bug email sent for {bug_submission_id}")
+                except Exception as e:
+                    log.warning(f"Failed to send critical bug email: {e}")
+                    # Continue anyway - email is nice-to-have
+            
+            # Log to Google Sheets (non-blocking, usually disabled)
+            if GOOGLE_SHEETS_ENABLED:
+                try:
+                    row_num = _log_to_google_sheets(feedback, current_user)
+                    if row_num:
+                        feedback.google_sheet_row = row_num
+                        log.info(f"Bug logged to Google Sheets row {row_num}")
+                except Exception as e:
+                    log.warning(f"Failed to log to Google Sheets: {e}")
+                    # Continue anyway - sheets logging is optional
+            
+            log.info(f"Auto-submitted bug report from chat: {feedback.title} (ID: {feedback.id})")
+        except Exception as e:
+            log.error(f"Failed to auto-submit bug: {e}", exc_info=True)
+            # Don't let bug submission failure crash the chat
+            bug_submission_id = None
+            try:
+                session.rollback()  # Clean up failed transaction
+            except Exception:
+                pass
+    
     # Save user message
     user_message = AssistantMessage(
         conversation_id=conversation.id,
@@ -539,7 +791,7 @@ async def chat_with_assistant(
         error_context=request.context.get("error") if request.context else None,
     )
     session.add(user_message)
-    session.commit()
+    session.commit()  # Commit both bug submission and user message
     
     try:
         # Build conversation history for context
@@ -552,7 +804,7 @@ async def chat_with_assistant(
         history_messages = list(reversed(session.exec(history_stmt).all()))
         
         # Build full prompt with system instructions + conversation history + new message
-        system_prompt = _get_system_prompt(current_user, conversation, guidance)
+        system_prompt = _get_system_prompt(current_user, conversation, guidance, session)
         
         # Add onboarding context if present
         if request.context and request.context.get('onboarding_mode'):
@@ -677,7 +929,7 @@ async def chat_with_assistant(
         response_content = gemini_generate(
             conversation_text,
             temperature=0.7,
-            max_output_tokens=2500,  # Allows detailed explanations and multi-step guidance
+            max_output_tokens=4000,  # Allows comprehensive, detailed explanations especially for UI/navigation questions
         )
         
         # Save assistant response
@@ -759,6 +1011,13 @@ async def chat_with_assistant(
             except Exception as e:
                 log.warning(f"Failed to parse highlight: {e}")
         
+        # Add bug submission acknowledgment if detected
+        if bug_submission_id and bug_detected:
+            clean_response += f"\n\n✅ **Bug Report Submitted** (#{bug_submission_id[:8]}...)\n"
+            clean_response += "I've logged this issue for the development team. They'll look into it!"
+            if bug_detected.get('severity') == 'critical':
+                clean_response += " This is marked as CRITICAL so it's high priority."
+        
         # Generate quick suggestions based on context
         suggestions = None
         lower_response = clean_response.lower()
@@ -794,6 +1053,26 @@ async def submit_feedback(
 ):
     """Submit feedback or bug report via AI assistant."""
     
+    # Extract context fields (old format for backward compatibility)
+    context = request.context or {}
+    page_url = context.get("page")
+    user_action = context.get("action")
+    browser_info = context.get("browser")
+    error_logs = context.get("errors")
+    
+    # Extract new auto-captured technical context
+    user_agent = context.get("user_agent")
+    viewport_size = context.get("viewport_size")
+    console_errors = context.get("console_errors")  # Array
+    network_errors = context.get("network_errors")  # Array
+    local_storage_data = context.get("local_storage_data")
+    reproduction_steps = context.get("reproduction_steps")
+    
+    # Convert arrays to JSON strings for storage
+    import json
+    console_errors_json = json.dumps(console_errors) if console_errors else None
+    network_errors_json = json.dumps(network_errors) if network_errors else None
+    
     # Create feedback submission
     feedback = FeedbackSubmission(
         user_id=current_user.id,
@@ -801,11 +1080,21 @@ async def submit_feedback(
         type=request.type,
         title=request.title,
         description=request.description,
-        page_url=request.context.get("page") if request.context else None,
-        user_action=request.context.get("action") if request.context else None,
-        browser_info=request.context.get("browser") if request.context else None,
-        error_logs=request.context.get("errors") if request.context else None,
         severity="critical" if request.type == "bug" else "medium",
+        
+        # Legacy context fields
+        page_url=page_url,
+        user_action=user_action,
+        browser_info=browser_info,
+        error_logs=error_logs,
+        
+        # New auto-captured context fields
+        user_agent=user_agent,
+        viewport_size=viewport_size,
+        console_errors=console_errors_json,
+        network_errors=network_errors_json,
+        local_storage_data=local_storage_data,
+        reproduction_steps=reproduction_steps,
     )
     
     session.add(feedback)
@@ -835,6 +1124,52 @@ async def submit_feedback(
     log.info(f"Feedback submitted: {feedback.type} - {feedback.title} by {current_user.email}")
     
     return {"id": str(feedback.id), "message": "Feedback submitted successfully"}
+
+
+@router.get("/bugs")
+async def get_known_bugs(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """Get list of known bugs and their status.
+    
+    This allows Mike (AI assistant) to reference known issues when users report problems.
+    Returns recent bugs and their resolution status.
+    """
+    from sqlmodel import desc, or_
+    
+    # Get recent bugs (last 30 days) that are not resolved
+    stmt = (
+        select(FeedbackSubmission)
+        .where(or_(
+            FeedbackSubmission.type == "bug",
+            FeedbackSubmission.severity.in_(["critical", "high"])  # type: ignore
+        ))
+        .where(FeedbackSubmission.status != "resolved")
+        .order_by(desc(FeedbackSubmission.created_at))  # type: ignore
+        .limit(50)
+    )
+    bugs = session.exec(stmt).all()
+    
+    # Format for AI consumption
+    bug_list = []
+    for bug in bugs:
+        bug_list.append({
+            "id": str(bug.id)[:8],  # Short ID
+            "title": bug.title,
+            "description": bug.description[:200] + "..." if len(bug.description) > 200 else bug.description,
+            "severity": bug.severity,
+            "status": bug.status,
+            "category": bug.category,
+            "page": bug.page_url,
+            "reported": bug.created_at.strftime("%Y-%m-%d") if bug.created_at else None,
+        })
+    
+    return {
+        "total_bugs": len(bug_list),
+        "bugs": bug_list,
+        "message": "Known bugs and issues currently being tracked"
+    }
 
 
 @router.post("/guidance/toggle")

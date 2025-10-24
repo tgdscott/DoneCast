@@ -79,8 +79,8 @@ The platform combines:
 ### 🤖 AI-Powered Features
 - **Automatic Transcription** - Assembly AI integration with speaker diarization
 - **Content Suggestions** - AI-generated titles, descriptions, and tags
-- **Intern Mode** - Detect spoken editing commands ("cut that out")
-- **Flubber Detection** - Automatic removal of filler words and pauses
+- **Intern Mode** - Detect spoken editing commands ("insert intro here", "cut this out")
+- **Flubber Detection** - Mark mistakes while recording by saying "flubber"
 - **AI Assistant "Mike"** - Context-aware help system
 
 ### 🎵 Audio Processing

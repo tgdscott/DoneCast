@@ -198,7 +198,12 @@ def get_answer_for_topic(
     if mode == "shownote":
         guidance = "Produce concise bullet point show notes summarizing the key takeaways."
     else:
-        guidance = "Draft a friendly, natural spoken reply that sounds conversational and human. Write 2-3 complete sentences that flow naturally when read aloud. Do NOT use bullet points, lists, or formatting - just natural speech."
+        guidance = (
+            "Write ONLY natural spoken sentences as if you're speaking directly into a microphone. "
+            "NO bullet points, NO lists, NO formatting, NO asterisks, NO dashes, NO markdown. "
+            "Just 2-3 conversational sentences that answer the question clearly and naturally. "
+            "Imagine you're having a conversation with a friend - keep it simple and speakable."
+        )
 
     prompt = dedent(
         f"""

@@ -60,9 +60,9 @@ class PodcastBase(SQLModel):
     # iTunes/RSS settings
     is_explicit: bool = Field(default=False, description="Podcast contains explicit content (iTunes)")
     itunes_category: Optional[str] = Field(default="Technology", description="Primary iTunes category")
-    category_id: Optional[int] = Field(default=None, description="Primary Spreaker category id")
-    category_2_id: Optional[int] = Field(default=None, description="Secondary Spreaker category id")
-    category_3_id: Optional[int] = Field(default=None, description="Tertiary Spreaker category id")
+    category_id: Optional[str] = Field(default=None, description="Primary Apple Podcasts category id")
+    category_2_id: Optional[str] = Field(default=None, description="Secondary Apple Podcasts category id")
+    category_3_id: Optional[str] = Field(default=None, description="Tertiary Apple Podcasts category id")
     # Ownership & source provenance
     podcast_guid: Optional[str] = Field(default=None, index=True, description="podcast:guid from RSS feed")
     feed_url_canonical: Optional[str] = Field(default=None, description="Final fetched URL after redirects")
@@ -80,12 +80,17 @@ class Podcast(PodcastBase, table=True):
 
     @property
     def rss_feed_url(self) -> Optional[str]:
-        """Deterministic RSS feed URL derived from spreaker_show_id.
-        Prefer this over stored rss_url / rss_url_locked which will be removed."""
-        sid = getattr(self, 'spreaker_show_id', None)
-        if not sid:
-            return None
-        return f"https://www.spreaker.com/show/{sid}/episodes/feed"
+        """
+        Deterministic RSS feed URL for this podcast.
+        
+        ALWAYS uses production domain (podcastplusplus.com) for OP3 analytics compatibility.
+        Uses slug if available, otherwise falls back to podcast ID.
+        """
+        # Get identifier (prefer slug over ID)
+        identifier = getattr(self, 'slug', None) or str(self.id)
+        
+        # ALWAYS use production domain (hardcoded for OP3 analytics)
+        return f"https://podcastplusplus.com/rss/{identifier}/feed.xml"
 
     @property
     def preferred_cover_url(self) -> Optional[str]:
@@ -209,6 +214,15 @@ class MediaItem(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     # When to expire this raw upload (UTC). For main_content, defaults to the first 2am PT boundary after upload + 14 days.
     expires_at: Optional[datetime] = Field(default=None, description="UTC timestamp when this media item should be purged if unused")
+    # Track which episode consumed this raw file (for 'safe to delete' notifications when auto-delete is disabled)
+    used_in_episode_id: Optional[UUID] = Field(default=None, foreign_key="episode.id", description="Episode that used this raw file during assembly")
+    
+    # Auphonic integration fields (Pro tier only)
+    auphonic_processed: bool = Field(default=False, description="True if Auphonic processed this file (Pro tier)")
+    auphonic_cleaned_audio_url: Optional[str] = Field(default=None, description="GCS URL of Auphonic's cleaned/processed audio")
+    auphonic_original_audio_url: Optional[str] = Field(default=None, description="GCS URL of original audio (kept for failure diagnosis)")
+    auphonic_output_file: Optional[str] = Field(default=None, description="GCS URL of single Auphonic output file")
+    auphonic_metadata: Optional[str] = Field(default=None, description="JSON string with show_notes, chapters (if returned separately)")
 
 class MusicAssetSource(str, Enum):
     builtin = "builtin"  # bundled curated loop
@@ -298,6 +312,17 @@ class Episode(SQLModel, table=True):
     # Audio pipeline metadata & working filename for in-progress/cleaned content
     meta_json: Optional[str] = Field(default="{}", description="Arbitrary JSON metadata for processing (flubber contexts, cuts, etc.)")
     working_audio_name: Optional[str] = Field(default=None, description="Current working audio basename (e.g., cleaned content) used as source for final mixing")
+    
+    # Auphonic integration (Professional Audio Processing for Creator+ tiers)
+    auphonic_production_id: Optional[str] = Field(default=None, description="Auphonic production UUID for this episode (if processed with Auphonic)")
+    auphonic_processed: bool = Field(default=False, description="True if this episode was processed with Auphonic's professional audio engine")
+    auphonic_error: Optional[str] = Field(default=None, description="Error message from Auphonic processing (if failed)")
+    
+    # Auphonic metadata (from Whisper ASR + AI processing)
+    brief_summary: Optional[str] = Field(default=None, description="Brief 1-2 paragraph AI-generated summary (for show notes)")
+    long_summary: Optional[str] = Field(default=None, description="Detailed multi-paragraph AI-generated summary (for marketing/blog posts)")
+    episode_tags: Optional[str] = Field(default="[]", description="JSON array of AI-extracted tags/keywords (for SEO)")
+    episode_chapters: Optional[str] = Field(default="[]", description="JSON array of chapter markers with titles and timestamps (for podcast apps)")
     
     # Self-hosted RSS feed requirements
     audio_file_size: Optional[int] = Field(default=None, description="Audio file size in bytes (required for RSS <enclosure> length attribute)")

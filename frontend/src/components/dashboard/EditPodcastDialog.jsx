@@ -87,7 +87,21 @@ export default function EditPodcastDialog({
 
 	// Track if we've done the initial local population to avoid overwriting remote-loaded values
 	const initializedFromLocal = useRef(false);
-		useEffect(() => {
+	
+	// Reset state when dialog closes
+	useEffect(() => {
+		if (!isOpen) {
+			initializedFromLocal.current = false;
+			setNewCoverFile(null);
+			setCoverCrop(null);
+			// Clean up blob URL when closing
+			if (coverPreview && coverPreview.startsWith('blob:')) {
+				URL.revokeObjectURL(coverPreview);
+			}
+		}
+	}, [isOpen, coverPreview]);
+	
+	useEffect(() => {
 		if (!podcast) return;
 		// If remote already loaded, don't clobber remote values
 		if (remoteStatus.loaded) return;
@@ -127,22 +141,26 @@ export default function EditPodcastDialog({
 			category_3_id: podcast.category_3_id ? String(podcast.category_3_id) : "",
 		});
 		// Use cover_url if available (already resolved), otherwise fallback to cover_path
-		setCoverPreview(podcast.cover_url || resolveCoverURL(podcast.cover_path));
+		const initialCoverUrl = podcast.cover_url || resolveCoverURL(podcast.cover_path);
+		setCoverPreview(initialCoverUrl);
 	}, [podcast, remoteStatus.loaded, isOpen, userEmail]);
 
-	// Fetch categories once
+	// Fetch categories once when dialog opens
 	useEffect(() => {
 		async function loadCategories() {
 			try {
 				const api = makeApi(token);
 				const data = await api.get("/api/podcasts/categories");
-				setCategories(data.categories || []);
+				const cats = data.categories || [];
+				setCategories(cats);
 			} catch (e) {
-				/* silent */
+				console.error('[EditPodcastDialog] Failed to load categories:', e);
 			}
 		}
-		if (isOpen) loadCategories();
-	}, [isOpen, token]);
+		if (isOpen && categories.length === 0) {
+			loadCategories();
+		}
+	}, [isOpen, token, categories.length]);
 
 	const resolveCoverURL = (path) => {
 		if (!path) return "";
@@ -175,8 +193,15 @@ export default function EditPodcastDialog({
 	const handleCoverFileChange = (e) => {
 		const file = e.target.files?.[0];
 		if (file) {
+			console.log('[EditPodcastDialog] New cover file selected:', file.name, file.type, file.size);
+			// Clean up old blob URL if it exists
+			if (coverPreview && coverPreview.startsWith('blob:')) {
+				URL.revokeObjectURL(coverPreview);
+			}
 			setNewCoverFile(file);
-			setCoverPreview(URL.createObjectURL(file));
+			const blobUrl = URL.createObjectURL(file);
+			console.log('[EditPodcastDialog] Created blob URL for preview:', blobUrl);
+			setCoverPreview(blobUrl);
 			setCoverCrop(null);
 		}
 	};
@@ -192,6 +217,7 @@ export default function EditPodcastDialog({
 			let updatedPodcast;
 			const api = makeApi(token);
 			if (newCoverFile) {
+				console.log('[EditPodcastDialog] Uploading new cover image...');
 				const data = new FormData();
 				Object.entries(formData).forEach(([k, v]) => {
 					if (v !== undefined && v !== null && v !== "") data.append(k, v);
@@ -199,23 +225,39 @@ export default function EditPodcastDialog({
 				try {
 					const blob = await coverCropperRef.current?.getProcessedBlob?.();
 					if (blob) {
+						console.log('[EditPodcastDialog] Using cropped image blob');
 						data.append("cover_image", new File([blob], "cover.jpg", { type: "image/jpeg" }));
 					} else {
+						console.log('[EditPodcastDialog] Using original file (no crop)');
 						data.append("cover_image", newCoverFile);
 					}
-				} catch {
+				} catch (err) {
+					console.warn('[EditPodcastDialog] Crop failed, using original:', err);
 					data.append("cover_image", newCoverFile);
 				}
 				updatedPodcast = await api.raw(`/api/podcasts/${podcast.id}`, { method: "PUT", body: data });
+				console.log('[EditPodcastDialog] Upload response:', updatedPodcast);
+				console.log('[EditPodcastDialog] Cover details:', {
+					id: updatedPodcast?.id,
+					cover_path: updatedPodcast?.cover_path,
+					cover_url: updatedPodcast?.cover_url,
+					remote_cover_url: updatedPodcast?.remote_cover_url
+				});
 			} else {
 				const payload = { ...formData };
 				updatedPodcast = await api.put(`/api/podcasts/${podcast.id}`, payload);
+			}
+
+			// Clean up blob URL if we created one
+			if (newCoverFile && coverPreview && coverPreview.startsWith('blob:')) {
+				URL.revokeObjectURL(coverPreview);
 			}
 
 			onSave(updatedPodcast);
 			toast({ title: "Success", description: "Podcast updated successfully." });
 			onClose();
 		} catch (error) {
+			console.error('[EditPodcastDialog] Save failed:', error);
 			const msg = isApiError(error) ? (error.detail || error.error || error.message) : String(error);
 			toast({ title: "Error", description: msg, variant: "destructive" });
 		} finally {
@@ -319,39 +361,45 @@ export default function EditPodcastDialog({
 						</div>
 						<div className="space-y-1">
 							<Label>Categories</Label>
-							<div className="space-y-1">
-								{["category_id", "category_2_id", "category_3_id"].map((field, idx) => {
-									const valueProp = formData[field] === "" ? undefined : String(formData[field]);
-									return (
-										<Select
-											key={field}
-											value={valueProp}
-											onValueChange={(v) => {
-												if (v === "__none__") {
-													handleSelectChange(field, "");
-												} else {
-													handleSelectChange(field, v);
-												}
-											}}
-										>
-											<SelectTrigger>
-												<SelectValue placeholder={idx === 0 ? "Primary category" : "Optional"} />
-											</SelectTrigger>
-											<SelectContent className="max-h-60 overflow-y-auto">
-												{idx > 0 && <SelectItem value="__none__">(none)</SelectItem>}
-												{categories.map((cat) => (
-													<SelectItem key={cat.category_id} value={String(cat.category_id)}>
-														{cat.name}
-													</SelectItem>
-												))}
-											</SelectContent>
-										</Select>
-									);
-								})}
-								<p className="text-[10px] text-muted-foreground">
-									Primary + up to two optional categories.
-								</p>
-							</div>
+							{categories.length === 0 ? (
+								<p className="text-xs text-muted-foreground">Loading categories...</p>
+							) : (
+								<div className="space-y-1">
+									{["category_id", "category_2_id", "category_3_id"].map((field, idx) => {
+										const rawValue = formData[field];
+										const valueProp = rawValue === "" || rawValue === null || rawValue === undefined ? undefined : String(rawValue);
+										
+										return (
+											<Select
+												key={field}
+												value={valueProp}
+												onValueChange={(v) => {
+													if (v === "__none__") {
+														handleSelectChange(field, "");
+													} else {
+														handleSelectChange(field, v);
+													}
+												}}
+											>
+												<SelectTrigger>
+													<SelectValue placeholder={idx === 0 ? "Primary category" : "Optional"} />
+												</SelectTrigger>
+												<SelectContent className="max-h-60 overflow-y-auto">
+													{idx > 0 && <SelectItem value="__none__">(none)</SelectItem>}
+													{categories.map((cat) => (
+														<SelectItem key={cat.category_id} value={String(cat.category_id)}>
+															{cat.name}
+														</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
+										);
+									})}
+									<p className="text-[10px] text-muted-foreground">
+										Primary + up to two optional categories.
+									</p>
+								</div>
+							)}
 						</div>
 						{podcast && (
 							<div className="space-y-2 p-3 bg-blue-50 border border-blue-200 rounded">
@@ -361,18 +409,18 @@ export default function EditPodcastDialog({
 										<div className="space-y-1">
 											<p className="text-xs text-blue-700 font-medium">Primary Feed (slug-based):</p>
 											<a
-												href={`https://api.podcastplusplus.com/v1/rss/${podcast.slug}/feed.xml`}
+												href={`https://api.podcastplusplus.com/rss/${podcast.slug}/feed.xml`}
 												target="_blank"
 												rel="noopener noreferrer"
 												className="text-xs text-blue-600 hover:underline break-all block"
 											>
-												https://api.podcastplusplus.com/v1/rss/{podcast.slug}/feed.xml
+												https://api.podcastplusplus.com/rss/{podcast.slug}/feed.xml
 											</a>
 										</div>
 									)}
 
 									<p className="text-[10px] text-blue-600 mt-2">
-										These are your Podcast++ RSS feeds. Share these URLs with podcast directories.
+										These are your Podcast Plus Plus RSS feeds. Share these URLs with podcast directories.
 									</p>
 								</div>
 							</div>

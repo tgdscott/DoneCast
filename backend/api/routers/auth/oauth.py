@@ -179,17 +179,50 @@ async def login_google(request: Request):
             "forwarded": hdr.get("forwarded"),
             "oauth_backend_base": settings.OAUTH_BACKEND_BASE or "",
         }
-    try:
-        oauth_client, _ = build_oauth_client()
-    except RuntimeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Google login is temporarily unavailable. Please contact support.",
-        ) from exc
-    client = getattr(oauth_client, "google", None)
-    if client is None:
-        raise HTTPException(status_code=500, detail="OAuth client not configured")
-    return await client.authorize_redirect(request, redirect_uri)
+    
+    # Try to get OAuth client with retry logic for network timeouts
+    max_retries = 2
+    for attempt in range(max_retries + 1):
+        try:
+            oauth_client, _ = build_oauth_client()
+            client = getattr(oauth_client, "google", None)
+            if client is None:
+                raise HTTPException(status_code=500, detail="OAuth client not configured")
+            
+            # Attempt to authorize redirect (this triggers metadata fetch on first call)
+            return await client.authorize_redirect(request, redirect_uri)
+            
+        except RuntimeError as exc:
+            # Configuration error, don't retry
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Google login is temporarily unavailable. Please contact support.",
+            ) from exc
+        except HTTPException:
+            # Re-raise HTTPExceptions directly
+            raise
+        except Exception as exc:
+            # Check if it's a timeout error
+            exc_str = str(type(exc).__name__) + str(exc)
+            is_timeout = "timeout" in exc_str.lower() or "ConnectTimeout" in str(type(exc).__name__)
+            
+            if is_timeout and attempt < max_retries:
+                log.warning(
+                    "OAuth: Network timeout on attempt %d/%d, retrying...",
+                    attempt + 1,
+                    max_retries + 1
+                )
+                # Clear cache to force fresh connection on retry
+                import api.routers.auth.utils as auth_utils
+                auth_utils._oauth_client_cache = None
+                continue
+            
+            # Final attempt failed or non-timeout error
+            log.exception("OAuth: Failed to initiate Google login after %d attempts", attempt + 1)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Unable to connect to Google login service. Please try again in a moment.",
+            ) from exc
 
 
 @router.get("/google/callback")

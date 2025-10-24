@@ -10,8 +10,8 @@ import StepAssemble from './podcastCreatorSteps/StepAssemble';
 import PodcastCreatorScaffold from './podcastCreator/PodcastCreatorScaffold';
 import FlubberScanOverlay from './podcastCreator/FlubberScanOverlay';
 import FlubberRetryModal from './podcastCreator/FlubberRetryModal';
-import FlubberQuickReview from './FlubberQuickReview';
-import InternCommandReview from './podcastCreator/InternCommandReview';
+import FlubberCommandReviewText from './podcastCreator/FlubberCommandReviewText';
+import InternCommandReviewText from './podcastCreator/InternCommandReviewText';
 import IntentQuestions from './IntentQuestions';
 import VoicePicker from '@/components/VoicePicker';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -32,6 +32,7 @@ export default function PodcastCreator({
   preselectedMainFilename,
   preselectedTranscriptReady,
   creatorMode = 'standard',
+  wasRecorded = false,
   preuploadedItems = [],
   preuploadedLoading = false,
   onRefreshPreuploaded = () => {},
@@ -48,6 +49,7 @@ export default function PodcastCreator({
     preselectedMainFilename,
     preselectedTranscriptReady,
     creatorMode,
+    wasRecorded,
     preselectedStartStep,
   });
 
@@ -60,6 +62,7 @@ export default function PodcastCreator({
     handleTemplateSelect,
     uploadedFile,
     uploadedFilename,
+    wasRecorded: wasRecordedFromHook,
     selectedPreupload,
     isUploading,
     uploadProgress,
@@ -144,6 +147,7 @@ export default function PodcastCreator({
     minutesDialog,
     setMinutesDialog,
     activeSegment,
+    retryMinutesPrecheck,
     showVoicePicker,
     handleVoiceChange,
     processInternCommand,
@@ -368,6 +372,7 @@ export default function PodcastCreator({
             formatDuration={formatDuration}
             audioDurationSec={audioDurationSec}
             episodeStatus={assembledEpisode?.status}
+            wasRecorded={wasRecordedFromHook}
           />
         );
       case 3:
@@ -451,6 +456,7 @@ export default function PodcastCreator({
             minutesRemaining={minutesRemainingPrecheck}
             formatDuration={formatDuration}
             audioDurationSec={audioDurationSec}
+            onRetryPrecheck={retryMinutesPrecheck}
           />
         );
       case 6:
@@ -497,7 +503,7 @@ export default function PodcastCreator({
       />
 
       {showFlubberReview && (
-        <FlubberQuickReview
+        <FlubberCommandReviewText
           contexts={flubberContexts || []}
           open={showFlubberReview}
           onConfirm={handleFlubberConfirm}
@@ -506,7 +512,7 @@ export default function PodcastCreator({
       )}
 
       {showInternReview && (
-        <InternCommandReview
+        <InternCommandReviewText
           open={showInternReview}
           contexts={internReviewContexts || []}
           onComplete={handleInternComplete}

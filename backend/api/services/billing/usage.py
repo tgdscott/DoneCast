@@ -166,3 +166,69 @@ def user_ledger(session: Any, user_id: UUID, limit: int = 100, offset: int = 0) 
             "created_at": r.created_at.isoformat() if r.created_at else None,
         })
     return items
+
+
+def month_credits_breakdown(
+    session: Any,
+    user_id: UUID,
+    period_start: datetime,
+    period_end: datetime,
+) -> Dict[str, float]:
+    """
+    Get breakdown of credits used this month by action type.
+    
+    Returns dict with keys: total, tts_generation, transcription, assembly, storage, auphonic_processing
+    """
+    norm_start = _normalize_to_utc(period_start)
+    norm_end = _normalize_to_utc(period_end)
+    
+    q = (
+        select(ProcessingMinutesLedger)
+        .where(ProcessingMinutesLedger.user_id == user_id)
+    )
+    rows = session.exec(q).all()
+    
+    breakdown: Dict[str, float] = {
+        'total': 0.0,
+        'tts_generation': 0.0,
+        'transcription': 0.0,
+        'assembly': 0.0,
+        'storage': 0.0,
+        'auphonic_processing': 0.0,
+    }
+    
+    for r in rows:
+        ts = getattr(r, "created_at", None)
+        if ts is None:
+            continue
+        ts_utc = _normalize_to_utc(ts)
+        if ts_utc < norm_start or ts_utc > norm_end:
+            continue
+        
+        # Only count DEBIT entries (charges)
+        if r.direction != LedgerDirection.DEBIT:
+            continue
+        
+        # Get credits value (fallback to minutes * 1.5 if credits column not yet populated)
+        credits_used = getattr(r, 'credits', None)
+        if credits_used is None:
+            # Legacy records without credits field
+            credits_used = r.minutes * 1.5
+        
+        # Map reason to category
+        reason_str = r.reason.value if hasattr(r.reason, 'value') else str(r.reason)
+        
+        if reason_str == 'TTS_GENERATION':
+            breakdown['tts_generation'] += credits_used
+        elif reason_str == 'TRANSCRIPTION':
+            breakdown['transcription'] += credits_used
+        elif reason_str == 'ASSEMBLY':
+            breakdown['assembly'] += credits_used
+        elif reason_str == 'STORAGE':
+            breakdown['storage'] += credits_used
+        elif reason_str == 'AUPHONIC_PROCESSING':
+            breakdown['auphonic_processing'] += credits_used
+        
+        breakdown['total'] += credits_used
+    
+    return breakdown

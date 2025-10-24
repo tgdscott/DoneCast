@@ -164,12 +164,19 @@ async def create_tts_media(
             gcs_key = f"{current_user.id.hex}/media/{body.category.value}/{filename}"
             log.info(f"[tts] Uploading {body.category.value} to GCS: gs://{gcs_bucket}/{gcs_key}")
             with open(out_path, "rb") as f:
-                gcs_url = gcs.upload_fileobj(gcs_bucket, gcs_key, f, content_type="audio/mpeg")
+                # Disable fallback - these categories MUST be in GCS (no local files)
+                gcs_url = gcs.upload_fileobj(
+                    gcs_bucket, 
+                    gcs_key, 
+                    f, 
+                    content_type="audio/mpeg",
+                    allow_fallback=False
+                )
             if gcs_url and gcs_url.startswith("gs://"):
                 final_filename = gcs_url
                 log.info(f"[tts] SUCCESS: Uploaded {body.category.value} to GCS: {gcs_url}")
             else:
-                # GCS upload returned non-GCS URL (local fallback) - this is a problem
+                # This should never happen with allow_fallback=False, but belt-and-suspenders
                 log.error(f"[tts] GCS upload returned non-GCS URL: {gcs_url}. This will break preview in production!")
                 raise HTTPException(
                     status_code=500,
@@ -184,6 +191,43 @@ async def create_tts_media(
                 status_code=500,
                 detail=f"Failed to upload {body.category} to GCS: {str(e)}"
             )
+
+    # ========== CHARGE CREDITS FOR TTS GENERATION ==========
+    try:
+        from api.services.billing import credits
+        
+        # Get audio duration in seconds
+        tts_duration_seconds = len(audio) / 1000.0  # pydub length in ms → seconds
+        
+        # Check if ElevenLabs was used (costs more)
+        use_elevenlabs_flag = (body.provider == "elevenlabs")
+        
+        log.info(
+            "[tts] 💳 Charging credits: user=%s, duration=%.2f sec, elevenlabs=%s",
+            current_user.id,
+            tts_duration_seconds,
+            use_elevenlabs_flag
+        )
+        
+        ledger_entry, cost_breakdown = credits.charge_for_tts_generation(
+            session=session,
+            user=current_user,
+            duration_seconds=tts_duration_seconds,
+            use_elevenlabs=use_elevenlabs_flag,
+            notes=f"TTS: {slug[:50]}"
+        )
+        
+        log.info(
+            "[tts] ✅ Credits charged: %.2f credits (provider=%s, multiplier=%.2fx)",
+            cost_breakdown['total_credits'],
+            cost_breakdown['provider'],
+            cost_breakdown['multiplier']
+        )
+        
+    except Exception as credits_err:
+        log.error("[tts] ⚠️ Failed to charge credits (non-fatal): %s", credits_err, exc_info=True)
+        # Don't fail TTS generation if credit charging fails
+    # ========== END CREDIT CHARGING ==========
 
     # Friendly name fallback
     if body.friendly_name and body.friendly_name.strip():

@@ -14,6 +14,7 @@ from sqlmodel import Session, select
 from api.core import crud
 from api.core.config import settings
 from api.core.database import get_session
+from api.core.ip_utils import get_client_ip
 from api.core.security import get_password_hash
 from api.models.user import User, UserPublic
 from api.models.verification import EmailVerification, PasswordReset
@@ -31,10 +32,10 @@ class ConfirmEmailPayload(BaseModel):
 
 
 @router.post("/confirm-email", response_model=UserPublic)
-@limiter.limit("20/hour")
+# @limiter.limit("20/hour")  # DISABLED - breaks FastAPI param detection
 async def confirm_email(
-    payload: ConfirmEmailPayload,
     request: Request,
+    payload: ConfirmEmailPayload,
     session: Session = Depends(get_session),
 ) -> UserPublic:
     """Confirm a user's email via 6-digit code or token."""
@@ -132,10 +133,10 @@ class ResendVerificationPayload(BaseModel):
 
 
 @router.post("/resend-verification")
-@limiter.limit("3/15minutes")
+# @limiter.limit("3/15minutes")  # DISABLED - breaks FastAPI param detection
 async def resend_verification(
-    payload: ResendVerificationPayload,
     request: Request,
+    payload: ResendVerificationPayload,
     session: Session = Depends(get_session),
 ) -> dict:
     """Resend the email verification code & link for a not-yet-active user."""
@@ -191,10 +192,10 @@ class UpdatePendingEmailPayload(BaseModel):
 
 
 @router.post("/update-pending-email")
-@limiter.limit("2/10minutes")
+# @limiter.limit("2/10minutes")  # DISABLED - breaks FastAPI param detection
 async def update_pending_email(
-    payload: UpdatePendingEmailPayload,
     request: Request,
+    payload: UpdatePendingEmailPayload,
     session: Session = Depends(get_session),
 ) -> dict:
     """Allow a user who hasn't verified yet to change their registration email."""
@@ -293,13 +294,11 @@ async def request_password_reset(
         session.rollback()
     token = _random_token(40)
     expires = datetime.utcnow() + timedelta(minutes=30)
-    ip = None
-    ua = None
-    try:
-        ip = request.client.host if request and request.client else None
-        ua = request.headers.get("user-agent", "") if request and request.headers else None
-    except Exception:
-        pass
+    
+    # Get the real client IP address (handles Cloud Run proxy)
+    ip = get_client_ip(request)
+    ua = request.headers.get("user-agent", "") if request and request.headers else None
+    
     pr = PasswordReset(user_id=user.id, token=token, expires_at=expires, ip=ip, user_agent=ua)
     session.add(pr)
     session.commit()

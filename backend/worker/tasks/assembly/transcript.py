@@ -455,6 +455,7 @@ def prepare_transcript_context(
     tts_values: dict,
     user_id: str,
     intents: dict | None,
+    auphonic_processed: bool = False,
 ) -> TranscriptContext:
     episode = media_context.episode
     base_audio_name = media_context.base_audio_name
@@ -467,6 +468,45 @@ def prepare_transcript_context(
         output_filename=output_filename,
         base_audio_name=base_audio_name,
     )
+
+    # Early exit for Auphonic-processed audio (already professionally processed)
+    if auphonic_processed:
+        logging.info("[assemble] ⚡ Auphonic-processed audio detected - skipping ALL custom processing (filler removal, silence removal, flubber, intern, etc.)")
+        
+        # Build minimal mixer options (no processing, just metadata)
+        intents = intents or {}
+        try:
+            raw_settings = media_context.audio_cleanup_settings_json
+            parsed_settings = json.loads(raw_settings) if raw_settings else {}
+        except Exception:
+            parsed_settings = {}
+        
+        user_commands = (parsed_settings or {}).get("commands") or {}
+        user_filler_words = (parsed_settings or {}).get("fillerWords") or []
+        intern_overrides = []
+        if intents and isinstance(intents, dict):
+            overrides = intents.get("intern_overrides", [])
+            if overrides and isinstance(overrides, list):
+                intern_overrides = overrides
+        
+        mixer_only_opts = {
+            "removeFillers": False,
+            "removePauses": False,
+            "fillerWords": user_filler_words if isinstance(user_filler_words, list) else [],
+            "commands": user_commands if isinstance(user_commands, dict) else {},
+            "intern_overrides": intern_overrides,
+        }
+        
+        # Return context with NO cleaned_path (use original audio), NO engine_result
+        return TranscriptContext(
+            words_json_path=Path(words_json_path) if words_json_path and Path(words_json_path).is_file() else None,
+            cleaned_path=None,  # Force mixer to use original audio
+            engine_result=None,  # No processing happened
+            mixer_only_options=mixer_only_opts,
+            flubber_intent="no",  # Disable all custom processing
+            intern_intent="no",
+            base_audio_name=base_audio_name,
+        )
 
     cuts_ms = _load_flubber_cuts(episode=episode)
 
@@ -563,7 +603,7 @@ def prepare_transcript_context(
                 synth=_synth,
                 flubber_cuts_ms=cuts_ms,
                 output_name=engine_output,
-                disable_intern_insertion=True,
+                disable_intern_insertion=False,  # Enable Intern insertion for user-reviewed overrides
             )
         cleaned_path = None
         try:

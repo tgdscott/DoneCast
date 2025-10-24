@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     ASSEMBLYAI_WEBHOOK_SECRET: Optional[str] = None
     ASSEMBLYAI_WEBHOOK_URL: Optional[str] = None
     ASSEMBLYAI_WEBHOOK_HEADER: str = "X-AssemblyAI-Signature"
+    
+    # --- Auphonic API (Professional Audio Processing) ---
+    AUPHONIC_API_KEY: str = ""
 
     # --- Spreaker API ---
     SPREAKER_API_TOKEN: str = ""
@@ -85,13 +88,37 @@ class Settings(BaseSettings):
     PODCAST_WEBSITE_CUSTOM_DOMAIN_MIN_TIER: str = "pro"
 
     # --- Legal ---
-    TERMS_VERSION: str = "2025-09-19"
+    # CRITICAL: Only change TERMS_VERSION when terms content actually changes!
+    # Changing this forces ALL users to re-accept terms. See TERMS_VERSION_MANAGEMENT_CRITICAL.md
+    # If you change this, run: python migrate_terms_version.py (if you don't need re-acceptance)
+    TERMS_VERSION: str = "2025-10-22"
     # Default legal / marketing URLs (rebranded from getpodcastplus.com -> podcastplusplus.com)
     TERMS_URL: str = "https://app.podcastplusplus.com/terms"
 
     # --- JWT Settings ---
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 30  # 30 days (increased from 7 for better UX)
+
+    # --- Dev Environment Safety (Cloud SQL Proxy) ---
+    DEV_READ_ONLY: bool = Field(
+        default=False,
+        description="Prevent destructive operations in dev mode (for Cloud SQL Proxy safety)"
+    )
+    DEV_TEST_USER_EMAILS: str = Field(
+        default="scott@scottgerhardt.com,test@example.com",
+        description="Comma-separated dev test user emails (for filtering in dev mode)"
+    )
+
+    @property
+    def is_dev_mode(self) -> bool:
+        """Check if running in development mode"""
+        env = (self.APP_ENV or "dev").strip().lower()
+        return env in _DEV_ENVS
+
+    @property
+    def dev_test_users(self) -> list[str]:
+        """Get list of test user emails for dev mode filtering"""
+        return [email.strip() for email in self.DEV_TEST_USER_EMAILS.split(",") if email.strip()]
 
     @property
     def cors_allowed_origin_list(self) -> list[str]:
@@ -148,25 +175,20 @@ class Settings(BaseSettings):
     def _validate_and_warn(self):
         env = (self.APP_ENV or "dev").strip().lower()
 
-        # Allow DATABASE_URL as an alternative to discrete credentials. When neither is
-        # provided we fall back to SQLite in dev/test, but require configuration in prod.
+        # PostgreSQL configuration required in all environments
         has_discrete_db_config = all(
             getattr(self, key, "").strip()
             for key in ("DB_USER", "DB_PASS", "DB_NAME", "INSTANCE_CONNECTION_NAME")
         )
         has_database_url = bool((self.DATABASE_URL or "").strip())
 
-        if env in _PROD_ENVS and not (has_discrete_db_config or has_database_url):
+        if not (has_discrete_db_config or has_database_url):
             missing = "DATABASE_URL or DB_USER/DB_PASS/DB_NAME/INSTANCE_CONNECTION_NAME"
-            raise ValueError(f"Database configuration missing required values: {missing}")
-
-        if env not in _PROD_ENVS and not (has_discrete_db_config or has_database_url):
-            log.warning(
-                "[config] Falling back to SQLite (no DATABASE_URL or Cloud SQL credentials provided)"
-            )
+            raise ValueError(f"PostgreSQL configuration required: {missing}")
 
         # Surface optional secrets that default to blanks so operators know what's absent.
         optional_keys = [
+            "AUPHONIC_API_KEY",
             "ELEVENLABS_API_KEY",
             "ASSEMBLYAI_API_KEY",
             "SPREAKER_API_TOKEN",

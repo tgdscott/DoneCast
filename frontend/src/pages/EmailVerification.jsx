@@ -64,7 +64,16 @@ export default function EmailVerification() {
 
       if (!verifyRes.ok) {
         const data = await verifyRes.json().catch(() => ({}));
-        setError(data?.detail || 'Invalid or expired code. Please check and try again.');
+        // Handle both string and array error formats from FastAPI
+        let errorMessage = 'Invalid or expired code. Please check and try again.';
+        if (data?.detail) {
+          if (typeof data.detail === 'string') {
+            errorMessage = data.detail;
+          } else if (Array.isArray(data.detail) && data.detail.length > 0) {
+            errorMessage = data.detail[0]?.msg || errorMessage;
+          }
+        }
+        setError(errorMessage);
         setIsSubmitting(false);
         return;
       }
@@ -131,7 +140,16 @@ export default function EmailVerification() {
         }, 100);
       } else {
         const data = await res.json().catch(() => ({}));
-        setError(data?.detail || 'Failed to resend code. Please try again.');
+        // Handle both string and array error formats from FastAPI
+        let errorMessage = 'Failed to resend code. Please try again.';
+        if (data?.detail) {
+          if (typeof data.detail === 'string') {
+            errorMessage = data.detail;
+          } else if (Array.isArray(data.detail) && data.detail.length > 0) {
+            errorMessage = data.detail[0]?.msg || errorMessage;
+          }
+        }
+        setError(errorMessage);
       }
     } catch (err) {
       setError('Network error. Could not resend code.');

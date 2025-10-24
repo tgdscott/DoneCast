@@ -20,6 +20,11 @@ import NewLanding from '@/pages/NewLanding.jsx';
 import InDevelopment from '@/pages/InDevelopment.jsx';
 import Contact from '@/pages/Contact.jsx';
 import Guides from '@/pages/Guides.jsx';
+import FAQ from '@/pages/FAQ.jsx';
+import Features from '@/pages/Features.jsx';
+import About from '@/pages/About.jsx';
+import PublicWebsite from '@/pages/PublicWebsite.jsx';
+import AIAssistantPopup from '@/components/assistant/AIAssistantPopup.jsx';
 import { AuthProvider } from './AuthContext.jsx';
 import { BrandProvider } from './brand/BrandContext.jsx';
 import { ComfortProvider } from './ComfortContext.jsx';
@@ -99,8 +104,28 @@ try {
   console.warn('[auth] token capture failed', err);
 }
 
+// Helper to detect if this is a subdomain request (for public websites)
+const isSubdomainRequest = () => {
+  if (typeof window === 'undefined') return false;
+  const hostname = window.location.hostname;
+  
+  // Never treat localhost or IP addresses as subdomains
+  if (hostname === 'localhost' || /^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
+    return false;
+  }
+  
+  const parts = hostname.split('.');
+  
+  // Check if subdomain exists (more than 2 parts) and not reserved
+  if (parts.length < 3) return false;
+  const subdomain = parts[0];
+  const reserved = ['www', 'api', 'admin', 'app', 'dev', 'test', 'staging'];
+  return !reserved.includes(subdomain);
+};
+
 const router = createBrowserRouter([
-  { path: '/', element: <NewLanding /> },
+  // Public website serving (subdomains) - check FIRST before other routes
+  { path: '/', element: isSubdomainRequest() ? <PublicWebsite /> : <NewLanding /> },
   { path: '/app', element: <AppWithToasterWrapper />, errorElement: <ErrorPage /> },
   { path: '/app/*', element: <AppWithToasterWrapper />, errorElement: <ErrorPage /> },
   { path: '/admin', element: <AppWithToasterWrapper />, errorElement: <ErrorPage /> },
@@ -121,8 +146,12 @@ const router = createBrowserRouter([
   { path: '/contact', element: <Contact /> },
   { path: '/guides', element: <Guides /> },
   { path: '/help', element: <Guides /> },
+  { path: '/faq', element: <FAQ /> },
+  { path: '/features', element: <Features /> },
+  { path: '/about', element: <About /> },
   { path: '/docs/podcast-website-builder', element: <PodcastWebsiteBuilder /> },
   { path: '/in-development', element: <InDevelopment /> },
+  { path: '/mike', element: <AIAssistantPopup /> },
   // Fallback 404 for any unknown route
   { path: '*', element: <NotFound /> },
 ]);

@@ -20,25 +20,40 @@ class LedgerReason(str, Enum):
     MANUAL_ADJUST = "MANUAL_ADJUST"
     # Minutes charged for TTS generated assets saved to the media library (outside episode assembly)
     TTS_LIBRARY = "TTS_LIBRARY"
+    # New usage-based credit reasons
+    TTS_GENERATION = "TTS_GENERATION"  # ElevenLabs or standard TTS
+    TRANSCRIPTION = "TRANSCRIPTION"  # AssemblyAI or Auphonic transcription
+    ASSEMBLY = "ASSEMBLY"  # Episode assembly
+    STORAGE = "STORAGE"  # Cloud storage charges
+    AUPHONIC_PROCESSING = "AUPHONIC_PROCESSING"  # Auphonic-specific processing
 
 
 class ProcessingMinutesLedger(SQLModel, table=True):
     """
-    Immutable ledger of processing minutes. Positive minutes are recorded with a direction:
-    - DEBIT: charge minutes (e.g., processing audio)
-    - CREDIT: refund minutes (e.g., system error, manual adjust)
+    Ledger of processing minutes AND credits (dual-write during transition).
+    - DEBIT: charge minutes/credits (e.g., processing audio, TTS generation)
+    - CREDIT: refund minutes/credits (e.g., system error, manual adjust)
 
-    A partial uniqueness constraint prevents duplicate DEBIT entries with the same non-null
-    correlation_id, providing idempotency for retried jobs.
+    NEW: Credits-based billing (1 minute = 1.5 credits baseline)
+    - credits field: precise credit amount charged (includes multipliers)
+    - minutes field: kept for backward compatibility
+    - cost_breakdown_json: detailed cost calculation for transparency
     """
 
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: UUID = Field(index=True)
     episode_id: Optional[UUID] = Field(default=None, index=True)
 
-    minutes: int = Field(description="Positive number of minutes for this entry")
+    minutes: int = Field(description="Positive number of minutes for this entry (legacy)")
+    credits: float = Field(default=0.0, description="Precise credit amount (1 min = 1.5 credits baseline, includes multipliers)")
     direction: LedgerDirection = Field(default=LedgerDirection.DEBIT)
     reason: LedgerReason = Field(default=LedgerReason.PROCESS_AUDIO)
+
+    # Cost breakdown for transparency (JSON)
+    cost_breakdown_json: Optional[str] = Field(
+        default=None,
+        description="JSON breakdown of cost calculation: {base_credits, multipliers, total}"
+    )
 
     correlation_id: Optional[str] = Field(
         default=None,
@@ -48,14 +63,13 @@ class ProcessingMinutesLedger(SQLModel, table=True):
     notes: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
-    # Partial unique index for DEBIT rows with non-null correlation_id
+    # Partial unique index for DEBIT rows with non-null correlation_id (PostgreSQL)
     __table_args__ = (
-        # SQLite supports partial indexes; use sqlite_where for conditional uniqueness
         Index(
             "uq_pml_debit_corr",
             "correlation_id",
             unique=True,
-            sqlite_where=text("direction = 'DEBIT' AND correlation_id IS NOT NULL"),
+            postgresql_where=text("direction = 'DEBIT' AND correlation_id IS NOT NULL"),
         ),
         UniqueConstraint(
             "id",

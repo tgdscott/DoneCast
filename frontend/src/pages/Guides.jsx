@@ -2,7 +2,12 @@ import { useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
-import { ArrowLeft, BookOpen, Search, ExternalLink, ChevronRight } from 'lucide-react';
+import { 
+  ArrowLeft, BookOpen, Search, ChevronRight, 
+  Mic, Upload, Settings, Wand2, Music, BarChart,
+  CreditCard, Zap, AlertCircle, CheckCircle, PlayCircle,
+  FileAudio, Sparkles, Globe, Clock, TrendingUp
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export default function Guides() {
@@ -12,6 +17,8 @@ export default function Guides() {
   const guides = [
     {
       category: 'Getting Started',
+      icon: PlayCircle,
+      description: 'New to Podcast Plus Plus? Start here to learn the basics',
       items: [
         {
           title: 'Quick Start Guide',
@@ -29,15 +36,17 @@ Welcome to Podcast Plus Plus! Here's how to create your first episode:
 - Select a voice for AI features
 
 ### 2. Upload Your Audio
-- Go to **Episodes** tab
-- Click "Create Episode"
-- Upload your main content audio file
-- Add episode title and description
+- Click **Record or Upload Audio** button from the dashboard
+- Choose to either upload a file already recorded, or record one directly in your browser
+- After the audio has been uploaded and transcribed, click **Assemble New Episode** from the dashboard
 
 ### 3. Process & Publish
-- Click "Assemble Episode" to process
-- Preview the final result
-- Hit "Publish" when ready
+- Approve any AI-features you may have, like Intern commands or Flubber markers
+- Enter text for any AI-generated intro or outro segments
+- Upload a cover image for your episode (optional)
+- Double check all the AI-generated title, notes, and tags and correct anything as needed
+- Verify the publish date and time and click **Publish Episode**
+- After a few minutes of processing, your episode will be live or scheduled, whichever you chose!
 - Your RSS feed updates automatically!
 
 **That's it!** Your episode is now live and available on all podcast platforms.
@@ -54,21 +63,21 @@ Your dashboard is divided into several key sections:
 
 ### Episodes Tab
 - **View all episodes** in your podcast
-- **Create new episodes** with one click
 - **Edit or delete** existing episodes
-- **Monitor processing status** (pending, processing, published)
+- **Monitor or change processing status for exisiting episodes** (pending, processing, published)
 
 ### Templates Tab
 - **Design reusable structures** for your episodes
 - **Set default intro/outro** audio
 - **Configure AI settings** for show notes
-- **Save time** by reusing templates
+- Set up as many templates as you want for different episode types
 
 ### Media Library
-- **Upload and manage** all audio files
-- **Organize by category** (intro, outro, music, SFX, main content)
+- **Upload and manage** all intro, outro, music, and sound effect audio files
+- **Organize by category** (intro, outro, music, sound effects)
 - **Preview audio** before using
-- **Delete unused files** to free up space
+- **Delete unused files** to keep organized
+- See Global Music and Sound Effects libraries available to all users
 
 ### Analytics
 - **Track downloads** and plays
@@ -76,11 +85,18 @@ Your dashboard is divided into several key sections:
 - **Monitor growth** over time
 - **Identify top episodes**
 
+## Subscription
+-  See, manage, and change your current plan
+-  See how many credits you have, and buy more if needed
+
 ### Settings
-- **Edit podcast details** (name, description, cover art)
 - **Manage account** (email, password, subscription)
 - **Configure RSS feed** settings
 - **Set up billing** and view usage
+
+## Website Builder
+-  See your podcast's website
+-  Customize everything from colors, fonts, layouts, and more
           `
         },
         {
@@ -95,7 +111,7 @@ Your dashboard is divided into several key sections:
 The onboarding wizard guides you through essential setup:
 
 #### Step 1: Import or Create
-- **Import from Spreaker** (if you have an existing show)
+- **Upload Pre-exisiting show** (if you have an existing show)
 - **Create from scratch** (recommended for new podcasters)
 
 #### Step 2: Podcast Details
@@ -107,8 +123,7 @@ The onboarding wizard guides you through essential setup:
 #### Step 3: Template Setup
 - **Intro Audio:** Upload or generate with AI voice
 - **Outro Audio:** Upload or generate with AI voice
-- **Background Music:** Choose from library or upload your own
-- **AI Settings:** Configure automatic show notes generation
+- **Background Music:** Choose from our library or upload your own
 
 #### Step 4: Voice Selection
 - **Preview voices** available for text-to-speech
@@ -128,6 +143,8 @@ Once complete, you can:
     },
     {
       category: 'Episode Creation',
+      icon: Mic,
+      description: 'Learn how to create, edit, and manage your podcast episodes',
       items: [
         {
           title: 'Uploading Audio Files',
@@ -271,11 +288,244 @@ You can schedule episodes for future release:
 3. Episode will auto-publish at that time
 4. Edit or cancel scheduled episodes anytime
           `
+        },
+        {
+          title: 'Manual Editor',
+          description: 'Fine-tune your episodes with precision editing',
+          link: '#manual-editor',
+          content: `
+## Manual Editor
+
+### What is the Manual Editor?
+
+The Manual Editor gives you complete control over your episode's final audio. You can:
+- View and edit the full waveform
+- Cut, trim, and rearrange segments
+- Adjust volume levels
+- Add fade in/out effects
+- Preview changes in real-time
+
+### Opening the Manual Editor
+
+1. Go to **Episodes** tab
+2. Find your episode (must be assembled)
+3. Click the **"Edit"** button or three-dot menu
+4. Select **"Manual Editor"**
+
+### Editor Interface
+
+**Waveform Display:**
+- Visual representation of your audio
+- Zoom in/out for precision
+- Click to set playback position
+
+**Timeline Tools:**
+- Play/Pause controls
+- Skip forward/backward
+- Zoom controls
+- Selection tools
+
+**Edit Actions:**
+- **Cut:** Remove selected section
+- **Split:** Divide audio at cursor
+- **Fade:** Add fade in/out
+- **Volume:** Adjust level of selection
+
+### Making Edits
+
+1. **Select audio segment:**
+   - Click and drag on waveform
+   - Or use keyboard shortcuts (Shift + Arrow keys)
+
+2. **Choose action:**
+   - Cut: Delete selection
+   - Fade: Gradual volume change
+   - Normalize: Balance audio levels
+
+3. **Preview changes:**
+   - Play edited section
+   - Undo if needed (Ctrl+Z)
+
+4. **Save:**
+   - Click "Save Changes"
+   - Episode re-processes with edits
+
+### Tips for Best Results
+
+✅ **Zoom in for precision:** Use zoom for exact cuts  
+✅ **Preview before saving:** Always listen to your edits  
+✅ **Use fade in/out:** Avoid abrupt starts/stops  
+✅ **Save frequently:** Changes persist in editor  
+❌ Don't make too many tiny cuts (can sound choppy)  
+❌ Don't forget to save before closing
+
+### Keyboard Shortcuts
+
+- **Space:** Play/Pause
+- **→ / ←:** Skip 5 seconds
+- **Shift + →/←:** Skip 30 seconds
+- **Ctrl + Z:** Undo
+- **Ctrl + S:** Save
+          `
+        },
+        {
+          title: 'RSS Feeds & Distribution',
+          description: 'Submit your podcast to Apple, Spotify, and more',
+          link: '#rss-distribution',
+          content: `
+## RSS Feeds & Distribution
+
+### Your RSS Feed URL
+
+Every podcast gets a unique RSS feed URL:
+
+https://podcastplusplus.com/rss/your-show-name.xml
+
+This feed updates automatically when you publish episodes.
+
+### Finding Your RSS URL
+
+1. Go to **Settings** tab
+2. Look for **"RSS Feed URL"** section
+3. Click **"Copy URL"** button
+4. Use this URL to submit to directories
+
+### Submitting to Apple Podcasts
+
+1. **Go to:** [Apple Podcasts Connect](https://podcastsconnect.apple.com)
+2. **Sign in** with Apple ID
+3. Click **"Add a Show"**
+4. **Paste your RSS feed URL**
+5. **Fill in show details** (Apple pulls most from RSS)
+6. **Submit for review** (takes 2-5 business days)
+
+### Submitting to Spotify
+
+1. **Go to:** [Spotify for Podcasters](https://podcasters.spotify.com)
+2. **Log in** or create account
+3. Click **"Get Started"**
+4. **Enter RSS feed URL**
+5. **Claim your podcast**
+6. **Publish** (usually approved within 24 hours)
+
+### Other Major Directories
+
+**Google Podcasts:**
+- Visit [Google Podcasts Manager](https://podcastsmanager.google.com)
+- Add RSS feed
+- Verify ownership
+
+**Amazon Music/Audible:**
+- Visit [Amazon Music for Podcasters](https://music.amazon.com/podcasters)
+- Submit RSS feed
+- Complete podcast details
+
+**iHeartRadio:**
+- Go to [iHeartRadio Podcast Directory](https://www.iheart.com/podcast-contact/)
+- Fill out submission form
+- Include RSS feed URL
+
+### RSS Feed Updates
+
+When you publish a new episode:
+- RSS feed updates within **1 minute**
+- Podcast apps check every **1-24 hours**
+- Some platforms may take **48 hours** to show new episodes
+
+### Custom Domain (Pro Feature)
+
+Upgrade to Pro to use your own domain:
+- https://yourwebsite.com/podcast.xml
+- Better branding
+- More professional
+- SEO benefits
+          `
+        },
+        {
+          title: 'Analytics & Tracking',
+          description: 'Understand your audience and grow your show',
+          link: '#analytics',
+          content: `
+## Analytics & Tracking
+
+### Accessing Analytics
+
+1. Click **Analytics** tab in dashboard
+2. View data for all episodes or individual ones
+3. Filter by date range (last 7 days, 30 days, all time)
+
+### Key Metrics
+
+**Downloads:**
+- Total number of episode downloads
+- Unique vs. repeat listeners
+- Download trends over time
+
+**Geographic Data:**
+- Where your listeners are located
+- Country-level breakdown
+- Top cities (Pro feature)
+
+**Listening Apps:**
+- Which apps people use (Apple Podcasts, Spotify, etc.)
+- Platform distribution
+- Mobile vs. desktop
+
+**Episode Performance:**
+- Most popular episodes
+- Average listen duration
+- Completion rate
+
+### Understanding the Data
+
+**What's a "Download"?**
+- Someone starts playing your episode
+- Counts once per IP address per 24 hours
+- Industry standard metric (IAB certified)
+
+**Why Don't Numbers Match?**
+Different platforms report differently:
+- **Apple:** Reports streams + downloads
+- **Spotify:** Only reports Spotify listeners
+- **Analytics Dashboard:** Shows ALL downloads across platforms
+
+**When Does Data Update?**
+- Real-time for new downloads (within 1 hour)
+- Geographic data updates every 4 hours
+- Historical data available for all published episodes
+
+### OP3 Analytics Integration
+
+Podcast Plus Plus uses OP3 (Open Podcast Prefix Project) for accurate tracking:
+- Privacy-respecting analytics
+- Cross-platform aggregation
+- Industry-standard metrics
+- No listener surveillance
+
+### Tips for Growing Your Audience
+
+✅ **Publish consistently:** Weekly schedule works best  
+✅ **Promote on social media:** Share episode links  
+✅ **Encourage reviews:** Ask listeners to rate/review  
+✅ **Collaborate:** Guest on other podcasts  
+✅ **Optimize titles:** Make them searchable and compelling  
+✅ **Use show notes:** Include keywords and links
+
+### Analytics Best Practices
+
+- Check analytics weekly, not daily (reduces anxiety)
+- Focus on trends, not individual spikes
+- Compare episodes to find what resonates
+- Use geographic data to plan guest topics
+- Track completion rates to optimize episode length
+          `
         }
       ]
     },
     {
       category: 'AI Features',
+      icon: Sparkles,
+      description: 'Discover how AI can help you create better podcasts faster',
       items: [
         {
           title: 'AI-Powered Editing (Intern)',
@@ -328,51 +578,58 @@ Intern listens to your audio and detects spoken editing commands like:
           `
         },
         {
-          title: 'Filler Word Removal (Flubber)',
-          description: 'Automatically remove ums, ahs, and pauses',
+          title: 'Mistake Markers (Flubber)',
+          description: 'Mark mistakes while recording by saying "flubber"',
           link: '#flubber',
           content: `
-## Filler Word Removal: Flubber
+## Mistake Markers: Flubber
 
 ### What is Flubber?
 
-Flubber analyzes your audio and identifies:
-- Filler words ("um," "uh," "like," "you know")
-- Long pauses (> 2 seconds)
-- Repeated phrases
-- False starts
+Flubber lets you mark audio mistakes while recording by simply saying the word "flubber" out loud. When you make a mistake, just say "flubber" and continue - the system will help you remove that section later.
+
+**Example:**
+"The capital of France is Berlin... flubber... The capital of France is Paris."
 
 ### How to Use Flubber
 
-1. **Upload audio** to episode
-2. **Click "Run Flubber"** in episode details
-3. **Wait for analysis** (1-2 minutes)
-4. **Review snippets:** See all detected fillers with timestamps
-5. **Expand/collapse** to hear context around each filler
-6. **Select fillers** to remove (or keep)
-7. **Apply changes** and assemble episode
+1. **While recording:** When you make a mistake, say "flubber" clearly
+2. **Continue recording:** No need to stop or start over
+3. **Upload audio** to episode
+4. **Click "Prepare Flubber Contexts"** in episode details
+5. **Review snippets:** Each "flubber" creates an audio clip with context
+6. **Mark mistake start:** Listen and indicate where the flub actually began
+7. **Apply cuts:** System removes from mistake start to "flubber" keyword
+8. **Assemble episode** with all flubs removed
+
+### What Flubber Detects
+
+The system listens for the spoken word "flubber" and creates audio snippets with:
+- **45 seconds before** the "flubber" keyword (configurable)
+- **10 seconds after** the "flubber" keyword (configurable)
+
+This gives you enough context to identify exactly where the mistake started.
 
 ### Flubber Settings
 
-**Sensitivity:**
-- **Low:** Only obvious, long fillers
-- **Medium:** Standard detection (recommended)
-- **High:** Aggressive removal (may cut too much)
+**Window Configuration:**
+- **Before window:** Seconds of audio before "flubber" (default: 45)
+- **After window:** Seconds of audio after "flubber" (default: 10)
 
-**Filler Types:**
-- Um/Uh/Er
-- Like/You know
-- Long pauses (> X seconds)
-- Repeated words
+**Fuzzy Matching:**
+- Optional tolerance for mishearing (e.g., "flober", "rubber")
+- Useful if transcription isn't perfect
 
 ### Best Practices
 
-- ✅ **Review before applying:** Don't auto-remove all
-- ✅ **Keep some fillers:** Natural speech needs a few
-- ✅ **Test with one episode first:** Find your preferred settings
-- ✅ **Listen to preview:** Make sure edits sound natural
-- ❌ Don't remove ALL fillers (sounds robotic)
-- ❌ Don't use highest sensitivity unless needed
+- ✅ **Say "flubber" clearly:** Enunciate so it's detected
+- ✅ **Pause briefly:** Before and after saying "flubber"
+- ✅ **Review all snippets:** Make sure cuts are correct
+- ✅ **Mark exact start:** Precisely indicate where mistake began
+- ✅ **Test first:** Try with a short recording
+- ❌ Don't mumble "flubber"
+- ❌ Don't say it while others are talking
+- ❌ Don't skip the review step (auto-cut might be wrong)
           `
         },
         {
@@ -435,6 +692,8 @@ Choose from presets:
     },
     {
       category: 'Media & Templates',
+      icon: FileAudio,
+      description: 'Organize your audio files and create reusable templates',
       items: [
         {
           title: 'Media Library Management',
@@ -541,11 +800,190 @@ When creating a new episode:
 - Explicit content flag
 - Auto-publish on completion
           `
+        },
+        {
+          title: 'Background Music & Audio Mixing',
+          description: 'Add music and control audio levels',
+          link: '#background-music',
+          content: `
+## Background Music & Audio Mixing
+
+### Adding Background Music
+
+1. **In Template Editor:**
+   - Go to Templates tab
+   - Edit your template
+   - Scroll to "Background Music" section
+   - Select music from library or upload new
+
+2. **Per Episode (Override):**
+   - Create/edit episode
+   - Toggle "Custom music for this episode"
+   - Choose different track
+
+### Music Ducking
+
+Ducking automatically lowers music volume when you're speaking:
+
+**Ducking Settings:**
+- **Level:** How much to reduce music (e.g., -12 dB)
+- **Attack:** How fast music drops when speech starts (0.5s recommended)
+- **Release:** How fast music returns when speech stops (1.0s recommended)
+
+**Example Settings:**
+- **Subtle ducking:** -6 dB, 1.0s attack, 2.0s release
+- **Moderate ducking (recommended):** -12 dB, 0.5s attack, 1.0s release
+- **Aggressive ducking:** -18 dB, 0.3s attack, 0.5s release
+
+### Volume Normalization
+
+Normalization ensures consistent volume across your episode:
+
+- **Target Level:** -16 LUFS (industry standard for podcasts)
+- **Peak Limiting:** Prevents audio from clipping
+- **Auto-applied:** Enabled by default in templates
+
+### Audio Formats & Quality
+
+**Supported Input Formats:**
+- MP3 (recommended for music)
+- WAV (best quality, larger files)
+- M4A/AAC
+- FLAC (lossless)
+- OGG
+
+**Output Format:**
+- MP3, 128 kbps (spoken word)
+- MP3, 192 kbps (music-heavy shows)
+- Mono for single-speaker
+- Stereo for multi-speaker or music
+
+### Tips for Great Audio
+
+✅ **Choose instrumental music:** Avoid lyrics that compete with speech  
+✅ **Use consistent ducking:** Keeps listener experience smooth  
+✅ **Test with headphones:** Catch issues that speakers miss  
+✅ **Match music to tone:** Upbeat for comedy, mellow for storytelling  
+✅ **Fade music:** Use fade in/out at episode start/end  
+❌ Don't use copyrighted music (use library or royalty-free)  
+❌ Don't make music too loud (should enhance, not overpower)
+          `
+        },
+        {
+          title: 'Podcast Website Builder',
+          description: 'Create a custom website for your podcast',
+          link: '#website-builder',
+          content: `
+## Podcast Website Builder
+
+### What is the Website Builder?
+
+Create a professional podcast website with zero coding:
+- Custom domain or free subdomain
+- Responsive design (mobile-friendly)
+- Automatic episode listings
+- Player embedded in each page
+- Contact form and links
+- SEO-optimized
+
+### Getting Started
+
+1. **Go to Settings > Website**
+2. **Click "Build Website"**
+3. **Choose domain:**
+   - Free: yourshow.podcastplusplus.com
+   - Custom: yourshow.com (requires DNS setup)
+4. **Select theme/style**
+5. **Customize sections**
+
+### Website Sections
+
+**Header:**
+- Show logo
+- Navigation menu
+- Social media links
+
+**Homepage:**
+- Hero section with show description
+- Latest episodes
+- Subscribe buttons (Apple, Spotify, etc.)
+
+**Episodes Page:**
+- All episodes in grid or list
+- Search and filter
+- Embedded player for each
+
+**About Page:**
+- Host bio
+- Show description
+- Contact information
+
+**Contact Form:**
+- Let listeners reach you
+- Submissions emailed to you
+
+### Customization Options
+
+**Colors & Branding:**
+- Primary color (buttons, links)
+- Secondary color (accents)
+- Background color
+- Text color
+- Upload logo and favicon
+
+**Layout:**
+- Grid or list view for episodes
+- Sidebar or full-width
+- Card style (bordered, shadowed, etc.)
+
+**Content:**
+- Add custom pages (About, Sponsors, etc.)
+- Edit all text and headings
+- Rearrange sections with drag-and-drop
+
+### Publishing Your Website
+
+1. **Preview changes** before publishing
+2. **Click "Publish Website"**
+3. **Site goes live** within 2 minutes
+4. **Share URL** on social media
+
+### Custom Domain Setup (Pro)
+
+1. **Purchase domain** from registrar (Namecheap, GoDaddy, etc.)
+2. **Add DNS records:**
+   - Type: CNAME
+   - Name: www (or @)
+   - Value: podcasts.podcastplusplus.com
+3. **In Website Builder:** Enter your domain
+4. **Verify:** Takes 24-48 hours for DNS to propagate
+
+### SEO & Discovery
+
+The website builder automatically includes:
+- ✅ Podcast RSS feed link
+- ✅ Schema.org markup for podcasts
+- ✅ Open Graph tags for social sharing
+- ✅ Sitemap for search engines
+- ✅ Mobile-optimized meta tags
+
+### Tips for a Great Website
+
+✅ **Use high-quality cover art:** First impression matters  
+✅ **Write compelling show description:** Hook visitors immediately  
+✅ **Add host photos:** Builds personal connection  
+✅ **Include call-to-action:** "Subscribe on Apple Podcasts"  
+✅ **Update regularly:** Add new episodes as published  
+❌ Don't clutter with too many sections  
+❌ Don't forget mobile preview (most visitors on mobile)
+          `
         }
       ]
     },
     {
       category: 'Account & Billing',
+      icon: CreditCard,
+      description: 'Manage your subscription, usage, and billing information',
       items: [
         {
           title: 'Subscription Plans',
@@ -653,6 +1091,8 @@ Contact support to downgrade. Note:
     },
     {
       category: 'Troubleshooting',
+      icon: AlertCircle,
+      description: 'Solutions to common problems and how to get help',
       items: [
         {
           title: 'Common Issues',
@@ -784,152 +1224,185 @@ For urgent production issues affecting live podcasts:
     )
   })).filter(category => category.items.length > 0);
 
-  const [expandedGuide, setExpandedGuide] = useState(null);
+  const [selectedGuide, setSelectedGuide] = useState(null);
+  const [expandedCategories, setExpandedCategories] = useState(guides.map(g => g.category));
 
   const handleGuideClick = (guide) => {
-    setExpandedGuide(expandedGuide?.title === guide.title ? null : guide);
+    setSelectedGuide(guide);
+  };
+
+  const toggleCategory = (categoryName) => {
+    setExpandedCategories(prev => 
+      prev.includes(categoryName) 
+        ? prev.filter(c => c !== categoryName)
+        : [...prev, categoryName]
+    );
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4">
-      <div className="max-w-6xl mx-auto">
-        <Button
-          variant="ghost"
-          className="mb-4"
-          onClick={() => navigate(-1)}
-        >
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back
-        </Button>
-
-        <Card className="mb-6">
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <BookOpen className="h-6 w-6 text-primary" />
-              <CardTitle>Guides & Documentation</CardTitle>
-            </div>
-            <p className="text-sm text-muted-foreground mt-2">
-              Everything you need to know about using Podcast Plus Plus
-            </p>
-          </CardHeader>
-          <CardContent>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input
-                type="text"
-                placeholder="Search guides..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {expandedGuide ? (
-          <Card>
-            <CardHeader>
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-white border-b sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setExpandedGuide(null)}
-                className="mb-2"
+                onClick={() => navigate(-1)}
               >
                 <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to all guides
+                Back
               </Button>
-              <CardTitle>{expandedGuide.title}</CardTitle>
-              <p className="text-sm text-muted-foreground">{expandedGuide.description}</p>
-            </CardHeader>
-            <CardContent>
-              <div className="prose prose-sm max-w-none">
-                {expandedGuide.content.split('\n').map((line, idx) => {
-                  if (line.startsWith('## ')) {
-                    return <h2 key={idx} className="text-2xl font-bold mt-6 mb-3">{line.replace('## ', '')}</h2>;
-                  } else if (line.startsWith('### ')) {
-                    return <h3 key={idx} className="text-xl font-semibold mt-4 mb-2">{line.replace('### ', '')}</h3>;
-                  } else if (line.startsWith('#### ')) {
-                    return <h4 key={idx} className="text-lg font-medium mt-3 mb-2">{line.replace('#### ', '')}</h4>;
-                  } else if (line.startsWith('- ')) {
-                    return <li key={idx} className="ml-6">{line.replace('- ', '')}</li>;
-                  } else if (line.startsWith('**') && line.endsWith('**')) {
-                    return <p key={idx} className="font-bold mt-3">{line.replace(/\*\*/g, '')}</p>;
-                  } else if (line.trim() === '') {
-                    return <br key={idx} />;
-                  } else {
-                    return <p key={idx} className="my-2">{line}</p>;
-                  }
-                })}
+              <div className="flex items-center gap-2">
+                <BookOpen className="h-5 w-5 text-primary" />
+                <h1 className="text-xl font-bold">Guides</h1>
               </div>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="space-y-6">
-            {filteredGuides.map((category, idx) => (
-              <Card key={idx}>
+            </div>
+            <div className="relative max-w-xs w-full">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input
+                type="text"
+                placeholder="Search..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10 h-9 text-sm"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="max-w-7xl mx-auto px-4 py-6">
+        <div className="flex gap-6">
+          {/* Left Sidebar - Outline */}
+          <div className="w-64 flex-shrink-0">
+            <Card className="sticky top-24">
+              <CardContent className="p-4">
+                <div className="space-y-1">
+                  {filteredGuides.map((category, idx) => {
+                    const CategoryIcon = category.icon || BookOpen;
+                    const isExpanded = expandedCategories.includes(category.category);
+                    
+                    return (
+                      <div key={idx}>
+                        <button
+                          onClick={() => toggleCategory(category.category)}
+                          className="flex items-center gap-2 w-full px-2 py-1.5 text-left rounded hover:bg-gray-100 transition-colors"
+                        >
+                          <CategoryIcon className="h-3.5 w-3.5 text-gray-500 flex-shrink-0" />
+                          <span className="text-xs font-medium text-gray-700 flex-1">
+                            {category.category}
+                          </span>
+                          <ChevronRight 
+                            className={`h-3.5 w-3.5 text-gray-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} 
+                          />
+                        </button>
+                        
+                        {isExpanded && (
+                          <div className="ml-6 mt-1 space-y-0.5">
+                            {category.items.map((guide, gIdx) => (
+                              <button
+                                key={gIdx}
+                                onClick={() => handleGuideClick(guide)}
+                                className={`w-full text-left px-2 py-1 rounded text-xs transition-colors ${
+                                  selectedGuide?.title === guide.title
+                                    ? 'bg-primary/10 text-primary font-medium'
+                                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                                }`}
+                              >
+                                {guide.title}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {filteredGuides.length === 0 && (
+                  <div className="text-center py-8">
+                    <p className="text-xs text-gray-500">
+                      No guides found
+                    </p>
+                    <Button
+                      variant="link"
+                      size="sm"
+                      onClick={() => setSearchTerm('')}
+                      className="mt-2 text-xs"
+                    >
+                      Clear search
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Right Content Area */}
+          <div className="flex-1 min-w-0">
+            {selectedGuide ? (
+              <Card>
                 <CardHeader>
-                  <CardTitle className="text-lg">{category.category}</CardTitle>
+                  <CardTitle className="text-2xl">{selectedGuide.title}</CardTitle>
+                  <p className="text-sm text-muted-foreground">{selectedGuide.description}</p>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-3">
-                    {category.items.map((guide, gIdx) => (
-                      <button
-                        key={gIdx}
-                        onClick={() => handleGuideClick(guide)}
-                        className="w-full text-left p-4 rounded-lg border hover:border-primary hover:bg-primary/5 transition-colors group"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1">
-                            <h3 className="font-semibold text-base group-hover:text-primary transition-colors">
-                              {guide.title}
-                            </h3>
-                            <p className="text-sm text-muted-foreground mt-1">
-                              {guide.description}
-                            </p>
-                          </div>
-                          <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-primary transition-colors" />
-                        </div>
-                      </button>
-                    ))}
+                  <div className="prose prose-sm max-w-none">
+                    {selectedGuide.content.split('\n').map((line, idx) => {
+                      if (line.startsWith('## ')) {
+                        return <h2 key={idx} className="text-2xl font-bold mt-6 mb-3">{line.replace('## ', '')}</h2>;
+                      } else if (line.startsWith('### ')) {
+                        return <h3 key={idx} className="text-xl font-semibold mt-4 mb-2">{line.replace('### ', '')}</h3>;
+                      } else if (line.startsWith('#### ')) {
+                        return <h4 key={idx} className="text-lg font-medium mt-3 mb-2">{line.replace('#### ', '')}</h4>;
+                      } else if (line.startsWith('- ')) {
+                        return <li key={idx} className="ml-6">{line.replace('- ', '')}</li>;
+                      } else if (line.startsWith('**') && line.endsWith('**')) {
+                        return <p key={idx} className="font-bold mt-3">{line.replace(/\*\*/g, '')}</p>;
+                      } else if (line.trim() === '') {
+                        return <br key={idx} />;
+                      } else {
+                        return <p key={idx} className="my-2">{line}</p>;
+                      }
+                    })}
                   </div>
                 </CardContent>
               </Card>
-            ))}
-
-            {filteredGuides.length === 0 && (
+            ) : (
               <Card>
-                <CardContent className="py-12 text-center">
-                  <p className="text-muted-foreground">
-                    No guides found matching "{searchTerm}"
+                <CardContent className="py-16 text-center">
+                  <BookOpen className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+                  <h2 className="text-xl font-semibold text-gray-700 mb-2">
+                    Select a guide to get started
+                  </h2>
+                  <p className="text-sm text-gray-500 max-w-md mx-auto">
+                    Choose a topic from the left sidebar to view detailed instructions and information.
                   </p>
-                  <Button
-                    variant="link"
-                    onClick={() => setSearchTerm('')}
-                    className="mt-2"
-                  >
-                    Clear search
-                  </Button>
                 </CardContent>
               </Card>
             )}
-          </div>
-        )}
 
-        <Card className="mt-6">
-          <CardContent className="py-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-semibold">Still need help?</h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Can't find what you're looking for? Contact our support team.
-                </p>
-              </div>
-              <Button onClick={() => navigate('/contact')}>
-                Contact Support
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+            {/* Help Card */}
+            <Card className="mt-6">
+              <CardContent className="py-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-semibold">Still need help?</h3>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Can't find what you're looking for? Contact our support team.
+                    </p>
+                  </div>
+                  <Button onClick={() => navigate('/contact')}>
+                    Contact Support
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
       </div>
     </div>
   );

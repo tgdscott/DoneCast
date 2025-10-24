@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from typing import Dict, Any
 from sqlmodel import Session
@@ -18,16 +18,29 @@ router = APIRouter(
 # --- helper: build a correct UserPublic without importing from auth ---
 def _to_user_public(u: User) -> UserPublic:
     admin_email = getattr(settings, "ADMIN_EMAIL", None)
-    is_admin = bool(
+    is_admin_email = bool(
         getattr(u, "email", None)
         and admin_email
         and str(u.email).lower() == str(admin_email).lower()
     )
     terms_required = getattr(settings, "TERMS_VERSION", None)
     public = UserPublic.model_validate(u, from_attributes=True)
-    public.is_admin = is_admin
-    public.role = "admin" if is_admin else None
-    public.terms_version_required = str(terms_required) if terms_required is not None else None
+    
+    # Use the role from database (don't override it!)
+    db_role = getattr(u, "role", None)
+    public.role = db_role
+    
+    # Set is_admin flag (legacy support) - true if they have any admin role OR match ADMIN_EMAIL
+    public.is_admin = is_admin_email or bool(getattr(u, "is_admin", False)) or db_role in ("admin", "superadmin")
+    
+    # Skip terms enforcement in dev mode (dev/prod share same DB, constant re-acceptance is annoying)
+    # CRITICAL: Don't wrap in str() - keep same type as settings (already a str)
+    # This ensures frontend comparison (required !== accepted) works consistently
+    env = (settings.APP_ENV or "dev").strip().lower()
+    if env in {"dev", "development", "local", "test", "testing"}:
+        public.terms_version_required = None
+    else:
+        public.terms_version_required = terms_required
     return public
 
 class ElevenLabsAPIKeyUpdate(BaseModel):
@@ -43,7 +56,23 @@ class AudioCleanupSettingsPublic(BaseModel):
     settings: Dict[str, Any]
 
 @router.get("/me", response_model=UserPublic)
-async def read_users_me(current_user: User = Depends(get_current_user)):
+async def read_users_me(
+    response: Response,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Get current user profile.
+    
+    CRITICAL: Explicitly refresh user from database to ensure terms_version_accepted
+    and other fields are current, preventing intermittent ToS re-acceptance bugs.
+    """
+    # Prevent HTTP caching of user profile data
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    
+    # Refresh from database to ensure we have latest committed data
+    session.refresh(current_user)
     return _to_user_public(current_user)
 
 @router.get("/me/stats", response_model=Dict[str, Any])

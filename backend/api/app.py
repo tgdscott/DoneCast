@@ -114,6 +114,10 @@ app.add_middleware(
     allow_credentials=True,
 )
 
+# --- Dev Safety Middleware (Cloud SQL Proxy protection) ---
+from api.middleware.dev_safety import dev_read_only_middleware
+app.middleware("http")(dev_read_only_middleware)
+
 # --- Deferred Startup Tasks -------------------------------------------------
 import threading, time as _time
 from pathlib import Path as _Path
@@ -130,6 +134,16 @@ def _launch_startup_tasks() -> None:
     blocking_flag = (os.getenv("BLOCKING_STARTUP_TASKS") or "").lower() in {"1","true","yes","on"}
     sentinel_path = _Path(os.getenv("STARTUP_SENTINEL_PATH", "/tmp/ppp_startup_done"))
     single = (os.getenv("SINGLE_STARTUP_TASKS") or "1").lower() in {"1","true","yes","on"}
+    
+    # ALWAYS recover raw file transcripts - critical for production after deployments
+    # This runs BEFORE sentinel check because Cloud Run may reuse containers with stale /tmp
+    try:
+        from api.startup_tasks import _recover_raw_file_transcripts
+        log.info("[deferred-startup] Running transcript recovery (always runs, ignores sentinel)")
+        _recover_raw_file_transcripts()
+    except Exception as e:
+        log.error("[deferred-startup] Transcript recovery failed: %s", e, exc_info=True)
+    
     if skip:
         log.warning("[deferred-startup] SKIP_STARTUP_MIGRATIONS=1 -> skipping run_startup_tasks()")
         return

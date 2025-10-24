@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import { Textarea } from '../../ui/textarea';
-import { ArrowLeft, Loader2, Wand2, Lightbulb, ListChecks, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Loader2, Wand2, Lightbulb, ListChecks, AlertTriangle, RefreshCw } from 'lucide-react';
 
 export default function StepEpisodeDetails({
   episodeDetails,
@@ -39,6 +39,7 @@ export default function StepEpisodeDetails({
   minutesRemaining = null,
   formatDuration = () => null,
   audioDurationSec: audioDurationSecProp = null,
+  onRetryPrecheck = null,
 }) {
   const audioDurationSec = audioDurationSecProp;
   const formatDurationSafe = typeof formatDuration === 'function' ? formatDuration : () => null;
@@ -374,19 +375,33 @@ export default function StepEpisodeDetails({
         <Button onClick={onBack} variant="outline" size="lg">
           <ArrowLeft className="w-5 h-5 mr-2" />Back
         </Button>
-        <div className="flex flex-col items-end">
-          <Button
-            onClick={onAssemble}
-            disabled={!canProceed || isAssembling || minutesPrecheckPending || minutesBlocking}
-            size="lg"
-            className="px-8 py-3 text-lg font-semibold text-white disabled:opacity-70"
-            style={{ backgroundColor: '#2C3E50' }}
-          >
-            {isAssembling ? 'Assembling...' : 'Save and continue'}
-            <ArrowLeft className="w-5 h-5 ml-2 rotate-180" />
-          </Button>
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex gap-2">
+            {(minutesBlocking || blockingQuota) && onRetryPrecheck && (
+              <Button
+                onClick={onRetryPrecheck}
+                disabled={minutesPrecheckPending}
+                variant="outline"
+                size="lg"
+                className="px-4"
+                title="Refresh quota check (if you just upgraded your plan)"
+              >
+                <RefreshCw className={`w-5 h-5 ${minutesPrecheckPending ? 'animate-spin' : ''}`} />
+              </Button>
+            )}
+            <Button
+              onClick={onAssemble}
+              disabled={!canProceed || isAssembling || minutesPrecheckPending || minutesBlocking}
+              size="lg"
+              className="px-8 py-3 text-lg font-semibold text-white disabled:opacity-70"
+              style={{ backgroundColor: '#2C3E50' }}
+            >
+              {isAssembling ? 'Assembling...' : 'Save and continue'}
+              <ArrowLeft className="w-5 h-5 ml-2 rotate-180" />
+            </Button>
+          </div>
           {(minutesPrecheckPending || !canProceed) && (
-            <div className={`text-xs mt-2 max-w-sm text-right ${minutesBlocking ? 'text-red-600' : minutesPrecheckPending ? 'text-slate-600' : 'text-red-600'}`}>
+            <div className={`text-xs max-w-sm text-right ${minutesBlocking ? 'text-red-600' : minutesPrecheckPending ? 'text-slate-600' : 'text-red-600'}`}>
               {minutesPrecheckPending
                 ? 'Waiting for processing minutes check…'
                 : minutesBlocking

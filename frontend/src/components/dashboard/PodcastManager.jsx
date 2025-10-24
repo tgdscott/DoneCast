@@ -25,6 +25,8 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts, o
   const [distributionPodcast, setDistributionPodcast] = useState(null);
   const { toast } = useToast();
   const [me, setMe] = useState(null);
+  const [publishedEpisodeCount, setPublishedEpisodeCount] = useState(0);
+  const [checkingPublishedEpisodes, setCheckingPublishedEpisodes] = useState(true);
 
   useEffect(() => {
     (async () => {
@@ -34,6 +36,24 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts, o
       } catch {}
     })();
   }, [token]);
+
+  // Check for published episodes to gate "New Podcast" button
+  useEffect(() => {
+    (async () => {
+      setCheckingPublishedEpisodes(true);
+      try {
+        const api = makeApi(token);
+        const summary = await api.get('/api/episodes/summary');
+        // Calculate published episodes: total minus unpublished
+        const published = (summary?.total || 0) - (summary?.unpublished_or_unscheduled || 0);
+        setPublishedEpisodeCount(published);
+      } catch {
+        setPublishedEpisodeCount(0);
+      } finally {
+        setCheckingPublishedEpisodes(false);
+      }
+    })();
+  }, [token, podcasts]); // Re-check when podcasts change
 
   const getComplianceIssues = (p) => {
     const issues = [];
@@ -74,6 +94,16 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts, o
   };
 
   const openWizard = () => {
+    // Block if user has podcasts but no published episodes
+    if (podcasts.length > 0 && publishedEpisodeCount === 0) {
+      toast({
+        variant: "destructive",
+        title: "Publish an episode first",
+        description: "You must have at least one published episode on your current podcast before creating a new one."
+      });
+      return;
+    }
+    
     // If full-page onboarding is enabled, steer users to /onboarding instead of opening the modal
     if (fullPageOnboarding) {
       try { window.location.href = '/onboarding?from=manager&reset=1'; } catch {}
@@ -143,7 +173,15 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts, o
               <CardDescription>Here you can create, import, edit, or delete your podcasts.</CardDescription>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={openWizard}><Icons.Plus className="w-4 h-4 mr-2" /> New Podcast</Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={openWizard}
+                disabled={checkingPublishedEpisodes || (podcasts.length > 0 && publishedEpisodeCount === 0)}
+                title={podcasts.length > 0 && publishedEpisodeCount === 0 ? "Publish at least one episode on your current podcast first" : ""}
+              >
+                <Icons.Plus className="w-4 h-4 mr-2" /> New Podcast
+              </Button>
               <Button variant="outline" size="sm" onClick={() => {
                 try { window.dispatchEvent(new CustomEvent('ppp:navigate-view', { detail: 'rssImporter' })); } catch {}
               }}><Icons.Rss className="w-4 h-4 mr-2" /> Import</Button>

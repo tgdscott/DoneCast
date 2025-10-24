@@ -328,7 +328,54 @@ export default function BillingPage({ token, onBack }) {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
+          {/* Mobile Card View */}
+          <div className="md:hidden space-y-4">
+            {tiers.map(t => (
+              <div key={t.key} className={`rounded-lg border p-4 ${t.popular ? 'border-blue-500 bg-blue-50/30' : 'border-slate-200'}`}>
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold">{t.name}</h3>
+                    {t.popular && <Badge variant="secondary">{t.badge || 'Popular'}</Badge>}
+                  </div>
+                  {currentPlanKey === t.key && (
+                    <Badge variant="secondary" className="bg-green-100 text-green-700 w-fit">Current Plan</Badge>
+                  )}
+                  <div className="text-2xl font-bold">{priceFor(t)}</div>
+                  <div className="space-y-2 pt-2 border-t">
+                    <div className="text-sm"><span className="font-medium">Processing:</span> {t.processing}</div>
+                    <div className="text-sm"><span className="font-medium">Extra Rate:</span> {t.extraRate}</div>
+                    <div className="text-sm"><span className="font-medium">Queue:</span> {t.queue}</div>
+                    {rows.filter(r => r.key !== 'price' && r.key !== 'processing' && r.key !== 'extraRate' && r.key !== 'queue').map(row => (
+                      <div key={row.key} className="flex items-center justify-between text-sm">
+                        <span>{row.label}</span>
+                        <Check on={!!t.features[row.key]} />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="pt-3">
+                    {t.contact ? (
+                      <Button asChild variant="secondary" className="w-full">
+                        <a href="/contact">Contact Sales</a>
+                      </Button>
+                    ) : currentPlanKey === t.key ? (
+                      <Button disabled={portalLoading} onClick={openPortal} className="w-full">Manage Subscription</Button>
+                    ) : (
+                      <Button 
+                        disabled={checkoutLoading} 
+                        onClick={()=>startCheckout(t.key, annual? 'annual':'monthly')}
+                        className="w-full"
+                      >
+                        {annual ? `Choose ${t.name} (Annual)` : `Choose ${t.name}`}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          {/* Desktop Table View */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full border-collapse align-top min-w-[860px]">
               <thead>
                 <tr>

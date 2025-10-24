@@ -65,20 +65,22 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
     """
     def _dispatch_transcribe(payload: dict) -> None:
             filename = str(payload.get("filename") or "").strip()
+            user_id = str(payload.get("user_id") or "").strip() or None  # Extract user_id from payload
             if not filename:
-                print("DEV MODE fallback skipped: payload missing 'filename'")
+                print("DEV MODE transcription skipped: payload missing 'filename'")
                 return
+            
             try:
                 from api.services.transcription import transcribe_media_file  # type: ignore
                 from api.core.paths import TRANSCRIPTS_DIR  # type: ignore
                 from pathlib import Path  # local import to avoid heavy import cost during module load
             except Exception as import_err:  # pragma: no cover
-                print(f"DEV MODE fallback import failed: {import_err}")
+                print(f"DEV MODE transcription import failed: {import_err}")
                 return
 
             def _runner() -> None:
                 try:
-                    words = transcribe_media_file(filename)
+                    words = transcribe_media_file(filename, user_id)  # Pass user_id for tier routing
                     # Persist a transcript JSON so /api/ai/transcript-ready becomes true.
                     try:
                         base_name = filename.split('/')[-1].split('\\')[-1]
@@ -91,16 +93,16 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
                             print(f"DEV MODE wrote transcript JSON -> {out_path}")
                     except Exception as write_err:  # pragma: no cover
                         print(f"DEV MODE warning: failed to write transcript JSON for {filename}: {write_err}")
-                    print(f"DEV MODE fallback transcription finished for {filename}")
+                    print(f"DEV MODE transcription completed for {filename}")
                 except Exception as trans_err:  # pragma: no cover
-                    print(f"DEV MODE fallback transcription error for {filename}: {trans_err}")
+                    print(f"DEV MODE transcription error for {filename}: {trans_err}")
 
             threading.Thread(
                 target=_runner,
                 name=f"dev-transcribe-{filename}",
                 daemon=True,
             ).start()
-            print(f"DEV MODE fallback transcription dispatched for {filename}")
+            print(f"DEV MODE transcription dispatched for {filename}")
 
     def _dispatch_assemble(payload: dict) -> None:
             # Expect the same payload as /api/tasks/assemble
@@ -222,7 +224,15 @@ def enqueue_http_task(path: str, body: dict) -> dict:
     if not project or not location or not queue:
         raise ValueError("Missing required Cloud Tasks configuration: GOOGLE_CLOUD_PROJECT, TASKS_LOCATION, TASKS_QUEUE")
     parent = client.queue_path(project, location, queue)
-    url = f"{os.getenv('TASKS_URL_BASE')}{path}"
+    
+    # Route assembly tasks to dedicated worker service for isolation
+    # Other tasks can still go to main API service
+    if "/assemble" in path:
+        base_url = os.getenv("WORKER_URL_BASE") or os.getenv("TASKS_URL_BASE")
+    else:
+        base_url = os.getenv("TASKS_URL_BASE")
+    
+    url = f"{base_url}{path}"
     task = {
         "http_request": {
             "http_method": tasks_v2.HttpMethod.POST,
@@ -232,5 +242,7 @@ def enqueue_http_task(path: str, body: dict) -> dict:
         }
     }
     created = client.create_task(request={"parent": parent, "task": task})
+    log.info("event=tasks.cloud.enqueued path=%s url=%s task_name=%s", path, url, created.name)
     return {"name": created.name}
+
 

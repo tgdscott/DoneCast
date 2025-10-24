@@ -1,9 +1,12 @@
 .new-landing {
   min-height: 100vh;
   background: radial-gradient(120% 120% at 85% 0%, hsla(185, 84%, 93%, 0.6), transparent),
-    radial-gradient(120% 120% at 10% -10%, hsla(168, 69%, 92%, 0.5), transparent);
+    radial-gradient(120% 120% at 10% -10%, hsla(168, 69%, 92%, 0.5), transparent),
+    hsl(var(--background)) !important;
   color: hsl(var(--foreground));
   font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* Reset any inherited styles */
+  isolation: isolate;
 }
 
 .new-landing a {
@@ -80,8 +83,8 @@ html.dark .nl-nav {
   gap: 0.75rem;
 }
 
-.nl-button,
-.nl-button-outline {
+.new-landing .nl-button,
+.new-landing .nl-button-outline {
   border-radius: 999px;
   padding: 0.5rem 1.4rem;
   font-weight: 600;
@@ -90,35 +93,36 @@ html.dark .nl-nav {
   align-items: center;
   gap: 0.5rem;
   transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease, color 180ms ease;
+  text-decoration: none;
 }
 
-.nl-button {
-  background: hsl(var(--primary));
+.new-landing .nl-button {
+  background: hsl(var(--primary)) !important;
   color: white !important; /* Force white text - fixes invisible teal-on-teal */
   box-shadow: 0 12px 30px -14px hsla(185, 84%, 38%, 0.7);
   border: none;
   cursor: pointer;
 }
 
-.nl-button:hover {
+.new-landing .nl-button:hover {
   transform: translateY(-2px);
   box-shadow: 0 18px 38px -18px hsla(185, 84%, 38%, 0.65);
   color: white !important;
 }
 
-.nl-button-outline {
-  border: 1px solid hsl(var(--border));
-  background: transparent;
-  color: hsl(var(--foreground));
+.new-landing .nl-button-outline {
+  border: 1px solid hsl(var(--border)) !important;
+  background: transparent !important;
+  color: hsl(var(--foreground)) !important;
   cursor: pointer;
 }
 
-.nl-button-outline:hover {
-  background: hsla(0, 0%, 100%, 0.6);
+.new-landing .nl-button-outline:hover {
+  background: hsla(0, 0%, 100%, 0.6) !important;
 }
 
-html.dark .nl-button-outline:hover {
-  background: hsla(240, 10%, 10%, 0.6);
+html.dark .new-landing .nl-button-outline:hover {
+  background: hsla(240, 10%, 10%, 0.6) !important;
 }
 
 /* Hero */
@@ -263,7 +267,7 @@ html.dark .nl-float-card {
 }
 
 .nl-section-highlight {
-  background: linear-gradient(135deg, hsla(185, 84%, 38%, 0.08), hsla(43, 100%, 51%, 0.05));
+  background: linear-gradient(135deg, hsla(185, 84%, 38%, 0.08), hsla(43, 100%, 51%, 0.05)) !important;
 }
 
 .nl-split {
@@ -361,11 +365,11 @@ html.dark .nl-media-card {
 }
 
 .nl-section-muted {
-  background: linear-gradient(135deg, hsla(185, 84%, 38%, 0.08), hsla(43, 100%, 51%, 0.06));
+  background: linear-gradient(135deg, hsla(185, 84%, 38%, 0.08), hsla(43, 100%, 51%, 0.06)) !important;
 }
 
 .nl-section-alt {
-  background: linear-gradient(135deg, hsla(185, 84%, 38%, 0.06), hsla(168, 69%, 92%, 0.4));
+  background: linear-gradient(135deg, hsla(185, 84%, 38%, 0.06), hsla(168, 69%, 92%, 0.4)) !important;
 }
 
 .nl-section-title {
@@ -637,8 +641,8 @@ html.dark .nl-footer {
 }
 
 .nl-section-cta {
-  background: linear-gradient(135deg, hsla(185, 84%, 38%, 0.12), hsla(43, 100%, 51%, 0.12));
-  color: hsl(var(--primary-foreground));
+  background: linear-gradient(135deg, hsla(185, 84%, 38%, 0.12), hsla(43, 100%, 51%, 0.12)) !important;
+  color: hsl(var(--foreground)) !important;
 }
 
 .nl-section-cta .nl-hero-title span {

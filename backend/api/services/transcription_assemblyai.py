@@ -22,6 +22,12 @@ def assemblyai_transcribe_with_speakers(filename: str, timeout_s: int = 7200) ->
     from .transcription.transcription_runner import run_assemblyai_job  # local import to avoid circular import
     from .transcription.assemblyai_client import AssemblyAITranscriptionError as RunnerClientError
     api_key = settings.ASSEMBLYAI_API_KEY
+    
+    # Debug logging for API key
+    logging.info("[assemblyai] 🔑 API key loaded: present=%s len=%d starts_with=%s", 
+                 bool(api_key), len(api_key) if api_key else 0, 
+                 api_key[:8] if api_key else "N/A")
+    
     if not api_key or api_key == "YOUR_API_KEY_HERE":
         raise AssemblyAITranscriptionError("AssemblyAI API key not configured")
     audio_path = MEDIA_DIR / filename

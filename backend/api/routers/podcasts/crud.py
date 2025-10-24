@@ -11,6 +11,7 @@ from sqlalchemy.exc import ProgrammingError
 from sqlmodel import SQLModel, Session, delete, select
 
 from ...routers.auth import get_current_user
+from ...core.config import settings
 from ...core.database import get_session
 from ...core.paths import MEDIA_DIR
 from ...models.podcast import (
@@ -25,6 +26,7 @@ from ...models.user import User
 from ...services.image_utils import ensure_cover_image_constraints
 from ...services.podcasts.utils import save_cover_upload
 from ...services.publisher import SpreakerClient
+from ...services import podcast_websites
 
 log = logging.getLogger(__name__)
 
@@ -45,9 +47,9 @@ class PodcastUpdate(SQLModel):
     author_name: Optional[str] = None
     spreaker_show_id: Optional[str] = None
     contact_email: Optional[str] = None
-    category_id: Optional[int] = None
-    category_2_id: Optional[int] = None
-    category_3_id: Optional[int] = None
+    category_id: Optional[str] = None  # Changed from int to str to match database model
+    category_2_id: Optional[str] = None  # Changed from int to str to match database model
+    category_3_id: Optional[str] = None  # Changed from int to str to match database model
 
 
 @router.post("/", response_model=Podcast, status_code=status.HTTP_201_CREATED)
@@ -166,6 +168,32 @@ async def create_podcast(
     session.commit()
     session.refresh(db_podcast)
     log.info("Successfully saved podcast to local database with ID: %s", db_podcast.id)
+    
+    # 🎉 AUTO-CREATE WEBSITE & RSS FEED - New users get working URLs immediately!
+    try:
+        log.info("🚀 Auto-creating website and RSS feed for new podcast...")
+        website, content = podcast_websites.create_or_refresh_site(session, db_podcast, current_user)
+        
+        # Get base domain from settings
+        base_domain = getattr(settings, 'PODCAST_WEBSITE_BASE_DOMAIN', 'podcastplusplus.com')
+        website_url = f"https://{website.subdomain}.{base_domain}"
+        log.info(f"✅ Website auto-created: {website_url}")
+        
+        # Generate friendly slug for RSS feed URL
+        if not db_podcast.slug:
+            from ...services.podcast_websites import _slugify_base
+            db_podcast.slug = _slugify_base(db_podcast.name)
+            session.add(db_podcast)
+            session.commit()
+            session.refresh(db_podcast)
+        
+        rss_url = f"https://app.{base_domain}/rss/{db_podcast.slug}/feed.xml"
+        log.info(f"✅ RSS feed available: {rss_url}")
+        log.info(f"🎊 User can share immediately: {website_url} and {rss_url}")
+    except Exception as exc:
+        # Non-fatal - don't block podcast creation if website generation fails
+        log.warning(f"⚠️ Failed to auto-create website/RSS feed (non-fatal): {exc}", exc_info=True)
+    
     log.info("--- Podcast creation process finished ---")
     return db_podcast
 
@@ -256,25 +284,32 @@ async def get_user_podcasts(
             # Add cover_url field with GCS URL resolution
             cover_url = None
             try:
-                # Priority 1: Remote cover (already public URL)
-                if pod.remote_cover_url:
-                    cover_url = pod.remote_cover_url
-                # Priority 2: GCS path → generate signed URL
-                elif pod.cover_path and str(pod.cover_path).startswith("gs://"):
+                # Priority 1: GCS path → generate signed URL
+                if pod.cover_path and str(pod.cover_path).startswith("gs://"):
                     from infrastructure.gcs import get_signed_url
                     gcs_str = str(pod.cover_path)[5:]  # Remove "gs://"
                     parts = gcs_str.split("/", 1)
                     if len(parts) == 2:
                         bucket, key = parts
                         cover_url = get_signed_url(bucket, key, expiration=3600)
-                # Priority 3: HTTP URL in cover_path
+                # Priority 2: HTTP URL in cover_path (legacy)
                 elif pod.cover_path and str(pod.cover_path).startswith("http"):
                     cover_url = pod.cover_path
                 # Priority 4: Local file (dev only)
                 elif pod.cover_path:
                     import os
                     filename = os.path.basename(str(pod.cover_path))
-                    cover_url = f"/static/media/{filename}"
+                    # Add cache-busting parameter using file modification time
+                    try:
+                        from pathlib import Path
+                        file_path = MEDIA_DIR / filename
+                        if file_path.exists():
+                            mtime = int(file_path.stat().st_mtime)
+                            cover_url = f"/static/media/{filename}?t={mtime}"
+                        else:
+                            cover_url = f"/static/media/{filename}"
+                    except:
+                        cover_url = f"/static/media/{filename}"
             except Exception as e:
                 log.warning(f"[podcasts.list] Failed to resolve cover URL for podcast {pod.id}: {e}")
             
@@ -430,6 +465,9 @@ async def update_podcast(
                     len(podcast_to_update.description or ""),
                     podcast_to_update.language,
                 )
+                # Note: We don't send category_id to Spreaker anymore since we switched to Apple Podcasts
+                # categories (string IDs like "arts", "technology") which are incompatible with Spreaker's
+                # integer category system. Categories are stored in our database for RSS feed generation.
                 ok_meta, resp_meta = client.update_show_metadata(
                     show_id=podcast_to_update.spreaker_show_id,
                     title=podcast_to_update.name,
@@ -440,9 +478,7 @@ async def update_podcast(
                     email=podcast_to_update.contact_email or current_user.email,
                     copyright_line=podcast_to_update.copyright_line,
                     show_type=(podcast_to_update.podcast_type.value if podcast_to_update.podcast_type else None),
-                    category_id=podcast_to_update.category_id,
-                    category_2_id=podcast_to_update.category_2_id,
-                    category_3_id=podcast_to_update.category_3_id,
+                    # Omit category_id fields - Apple Podcasts categories not compatible with Spreaker
                 )
                 if not ok_meta:
                     log.warning("Spreaker metadata update failed: %s", resp_meta)
@@ -469,7 +505,34 @@ async def update_podcast(
         except Exception as exc:
             log.warning("Spreaker metadata/cover update error: %s", exc)
 
-    return podcast_to_update
+    # Enrich response with cover_url for frontend display
+    response_data = podcast_to_update.model_dump()
+    cover_url = None
+    try:
+        # Priority 1: GCS path → generate signed URL
+        if podcast_to_update.cover_path and str(podcast_to_update.cover_path).startswith("gs://"):
+            from infrastructure.gcs import get_signed_url
+            gcs_str = str(podcast_to_update.cover_path)[5:]  # Remove "gs://"
+            parts = gcs_str.split("/", 1)
+            if len(parts) == 2:
+                bucket, key = parts
+                cover_url = get_signed_url(bucket, key, expiration=3600)
+        # Priority 2: HTTP URL in cover_path (legacy)
+        elif podcast_to_update.cover_path and str(podcast_to_update.cover_path).startswith("http"):
+            cover_url = podcast_to_update.cover_path
+        # Priority 4: Local file (dev only)
+        elif podcast_to_update.cover_path:
+            import os
+            from datetime import datetime
+            filename = os.path.basename(str(podcast_to_update.cover_path))
+            # Add timestamp to bust browser cache when cover is updated
+            timestamp = int(datetime.utcnow().timestamp())
+            cover_url = f"/static/media/{filename}?t={timestamp}"
+    except Exception as e:
+        log.warning(f"[podcast.update] Failed to resolve cover URL: {e}")
+    
+    response_data["cover_url"] = cover_url
+    return response_data
 
 
 @router.delete("/{podcast_id}", status_code=status.HTTP_204_NO_CONTENT)

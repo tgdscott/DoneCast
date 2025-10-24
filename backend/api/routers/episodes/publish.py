@@ -45,36 +45,38 @@ def publish_episode_endpoint(
             detail="Episode has no GCS audio file. Episode must be properly assembled with audio uploaded to GCS before publishing. Local files and Spreaker-only episodes are no longer supported."
         )
 
+    # Spreaker integration is now OPTIONAL (legacy support only)
     spreaker_access_token = getattr(current_user, "spreaker_access_token", None)
-    if not spreaker_access_token:
-        raise HTTPException(status_code=401, detail="User is not connected to Spreaker")
-
-    # Derive / validate Spreaker show id
+    
+    # Only attempt Spreaker validation if user has token
     derived_show_id = None
-    if spreaker_show_id and spreaker_show_id.isdigit():
-        derived_show_id = spreaker_show_id
-    else:
-        candidate_uuid = None
-        if spreaker_show_id and '-' in spreaker_show_id:
-            try:
-                candidate_uuid = _UUID(str(spreaker_show_id))
-            except Exception:
-                candidate_uuid = None
-        podcast_obj = None
-        try:
-            if getattr(ep, 'podcast_id', None):
-                podcast_obj = session.exec(select(Podcast).where(Podcast.id == ep.podcast_id)).first()
-        except Exception:
+    if spreaker_access_token:
+        # Derive / validate Spreaker show id
+        if spreaker_show_id and spreaker_show_id.isdigit():
+            derived_show_id = spreaker_show_id
+        else:
+            candidate_uuid = None
+            if spreaker_show_id and '-' in spreaker_show_id:
+                try:
+                    candidate_uuid = _UUID(str(spreaker_show_id))
+                except Exception:
+                    candidate_uuid = None
             podcast_obj = None
-        if not podcast_obj and candidate_uuid:
-            podcast_obj = session.exec(select(Podcast).where(Podcast.id == candidate_uuid)).first()
-        if podcast_obj and getattr(podcast_obj, 'spreaker_show_id', None):
-            derived_show_id = str(podcast_obj.spreaker_show_id)
-
-    if not derived_show_id or not derived_show_id.isdigit():
-        raise HTTPException(
-            status_code=400,
-            detail="Unable to determine valid numeric Spreaker show id. Ensure the associated podcast has its numeric Spreaker show id stored in spreaker_show_id.")
+            try:
+                if getattr(ep, 'podcast_id', None):
+                    podcast_obj = session.exec(select(Podcast).where(Podcast.id == ep.podcast_id)).first()
+            except Exception:
+                podcast_obj = None
+            if not podcast_obj and candidate_uuid:
+                podcast_obj = session.exec(select(Podcast).where(Podcast.id == candidate_uuid)).first()
+            if podcast_obj and getattr(podcast_obj, 'spreaker_show_id', None):
+                derived_show_id = str(podcast_obj.spreaker_show_id)
+        
+        # Log if Spreaker is attempted but show ID couldn't be determined
+        if not derived_show_id or not derived_show_id.isdigit():
+            logger.warning("publish_episode: User has Spreaker token but no valid show ID found episode_id=%s", episode_id)
+    else:
+        logger.info("publish_episode: Spreaker not connected, publishing RSS-only episode_id=%s", episode_id)
 
     # If publish_state omitted and admin test mode is on, default to draft (unpublished)
     if not publish_state:
@@ -146,7 +148,7 @@ def publish_episode_endpoint(
         session=session,
         current_user=current_user,
         episode_id=eid,
-        derived_show_id=str(derived_show_id),
+        derived_show_id=str(derived_show_id) if derived_show_id else None,
         publish_state=publish_state,
         auto_publish_iso=auto_publish_iso,
     )

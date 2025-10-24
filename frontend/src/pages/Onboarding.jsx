@@ -14,7 +14,6 @@ import { FORMATS, NO_MUSIC_OPTION } from "@/components/onboarding/OnboardingWiza
 import CoverCropper from "@/components/dashboard/CoverCropper.jsx";
 import { useResolvedTimezone } from '@/hooks/useResolvedTimezone';
 import { formatInTimezone } from '@/lib/timezone';
-import AIAssistant from "@/components/assistant/AIAssistant.jsx";
 import VoiceRecorder from "@/components/onboarding/VoiceRecorder.jsx";
 
 export default function Onboarding() {
@@ -88,9 +87,9 @@ export default function Onboarding() {
   const [selectedWeekdays, setSelectedWeekdays] = useState([]); // e.g., ['Monday','Wednesday']
   const [selectedDates, setSelectedDates] = useState([]); // e.g., ['2025-09-10','2025-09-24']
   const [notSureSchedule, setNotSureSchedule] = useState(false);
-  // Name capture (Step 1)
-  const [firstName, setFirstName] = useState(() => (user?.first_name || ''));
-  const [lastName, setLastName] = useState(() => (user?.last_name || ''));
+  // Name capture (Step 1) - Start with EMPTY strings for proper placeholder display
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [nameError, setNameError] = useState('');
 
   // Cover step: allow skipping
@@ -230,11 +229,11 @@ export default function Onboarding() {
         <div className="grid gap-4">
           <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor="firstName" className="text-right">First name<span className="text-red-600">*</span></Label>
-            <Input id="firstName" value={firstName} onChange={(e)=>setFirstName(e.target.value)} className="col-span-3" placeholder="e.g., Alex" />
+            <Input id="firstName" value={firstName} onChange={(e)=>setFirstName(e.target.value)} className="col-span-3" placeholder="Enter your first name" />
           </div>
           <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor="lastName" className="text-right">Last name</Label>
-            <Input id="lastName" value={lastName} onChange={(e)=>setLastName(e.target.value)} className="col-span-3" placeholder="(Optional)" />
+            <Input id="lastName" value={lastName} onChange={(e)=>setLastName(e.target.value)} className="col-span-3" placeholder="Enter your last name (optional)" />
           </div>
           {nameError && <p className="text-sm text-red-600">{nameError}</p>}
         </div>
@@ -387,7 +386,8 @@ export default function Onboarding() {
       setVoicesLoading(true); setVoicesError('');
       (async()=>{
         try {
-          const data = await makeApi(token).get('/api/elevenlabs/voices?size=12');
+          // Fetch more voices to ensure we get a balanced gender mix (was 12, now 20 to get better diversity)
+          const data = await makeApi(token).get('/api/elevenlabs/voices?size=20');
           const items = (data && (data.items || data.voices)) || [];
           setVoices(items);
           if (items.length > 0 && (!selectedVoiceId || selectedVoiceId === 'default')) {
@@ -735,7 +735,7 @@ export default function Onboarding() {
               end_offset_s: 1,
               fade_in_s: 1.5,
               fade_out_s: 2.0,
-              volume_db: -4,
+              volume_db: -1.4,  // Level 5.5 on 1-11 scale (was -4 = level 3.3)
             });
             musicRules.push({
               music_asset_id: selectedMusic.id,
@@ -744,7 +744,7 @@ export default function Onboarding() {
               end_offset_s: 0,
               fade_in_s: 3.0,
               fade_out_s: 1.0,
-              volume_db: -4,
+              volume_db: -1.4,  // Level 5.5 on 1-11 scale (was -4 = level 3.3)
             });
           }
 
@@ -859,7 +859,7 @@ export default function Onboarding() {
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="podcastName" className="text-right">Name<span className="text-red-600">*</span></Label>
                 <div className="col-span-3">
-                  <Input id="podcastName" value={formData.podcastName} onChange={handleChange} placeholder="e.g., 'The Morning Cup'" />
+                  <Input id="podcastName" value={formData.podcastName} onChange={handleChange} placeholder="Enter your podcast name" />
                   {((formData.podcastName||'').trim().length > 0 && (formData.podcastName||'').trim().length < 4) && (
                     <p className="text-xs text-red-600 mt-1">Name must be at least 4 characters</p>
                   )}
@@ -867,7 +867,7 @@ export default function Onboarding() {
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="podcastDescription" className="text-right">Description<span className="text-red-600">*</span></Label>
-                <Textarea id="podcastDescription" value={formData.podcastDescription} onChange={handleChange} className="col-span-3" placeholder="e.g., 'A daily podcast about the latest tech news.'" />
+                <Textarea id="podcastDescription" value={formData.podcastDescription} onChange={handleChange} className="col-span-3" placeholder="Describe your podcast in a few sentences" />
               </div>
             </div>
           );
@@ -974,7 +974,7 @@ export default function Onboarding() {
                       {introPreviewing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                     </button>
                     <select
-                      className="border rounded p-2 min-w-[220px]"
+                      className="border rounded p-2 w-full min-w-0 sm:min-w-[220px]"
                       value={selectedIntroId}
                       onChange={(e)=>{
                         const v = e.target.value;
@@ -1017,7 +1017,7 @@ export default function Onboarding() {
                   />
                 )}
                 {introMode==='tts' ? (
-                  <Textarea value={introScript} onChange={(e)=> setIntroScript(e.target.value)} placeholder="Welcome to my podcast!" />
+                  <Textarea value={introScript} onChange={(e)=> setIntroScript(e.target.value)} placeholder="Write your intro script here (e.g., 'Welcome to my podcast!')" />
                 ) : (
                   introMode==='upload' ? <Input type="file" accept="audio/*" onChange={(e)=> setIntroFile(e.target.files?.[0] || null)} /> : null
                 )}
@@ -1060,7 +1060,7 @@ export default function Onboarding() {
                       {outroPreviewing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                     </button>
                     <select
-                      className="border rounded p-2 min-w-[220px]"
+                      className="border rounded p-2 w-full min-w-0 sm:min-w-[220px]"
                       value={selectedOutroId}
                       onChange={(e)=>{
                         const v = e.target.value;
@@ -1103,7 +1103,7 @@ export default function Onboarding() {
                   />
                 )}
                 {outroMode==='tts' ? (
-                  <Textarea value={outroScript} onChange={(e)=> setOutroScript(e.target.value)} placeholder="Thank you for listening and see you next time!" />
+                  <Textarea value={outroScript} onChange={(e)=> setOutroScript(e.target.value)} placeholder="Write your outro script here (e.g., 'Thank you for listening!')" />
                 ) : (
                   outroMode==='upload' ? <Input type="file" accept="audio/*" onChange={(e)=> setOutroFile(e.target.files?.[0] || null)} /> : null
                 )}
@@ -1114,7 +1114,7 @@ export default function Onboarding() {
                   <div className="space-y-1">
                     <Label className="">Voice</Label>
                     <div className="flex items-center gap-2">
-                      <select className="border rounded p-2 min-w-[220px]" value={selectedVoiceId} onChange={(e)=> setSelectedVoiceId(e.target.value)} disabled={voicesLoading || (voices?.length||0)===0}>
+                      <select className="border rounded p-2 w-full min-w-0 sm:min-w-[220px]" value={selectedVoiceId} onChange={(e)=> setSelectedVoiceId(e.target.value)} disabled={voicesLoading || (voices?.length||0)===0}>
                         <option value="default">Default</option>
                         {voices.map((v)=>{
                           const id = v.voice_id || v.id || v.name;
@@ -1352,7 +1352,7 @@ export default function Onboarding() {
             <div className="grid gap-4">
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="rssUrl" className="text-right">RSS URL</Label>
-                <Input id="rssUrl" value={rssUrl} onChange={(e)=> setRssUrl(e.target.value)} className="col-span-3" placeholder="https://example.com/feed.xml" />
+                <Input id="rssUrl" value={rssUrl} onChange={(e)=> setRssUrl(e.target.value)} className="col-span-3" placeholder="Enter your RSS feed URL" />
               </div>
             </div>
           );
@@ -1699,25 +1699,6 @@ export default function Onboarding() {
         hideBack={importJumpedToStep6 && stepId === 'introOutro'}
         showExitDiscard={hasExistingPodcast}
         onExitDiscard={handleExitDiscard}
-      />
-      <AIAssistant 
-        token={token} 
-        user={user}
-        onboardingMode={true}
-        currentStep={stepId}
-        currentStepData={{
-          path,
-          formData,
-          firstName,
-          lastName,
-          formatKey,
-          musicChoice,
-          freqUnit,
-          freqCount,
-          selectedWeekdays,
-          selectedDates,
-          notSureSchedule,
-        }}
       />
     </>
   );

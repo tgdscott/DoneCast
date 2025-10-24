@@ -136,7 +136,7 @@ export function makeApi(token) {
     post: (p, body, opts={}) => req(p, { ...opts, method: "POST", headers: authFor({ 'Content-Type': 'application/json', ...(opts.headers||{}) }), body: jsonBody(body) }),
     put: (p, body, opts={}) => req(p, { ...opts, method: "PUT", headers: authFor({ 'Content-Type': 'application/json', ...(opts.headers||{}) }), body: jsonBody(body) }),
     patch: (p, body, opts={}) => req(p, { ...opts, method: "PATCH", headers: authFor({ 'Content-Type': 'application/json', ...(opts.headers||{}) }), body: jsonBody(body) }),
-    del: (p, opts={}) => req(p, { ...opts, method: "DELETE", headers: authFor(opts.headers) }),
+    del: (p, body, opts={}) => req(p, { ...opts, method: "DELETE", headers: authFor({ 'Content-Type': 'application/json', ...(opts.headers||{}) }), body: jsonBody(body) }),
     raw: (p, opts={}) => req(p, { ...opts, headers: authFor(opts.headers) }),
   };
 }

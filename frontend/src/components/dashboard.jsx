@@ -26,11 +26,18 @@ import {
   ArrowLeft,
   Rss,
   AlertTriangle,
+  AlertCircle,
   Settings as SettingsIcon,
   DollarSign,
   Globe2,
+  Menu,
+  X,
+  BookOpen,
+  Mic,
+  Library,
+  Shield,
 } from "lucide-react";
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
 
 import { makeApi, coerceArray } from "@/lib/apiClient";
 import { useAuth } from "@/AuthContext";
@@ -40,23 +47,81 @@ import Joyride, { STATUS } from "react-joyride";
 import { useResolvedTimezone } from "@/hooks/useResolvedTimezone";
 import { formatInTimezone } from "@/lib/timezone";
 
-import TemplateEditor from "@/components/dashboard/TemplateEditor";
-import PodcastCreator from "@/components/dashboard/PodcastCreator";
+// Eager load components needed for dashboard view
 import EpisodeStartOptions from "@/components/dashboard/EpisodeStartOptions";
-import PreUploadManager from "@/components/dashboard/PreUploadManager";
-import MediaLibrary from "@/components/dashboard/MediaLibrary";
-import EpisodeHistory from "@/components/dashboard/EpisodeHistory";
-import PodcastManager from "@/components/dashboard/PodcastManager";
-import PodcastAnalytics from "@/components/dashboard/PodcastAnalytics";
-import RssImporter from "@/components/dashboard/RssImporter";
-import DevTools from "@/components/dashboard/DevTools";
-import TemplateWizard from "@/components/dashboard/TemplateWizard";
-import Settings from "@/components/dashboard/Settings";
-import TemplateManager from "@/components/dashboard/TemplateManager";
-import BillingPage from "@/components/dashboard/BillingPage";
-import Recorder from "@/components/quicktools/Recorder";
-import WebsiteBuilder from "@/components/dashboard/WebsiteBuilder.jsx";
 import AIAssistant from "@/components/assistant/AIAssistant";
+
+// Lazy load heavy components for better mobile performance
+const TemplateEditor = lazy(() => import("@/components/dashboard/TemplateEditor"));
+const PodcastCreator = lazy(() => import("@/components/dashboard/PodcastCreator"));
+const PreUploadManager = lazy(() => import("@/components/dashboard/PreUploadManager"));
+const MediaLibrary = lazy(() => import("@/components/dashboard/MediaLibrary"));
+const EpisodeHistory = lazy(() => import("@/components/dashboard/EpisodeHistory"));
+const PodcastManager = lazy(() => import("@/components/dashboard/PodcastManager"));
+const PodcastAnalytics = lazy(() => import("@/components/dashboard/PodcastAnalytics"));
+const RssImporter = lazy(() => import("@/components/dashboard/RssImporter"));
+const TemplateWizard = lazy(() => import("@/components/dashboard/TemplateWizard"));
+const Settings = lazy(() => import("@/components/dashboard/Settings"));
+const TemplateManager = lazy(() => import("@/components/dashboard/TemplateManager"));
+const BillingPage = lazy(() => import("@/components/dashboard/BillingPage"));
+const Recorder = lazy(() => import("@/components/quicktools/Recorder"));
+const VisualEditor = lazy(() => import("@/components/website/VisualEditor.jsx"));
+
+// Loading fallback component
+const ComponentLoader = () => (
+  <div className="flex items-center justify-center min-h-[400px]">
+    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+  </div>
+);
+
+// Error boundary for lazy-loaded chunk failures
+class LazyLoadErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    // Check if this is a chunk load error
+    if (error?.message?.includes('Failed to fetch dynamically imported module') ||
+        error?.message?.includes('Loading chunk')) {
+      console.warn('[LazyLoad] Chunk load error detected, will auto-reload');
+      // The Vite plugin will handle reload, but this prevents error boundary crash
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      const isChunkError = this.state.error?.message?.includes('Failed to fetch') ||
+                          this.state.error?.message?.includes('Loading chunk');
+      
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[400px] p-6">
+          <AlertCircle className="w-12 h-12 text-orange-500 mb-4" />
+          <h3 className="text-lg font-semibold mb-2">
+            {isChunkError ? 'Loading Update...' : 'Something went wrong'}
+          </h3>
+          <p className="text-sm text-muted-foreground text-center max-w-md mb-4">
+            {isChunkError 
+              ? 'Podcast Plus Plus was recently updated. Refreshing to get the latest version...'
+              : 'An error occurred loading this component.'}
+          </p>
+          {!isChunkError && (
+            <Button onClick={() => window.location.reload()} variant="outline">
+              Reload Page
+            </Button>
+          )}
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 const isAdmin = (u) => !!(u && (u.is_admin || u.role === 'admin'));
 const DASHBOARD_TOUR_STORAGE_KEY = 'ppp_dashboard_tour_completed';
@@ -130,11 +195,33 @@ export default function PodcastPlusDashboard() {
   const [preselectedTranscriptReady, setPreselectedTranscriptReady] = useState(false);
   const [shouldRunTour, setShouldRunTour] = useState(false);
   const [creatorMode, setCreatorMode] = useState('standard');
+  const [wasRecorded, setWasRecorded] = useState(false);
   const [preuploadItems, setPreuploadItems] = useState([]);
   const [preuploadLoading, setPreuploadLoading] = useState(false);
   const [preuploadError, setPreuploadError] = useState(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const preuploadFetchedOnceRef = useRef(false);
   const previousPreuploadContextRef = useRef({ view: currentView, mode: creatorMode });
+
+  // SAFETY CHECK: Detect users who bypassed TermsGate (should never happen, but defensive)
+  useEffect(() => {
+    if (authUser?.terms_version_required && authUser?.terms_version_required !== authUser?.terms_version_accepted) {
+      console.error('[Dashboard Safety Check] User bypassed TermsGate!', {
+        email: authUser.email,
+        required: authUser.terms_version_required,
+        accepted: authUser.terms_version_accepted,
+      });
+      // Force reload to trigger TermsGate check in App.jsx
+      toast({
+        title: 'Terms Acceptance Required',
+        description: 'Please accept the Terms of Use to continue.',
+        variant: 'destructive',
+      });
+      setTimeout(() => {
+        window.location.href = '/?force_terms_check=1';
+      }, 2000);
+    }
+  }, [authUser, toast]);
 
   const resetPreuploadFetchedFlag = useCallback(() => {
     preuploadFetchedOnceRef.current = false;
@@ -146,9 +233,22 @@ export default function PodcastPlusDashboard() {
 
   const tourSteps = useMemo(() => [
     {
-      target: '[data-tour-id="dashboard-new-episode"]',
-      title: 'New Episode Button',
-      content: 'This is where the magic happens. Hit this button to start making your episode either from a show you\'ve already recorded, or one you want to record now.',
+      target: 'body',
+      title: 'Welcome to Your Dashboard! 🎙️',
+      content: 'Let\'s take a quick tour of your podcast dashboard. This will give you a general overview of the key features - not detailed instructions, just a friendly introduction to help you get oriented.',
+      disableBeacon: true,
+      placement: 'center',
+    },
+    {
+      target: '[data-tour-id="dashboard-record-upload"]',
+      title: 'Record or Upload Audio',
+      content: 'Start here to record new audio or upload files you\'ve already created. This is your first step in creating a new episode.',
+      disableBeacon: true,
+    },
+    {
+      target: '[data-tour-id="dashboard-assemble-episode"]',
+      title: 'Assemble New Episode',
+      content: 'Got audio that\'s ready to go? This button appears when you have transcribed audio waiting. Click here to turn it into a polished episode.',
       disableBeacon: true,
     },
     {
@@ -164,12 +264,27 @@ export default function PodcastPlusDashboard() {
     {
       target: '[data-tour-id="dashboard-quicktool-media"]',
       title: 'Media',
-      content: 'Any sound files that you use for your show are uploaded and stored here.',
+      content: 'Any other sound files except for raw episodes that you use for your show are uploaded and stored here.',
     },
     {
       target: '[data-tour-id="dashboard-quicktool-episodes"]',
       title: 'Episodes',
       content: 'All the details about your individual episodes here so you can edit them as you need to.',
+    },
+    {
+      target: '[data-tour-id="dashboard-quicktool-analytics"]',
+      title: 'Analytics',
+      content: 'Track your podcast\'s performance here. See download stats, listener trends, and get insights about your audience.',
+    },
+    {
+      target: '[data-tour-id="dashboard-quicktool-guides"]',
+      title: 'Guides & Help',
+      content: 'Need help or want to learn more? Access step-by-step guides, tutorials, and documentation to make the most of your podcasting experience.',
+    },
+    {
+      target: '[data-tour-id="dashboard-quicktool-website"]',
+      title: 'Website Builder',
+      content: 'Create a beautiful website for your podcast! Build custom pages, showcase your episodes, and give your listeners a home on the web.',
     },
     {
       target: '[data-tour-id="dashboard-quicktool-subscription"]',
@@ -198,21 +313,18 @@ export default function PodcastPlusDashboard() {
       return data;
     } catch (err) {
       const status = err?.status;
-      let msg = 'Failed to load your uploaded main-content audio.';
+      // Only show errors for auth failures (401/403)
+      // Network issues, 404s, and other errors should fail silently
+      // since this is just a background check for existing uploads
       if (status === 401) {
-        msg = 'Your session expired. Please sign in again to load your uploads.';
+        setPreuploadError('Your session expired. Please sign in again.');
       } else if (status === 403) {
-        msg = 'You are not allowed to view uploads for this account.';
-      } else if (status === 404) {
-        // In some setups this route might be gated; treat as empty rather than fatal
-        msg = 'No uploads found yet.';
-      } else if (typeof err?.message === 'string') {
-        const em = err.message.toLowerCase();
-        if (em.includes('failed to fetch') || em.includes('network') || em.includes('cors')) {
-          msg = 'Network issue loading your uploads. Check your connection or try again.';
-        }
+        setPreuploadError('You are not allowed to view uploads for this account.');
+      } else {
+        // Silently fail for all other errors (network, 404, 500, etc.)
+        // User can still proceed with recording or uploading new audio
+        setPreuploadError(null);
       }
-      setPreuploadError(msg);
       setPreuploadItems([]);
       return [];
     } finally {
@@ -233,6 +345,17 @@ export default function PodcastPlusDashboard() {
       setShouldRunTour(false);
     }
   };
+
+  const handleRestartTooltips = useCallback(() => {
+    // Clear the tour completion flag from localStorage
+    try {
+      localStorage.removeItem(DASHBOARD_TOUR_STORAGE_KEY);
+    } catch (error) {
+      console.error('Failed to clear tour flag:', error);
+    }
+    // Restart the tour
+    setShouldRunTour(true);
+  }, []);
 
   const fetchData = async () => {
     if (!token) return;
@@ -347,6 +470,24 @@ export default function PodcastPlusDashboard() {
       fetchData();
     }
   }, [token, currentView]);
+  
+  // Poll for preupload updates when on dashboard with processing files
+  useEffect(() => {
+    if (!token || currentView !== 'dashboard') return;
+    
+    // Check if we have any items that are still processing (not transcript_ready)
+    const hasProcessingItems = preuploadItems.some((item) => !item?.transcript_ready);
+    
+    if (!hasProcessingItems || preuploadItems.length === 0) return;
+    
+    // Poll every 5 seconds while there are processing items
+    const pollInterval = setInterval(() => {
+      refreshPreuploads();
+    }, 5000);
+    
+    return () => clearInterval(pollInterval);
+  }, [token, currentView, preuploadItems, refreshPreuploads]);
+  
   // Fetch notifications
   useEffect(() => {
     if(!token) return;
@@ -462,18 +603,21 @@ export default function PodcastPlusDashboard() {
     switch (currentView) {
       case 'recorder':
         return (
-          <Recorder
-            onBack={handleBackToDashboard}
-            token={token}
-            onFinish={({ filename, hint, transcriptReady }) => {
-              try {
-                setPreselectedMainFilename(filename || hint || null);
-                setPreselectedTranscriptReady(!!transcriptReady);
-              } catch {}
-              setCreatorMode('standard');
-              setCurrentView('createEpisode');
-            }}
-          />
+          <Suspense fallback={<ComponentLoader />}>
+            <Recorder
+              onBack={handleBackToDashboard}
+              token={token}
+              onFinish={({ filename, hint, transcriptReady }) => {
+                try {
+                  setPreselectedMainFilename(filename || hint || null);
+                  setPreselectedTranscriptReady(!!transcriptReady);
+                  setWasRecorded(true);
+                } catch {}
+                // Return to main dashboard after recording (not the Episode Creator)
+                handleBackToDashboard();
+              }}
+            />
+          </Suspense>
         );
       case 'episodeStart': {
         const hasReadyAudio = preuploadItems.some((item) => item?.transcript_ready);
@@ -490,99 +634,147 @@ export default function PodcastPlusDashboard() {
             onBack={handleBackToDashboard}
             onChooseRecord={() => {
               setCreatorMode('standard');
+              setWasRecorded(false);
               setCurrentView('recorder');
             }}
-            onChooseLibrary={async () => {
-              setCreatorMode('preuploaded');
-              setPreselectedMainFilename(null);
-              setPreselectedTranscriptReady(false);
-              resetPreuploadFetchedFlag();
-              if (!preuploadLoading && preuploadItems.length === 0) {
-                try { await requestPreuploadRefresh(); } catch {}
-              }
-              setCurrentView('createEpisode');
+            onChooseUpload={() => {
+              setCreatorMode('standard');
+              setWasRecorded(false);
+              setCurrentView('preuploadUpload');
             }}
           />
         );
       }
       case 'preuploadUpload':
         return (
-          <PreUploadManager
-            token={token}
-            onBack={() => setCurrentView('episodeStart')}
-            onDone={handleBackToDashboard}
-            defaultEmail={user?.email || ''}
-            onUploaded={requestPreuploadRefresh}
-          />
+          <LazyLoadErrorBoundary>
+            <Suspense fallback={<ComponentLoader />}>
+              <PreUploadManager
+                token={token}
+                onBack={() => setCurrentView('episodeStart')}
+                onDone={handleBackToDashboard}
+                defaultEmail={user?.email || ''}
+                onUploaded={requestPreuploadRefresh}
+              />
+            </Suspense>
+          </LazyLoadErrorBoundary>
         );
       case 'templateManager':
-        return <TemplateManager onBack={handleBackToDashboard} token={token} setCurrentView={setCurrentView} />;
+        return (
+          <Suspense fallback={<ComponentLoader />}>
+            <TemplateManager onBack={handleBackToDashboard} token={token} setCurrentView={setCurrentView} />
+          </Suspense>
+        );
       case 'editTemplate':
-        return <TemplateEditor templateId={selectedTemplateId} onBack={handleBackToTemplateManager} token={token} onTemplateSaved={fetchData} />;
+        return (
+          <Suspense fallback={<ComponentLoader />}>
+            <TemplateEditor templateId={selectedTemplateId} onBack={handleBackToTemplateManager} token={token} onTemplateSaved={fetchData} />
+          </Suspense>
+        );
       case 'createEpisode':
         return (
-          <PodcastCreator
-            onBack={handleBackToDashboard}
-            token={token}
-            templates={templates}
-            podcasts={podcasts}
-            preselectedMainFilename={preselectedMainFilename}
-            preselectedTranscriptReady={preselectedTranscriptReady}
-            creatorMode={creatorMode}
-            preuploadedItems={preuploadItems}
-            preuploadedLoading={preuploadLoading}
-            onRefreshPreuploaded={requestPreuploadRefresh}
-            preselectedStartStep={creatorMode === 'preuploaded' ? 1 : undefined}
-            onRequestUpload={() => {
-              setCreatorMode('standard');
-              setCurrentView('preuploadUpload');
-            }}
-            userTimezone={resolvedTimezone}
-          />
+          <Suspense fallback={<ComponentLoader />}>
+            <PodcastCreator
+              onBack={handleBackToDashboard}
+              token={token}
+              templates={templates}
+              podcasts={podcasts}
+              preselectedMainFilename={preselectedMainFilename}
+              preselectedTranscriptReady={preselectedTranscriptReady}
+              creatorMode={creatorMode}
+              wasRecorded={wasRecorded}
+              preuploadedItems={preuploadItems}
+              preuploadedLoading={preuploadLoading}
+              onRefreshPreuploaded={requestPreuploadRefresh}
+              preselectedStartStep={creatorMode === 'preuploaded' ? 1 : undefined}
+              onRequestUpload={() => {
+                setCreatorMode('standard');
+                setCurrentView('preuploadUpload');
+              }}
+              userTimezone={resolvedTimezone}
+            />
+          </Suspense>
         );
       case 'mediaLibrary':
-        return <MediaLibrary onBack={handleBackToDashboard} token={token} />;
-      case 'episodeHistory':
-        return <EpisodeHistory onBack={handleBackToDashboard} token={token} />;
-      case 'websiteBuilder':
         return (
-          <WebsiteBuilder
-            token={token}
-            podcasts={podcasts}
-            onBack={handleBackToDashboard}
-            allowCustomDomain={canManageCustomDomain}
-          />
+          <Suspense fallback={<ComponentLoader />}>
+            <MediaLibrary onBack={handleBackToDashboard} token={token} />
+          </Suspense>
+        );
+      case 'episodeHistory':
+        return (
+          <Suspense fallback={<ComponentLoader />}>
+            <EpisodeHistory onBack={handleBackToDashboard} token={token} />
+          </Suspense>
+        );
+      case 'websiteBuilder':
+        // Use VisualEditor with the first podcast as default if none selected
+        const targetPodcast = podcasts?.find(p => p.id === selectedPodcastId) || podcasts?.[0];
+        if (!targetPodcast) {
+          return (
+            <div className="p-8 text-center">
+              <p className="text-slate-600">Please create a podcast first before building a website.</p>
+              <Button onClick={handleBackToDashboard} className="mt-4">Back to Dashboard</Button>
+            </div>
+          );
+        }
+        return (
+          <Suspense fallback={<ComponentLoader />}>
+            <VisualEditor
+              token={token}
+              podcast={targetPodcast}
+              onBack={handleBackToDashboard}
+            />
+          </Suspense>
         );
       case 'podcastManager':
-        return <PodcastManager 
-          onBack={handleBackToDashboard} 
-          token={token} 
-          podcasts={podcasts} 
-          setPodcasts={setPodcasts}
-          onViewAnalytics={(podcastId) => {
-            setSelectedPodcastId(podcastId);
-            setCurrentView('analytics');
-          }}
-        />;
+        return (
+          <Suspense fallback={<ComponentLoader />}>
+            <PodcastManager 
+              onBack={handleBackToDashboard} 
+              token={token} 
+              podcasts={podcasts} 
+              setPodcasts={setPodcasts}
+              onViewAnalytics={(podcastId) => {
+                setSelectedPodcastId(podcastId);
+                setCurrentView('analytics');
+              }}
+            />
+          </Suspense>
+        );
       case 'rssImporter':
-        return <RssImporter onBack={handleBackToDashboard} token={token} />;
-      case 'devTools':
-        return isAdmin(authUser)
-          ? <DevTools token={token} />
-          : <div className="p-6 text-sm text-red-600">Not authorized.</div>;
+        return (
+          <Suspense fallback={<ComponentLoader />}>
+            <RssImporter onBack={handleBackToDashboard} token={token} />
+          </Suspense>
+        );
       case 'settings':
-        return <Settings token={token} />;
+        return (
+          <Suspense fallback={<ComponentLoader />}>
+            <Settings token={token} />
+          </Suspense>
+        );
       case 'templateWizard':
-        return <TemplateWizard user={user} token={token} onBack={() => setCurrentView('templateManager')} onTemplateCreated={() => { fetchData(); setCurrentView('templateManager'); }} />;
+        return (
+          <Suspense fallback={<ComponentLoader />}>
+            <TemplateWizard user={user} token={token} onBack={() => setCurrentView('templateManager')} onTemplateCreated={() => { fetchData(); setCurrentView('templateManager'); }} />
+          </Suspense>
+        );
       case 'billing':
-        return <BillingPage token={token} onBack={() => setCurrentView('dashboard')} />;
+        return (
+          <Suspense fallback={<ComponentLoader />}>
+            <BillingPage token={token} onBack={() => setCurrentView('dashboard')} />
+          </Suspense>
+        );
       case 'analytics':
         return (
-          <PodcastAnalytics 
-            podcastId={selectedPodcastId} 
-            token={token} 
-            onBack={handleBackToDashboard}
-          />
+          <Suspense fallback={<ComponentLoader />}>
+            <PodcastAnalytics 
+              podcastId={selectedPodcastId} 
+              token={token} 
+              onBack={handleBackToDashboard}
+            />
+          </Suspense>
         );
       case 'dashboard':
       default: {
@@ -596,7 +788,7 @@ export default function PodcastPlusDashboard() {
                   Welcome back
                   {user ? `, ${user.first_name || (user.email ? user.email.split('@')[0] : 'friend')}` : ''}!
                 </h1>
-                <p className="text-sm md:text-base text-gray-600 mt-1">Quick launch your next episode or jump into a tool.</p>
+                <p className="text-sm md:text-base text-gray-600 mt-1">Your next masterpiece is just a couple clicks away!</p>
               </div>
               {/* Layout experiment toggled from the admin dashboard */}
             </div>
@@ -624,23 +816,50 @@ export default function PodcastPlusDashboard() {
                         <div className="font-semibold text-gray-800 mt-0.5">{stats?.total_episodes ?? '–'}</div>
                       </div>
                     </div>
-                      <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+                      <div className="flex flex-col gap-2 w-full md:w-auto">
                         {canCreateEpisode && (
-                          <Button
-                            className="flex-1 md:flex-none"
-                            title="Start a new episode"
-                            data-tour-id="dashboard-new-episode"
-                            onClick={() => {
-                              setCreatorMode('standard');
-                              setPreselectedMainFilename(null);
-                              setPreselectedTranscriptReady(false);
-                              setCurrentView('episodeStart');
-                              requestPreuploadRefresh();
-                            }}
-                          >
-                            <Plus className="w-4 h-4 mr-2" />
-                            Start New Episode
-                          </Button>
+                          <>
+                            <Button
+                              className="flex-1 md:flex-none"
+                              variant="default"
+                              title="Record or upload new audio"
+                              data-tour-id="dashboard-record-upload"
+                              onClick={async () => {
+                                setCreatorMode('standard');
+                                setWasRecorded(false);
+                                // Refresh preuploaded items before showing options
+                                if (!preuploadLoading && preuploadItems.length === 0) {
+                                  try { await requestPreuploadRefresh(); } catch {}
+                                }
+                                setCurrentView('episodeStart');
+                              }}
+                            >
+                              <Mic className="w-4 h-4 mr-2" />
+                              Record or Upload Audio
+                            </Button>
+                            {preuploadItems.some((item) => item?.transcript_ready) && (
+                              <Button
+                                className="flex-1 md:flex-none"
+                                variant="outline"
+                                title="Assemble episode from ready audio"
+                                data-tour-id="dashboard-assemble-episode"
+                                onClick={async () => {
+                                  setCreatorMode('preuploaded');
+                                  setWasRecorded(false);
+                                  setPreselectedMainFilename(null);
+                                  setPreselectedTranscriptReady(false);
+                                  resetPreuploadFetchedFlag();
+                                  if (!preuploadLoading && preuploadItems.length === 0) {
+                                    try { await requestPreuploadRefresh(); } catch {}
+                                  }
+                                  setCurrentView('createEpisode');
+                                }}
+                              >
+                                <Library className="w-4 h-4 mr-2" />
+                                Assemble New Episode
+                              </Button>
+                            )}
+                          </>
                         )}
                     </div>
                   </CardContent>
@@ -670,26 +889,66 @@ export default function PodcastPlusDashboard() {
                         <span className={`text-sm font-medium ${stats?.last_assembly_status==='error'?'text-red-600': stats?.last_assembly_status==='success'?'text-green-600': stats?.last_assembly_status==='pending'?'text-amber-600':'text-gray-600'}`}>{formatAssemblyStatus(stats?.last_assembly_status)}</span>
                       </div>
                     </div>
-          {(typeof stats?.plays_last_30d === 'number' || typeof stats?.show_total_plays === 'number' || (Array.isArray(stats?.recent_episode_plays) && stats.recent_episode_plays.length > 0)) && (
+          {(typeof stats?.plays_last_30d === 'number' || typeof stats?.plays_7d === 'number' || typeof stats?.plays_365d === 'number' || typeof stats?.plays_all_time === 'number' || typeof stats?.show_total_plays === 'number' || (Array.isArray(stats?.top_episodes) && stats.top_episodes.length > 0)) && (
                       <div className="space-y-3">
-                        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Listening</div>
+                        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Listening Stats</div>
+                        
+                        {/* Time Period Cards */}
                         <div className="grid md:grid-cols-2 gap-3">
-              {typeof stats?.plays_last_30d === 'number' && (
+              {typeof stats?.plays_7d === 'number' && (
                             <div className="p-3 rounded border bg-white flex flex-col gap-1">
-                <span className="text-[11px] tracking-wide text-gray-500">Plays Last 30 Days</span>
-                <span className="text-lg font-semibold">{stats.plays_last_30d}</span>
+                <span className="text-[11px] tracking-wide text-gray-500">Downloads Last 7 Days</span>
+                <span className="text-lg font-semibold">{stats.plays_7d.toLocaleString()}</span>
                             </div>
                           )}
-                          {Array.isArray(stats?.recent_episode_plays) && stats.recent_episode_plays.slice(0,4).map(ep => (
-                            <div key={ep.episode_id} className="p-3 rounded border bg-white flex flex-col gap-1">
-                              <span className="text-[11px] tracking-wide text-gray-500 truncate" title={ep.title}>{ep.title}</span>
-                              <span className="text-lg font-semibold">{ep.plays_total ?? '—'}</span>
+              {typeof stats?.plays_30d === 'number' && (
+                            <div className="p-3 rounded border bg-white flex flex-col gap-1">
+                <span className="text-[11px] tracking-wide text-gray-500">Downloads Last 30 Days</span>
+                <span className="text-lg font-semibold">{stats.plays_30d.toLocaleString()}</span>
                             </div>
-                          ))}
+                          )}
+              {typeof stats?.plays_365d === 'number' && (
+                            <div className="p-3 rounded border bg-white flex flex-col gap-1">
+                <span className="text-[11px] tracking-wide text-gray-500">Downloads Last Year</span>
+                <span className="text-lg font-semibold">{stats.plays_365d.toLocaleString()}</span>
+                            </div>
+                          )}
+              {typeof stats?.plays_all_time === 'number' && (
+                            <div className="p-3 rounded border bg-white flex flex-col gap-1">
+                <span className="text-[11px] tracking-wide text-gray-500">All-Time Downloads</span>
+                <span className="text-lg font-semibold">{stats.plays_all_time.toLocaleString()}</span>
+                            </div>
+                          )}
                         </div>
+                        
+                        {/* Top Episodes Section */}
+                        {Array.isArray(stats?.top_episodes) && stats.top_episodes.length > 0 && (
+                          <div className="space-y-2">
+                            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-3">Top Episodes (All-Time)</div>
+                            {stats.top_episodes.slice(0, 3).map((ep, idx) => (
+                              <div key={ep.episode_id || idx} className="p-3 rounded border bg-gradient-to-r from-blue-50 to-white flex items-center justify-between">
+                                <div className="flex items-center gap-2 flex-1 min-w-0">
+                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">#{idx + 1}</Badge>
+                                  <span className="text-[11px] tracking-wide text-gray-700 font-medium truncate" title={ep.title}>{ep.title}</span>
+                                </div>
+                                <div className="text-right ml-3">
+                                  <div className="text-base font-bold text-gray-900">{ep.downloads_all_time?.toLocaleString() || 0}</div>
+                                  <div className="text-[9px] text-gray-500">downloads</div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
-                    <p className="text-[11px] text-gray-400">Plays update periodically; detailed windows (24h / 7d / 30d) coming soon.</p>
+                    <p className="text-[11px] text-gray-400">Analytics powered by OP3 (Open Podcast Prefix Project). Updates every 3 hours.</p>
+                    {stats?.op3_enabled && (stats?.plays_7d === 0 && stats?.plays_30d === 0 && stats?.plays_all_time === 0) && (
+                      <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
+                        <p className="font-semibold mb-1">📊 Showing 0 downloads?</p>
+                        <p className="mb-2">OP3 only tracks downloads from <strong>podcast apps</strong> (Apple Podcasts, Spotify, etc.). YouTube views are not included.</p>
+                        <p className="text-[10px] text-blue-600">Tip: If you distribute via YouTube, consider manually tracking those views separately.</p>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </div>
@@ -724,18 +983,46 @@ export default function PodcastPlusDashboard() {
           <Button onClick={() => setCurrentView('billing')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-subscription"><DollarSign className="w-4 h-4 mr-2" />Subscription</Button>
                       <Button onClick={() => setCurrentView('settings')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-settings"><SettingsIcon className="w-4 h-4 mr-2" />Settings</Button>
                       <Button
+                        onClick={() => window.location.href = '/guides'}
+                        variant="outline"
+                        className="justify-start text-sm h-10"
+                        data-tour-id="dashboard-quicktool-guides"
+                      >
+                        <BookOpen className="w-4 h-4 mr-2" />
+                        Guides & Help
+                      </Button>
+                      <Button
                         onClick={() => setCurrentView('websiteBuilder')}
                         variant="outline"
-                        className="justify-start text-sm h-10 text-slate-400 border-slate-200 bg-slate-50 hover:bg-slate-100"
+                        className="justify-start text-sm h-10"
+                        data-tour-id="dashboard-quicktool-website"
                       >
                         <Globe2 className="w-4 h-4 mr-2" />
-                        <span className="flex items-center w-full">
-                          <span>Website Builder</span>
-                          <span className="ml-auto text-xs font-medium uppercase tracking-wide text-slate-400">Coming Soon</span>
-                        </span>
+                        Website Builder
                       </Button>
-                      {isAdmin(authUser) && (
-                        <Button onClick={() => setCurrentView('devTools')} variant="destructive" className="justify-start text-sm h-10"><AlertTriangle className="w-4 h-4 mr-2" />Dev</Button>
+                      {(authUser?.role === 'admin' || authUser?.role === 'superadmin' || isAdmin(authUser)) && (
+                        <Button 
+                          onClick={() => window.location.href = '/dashboard?admin=1'} 
+                          variant="outline" 
+                          className="justify-start text-sm h-10 border-orange-300 hover:bg-orange-50"
+                          data-tour-id="dashboard-quicktool-admin-panel"
+                          title="Access admin panel for user management and platform settings"
+                        >
+                          <Shield className="w-4 h-4 mr-2 text-orange-600" />
+                          Admin Panel
+                        </Button>
+                      )}
+                      {authUser?.email === 'wordsdonewrite@gmail.com' && (
+                        <Button 
+                          onClick={() => window.location.href = '/admin?tab=landing'} 
+                          variant="outline" 
+                          className="justify-start text-sm h-10 border-blue-300 hover:bg-blue-50"
+                          data-tour-id="dashboard-quicktool-landing-editor"
+                          title="Edit customer testimonials and FAQs on the front page"
+                        >
+                          <FileText className="w-4 h-4 mr-2 text-blue-600" />
+                          Edit Front Page
+                        </Button>
                       )}
                     </div>
                   </CardContent>
@@ -806,11 +1093,26 @@ export default function PodcastPlusDashboard() {
         scrollToFirstStep
         styles={{ options: { zIndex: 10000 } }}
         spotlightClicks
+        locale={{
+          last: "Let's Do This!",
+          skip: "Skip Tour",
+        }}
       />
-      <nav className="border-b border-gray-200 px-4 py-4 bg-white shadow-sm">
+      <nav className="border-b border-gray-200 px-4 py-4 bg-white shadow-sm safe-top">
         <div className="container mx-auto max-w-7xl flex justify-between items-center">
-      <Logo size={28} lockup />
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="lg:hidden touch-target-icon"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              aria-label="Toggle menu"
+            >
+              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </Button>
+            <Logo size={28} lockup />
+          </div>
+          <div className="flex items-center space-x-2 sm:space-x-4">
             <div className="relative">
               <Button variant="ghost" size="sm" className="relative" onClick={()=>setShowNotifPanel(v=>!v)}>
                 <Bell className="w-5 h-5" />
@@ -857,16 +1159,162 @@ export default function PodcastPlusDashboard() {
               ) : null}
               <span className="hidden md:block text-sm font-medium" style={{ color: "#2C3E50" }}>{user ? user.email : 'Loading...'}</span>
             </div>
+            {(authUser?.is_admin || authUser?.role === 'admin' || authUser?.role === 'superadmin') && (
+              <Button onClick={() => window.location.href = '/dashboard?admin=1'} variant="ghost" size="sm" className="text-gray-600 hover:text-gray-800">
+                <SettingsIcon className="w-4 h-4 mr-1" /><span className="hidden md:inline">Admin Panel</span>
+              </Button>
+            )}
             <Button onClick={logout} variant="ghost" size="sm" className="text-gray-600 hover:text-gray-800"><LogOut className="w-4 h-4 mr-1" /><span className="hidden md:inline">Logout</span></Button>
           </div>
         </div>
       </nav>
-      <main className="container mx-auto max-w-7xl px-4 py-6">
+      
+      {/* Mobile Menu Overlay and Drawer */}
+      {mobileMenuOpen && (
+        <>
+          <div 
+            className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+          <div className="fixed top-0 left-0 bottom-0 w-[280px] bg-white shadow-xl z-50 overflow-y-auto lg:hidden safe-top safe-bottom">
+            <div className="p-4 border-b">
+              <div className="flex items-center justify-between mb-4">
+                <Logo size={24} lockup />
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="touch-target-icon"
+                >
+                  <X className="w-5 h-5" />
+                </Button>
+              </div>
+              {user && (
+                <div className="flex items-center gap-2">
+                  <Avatar className="h-8 w-8">
+                    <AvatarImage src={user.picture} />
+                    <AvatarFallback>{user?.email ? user.email.substring(0, 2).toUpperCase() : '…'}</AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{user.email}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="p-4 space-y-2">
+              {currentView !== 'dashboard' && (
+                <Button 
+                  onClick={() => { setCurrentView('dashboard'); setMobileMenuOpen(false); }} 
+                  variant="outline" 
+                  className="w-full justify-start touch-target"
+                >
+                  <ArrowLeft className="w-4 h-4 mr-2" />Dashboard
+                </Button>
+              )}
+              <Button 
+                onClick={() => { setCurrentView('podcastManager'); setMobileMenuOpen(false); }} 
+                variant="outline" 
+                className="w-full justify-start touch-target"
+              >
+                <Podcast className="w-4 h-4 mr-2" />Podcasts
+              </Button>
+              <Button 
+                onClick={() => { setCurrentView('templateManager'); setMobileMenuOpen(false); }} 
+                variant="outline" 
+                className="w-full justify-start touch-target"
+              >
+                <FileText className="w-4 h-4 mr-2" />Templates
+              </Button>
+              <Button 
+                onClick={() => { setCurrentView('mediaLibrary'); setMobileMenuOpen(false); }} 
+                variant="outline" 
+                className="w-full justify-start touch-target"
+              >
+                <Music className="w-4 h-4 mr-2" />Media
+              </Button>
+              <Button 
+                onClick={() => { setCurrentView('episodeHistory'); setMobileMenuOpen(false); }} 
+                variant="outline" 
+                className="w-full justify-start touch-target"
+              >
+                <BarChart3 className="w-4 h-4 mr-2" />Episodes
+              </Button>
+              <Button 
+                onClick={() => { 
+                  if (podcasts.length > 0) {
+                    setSelectedPodcastId(podcasts[0].id);
+                    setCurrentView('analytics');
+                    setMobileMenuOpen(false);
+                  }
+                }} 
+                variant="outline" 
+                className="w-full justify-start touch-target"
+                disabled={podcasts.length === 0}
+              >
+                <BarChart3 className="w-4 h-4 mr-2" />Analytics
+              </Button>
+              <Button 
+                onClick={() => { setCurrentView('billing'); setMobileMenuOpen(false); }} 
+                variant="outline" 
+                className="w-full justify-start touch-target"
+              >
+                <DollarSign className="w-4 h-4 mr-2" />Subscription
+              </Button>
+              <Button 
+                onClick={() => { setCurrentView('settings'); setMobileMenuOpen(false); }} 
+                variant="outline" 
+                className="w-full justify-start touch-target"
+              >
+                <SettingsIcon className="w-4 h-4 mr-2" />Settings
+              </Button>
+              <Button 
+                onClick={() => { window.location.href = '/guides'; }} 
+                variant="outline" 
+                className="w-full justify-start touch-target"
+              >
+                <BookOpen className="w-4 h-4 mr-2" />Guides & Help
+              </Button>
+              <Button 
+                onClick={() => { setCurrentView('websiteBuilder'); setMobileMenuOpen(false); }} 
+                variant="outline" 
+                className="w-full justify-start touch-target"
+              >
+                <Globe2 className="w-4 h-4 mr-2" />Website Builder
+              </Button>
+              {(authUser?.is_admin || authUser?.role === 'admin' || authUser?.role === 'superadmin') && (
+                <Button 
+                  onClick={() => { window.location.href = '/dashboard?admin=1'; setMobileMenuOpen(false); }} 
+                  variant="outline" 
+                  className="w-full justify-start touch-target bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100"
+                >
+                  <SettingsIcon className="w-4 h-4 mr-2" />Admin Panel
+                </Button>
+              )}
+            </div>
+            <div className="p-4 border-t mt-4">
+              <Button 
+                onClick={logout} 
+                variant="ghost" 
+                className="w-full justify-start touch-target text-red-600 hover:text-red-700 hover:bg-red-50"
+              >
+                <LogOut className="w-4 h-4 mr-2" />Logout
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
+      
+      <main className="container mx-auto max-w-7xl px-4 sm:px-6 py-6">
         {renderCurrentView()}
       </main>
       
       {/* AI Assistant - Always available in bottom-right corner */}
-      <AIAssistant token={token} user={user} />
+      <AIAssistant 
+        token={token} 
+        user={user} 
+        currentPage={currentView}
+        onRestartTooltips={currentView === 'dashboard' ? handleRestartTooltips : null}
+      />
     </div>
   );
 }

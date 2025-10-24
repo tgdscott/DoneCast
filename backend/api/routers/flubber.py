@@ -600,7 +600,27 @@ def prepare_flubber_by_file(
         if not url:
             p = Path(c.get('snippet_path',''))
             url = f"/static/flubber/{p.name}" if p.is_file() else None
-        out.append({**c, 'url': url})
+        
+        # Extract words for text-based UI (similar to intern)
+        flubber_time_s = c.get('flubber_time_s', 0.0)
+        snippet_start_s = c.get('snippet_start_s', 0.0)
+        snippet_end_s = c.get('snippet_end_s', flubber_time_s + 10.0)
+        
+        # Get all words in the snippet window
+        display_words = []
+        for w in words:
+            try:
+                t = float((w or {}).get("start") or (w or {}).get("time") or 0.0)
+            except Exception:
+                continue
+            if t >= snippet_start_s and t <= snippet_end_s:
+                display_words.append({
+                    "word": str((w or {}).get("word") or ""),
+                    "start": t,
+                    "end": float((w or {}).get("end") or t),
+                })
+        
+        out.append({**c, 'url': url, 'words': display_words})
     # Insist policy: by default, surface 425 to encourage the client to retry until found
     insist = True if (payload is None or 'insist' not in payload) else bool(payload.get('insist'))
     if insist and not out:

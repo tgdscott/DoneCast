@@ -12,6 +12,7 @@ from api.models.podcast import Episode, EpisodeStatus, Podcast
 from api.models.user import User
 from api.services.publisher import SpreakerClient
 from api.services.op3_analytics import get_show_stats_sync, OP3ShowStats
+from api.services.op3_historical_data import get_historical_data
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 logger = logging.getLogger(__name__)
@@ -144,6 +145,10 @@ def dashboard_stats(
     
     # Try to fetch OP3 analytics for enhanced stats
     op3_downloads_30d = None
+    op3_downloads_7d = None
+    op3_downloads_365d = None
+    op3_downloads_all_time = None
+    op3_top_episodes = []
     op3_show_stats = None
     op3_error_message = None
     
@@ -170,22 +175,65 @@ def dashboard_stats(
             op3_show_stats = get_show_stats_sync(rss_url, days=30)
             
             if op3_show_stats:
-                op3_downloads_30d = op3_show_stats.total_downloads
+                op3_downloads_7d = op3_show_stats.downloads_7d
+                op3_downloads_30d = op3_show_stats.downloads_30d
+                op3_downloads_365d = op3_show_stats.downloads_365d
+                op3_downloads_all_time = op3_show_stats.downloads_all_time
+                op3_top_episodes = op3_show_stats.top_episodes[:3]  # Top 3
+                
                 if op3_downloads_30d > 0:
-                    logger.info(f"OP3 stats SUCCESS: {op3_downloads_30d} downloads in last 30 days")
+                    logger.info(f"OP3 stats SUCCESS: 7d={op3_downloads_7d}, 30d={op3_downloads_30d}, all-time={op3_downloads_all_time}")
                 else:
-                    # OP3 returned 0 - could be no data OR 401 auth required
-                    logger.warning(f"OP3 returned 0 downloads for {rss_url} - check if API requires authentication")
-                    op3_error_message = "OP3 API requires authentication or no data available"
+                    logger.warning(f"OP3 returned 0 downloads for {rss_url}")
+                    op3_error_message = "OP3 API returned no download data"
             else:
-                logger.warning("OP3 stats fetch returned None - API may have returned no data")
+                logger.warning("OP3 stats fetch returned None")
                 op3_error_message = "OP3 API returned no data"
+            
+            # FALLBACK: If self-hosted OP3 has no data yet, use historical TSV
+            if (op3_downloads_30d == 0 or op3_downloads_30d is None) and op3_downloads_all_time == 0:
+                logger.info("Self-hosted OP3 has no data - falling back to historical TSV")
+                historical = get_historical_data()
+                op3_downloads_7d = historical.get_total_downloads(days=7)
+                op3_downloads_30d = historical.get_total_downloads(days=30)
+                op3_downloads_365d = 0  # TSV doesn't have 365-day data
+                op3_downloads_all_time = historical.get_total_downloads()
+                
+                # Get top 3 episodes from historical data
+                top_historical = historical.get_top_episodes(limit=3, days=None)  # All-time top episodes
+                op3_top_episodes = [
+                    {
+                        'title': ep['episode_title'],
+                        'downloads': ep['downloads']
+                    }
+                    for ep in top_historical
+                ]
+                
+                if op3_downloads_all_time > 0:
+                    logger.info(f"Historical fallback: 7d={op3_downloads_7d}, 30d={op3_downloads_30d}, all-time={op3_downloads_all_time}, top_episodes={len(op3_top_episodes)}")
+                    op3_error_message = None  # Clear error since we have historical data
             
     except Exception as e:
         # OP3 fetch failed - log but don't crash dashboard
         logger.error(f"Failed to fetch OP3 analytics: {e}", exc_info=True)
         op3_error_message = f"API error: {str(e)}"
         logger.info("Falling back to local episode counts")
+    
+    # Include all available time periods (no "smart filtering" - show what we have)
+    time_periods = {}
+    if op3_downloads_7d is not None:
+        time_periods["plays_7d"] = op3_downloads_7d
+    if op3_downloads_30d is not None:
+        time_periods["plays_30d"] = op3_downloads_30d
+    if op3_downloads_365d is not None and op3_downloads_365d > 0:
+        time_periods["plays_365d"] = op3_downloads_365d
+    if op3_downloads_all_time is not None and op3_downloads_all_time > 0:
+        time_periods["plays_all_time"] = op3_downloads_all_time
+    
+    # Debug logging to diagnose missing stats
+    logger.info(f"[DASHBOARD] OP3 Stats - 7d: {op3_downloads_7d}, 30d: {op3_downloads_30d}, 365d: {op3_downloads_365d}, all-time: {op3_downloads_all_time}")
+    logger.info(f"[DASHBOARD] Time periods dict: {time_periods}")
+    logger.info(f"[DASHBOARD] Top episodes count: {len(op3_top_episodes)}")
     
     # Build response with OP3 data if available, else local counts
     return {
@@ -196,7 +244,11 @@ def dashboard_stats(
         "downloads_last_30d": op3_downloads_30d,
         # Legacy field - OP3 provides downloads, not "plays"
         "plays_last_30d": op3_downloads_30d,
-        "recent_episode_plays": [],
+        # New multi-period fields (with smart filtering applied)
+        **time_periods,
+        # Top episodes
+        "top_episodes": op3_top_episodes,
+        "recent_episode_plays": [],  # Deprecated, use top_episodes
         # Include flag so frontend knows if OP3 data is present
         "op3_enabled": op3_downloads_30d is not None,
         # Include error message for debugging (not shown to user)

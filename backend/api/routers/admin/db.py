@@ -41,19 +41,9 @@ def _quote_ident(name: str) -> str:
 
 
 def _find_table_schema_and_columns(session: Session, table_name: str) -> tuple[Optional[str], List[str]]:
+    """Find table schema and columns (PostgreSQL only)."""
     bind = session.get_bind()
-    try:
-        dialect = (bind.dialect.name.lower() if bind else "")
-    except Exception:
-        dialect = ""
-
-    if "sqlite" in dialect:
-        try:
-            cols_res = _exec_text(session, f"PRAGMA table_info({_quote_ident(table_name)})")
-            return None, [col[1] for col in cols_res]
-        except Exception:
-            return None, []
-
+    
     try:
         inspector = sa_inspect(bind)
     except Exception:

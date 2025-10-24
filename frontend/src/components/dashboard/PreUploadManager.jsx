@@ -185,11 +185,28 @@ export default function PreUploadManager({
     } catch (err) {
       setUploading(false);
       setUploadProgress(null);
-      setError(err?.message || 'Upload failed. Please try again.');
+      
+      // Provide user-friendly error messages without technical jargon
+      let userMessage = 'We couldn\'t complete your upload. Please try again.';
+      
+      // Check for specific error types
+      if (err?.message?.toLowerCase().includes('network')) {
+        userMessage = 'Network connection issue. Please check your internet and try again.';
+      } else if (err?.message?.toLowerCase().includes('aborted')) {
+        userMessage = 'Upload was cancelled.';
+      } else if (err?.status === 413 || err?.message?.toLowerCase().includes('too large')) {
+        userMessage = 'File is too large. Please try a smaller file.';
+      } else if (err?.status === 401 || err?.status === 403) {
+        userMessage = 'Session expired. Please sign in again.';
+      } else if (err?.status >= 500) {
+        userMessage = 'Server error. Please try again in a moment.';
+      }
+      
+      setError(userMessage);
       toast({ 
         variant: 'destructive', 
         title: 'Upload failed', 
-        description: err?.message || 'Unable to upload audio.' 
+        description: userMessage
       });
     }
   };

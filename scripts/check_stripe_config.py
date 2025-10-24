@@ -75,10 +75,10 @@ def check_products_and_prices(api_key):
         stripe.api_key = api_key
         
         # Check for products
-        products = stripe.Product.search(query="name:'Podcast++'", limit=10)
+        products = stripe.Product.search(query="name:'Podcast Plus Plus'", limit=10)
         
         if not products.data:
-            print("⚠️  No products found with 'Podcast++' in name")
+            print("⚠️  No products found with 'Podcast Plus Plus' in name")
             print("   Run: python scripts/stripe_setup.py --mode [test|live]")
             return False
         

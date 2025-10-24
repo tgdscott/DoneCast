@@ -8,7 +8,8 @@ export default function BuildInfo() {
     const [error, setError] = useState(null);
 
     useEffect(() => {
-        if (!user?.is_admin || !token) return;
+        // Only fetch for superadmin (not regular admin)
+        if (user?.role !== 'superadmin' || !token) return;
 
         const fetchBuildInfo = async () => {
             try {
@@ -29,8 +30,8 @@ export default function BuildInfo() {
         return () => clearInterval(interval);
     }, [user, token]);
 
-    // Only show for admin users
-    if (!user?.is_admin) return null;
+    // Only show for superadmin users (not regular admin)
+    if (user?.role !== 'superadmin') return null;
     if (error) return null; // Silent fail if endpoint not available yet
 
     if (!buildInfo) return null;

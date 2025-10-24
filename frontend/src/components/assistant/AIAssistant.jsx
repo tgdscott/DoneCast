@@ -10,11 +10,20 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MessageCircle, X, Send, Minimize2, Maximize2, HelpCircle, AlertCircle } from 'lucide-react';
+import { MessageCircle, X, Send, Minimize2, Maximize2, HelpCircle, AlertCircle, Lightbulb } from 'lucide-react';
 import { Button } from '../ui/button';
 import { makeApi } from '../../lib/apiClient';
+import { captureBugContext } from '../../lib/bugReportCapture';
 
-export default function AIAssistant({ token, user, onboardingMode = false, currentStep = null, currentStepData = null }) {
+export default function AIAssistant({ 
+  token, 
+  user, 
+  onboardingMode = false, 
+  currentStep = null, 
+  currentStepData = null,
+  currentPage = null, // e.g., 'dashboard', 'episodes', etc.
+  onRestartTooltips = null, // callback to restart page-specific tooltips
+}) {
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
@@ -25,6 +34,7 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
   const [sessionId] = useState(() => `session_${Date.now()}_${Math.random()}`);
   const [guidanceStatus, setGuidanceStatus] = useState(null);
   const [proactiveHelp, setProactiveHelp] = useState(null);
+  const [popupWindow, setPopupWindow] = useState(null);
   
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -33,6 +43,30 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
   const errorsEncountered = useRef([]);
   const lastProactiveStep = useRef(null);
   const hasShownIntro = useRef(false);
+  const [isDesktop, setIsDesktop] = useState(false);
+  
+  // Track reminder timing for exponential backoff (#1)
+  const lastDismissTime = useRef(null);
+  const currentReminderInterval = useRef(120000); // Start at 2 minutes (120000ms)
+  
+  // Detect if we're on desktop (screen width >= 768px)
+  useEffect(() => {
+    const checkDesktop = () => {
+      setIsDesktop(window.innerWidth >= 768);
+    };
+    checkDesktop();
+    window.addEventListener('resize', checkDesktop);
+    return () => window.removeEventListener('resize', checkDesktop);
+  }, []);
+  
+  // Clean up popup window on unmount
+  useEffect(() => {
+    return () => {
+      if (popupWindow && !popupWindow.closed) {
+        popupWindow.close();
+      }
+    };
+  }, [popupWindow]);
   
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -46,16 +80,16 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
     }
   }, [token, user]);
   
-  // Check for proactive help periodically
+  // Check for proactive help periodically - ONLY shows speech bubble, doesn't auto-open
   useEffect(() => {
-    if (!token || !user || !isOpen) return;
+    if (!token || !user) return;
     
     const checkInterval = setInterval(() => {
-      checkProactiveHelp();
-    }, 60000); // Check every minute
+      checkProactiveHelp(); // This only sets proactiveHelp state, doesn't open chat
+    }, currentReminderInterval.current); // Use dynamic interval with exponential backoff
     
     return () => clearInterval(checkInterval);
-  }, [token, user, isOpen]);
+  }, [token, user, currentReminderInterval.current]); // Added currentReminderInterval to dependencies
   
   // Show welcome message when chat first opens (introduce Mike!)
   useEffect(() => {
@@ -65,7 +99,7 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
       
       const introMessage = onboardingMode
         ? `Hey ${user?.first_name || 'there'}! 👋 I'm Mike Czech, your podcast setup guide. I'm here to help you get your show set up. Click "Need Help?" anytime you have questions!`
-        : `Hi ${user?.first_name || 'there'}! 👋 I'm Mike Czech (but you can call me Mike), your podcast assistant. I'm here to help you with anything - uploading, editing, publishing, you name it! What can I help you with today?`;
+        : `Hi ${user?.first_name || 'there'}! 👋 I'm Mike Czech (but you can call me Mike), your podcast assistant.\n\nI can help with:\n• Uploading & editing episodes\n• Publishing & scheduling\n• Template creation\n• **Reporting bugs** (just tell me what's broken!)\n\nWhat can I help you with today?`;
       
       setMessages([{
         role: 'assistant',
@@ -85,14 +119,14 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
     }
   }, [isOpen, isMinimized, messages]);
   
-  // Proactive help for onboarding steps
+  // Proactive help for onboarding steps - SHOWS SPEECH BUBBLE ONLY (no auto-open)
   useEffect(() => {
     if (!onboardingMode || !currentStep || !token || !user) return;
     
     // Don't show proactive help for the same step twice
     if (lastProactiveStep.current === currentStep) return;
     
-    // Show proactive help after 10 seconds on this step
+    // Show proactive help speech bubble after 15 seconds on this step (increased from 10s)
     const timer = setTimeout(async () => {
       lastProactiveStep.current = currentStep;
       
@@ -104,18 +138,15 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
         });
         
         if (response.message) {
-          setMessages(prev => [...prev, {
-            role: 'assistant',
-            content: response.message,
-            suggestions: response.suggestions,
-            timestamp: new Date(),
-          }]);
-          setIsOpen(true); // Auto-open the assistant
+          // Store the proactive help message to show in speech bubble
+          // User must click "Help me!" button or Mike to see it
+          setProactiveHelp(response.message);
+          // DO NOT auto-open: setIsOpen(true); 
         }
       } catch (error) {
         console.error('Failed to get onboarding help:', error);
       }
-    }, 10000); // 10 seconds
+    }, 15000); // 15 seconds (less aggressive)
     
     return () => clearTimeout(timer);
   }, [onboardingMode, currentStep, currentStepData, token, user]);
@@ -123,7 +154,7 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
   // Listen for manual "Need Help?" button clicks
   useEffect(() => {
     const handleOpenAssistant = () => {
-      setIsOpen(true);
+      handleOpenMike(); // Use existing open logic (respects desktop/mobile)
       // If in onboarding mode and no messages yet, trigger help immediately
       if (onboardingMode && currentStep && messages.length === 0) {
         (async () => {
@@ -132,8 +163,9 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
               step: currentStep,
               data: currentStepData,
             });
+            
             if (response.message) {
-              setMessages([{
+              setMessages(prev => [...prev, {
                 role: 'assistant',
                 content: response.message,
                 suggestions: response.suggestions,
@@ -149,7 +181,7 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
     
     window.addEventListener('ppp:open-ai-assistant', handleOpenAssistant);
     return () => window.removeEventListener('ppp:open-ai-assistant', handleOpenAssistant);
-  }, [onboardingMode, currentStep, currentStepData, token, messages.length]);
+  }, [onboardingMode, currentStep, currentStepData, token, user, messages.length]);
   
   // Monitor for user being stuck
   useEffect(() => {
@@ -204,6 +236,86 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
       loadGuidanceStatus();
     } catch (error) {
       console.error('Failed to track milestone:', error);
+    }
+  };
+  
+  // Open Mike in a separate popup window (desktop only)
+  const openMikePopup = () => {
+    // Check if popup is already open
+    if (popupWindow && !popupWindow.closed) {
+      popupWindow.focus();
+      return;
+    }
+    
+    // Open new popup window (#2 - alwaysOnTop implemented via focused window management)
+    const width = 600;
+    const height = 700;
+    const left = Math.max(0, (window.screen.width - width) / 2);
+    const top = Math.max(0, (window.screen.height - height) / 2);
+    
+    const popup = window.open(
+      '/mike',
+      'MikeCzech',
+      `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=no,status=no,toolbar=no,menubar=no,location=no,alwaysRaised=yes`
+    );
+    
+    if (popup) {
+      setPopupWindow(popup);
+      
+      // Listen for popup ready message
+      const handlePopupReady = (event) => {
+        if (event.origin !== window.location.origin) return;
+        if (event.data?.type === 'mike-popup-ready' && popup && !popup.closed) {
+          // Send initialization data to popup
+          popup.postMessage({
+            type: 'mike-popup-init',
+            token,
+            user,
+          }, window.location.origin);
+        }
+      };
+      
+      window.addEventListener('message', handlePopupReady);
+      
+      // (#2) Keep popup on top by periodically checking if main window is focused
+      // When main window gets focus, re-focus the popup to keep Mike visible
+      const keepOnTopInterval = setInterval(() => {
+        if (popup.closed) {
+          clearInterval(keepOnTopInterval);
+          return;
+        }
+        // If main window is focused and popup exists, bring popup to front
+        if (document.hasFocus() && popup && !popup.closed) {
+          try {
+            popup.focus();
+          } catch (e) {
+            // Silently fail if popup is being closed
+          }
+        }
+      }, 1000); // Check every second
+      
+      // Clean up when popup closes
+      const checkClosed = setInterval(() => {
+        if (popup.closed) {
+          clearInterval(checkClosed);
+          clearInterval(keepOnTopInterval);
+          setPopupWindow(null);
+          window.removeEventListener('message', handlePopupReady);
+        }
+      }, 500);
+    } else {
+      // Popup blocked - show toast or fallback to inline
+      console.warn('Popup blocked - falling back to inline Mike');
+      setIsOpen(true);
+    }
+  };
+  
+  // Handle opening Mike (popup on desktop, inline on mobile)
+  const handleOpenMike = () => {
+    if (isDesktop) {
+      openMikePopup();
+    } else {
+      setIsOpen(true);
     }
   };
   
@@ -274,6 +386,14 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
     setIsLoading(true);
     
     try {
+      // Capture technical context for bug reports (non-blocking)
+      let technicalContext = null;
+      try {
+        technicalContext = captureBugContext();
+      } catch (e) {
+        console.warn('Failed to capture bug context:', e);
+      }
+      
       // Gather context
       const context = {
         page: onboardingMode ? '/onboarding' : window.location.pathname,
@@ -284,6 +404,8 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
         onboarding_mode: onboardingMode,
         onboarding_step: currentStep,
         onboarding_data: currentStepData,
+        // Technical context for bug reports
+        ...(technicalContext || {}),
       };
       
       // Send to AI
@@ -310,13 +432,28 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
       
     } catch (error) {
       console.error('Failed to send message:', error);
-      const errorMessage = error?.response?.data?.detail 
-        || error?.message 
-        || 'Unknown error';
+      console.error('Error details:', {
+        message: error?.message,
+        status: error?.status,
+        detail: error?.detail,
+        response: error?.response,
+      });
+      
+      // Build more helpful error message based on error type
+      let errorMessage = `Hey, I'm having trouble connecting to my AI brain right now. 🤔\n\nSomething went wrong on my end. Please try:\n1. Refreshing the page\n2. Asking your question again in a moment\n\nIf this keeps happening, please use the bug report tool to let us know!\n\nSorry about that! - Mike`;
+      
+      // Add specific error details if available
+      if (error?.status === 503) {
+        errorMessage += `\n\n⚠️ Technical detail: AI service unavailable (503)`;
+      } else if (error?.status === 401) {
+        errorMessage += `\n\n⚠️ Technical detail: Session expired - please refresh the page`;
+      } else if (error?.detail) {
+        errorMessage += `\n\n⚠️ Technical detail: ${error.detail}`;
+      }
       
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: `Hey, I'm having trouble connecting to my AI brain right now. 🤔\n\nError: ${errorMessage}\n\nThis usually means the Gemini API isn't responding. Can you check:\n1. Is GEMINI_API_KEY set in Cloud Run environment?\n2. Are there any error logs in the backend?\n3. Try refreshing the page?\n\nSorry about that! - Mike`,
+        content: errorMessage,
         timestamp: new Date(),
         isError: true,
       }]);
@@ -342,8 +479,23 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
   };
   
   const dismissProactiveHelp = () => {
+    // Track dismissal time and increase interval by 25% for next reminder (#1)
+    lastDismissTime.current = Date.now();
+    currentReminderInterval.current = Math.floor(currentReminderInterval.current * 1.25);
+    console.log(`Mike reminder dismissed. Next reminder in ${Math.floor(currentReminderInterval.current / 1000)}s`);
     setProactiveHelp(null);
   };
+
+  const handleShowTooltipsAgain = () => {
+    // Check if we have a tooltip restart handler for the current page
+    if (onRestartTooltips && typeof onRestartTooltips === 'function') {
+      onRestartTooltips();
+      dismissProactiveHelp(); // Close the proactive help bubble
+    }
+  };
+
+  // Check if the current page supports tooltips
+  const hasTooltipsSupport = currentPage && onRestartTooltips && typeof onRestartTooltips === 'function';
   
   const applyHighlight = (selector, message) => {
     try {
@@ -416,29 +568,41 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
   
   return (
     <>
-      {/* Proactive Help Notification */}
-      {proactiveHelp && !isOpen && (
+      {/* Proactive Help Notification (mobile only - desktop uses speech bubble) */}
+      {proactiveHelp && !isOpen && !isDesktop && (
         <div className="fixed bottom-24 right-6 max-w-sm bg-white border-2 border-blue-500 rounded-lg shadow-lg p-4 z-50 animate-bounce">
           <div className="flex items-start gap-3">
             <HelpCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
             <div className="flex-1">
               <p className="text-sm text-gray-800">{proactiveHelp}</p>
-              <div className="flex gap-2 mt-3">
-                <Button size="sm" onClick={acceptProactiveHelp}>
-                  Yes, help me!
-                </Button>
-                <Button size="sm" variant="ghost" onClick={dismissProactiveHelp}>
-                  No thanks
-                </Button>
+              <div className="flex flex-col gap-2 mt-3">
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={() => { handleOpenMike(); acceptProactiveHelp(); }}>
+                    Yes, help me!
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={dismissProactiveHelp}>
+                    Dismiss
+                  </Button>
+                </div>
+                {hasTooltipsSupport && (
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    onClick={handleShowTooltipsAgain}
+                    className="w-full"
+                  >
+                    Show tooltips again
+                  </Button>
+                )}
               </div>
             </div>
           </div>
         </div>
       )}
       
-      {/* Chat Widget - Responsive sizing to avoid covering content */}
-      {isOpen ? (
-        <div className={`fixed bg-white border border-gray-300 rounded-lg shadow-2xl flex flex-col
+      {/* Chat Widget - Responsive sizing to avoid covering content (mobile only, desktop uses popup) */}
+      {isOpen && !isDesktop ? (
+        <div className={`fixed bg-white border border-gray-300 shadow-2xl flex flex-col
           ${isPoppedOut
             ? 'top-[10%] left-[10%] w-[600px] h-[700px] z-[70]'
             : onboardingMode 
@@ -449,31 +613,56 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
             ? 'w-80 h-14' 
             : isPoppedOut
               ? ''
-              : 'w-96 max-w-[calc(100vw-3rem)] h-[500px] max-h-[min(500px,calc(100vh-10rem))]'
-          }`}
+              : 'inset-4 md:inset-auto md:bottom-6 md:right-6 md:w-96 md:h-[500px] md:max-h-[min(500px,calc(100vh-10rem))] md:rounded-lg'
+          }
+          rounded-lg`}
           style={isPoppedOut ? { resize: 'both', overflow: 'hidden', minWidth: '400px', minHeight: '500px', maxWidth: '90vw', maxHeight: '90vh' } : {}}
         >
           
           {/* Header */}
-          <div className="flex items-center justify-between p-4 border-b bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-t-lg flex-shrink-0">
+          <div className="flex items-center justify-between p-3 md:p-4 border-b bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-t-lg flex-shrink-0 safe-top">
             <div className="flex items-center gap-2">
-              <MessageCircle className="w-5 h-5" />
-              <span className="font-semibold">Mike Czech</span>
+              <MessageCircle className="w-4 h-4 md:w-5 md:h-5" />
+              <span className="font-semibold text-sm md:text-base">Mike Czech</span>
               {isLoading && (
                 <span className="text-xs bg-white/20 px-2 py-0.5 rounded-full">Thinking...</span>
               )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 md:gap-2">
+              {/* Bug Report Button */}
+              <button
+                onClick={() => {
+                  setInputValue("I found a bug: ");
+                  setTimeout(() => inputRef.current?.focus(), 100);
+                }}
+                className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded-full flex items-center gap-1 transition-colors touch-target-icon"
+                title="Report a bug to the development team"
+              >
+                <AlertCircle className="w-3 h-3" />
+                <span className="hidden md:inline">Report Bug</span>
+              </button>
+              {/* Feature Request Button */}
+              <button
+                onClick={() => {
+                  setInputValue("I have a feature request: ");
+                  setTimeout(() => inputRef.current?.focus(), 100);
+                }}
+                className="text-xs bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded-full flex items-center gap-1 transition-colors touch-target-icon"
+                title="Request a new feature"
+              >
+                <Lightbulb className="w-3 h-3" />
+                <span className="hidden md:inline">Request Feature</span>
+              </button>
               <button
                 onClick={() => setIsPoppedOut(!isPoppedOut)}
-                className="hover:bg-white/20 p-1 rounded transition-colors"
+                className="hover:bg-white/20 p-1 rounded transition-colors hidden md:block"
                 title={isPoppedOut ? "Dock to corner" : "Pop out & resize"}
               >
                 <Maximize2 className="w-4 h-4" />
               </button>
               <button
                 onClick={() => setIsMinimized(!isMinimized)}
-                className="hover:bg-white/20 p-1 rounded transition-colors"
+                className="hover:bg-white/20 p-1 rounded transition-colors hidden md:block"
                 title={isMinimized ? "Expand" : "Minimize"}
               >
                 {isMinimized ? <Maximize2 className="w-4 h-4" /> : <Minimize2 className="w-4 h-4" />}
@@ -483,10 +672,10 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
                   setIsOpen(false);
                   setIsPoppedOut(false);
                 }}
-                className="hover:bg-white/20 p-1 rounded transition-colors"
+                className="hover:bg-white/20 p-1.5 md:p-1 rounded transition-colors touch-target-icon"
                 title="Close"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5 md:w-4 md:h-4" />
               </button>
             </div>
           </div>
@@ -582,21 +771,6 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
                         </div>
                       )}
                       
-                      {/* Quick action suggestions */}
-                      {msg.suggestions && (
-                        <div className="flex flex-wrap gap-2 mt-3">
-                          {msg.suggestions.map((suggestion, i) => (
-                            <button
-                              key={i}
-                              onClick={() => handleSuggestionClick(suggestion)}
-                              className="text-xs bg-blue-100 hover:bg-blue-200 text-blue-800 px-2 py-1 rounded transition-colors"
-                            >
-                              {suggestion}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      
                       <span className="text-xs opacity-60 mt-1 block">
                         {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
@@ -618,7 +792,7 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
               </div>
               
               {/* Input */}
-              <div className="p-4 border-t bg-white rounded-b-lg flex-shrink-0">
+              <div className="p-3 md:p-4 border-t bg-white rounded-b-lg flex-shrink-0 safe-bottom">
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
@@ -636,7 +810,7 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
                     placeholder="Ask me anything..."
-                    className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm md:text-base focus:outline-none focus:ring-2 focus:ring-blue-500"
                     disabled={isLoading}
                     autoFocus
                   />
@@ -644,26 +818,33 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
                     type="submit"
                     size="sm"
                     disabled={!inputValue.trim() || isLoading}
-                    className="bg-blue-600 hover:bg-blue-700"
+                    className="bg-blue-600 hover:bg-blue-700 touch-target"
                   >
                     <Send className="w-4 h-4" />
                   </Button>
                 </form>
                 
-                <div className="flex items-center gap-2 mt-2 text-xs text-gray-500">
-                  <AlertCircle className="w-3 h-3" />
-                  <span>Found a bug? Just tell me and I'll report it!</span>
+                {/* Improved bug reporting hint with better visibility */}
+                <div className="flex items-center gap-2 mt-2 text-xs bg-blue-50 border border-blue-200 rounded-md px-2 py-1">
+                  <AlertCircle className="w-3.5 h-3.5 text-blue-600" />
+                  <span className="hidden md:inline text-blue-800 font-medium">
+                    💡 Tip: Found a bug? Just tell me and I'll report it to the dev team!
+                  </span>
+                  <span className="md:hidden text-blue-800 font-medium">
+                    💡 Bug? Tell me!
+                  </span>
                 </div>
               </div>
             </>
           )}
         </div>
       ) : (
-        /* AI Assistant Character (Clippy-style) */
-        <div className="fixed bottom-6 right-6 z-50">
-          {/* Speech Bubble - Shows when proactive help is available */}
+        /* AI Assistant Character (Clippy-style) - HIDDEN when popped out (#3) */
+        !popupWindow && ( // Only show if popup is NOT open
+          <div className="fixed bottom-4 right-4 md:bottom-6 md:right-6 z-50 safe-bottom safe-right">
+          {/* Speech Bubble - Shows when proactive help is available (desktop only) */}
           {proactiveHelp && (
-            <div className="absolute bottom-20 right-0 mb-2 animate-bounce-gentle">
+            <div className="hidden md:block absolute bottom-20 right-0 mb-2 animate-bounce-gentle">
               <div className="relative bg-white border-2 border-purple-400 rounded-2xl shadow-xl p-4 max-w-xs">
                 {/* Speech bubble tail */}
                 <div className="absolute bottom-[-10px] right-8 w-0 h-0 border-l-[10px] border-l-transparent border-r-[10px] border-r-transparent border-t-[10px] border-t-purple-400"></div>
@@ -671,76 +852,52 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
                 
                 {/* Message content */}
                 <p className="text-sm text-gray-800 mb-3">{proactiveHelp}</p>
-                <div className="flex gap-2 justify-end">
-                  <button
-                    onClick={acceptProactiveHelp}
-                    className="px-3 py-1 bg-purple-600 text-white text-xs rounded-full hover:bg-purple-700 transition-colors"
-                  >
-                    Help me!
-                  </button>
-                  <button
-                    onClick={dismissProactiveHelp}
-                    className="px-3 py-1 bg-gray-200 text-gray-700 text-xs rounded-full hover:bg-gray-300 transition-colors"
-                  >
-                    Dismiss
-                  </button>
+                <div className="flex flex-col gap-2">
+                  <div className="flex gap-2 justify-center">
+                    <button
+                      onClick={() => {
+                        handleOpenMike(); // Open chat interface (popup on desktop, inline on mobile)
+                        acceptProactiveHelp(); // Add message to chat
+                      }}
+                      className="px-3 py-1 bg-purple-600 text-white text-xs rounded-full hover:bg-purple-700 transition-colors touch-target flex items-center justify-center"
+                    >
+                      Help me!
+                    </button>
+                    <button
+                      onClick={dismissProactiveHelp}
+                      className="px-3 py-1 bg-gray-200 text-gray-700 text-xs rounded-full hover:bg-gray-300 transition-colors touch-target flex items-center justify-center"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                  {hasTooltipsSupport && (
+                    <button
+                      onClick={handleShowTooltipsAgain}
+                      className="px-3 py-1 bg-blue-50 text-blue-700 text-xs rounded-full hover:bg-blue-100 transition-colors touch-target border border-blue-200 flex items-center justify-center"
+                    >
+                      Show tooltips again
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
           )}
           
-          {/* AI Character - Clickable mascot */}
+          {/* AI Character - Mobile: FAB with icon, Desktop: Mike Czech mascot */}
           <button
-            onClick={() => setIsOpen(true)}
-            className="relative w-24 h-24 transition-all hover:scale-110 focus:outline-none focus:ring-4 focus:ring-purple-400 rounded-full"
-            title="Click me for help!"
+            onClick={handleOpenMike}
+            className="relative touch-target transition-all hover:scale-110 focus:outline-none focus:ring-4 focus:ring-purple-400 rounded-full bg-purple-600 md:bg-white shadow-xl w-14 h-14 md:w-24 md:h-24 flex items-center justify-center md:block overflow-hidden"
+            title="Click me for help! I'm Mike Czech!"
           >
-            {/* Character SVG */}
-            <svg viewBox="0 0 200 200" className="w-full h-full drop-shadow-xl">
-              {/* Shadow */}
-              <ellipse cx="100" cy="180" rx="60" ry="10" fill="#D8D8E8" opacity="0.4"/>
-              
-              {/* Body */}
-              <ellipse cx="100" cy="150" rx="70" ry="35" fill="#8B5CF6"/>
-              
-              {/* Head */}
-              <circle cx="100" cy="100" r="55" fill="url(#gradient-head)"/>
-              <defs>
-                <linearGradient id="gradient-head" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#A855F7"/>
-                  <stop offset="100%" stopColor="#D946EF"/>
-                </linearGradient>
-              </defs>
-              
-              {/* Headphones */}
-              <path d="M 45 90 Q 40 100 45 110" stroke="#8B5CF6" strokeWidth="8" fill="none" strokeLinecap="round"/>
-              <path d="M 155 90 Q 160 100 155 110" stroke="#8B5CF6" strokeWidth="8" fill="none" strokeLinecap="round"/>
-              <ellipse cx="40" cy="100" rx="12" ry="18" fill="#C084FC"/>
-              <ellipse cx="160" cy="100" rx="12" ry="18" fill="#C084FC"/>
-              <path d="M 50 70 Q 100 50 150 70" stroke="#8B5CF6" strokeWidth="10" fill="none" strokeLinecap="round"/>
-              
-              {/* Eyes */}
-              <ellipse cx="80" cy="95" rx="12" ry="16" fill="white"/>
-              <ellipse cx="120" cy="95" rx="12" ry="16" fill="white"/>
-              <circle cx="80" cy="98" r="7" fill="#2D3748"/>
-              <circle cx="120" cy="98" r="7" fill="#2D3748"/>
-              <circle cx="82" cy="96" r="3" fill="white"/> {/* Eye shine */}
-              <circle cx="122" cy="96" r="3" fill="white"/>
-              
-              {/* Eyebrows */}
-              <path d="M 68 80 Q 80 75 90 78" stroke="#8B5CF6" strokeWidth="3" fill="none" strokeLinecap="round"/>
-              <path d="M 110 78 Q 120 75 132 80" stroke="#8B5CF6" strokeWidth="3" fill="none" strokeLinecap="round"/>
-              
-              {/* Happy smile */}
-              <path d="M 75 115 Q 100 125 125 115" stroke="#8B5CF6" strokeWidth="3" fill="none" strokeLinecap="round"/>
-              
-              {/* Idea lightbulb */}
-              <circle cx="50" cy="40" r="12" fill="#FFA726" opacity="0.9"/>
-              <path d="M 48 52 L 48 56 L 52 56 L 52 52 Z" fill="#9C27B0"/>
-              <path d="M 45 38 L 43 35" stroke="#FFA726" strokeWidth="2" strokeLinecap="round"/>
-              <path d="M 55 38 L 57 35" stroke="#FFA726" strokeWidth="2" strokeLinecap="round"/>
-              <path d="M 50 30 L 50 27" stroke="#FFA726" strokeWidth="2" strokeLinecap="round"/>
-            </svg>
+            {/* Mobile: MessageCircle icon */}
+            <MessageCircle className="w-6 h-6 text-white md:hidden" />
+            
+            {/* Desktop: Mike Czech Image */}
+            <img 
+              src="/MikeCzech.png" 
+              alt="Mike Czech - Your AI Assistant"
+              className="hidden md:block w-full h-full object-cover"
+            />
             
             {/* Notification badge for new users */}
             {guidanceStatus?.is_new_user && (
@@ -748,6 +905,7 @@ export default function AIAssistant({ token, user, onboardingMode = false, curre
             )}
           </button>
         </div>
+        ) /* Close the !popupWindow conditional */
       )}
     </>
   );

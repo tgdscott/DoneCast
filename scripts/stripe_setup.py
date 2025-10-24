@@ -26,7 +26,7 @@ import stripe
 # Product & Price Configuration (ACTUAL PRICING from your site)
 PRODUCTS = {
     "starter": {
-        "name": "Podcast++ Starter",
+        "name": "Podcast Plus Plus Starter",
         "description": "Get started with AI-powered podcasting - 120 minutes/month",
         "features": [
             "120 minutes per month (2 hrs)",
@@ -49,7 +49,7 @@ PRODUCTS = {
         }
     },
     "creator": {
-        "name": "Podcast++ Creator",
+        "name": "Podcast Plus Plus Creator",
         "description": "Most popular - 600 minutes/month (10 hrs)",
         "features": [
             "600 minutes per month (10 hrs)",
@@ -72,7 +72,7 @@ PRODUCTS = {
         }
     },
     "pro": {
-        "name": "Podcast++ Pro",
+        "name": "Podcast Plus Plus Pro",
         "description": "Professional tier - 1500 minutes/month (25 hrs)",
         "features": [
             "1500 minutes per month (25 hrs)",

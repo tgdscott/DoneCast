@@ -145,14 +145,21 @@ async def upload_media_files(
 				gcs_key = f"{current_user.id.hex}/media/{category.value}/{safe_filename}"
 				log.info("[upload.gcs] Uploading %s to gs://%s/%s", category.value, gcs_bucket, gcs_key)
 				with open(file_path, "rb") as f:
-					gcs_url = gcs.upload_fileobj(gcs_bucket, gcs_key, f, content_type=file.content_type or "audio/mpeg")
+					# Disable fallback - these categories MUST be in GCS (no local files)
+					gcs_url = gcs.upload_fileobj(
+						gcs_bucket, 
+						gcs_key, 
+						f, 
+						content_type=file.content_type or "audio/mpeg",
+						allow_fallback=False
+					)
 				
 				# Store GCS URL instead of local filename for persistence
 				if gcs_url and gcs_url.startswith("gs://"):
 					safe_filename = gcs_url
 					log.info("[upload.gcs] SUCCESS: %s uploaded: %s", category.value, gcs_url)
 				else:
-					# GCS upload returned non-GCS URL (local fallback) - fail the request
+					# This should never happen with allow_fallback=False, but belt-and-suspenders
 					log.error("[upload.gcs] Upload returned non-GCS URL: %s", gcs_url)
 					# Clean up local file
 					try:
@@ -235,7 +242,7 @@ async def upload_media_files(
                 try:
                         if category == MediaCategory.main_content:
 				from worker.tasks import transcribe_media_file  # type: ignore
-				transcribe_media_file.delay(safe_filename)
+				transcribe_media_file.delay(safe_filename, str(current_user.id))
 		except Exception:
 			pass
 

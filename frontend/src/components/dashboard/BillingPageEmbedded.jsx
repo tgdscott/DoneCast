@@ -5,6 +5,7 @@ import { Button } from '../ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
 import { Progress } from '../ui/progress';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { makeApi, isApiError } from '@/lib/apiClient';
 import { useResolvedTimezone } from '@/hooks/useResolvedTimezone';
 import { formatToPartsInTimezone } from '@/lib/timezone';
@@ -13,6 +14,7 @@ import {
   EmbeddedCheckoutProvider,
   EmbeddedCheckout,
 } from '@stripe/react-stripe-js';
+import CreditLedger from './CreditLedger';
 
 export default function BillingPageEmbedded({ token, onBack }) {
   const { refreshUser } = useAuth();
@@ -27,6 +29,7 @@ export default function BillingPageEmbedded({ token, onBack }) {
   const [clientSecret, setClientSecret] = useState(null);
   const [showCheckout, setShowCheckout] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState(null);
+  const [activeTab, setActiveTab] = useState('overview');
   const { toast } = (() => { try { return useToast(); } catch { return { toast: () => {} }; } })();
   
   // Initialize Stripe
@@ -274,8 +277,16 @@ export default function BillingPageEmbedded({ token, onBack }) {
         </div>
       )}
 
-      {/* Current Plan */}
-      <Card>
+      {/* Tabs for Overview and Credit History */}
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="grid w-full max-w-md grid-cols-2">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="credits">Credit History</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="space-y-8 mt-6">
+          {/* Current Plan */}
+          <Card>
         <CardHeader>
           <CardTitle>Current Plan</CardTitle>
         </CardHeader>
@@ -319,10 +330,77 @@ export default function BillingPageEmbedded({ token, onBack }) {
                 </div>
               )}
               
+              {/* NEW: Credits System (Primary) */}
+              {typeof usage.credits_balance === 'number' && (
+                <div className="border-t pt-4 mt-4">
+                  <div className="mb-4">
+                    <div className="flex justify-between items-baseline mb-2">
+                      <span className="text-lg font-semibold text-gray-800">Credit Balance</span>
+                      <div className="text-right">
+                        <span className="text-2xl font-bold text-blue-600">
+                          {usage.credits_balance.toFixed(1)}
+                        </span>
+                        <span className="text-sm text-gray-500 ml-1">credits</span>
+                      </div>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      ≈ {(usage.credits_balance / 1.5).toFixed(1)} minutes equivalent
+                    </div>
+                  </div>
+                  
+                  <div className="mb-3">
+                    <div className="flex justify-between text-sm mb-2">
+                      <span className="text-gray-600">Credits used this month</span>
+                      <span className="font-medium text-red-600">
+                        -{usage.credits_used_this_month.toFixed(1)}
+                      </span>
+                    </div>
+                  </div>
+                  
+                  {/* Breakdown by action type */}
+                  {usage.credits_breakdown && (
+                    <div className="bg-gray-50 rounded-lg p-3 space-y-2">
+                      <div className="text-xs font-semibold text-gray-700 mb-2">Usage Breakdown</div>
+                      {usage.credits_breakdown.transcription > 0 && (
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-600">Transcription</span>
+                          <span className="font-medium">{usage.credits_breakdown.transcription.toFixed(1)} credits</span>
+                        </div>
+                      )}
+                      {usage.credits_breakdown.assembly > 0 && (
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-600">Episode Assembly</span>
+                          <span className="font-medium">{usage.credits_breakdown.assembly.toFixed(1)} credits</span>
+                        </div>
+                      )}
+                      {usage.credits_breakdown.tts_generation > 0 && (
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-600">TTS Generation</span>
+                          <span className="font-medium">{usage.credits_breakdown.tts_generation.toFixed(1)} credits</span>
+                        </div>
+                      )}
+                      {usage.credits_breakdown.auphonic_processing > 0 && (
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-600">Auphonic Processing</span>
+                          <span className="font-medium">{usage.credits_breakdown.auphonic_processing.toFixed(1)} credits</span>
+                        </div>
+                      )}
+                      {usage.credits_breakdown.storage > 0 && (
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-600">Storage</span>
+                          <span className="font-medium">{usage.credits_breakdown.storage.toFixed(1)} credits</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {/* Legacy: Processing minutes (kept for backward compatibility) */}
               {usage.max_processing_minutes_month !== null && (
-                <div>
+                <div className="border-t pt-4 mt-4">
                   <div className="flex justify-between text-sm mb-2">
-                    <span className="text-gray-600">Processing minutes this month</span>
+                    <span className="text-gray-600">Processing minutes this month (legacy)</span>
                     <span className="font-medium">
                       {usage.processing_minutes_used_this_month} / {usage.max_processing_minutes_month}
                     </span>
@@ -424,6 +502,12 @@ export default function BillingPageEmbedded({ token, onBack }) {
           </div>
         </>
       )}
+        </TabsContent>
+
+        <TabsContent value="credits" className="mt-6">
+          <CreditLedger token={token} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

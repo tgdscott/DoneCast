@@ -75,28 +75,42 @@ class FeedbackSubmission(SQLModel, table=True):
     title: str = Field()
     description: str = Field()
     
-    # Context
+    # Context - ENHANCED
     page_url: Optional[str] = None
-    user_action: Optional[str] = None
+    user_action: Optional[str] = None  # What the user was trying to do
     browser_info: Optional[str] = None  # Browser, OS, screen size
     error_logs: Optional[str] = None  # Any error messages
     screenshot_url: Optional[str] = None  # If user provided screenshot
+    
+    # NEW: Enhanced technical context
+    user_agent: Optional[str] = None  # Full user agent string
+    viewport_size: Optional[str] = None  # e.g., "1920x1080"
+    console_errors: Optional[str] = None  # Captured console errors (JSON array)
+    network_errors: Optional[str] = None  # Failed requests (JSON array)
+    local_storage_data: Optional[str] = None  # Relevant localStorage/sessionStorage
+    reproduction_steps: Optional[str] = None  # User-provided steps to reproduce
     
     # Categorization
     severity: str = Field(default="medium")  # "critical", "high", "medium", "low"
     category: Optional[str] = None  # "upload", "publish", "editor", "audio", etc.
     
     # Status tracking
-    status: str = Field(default="new")  # "new", "acknowledged", "investigating", "resolved"
+    status: str = Field(default="new")  # "new", "acknowledged", "investigating", "resolved", "wont_fix"
     admin_notified: bool = Field(default=False)
     google_sheet_row: Optional[int] = None  # Row number in tracking sheet
     
     # Timestamps
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    acknowledged_at: Optional[datetime] = None  # When admin first looked at it
     resolved_at: Optional[datetime] = None
     
-    # Admin notes
-    admin_notes: Optional[str] = None
+    # Admin workflow - ENHANCED
+    admin_notes: Optional[str] = None  # Internal notes (Markdown supported)
+    assigned_to: Optional[str] = None  # Admin email assigned to this bug
+    priority: Optional[str] = None  # "urgent", "high", "normal", "low", "backlog"
+    related_issues: Optional[str] = None  # Comma-separated IDs of related bugs
+    fix_version: Optional[str] = None  # Version where bug was fixed
+    status_history: Optional[str] = None  # JSON array of status changes
 
 
 class AssistantGuidance(SQLModel, table=True):

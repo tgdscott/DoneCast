@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ExternalLink, Loader2, RefreshCcw, Send, ServerCog } from "lucide-react";
+import { ArrowLeft, ExternalLink, Loader2, RefreshCcw, Send, ServerCog, Layout, Palette, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -8,6 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { makeApi, isApiError } from "@/lib/apiClient";
 import { useToast } from "@/hooks/use-toast";
+import VisualEditor from "@/components/website/VisualEditor";
+import CSSEditorDialog from "@/components/dashboard/CSSEditorDialog";
+import ResetConfirmDialog from "@/components/dashboard/ResetConfirmDialog";
 
 const statusCopy = {
   draft: { label: "Draft", tone: "bg-amber-100 text-amber-800" },
@@ -219,10 +222,15 @@ export default function WebsiteBuilder({ token, podcasts, onBack, allowCustomDom
   const [selectedPodcastId, setSelectedPodcastId] = useState(() => (podcasts && podcasts[0] ? podcasts[0].id : ""));
   const [website, setWebsite] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [actionState, setActionState] = useState({ creating: false, chatting: false, savingDomain: false });
+  const [actionState, setActionState] = useState({ creating: false, chatting: false, savingDomain: false, publishing: false });
   const [error, setError] = useState(null);
   const [chatMessage, setChatMessage] = useState("");
   const [domainDraft, setDomainDraft] = useState("");
+  const [builderMode, setBuilderMode] = useState("visual"); // "visual" | "ai"
+  const [publishStatus, setPublishStatus] = useState(null); // For SSL cert status
+  const [showCSSEditor, setShowCSSEditor] = useState(false);
+  const [showResetDialog, setShowResetDialog] = useState(false);
+  const [cssEditorLoading, setCSSEditorLoading] = useState(false);
 
   const api = useMemo(() => makeApi(token), [token]);
 
@@ -281,6 +289,96 @@ export default function WebsiteBuilder({ token, podcasts, onBack, allowCustomDom
     }
   };
 
+  const handlePublish = async () => {
+    if (!selectedPodcastId || !website) return;
+    
+    const isPublished = website.status === 'published';
+    setActionState((prev) => ({ ...prev, publishing: true }));
+    setError(null);
+    
+    try {
+      if (isPublished) {
+        // Unpublish
+        await api.post(`/api/podcasts/${selectedPodcastId}/website/unpublish`);
+        toast({ 
+          title: "Website unpublished", 
+          description: "Your website is now in draft mode." 
+        });
+      } else {
+        // Publish with automatic domain provisioning
+        const result = await api.post(`/api/podcasts/${selectedPodcastId}/website/publish`, {
+          auto_provision_domain: true
+        });
+        
+        setPublishStatus(result);
+        
+        if (result.ssl_status === 'provisioning') {
+          toast({ 
+            title: "🎉 Publishing website...", 
+            description: `Your website will be live at ${result.domain} in about 10-15 minutes while we provision your SSL certificate.`,
+            duration: 10000
+          });
+          
+          // Start polling for SSL readiness
+          pollDomainStatus();
+        } else if (result.ssl_status === 'active') {
+          toast({ 
+            title: "🚀 Website is live!", 
+            description: `Your website is now accessible at ${result.domain}` 
+          });
+        }
+      }
+      
+      // Reload website to get updated status
+      await loadWebsite(selectedPodcastId);
+      
+    } catch (err) {
+      console.error("Failed to publish/unpublish website", err);
+      const message = isApiError(err) ? (err.detail || err.message || err.error || "Unable to publish site") : "Unable to publish site";
+      setError(message);
+      toast({ title: "Error", description: message, variant: "destructive" });
+    } finally {
+      setActionState((prev) => ({ ...prev, publishing: false }));
+    }
+  };
+
+  const pollDomainStatus = async () => {
+    if (!selectedPodcastId) return;
+    
+    const checkStatus = async () => {
+      try {
+        const status = await api.get(`/api/podcasts/${selectedPodcastId}/website/domain-status`);
+        
+        if (status.is_ready) {
+          toast({
+            title: "✅ Your website is now live!",
+            description: `Visit ${status.domain} to see it in action.`,
+            duration: 10000
+          });
+          await loadWebsite(selectedPodcastId);
+          return true; // Stop polling
+        }
+        return false; // Continue polling
+      } catch (err) {
+        console.error("Failed to check domain status", err);
+        return true; // Stop polling on error
+      }
+    };
+    
+    // Poll every 30 seconds for up to 20 minutes
+    const maxAttempts = 40;
+    let attempts = 0;
+    
+    const intervalId = setInterval(async () => {
+      attempts++;
+      const shouldStop = await checkStatus();
+      
+      if (shouldStop || attempts >= maxAttempts) {
+        clearInterval(intervalId);
+      }
+    }, 30000); // 30 seconds
+  };
+
   const handleChat = async () => {
     if (!selectedPodcastId || !chatMessage.trim()) return;
     setActionState((prev) => ({ ...prev, chatting: true }));
@@ -297,6 +395,84 @@ export default function WebsiteBuilder({ token, podcasts, onBack, allowCustomDom
       setError(message);
     } finally {
       setActionState((prev) => ({ ...prev, chatting: false }));
+    }
+  };
+
+  const handleCSSsave = async (css) => {
+    if (!selectedPodcastId) return;
+    setCSSEditorLoading(true);
+    try {
+      await api.patch(`/api/podcasts/${selectedPodcastId}/website/css`, { css });
+      await loadWebsite(selectedPodcastId);
+      setShowCSSEditor(false);
+      toast({ 
+        title: "CSS updated", 
+        description: "Your custom styles have been saved." 
+      });
+    } catch (err) {
+      console.error("Failed to update CSS", err);
+      toast({ 
+        title: "Failed to update CSS", 
+        description: isApiError(err) ? (err.detail || err.error || "Unable to save CSS") : "Unable to save CSS",
+        variant: "destructive"
+      });
+    } finally {
+      setCSSEditorLoading(false);
+    }
+  };
+
+  const handleAIGenerateCSS = async (prompt) => {
+    if (!selectedPodcastId || !prompt.trim()) return;
+    setCSSEditorLoading(true);
+    try {
+      const result = await api.patch(`/api/podcasts/${selectedPodcastId}/website/css`, { 
+        css: "", 
+        ai_prompt: prompt 
+      });
+      await loadWebsite(selectedPodcastId);
+      toast({ 
+        title: "CSS generated", 
+        description: "AI has created custom styles for your website." 
+      });
+      // Update the CSS editor with the new CSS
+      if (website) {
+        setWebsite({...website, global_css: result.css});
+      }
+    } catch (err) {
+      console.error("Failed to generate CSS", err);
+      toast({ 
+        title: "Failed to generate CSS", 
+        description: isApiError(err) ? (err.detail || err.error || "Unable to generate CSS") : "Unable to generate CSS",
+        variant: "destructive"
+      });
+    } finally {
+      setCSSEditorLoading(false);
+    }
+  };
+
+  const handleReset = async () => {
+    if (!selectedPodcastId) return;
+    setActionState((prev) => ({ ...prev, creating: true }));
+    try {
+      const data = await api.post(`/api/podcasts/${selectedPodcastId}/website/reset`, { 
+        confirmation_phrase: "here comes the boom" 
+      });
+      setWebsite(data);
+      setDomainDraft(data.custom_domain || "");
+      setShowResetDialog(false);
+      toast({ 
+        title: "Website reset", 
+        description: "Your website has been reset to default settings." 
+      });
+    } catch (err) {
+      console.error("Failed to reset website", err);
+      toast({ 
+        title: "Failed to reset website", 
+        description: isApiError(err) ? (err.detail || err.error || "Unable to reset") : "Unable to reset",
+        variant: "destructive"
+      });
+    } finally {
+      setActionState((prev) => ({ ...prev, creating: false }));
     }
   };
 
@@ -326,13 +502,50 @@ export default function WebsiteBuilder({ token, podcasts, onBack, allowCustomDom
     return null;
   }, [website]);
 
+  const selectedPodcast = useMemo(() => {
+    return podcasts.find((p) => p.id === selectedPodcastId);
+  }, [podcasts, selectedPodcastId]);
+
+  // If visual mode and podcast selected, show visual editor
+  if (builderMode === "visual" && selectedPodcast) {
+    return (
+      <VisualEditor
+        token={token}
+        podcast={selectedPodcast}
+        onBack={() => setBuilderMode("select")}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm" onClick={onBack} className="text-slate-600 hover:text-slate-900">
-          <ArrowLeft className="mr-2 h-4 w-4" /> Back to dashboard
-        </Button>
-        <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Website Builder</div>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={onBack} className="text-slate-600 hover:text-slate-900">
+            <ArrowLeft className="mr-2 h-4 w-4" /> Back to dashboard
+          </Button>
+          <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Website Builder</div>
+        </div>
+        
+        {/* Mode toggle */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant={builderMode === "visual" ? "default" : "outline"}
+            onClick={() => setBuilderMode("visual")}
+          >
+            <Layout className="mr-2 h-4 w-4" />
+            Visual Builder
+          </Button>
+          <Button
+            size="sm"
+            variant={builderMode === "ai" ? "default" : "outline"}
+            onClick={() => setBuilderMode("ai")}
+          >
+            <RefreshCcw className="mr-2 h-4 w-4" />
+            AI Mode (Legacy)
+          </Button>
+        </div>
       </div>
 
       <Card className="border border-slate-200 shadow-sm">
@@ -402,6 +615,23 @@ export default function WebsiteBuilder({ token, podcasts, onBack, allowCustomDom
                       {actionState.creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
                       {website ? "Refresh with AI" : "Create my site"}
                     </Button>
+                    
+                    {/* Publish button - only show if website exists */}
+                    {website && website.subdomain && (
+                      <Button
+                        onClick={handlePublish}
+                        disabled={actionState.publishing || loading}
+                        variant={website.status === 'published' ? 'outline' : 'default'}
+                        className={website.status === 'published' ? '' : 'bg-green-600 hover:bg-green-700'}
+                      >
+                        {actionState.publishing ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <ExternalLink className="mr-2 h-4 w-4" />
+                        )}
+                        {website.status === 'published' ? 'Unpublish' : 'Publish Website'}
+                      </Button>
+                    )}
                   </div>
                 </div>
 
@@ -461,6 +691,39 @@ export default function WebsiteBuilder({ token, podcasts, onBack, allowCustomDom
                     </Button>
                   </div>
                 </div>
+
+                {/* CSS Editor Button */}
+                {website && (
+                  <div className="space-y-2">
+                    <Button
+                      onClick={() => setShowCSSEditor(true)}
+                      variant="outline"
+                      className="w-full"
+                      disabled={loading}
+                    >
+                      <Palette className="mr-2 h-4 w-4" />
+                      Customize CSS
+                    </Button>
+                  </div>
+                )}
+
+                {/* Reset Button */}
+                {website && (
+                  <div className="space-y-2 pt-4 border-t border-slate-200">
+                    <Button
+                      onClick={() => setShowResetDialog(true)}
+                      variant="outline"
+                      className="w-full text-red-600 hover:text-red-700 hover:bg-red-50"
+                      disabled={loading || actionState.creating}
+                    >
+                      <RotateCcw className="mr-2 h-4 w-4" />
+                      Reset to Default Settings
+                    </Button>
+                    <p className="text-xs text-slate-500 text-center">
+                      Removes all customizations and returns to the initial website
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="min-h-[420px]">
@@ -482,6 +745,24 @@ export default function WebsiteBuilder({ token, podcasts, onBack, allowCustomDom
           )}
         </CardContent>
       </Card>
+
+      {/* CSS Editor Dialog */}
+      <CSSEditorDialog
+        isOpen={showCSSEditor}
+        onClose={() => setShowCSSEditor(false)}
+        currentCSS={website?.global_css || ""}
+        onSave={handleCSSsave}
+        onAIGenerate={handleAIGenerateCSS}
+        isLoading={cssEditorLoading}
+      />
+
+      {/* Reset Confirmation Dialog */}
+      <ResetConfirmDialog
+        isOpen={showResetDialog}
+        onClose={() => setShowResetDialog(false)}
+        onConfirm={handleReset}
+        isLoading={actionState.creating}
+      />
     </div>
   );
 }

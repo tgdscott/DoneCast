@@ -1,0 +1,33 @@
+# Dockerfile for dedicated worker service
+# This runs long-running background tasks (episode assembly, audio processing)
+# Separate from main API service to prevent deployment interruptions
+
+FROM python:3.11-slim
+
+# Install system dependencies (same as API service)
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libsndfile1 \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy backend code
+COPY backend/ /app/
+
+# Install Python dependencies
+# Note: We reuse the same requirements as the API service
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Set Python path so imports work correctly
+ENV PYTHONPATH=/app:$PYTHONPATH
+
+# Expose port (Cloud Run will override this)
+EXPOSE 8080
+
+# Run worker service
+CMD ["python", "-m", "uvicorn", "worker_service:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "info"]

@@ -50,8 +50,10 @@ def save_cover_upload(
                 + ", ".join(sorted(allowed)),
             )
 
+    # Always capture content_type for GCS upload
+    content_type = (getattr(cover_image, "content_type", "") or "").lower()
+    
     if require_image_content_type:
-        content_type = (getattr(cover_image, "content_type", "") or "").lower()
         if not content_type.startswith("image/"):
             raise HTTPException(
                 status_code=400,
@@ -100,11 +102,13 @@ def save_cover_upload(
     try:
         from infrastructure import gcs
         with open(temp_path, "rb") as f:
+            # Disable fallback - podcast covers MUST be in GCS
             gcs_url = gcs.upload_fileobj(
                 gcs_bucket, 
                 gcs_key, 
                 f, 
-                content_type=content_type or "image/jpeg"
+                content_type=content_type or "image/jpeg",
+                allow_fallback=False
             )
         
         # Clean up temp file

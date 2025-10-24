@@ -67,25 +67,9 @@ def _is_truthy(value: str | None) -> bool:
 
 
 _ENV_VALUE = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower()
-_FORCE_SQLITE = False
-if _is_truthy(os.getenv("TEST_FORCE_SQLITE")):
-    _FORCE_SQLITE = True
-elif os.getenv("PYTEST_CURRENT_TEST"):
-    _FORCE_SQLITE = True
-elif _ENV_VALUE in {"dev", "development", "local", "test", "testing"}:
-    _FORCE_SQLITE = True
-
-if _FORCE_SQLITE and settings.INSTANCE_CONNECTION_NAME:
-    log.info(
-        "[db] Forcing SQLite (test/dev override); ignoring INSTANCE_CONNECTION_NAME=%s",
-        settings.INSTANCE_CONNECTION_NAME,
-    )
-
-_INSTANCE_CONNECTION_NAME = settings.INSTANCE_CONNECTION_NAME.strip() if not _FORCE_SQLITE else ""
+# PostgreSQL-only configuration
+_INSTANCE_CONNECTION_NAME = settings.INSTANCE_CONNECTION_NAME.strip() if settings.INSTANCE_CONNECTION_NAME else ""
 _DATABASE_URL = (settings.DATABASE_URL or "").strip()
-if _FORCE_SQLITE and _DATABASE_URL:
-    log.info("[db] Forcing SQLite (test/dev override); ignoring DATABASE_URL configuration")
-    _DATABASE_URL = ""
 
 _HAS_DISCRETE_DB_CONFIG = all(
     getattr(settings, key, "").strip() for key in ("DB_USER", "DB_PASS", "DB_NAME")
@@ -95,76 +79,42 @@ DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT", "5432")
 
 _POOL_KWARGS = {
-    # Disabled pool_pre_ping due to psycopg3 incompatibility with INTRANS state
-    # Relying on pool_recycle instead to handle stale connections
-    "pool_pre_ping": False,
+    # Enable pool_pre_ping to validate connections before use (Cloud SQL Proxy compatible)
+    "pool_pre_ping": True,
     "pool_size": int(os.getenv("DB_POOL_SIZE", 5)),
-    "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", 10)),  # Increased from 0 to handle concurrent requests
-    "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", 300)),  # Increased from 180s to 5min - recycle stale connections
+    "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", 10)),
+    # Cloud SQL Proxy can maintain stable connections - use reasonable recycle time
+    # Cloud SQL itself times out after 10 minutes of inactivity, so recycle before that
+    "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", 540)),  # 9 minutes (before Cloud SQL 10min timeout)
     "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", 30)),
+    # CRITICAL: Force ROLLBACK on all connections returned to pool
+    # This is the ultimate safeguard against INTRANS state corruption
+    "pool_reset_on_return": "rollback",
     "future": True,
     # PostgreSQL connection args to handle long-running operations
     "connect_args": {
-        "connect_timeout": int(os.getenv("DB_CONNECT_TIMEOUT", 60)),
+        "connect_timeout": int(os.getenv("DB_CONNECT_TIMEOUT", 10)),  # Faster fail for dev
         # Set statement timeout to 5 minutes for long-running queries
         "options": f"-c statement_timeout={int(os.getenv('DB_STATEMENT_TIMEOUT_MS', 300000))}",
     },
 }
-
-def _create_sqlite_engine(url: str):
-    engine_ = create_engine(
-        url,
-        echo=False,
-        connect_args={
-            "check_same_thread": False,
-            "timeout": float(os.getenv("SQLITE_TIMEOUT_SECONDS", "60")),
-        },
-    )
-
-    def _sqlite_pragmas(dbapi_connection, connection_record):
-        """Set recommended SQLite PRAGMAs for concurrency and integrity."""
-        try:
-            cursor = dbapi_connection.cursor()
-            cursor.execute("PRAGMA foreign_keys=ON")
-            try:
-                cursor.execute("PRAGMA journal_mode=WAL")
-            except Exception:
-                pass
-            try:
-                cursor.execute("PRAGMA synchronous=NORMAL")
-            except Exception:
-                pass
-            try:
-                busy_ms = int(float(os.getenv("SQLITE_BUSY_TIMEOUT_MS", "15000")))
-                cursor.execute(f"PRAGMA busy_timeout={busy_ms}")
-            except Exception:
-                pass
-            cursor.close()
-        except Exception:
-            pass
-
-    listen(engine_, "connect", _sqlite_pragmas)
-    return engine_
 
 
 if _DATABASE_URL:
     try:
         parsed_url = make_url(_DATABASE_URL)
         backend_name = parsed_url.get_backend_name()
-    except Exception:
-        parsed_url = None
-        backend_name = ""
+    except Exception as e:
+        raise RuntimeError(f"Invalid DATABASE_URL format: {e}") from e
 
-    if backend_name == "sqlite":
-        engine = _create_sqlite_engine(_DATABASE_URL)
-        sqlite_path = parsed_url.database if parsed_url is not None else _DATABASE_URL
-        log.info("[db] Using SQLite via DATABASE_URL override (path=%s)", sqlite_path)
-    else:
-        engine = create_engine(_DATABASE_URL, **_POOL_KWARGS)
-        driver = parsed_url.drivername if parsed_url is not None else "unknown"
-        log.info("[db] Using DATABASE_URL for engine (driver=%s)", driver)
+    if backend_name != "postgresql":
+        raise RuntimeError(f"Only PostgreSQL is supported, got: {backend_name}. DATABASE_URL must start with postgresql://")
+    
+    engine = create_engine(_DATABASE_URL, **_POOL_KWARGS)
+    driver = parsed_url.drivername if parsed_url is not None else "unknown"
+    log.info("[db] Using DATABASE_URL for engine (driver=%s)", driver)
 
-elif _INSTANCE_CONNECTION_NAME and _HAS_DISCRETE_DB_CONFIG and not _FORCE_SQLITE:
+elif _INSTANCE_CONNECTION_NAME and _HAS_DISCRETE_DB_CONFIG:
     db_user = settings.DB_USER.strip()
     db_pass = settings.DB_PASS.strip()
     db_name = settings.DB_NAME.strip()
@@ -188,112 +138,62 @@ elif _INSTANCE_CONNECTION_NAME and _HAS_DISCRETE_DB_CONFIG and not _FORCE_SQLITE
         )
         log.info("[db] Using Cloud SQL via Unix socket %s", socket_path)
 else:
-    if _INSTANCE_CONNECTION_NAME and not _HAS_DISCRETE_DB_CONFIG:
-        log.warning(
-            "[db] INSTANCE_CONNECTION_NAME provided without DB_USER/DB_PASS/DB_NAME; falling back to SQLite"
-        )
-    _DB_PATH: Path = Path(os.getenv("SQLITE_PATH", "/tmp/ppp.db")).resolve()
-    _DEFAULT_SQLITE_URL = f"sqlite:///{_DB_PATH.as_posix()}"
-    engine = _create_sqlite_engine(_DEFAULT_SQLITE_URL)
-    log.info("[db] Using SQLite database at %s", _DB_PATH)
+    raise RuntimeError(
+        "PostgreSQL database configuration required! "
+        "Set DATABASE_URL or provide INSTANCE_CONNECTION_NAME + DB_USER + DB_PASS + DB_NAME."
+    )
 
 
-def _is_sqlite_engine() -> bool:
-    try:
-        return engine.url.get_backend_name() == "sqlite"
-    except Exception:
-        return False
+# Add connection pool event listeners for better Cloud SQL Proxy compatibility
+def _handle_connect(dbapi_connection, connection_record):
+    """Called when a new connection is created."""
+    log.debug("[db-pool] New connection created")
 
 
-def _ensure_episode_new_columns():
-    """Add newly introduced Episode columns if they don't already exist.
-
-    Safe to run on every startup (SQLite additive migrations).
+def _handle_checkout(dbapi_connection, connection_record, connection_proxy):
+    """Called when a connection is retrieved from the pool.
+    
+    CRITICAL: Aggressively rollback any stale transaction state before use.
+    This prevents INTRANS state from previous requests causing "can't change autocommit" errors.
     """
-    if not _is_sqlite_engine():
-        return
-    wanted = {
-        "season_number": "INTEGER",
-        "episode_number": "INTEGER",
-        "remote_cover_url": "TEXT",
-        "spreaker_publish_error": "TEXT",
-        "spreaker_publish_error_detail": "TEXT",
-        "needs_republish": "INTEGER DEFAULT 0",
-        "publish_at_local": "TEXT",
-        "tags_json": "TEXT DEFAULT '[]'",
-        "is_explicit": "INTEGER DEFAULT 0",
-        "image_crop": "TEXT",
-    }
+    log.debug("[db-pool] Connection checked out from pool")
+    
+    # Force ROLLBACK on checkout to ensure clean connection state
+    # This is a safety net for any connections that leaked back to pool in INTRANS state
     try:
-        with engine.connect() as conn:
-            res = conn.execute(text("PRAGMA table_info(episode)"))
-            existing = {row[1] for row in res}
-            for col, ddl in wanted.items():
-                if col not in existing:
-                    try:
-                        log.info(f"[migrate] Adding missing column episode.{col}")
-                        conn.execute(text(f"ALTER TABLE episode ADD COLUMN {col} {ddl}"))
-                    except Exception as e:  # pragma: no cover
-                        log.error(f"[migrate] Failed adding column {col}: {e}")
-            conn.commit()
-    except Exception as e:  # pragma: no cover
-        log.error(f"[migrate] Episode column introspection failed: {e}")
+        # Check transaction status via psycopg connection
+        if hasattr(dbapi_connection, 'info') and hasattr(dbapi_connection.info, 'transaction_status'):
+            from psycopg import pq  # type: ignore
+            # INTRANS = 2 (transaction in progress)
+            if dbapi_connection.info.transaction_status == pq.TransactionStatus.INTRANS:
+                log.warning("[db-pool] Connection in INTRANS state on checkout - forcing ROLLBACK")
+                dbapi_connection.rollback()
+    except Exception as exc:
+        # If we can't check/rollback, invalidate the connection to be safe
+        log.error("[db-pool] Failed to check/rollback on checkout, invalidating connection: %s", exc)
+        connection_proxy._checkin_failed = True  # Mark for invalidation
 
 
-def _ensure_podcast_new_columns():
-    """Add newly introduced Podcast columns if they don't exist.
-
-    Currently handles: remote_cover_url (TEXT)
-    Safe & idempotent for SQLite.
-    """
-    if not _is_sqlite_engine():
-        return
-    wanted = {
-        "remote_cover_url": "TEXT",
-    }
-    try:
-        with engine.connect() as conn:
-            res = conn.execute(text("PRAGMA table_info(podcast)"))
-            existing = {row[1] for row in res}
-            for col, ddl in wanted.items():
-                if col not in existing:
-                    try:
-                        log.info(f"[migrate] Adding missing column podcast.{col}")
-                        conn.execute(text(f"ALTER TABLE podcast ADD COLUMN {col} {ddl}"))
-                    except Exception as e:  # pragma: no cover
-                        log.error(f"[migrate] Failed adding podcast column {col}: {e}")
-            conn.commit()
-    except Exception as e:  # pragma: no cover
-        log.error(f"[migrate] Podcast column introspection failed: {e}")
+def _handle_checkin(dbapi_connection, connection_record):
+    """Called when a connection is returned to the pool."""
+    log.debug("[db-pool] Connection returned to pool")
 
 
-def _ensure_template_new_columns():
-    """Add newly introduced PodcastTemplate columns if they don't exist.
+def _handle_invalidate(dbapi_connection, connection_record, exception):
+    """Called when a connection is invalidated (stale/broken)."""
+    log.warning("[db-pool] Connection invalidated due to: %s", exception)
 
-    Currently handles: ai_settings_json (TEXT)
-    Safe & idempotent for SQLite.
-    """
-    if not _is_sqlite_engine():
-        return
-    wanted = {
-        "ai_settings_json": "TEXT DEFAULT '{}'",
-        "is_active": "INTEGER DEFAULT 1",
-        "default_elevenlabs_voice_id": "TEXT",
-    }
-    try:
-        with engine.connect() as conn:
-            res = conn.execute(text("PRAGMA table_info(podcasttemplate)"))
-            existing = {row[1] for row in res}
-            for col, ddl in wanted.items():
-                if col not in existing:
-                    try:
-                        log.info(f"[migrate] Adding missing column podcasttemplate.{col}")
-                        conn.execute(text(f"ALTER TABLE podcasttemplate ADD COLUMN {col} {ddl}"))
-                    except Exception as e:  # pragma: no cover
-                        log.error(f"[migrate] Failed adding podcasttemplate column {col}: {e}")
-            conn.commit()
-    except Exception as e:  # pragma: no cover
-        log.error(f"[migrate] PodcastTemplate column introspection failed: {e}")
+
+# Register event listeners (only if engine was created)
+if 'engine' in globals():
+    listen(engine, "connect", _handle_connect)
+    listen(engine, "checkout", _handle_checkout)
+    listen(engine, "checkin", _handle_checkin)
+    listen(engine.pool, "invalidate", _handle_invalidate)
+    log.info("[db-pool] Connection pool event listeners registered")
+
+
+# All column migrations now handled by PostgreSQL migrations in startup_tasks.py
 
 
 def _should_retry_db_error(exc: Exception) -> bool:
@@ -358,34 +258,58 @@ def _wait_for_db_connection(
 
 
 def create_db_and_tables():
+    """Create all PostgreSQL tables from SQLModel metadata.
+    
+    All column migrations handled by startup_tasks.py PostgreSQL migrations.
+    """
     _wait_for_db_connection()
     SQLModel.metadata.create_all(engine)
-    _ensure_episode_new_columns()
-    _ensure_podcast_new_columns()
-    _ensure_template_new_columns()
-    if _is_sqlite_engine():
-        try:
-            with engine.connect() as conn:
-                res = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='appsetting'"))
-                if not res.fetchone():
-                    conn.execute(text(
-                        """
-CREATE TABLE appsetting (
-    key TEXT PRIMARY KEY,
-    value_json TEXT NOT NULL DEFAULT '{}',
-    created_at TIMESTAMP NULL,
-    updated_at TIMESTAMP NULL
-);
-"""
-                    ))
-                    conn.commit()
-        except Exception:
-            pass
 
 
 def get_session():
-    with Session(engine) as session:
+    """Provide database session for FastAPI dependency injection.
+    
+    CRITICAL: expire_on_commit=False prevents stale attribute access after commits.
+    Without this, user.terms_version_accepted and similar fields can become detached
+    after commit, causing intermittent "must accept ToS again" bugs on page reload.
+    
+    CRITICAL: Always executes ROLLBACK before returning connection to pool.
+    This prevents INTRANS state leakage that causes "can't change autocommit" errors
+    when exceptions occur during request processing.
+    """
+    session = Session(engine, expire_on_commit=False)
+    try:
         yield session
+    except Exception:
+        # Always rollback on exception to clean transaction state
+        try:
+            session.rollback()
+        except Exception as rollback_exc:
+            log.warning(
+                "[db] Rollback failed in get_session cleanup: %s",
+                rollback_exc,
+            )
+        raise
+    finally:
+        # CRITICAL: Force rollback before closing to prevent INTRANS state
+        try:
+            if session.in_transaction():
+                session.rollback()
+        except Exception as rollback_exc:
+            log.debug(
+                "[db] Pre-close rollback in get_session: %s",
+                rollback_exc,
+            )
+        
+        # Ensure session is properly closed
+        try:
+            session.close()
+        except Exception as close_exc:
+            log.warning(
+                "[db] Session close failed in get_session cleanup: %s",
+                close_exc,
+            )
+
 
 
 @contextmanager

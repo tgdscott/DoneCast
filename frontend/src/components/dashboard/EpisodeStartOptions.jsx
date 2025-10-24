@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
-import { AlertTriangle, ArrowLeft, Library, Mic } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Mic, Upload } from 'lucide-react';
 import styles from './EpisodeStartOptions.module.css';
 
 export default function EpisodeStartOptions({
@@ -11,7 +11,7 @@ export default function EpisodeStartOptions({
   onRetry,
   onBack,
   onChooseRecord,
-  onChooseLibrary,
+  onChooseUpload,
 }) {
   return (
     <div className="space-y-6">
@@ -27,7 +27,7 @@ export default function EpisodeStartOptions({
         <CardHeader>
           <CardTitle className="text-2xl" style={{ color: '#2C3E50' }}>How do you want to start?</CardTitle>
           <CardDescription className="text-slate-600 text-sm">
-            Record something new or jump straight into picking a processed file that’s ready to edit.
+            Record something new or upload an audio file from your computer.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
@@ -37,32 +37,23 @@ export default function EpisodeStartOptions({
             className={`border border-slate-200 rounded-xl text-left hover:border-blue-400 hover:shadow-sm transition ${styles['uniform-card']}`}
           >
             <Mic className="w-6 h-6 text-blue-500 mb-4" />
-            <div className="font-semibold text-slate-800 mb-1">Record Your Podcast Now</div>
+            <div className="font-semibold text-slate-800 mb-1">Record Now</div>
             <p className="text-sm text-slate-600">
-              Capture your next episode right in the browser. We’ll save it here so you can edit and publish without leaving CloudPod.
+              Capture your podcast right in the browser using your microphone.
             </p>
           </button>
 
-          <div className="border border-emerald-200 rounded-xl text-left hover:border-emerald-500 hover:shadow-sm transition relative">
-            <button
-              type="button"
-              onClick={onChooseLibrary}
-              disabled={loading}
-              className={`${styles['uniform-card']} w-full text-left ${loading ? 'opacity-90 cursor-wait' : ''}`}
-            >
-              <Library className={`w-6 h-6 mb-4 ${hasReadyAudio ? 'text-emerald-500' : 'text-slate-400'}`} />
-              <div className="font-semibold text-slate-800 mb-1">Upload and use processed audio</div>
-              <p className="text-sm text-slate-600">
-                Jump straight into Step 2 to pick a processed upload or add a new file. {hasReadyAudio ? '' : 'If you haven’t uploaded anything yet, we’ll guide you there.'}
-              </p>
-            </button>
-
-            {!hasReadyAudio && (
-              <div className="px-6 pb-4 text-xs text-amber-700 max-w-xs">
-                You’ll need at least one processed upload before you can continue, but we’ll show you how to add one.
-              </div>
-            )}
-          </div>
+          <button
+            type="button"
+            onClick={onChooseUpload}
+            className={`border border-slate-200 rounded-xl text-left hover:border-purple-400 hover:shadow-sm transition ${styles['uniform-card']}`}
+          >
+            <Upload className="w-6 h-6 text-purple-500 mb-4" />
+            <div className="font-semibold text-slate-800 mb-1">Upload Audio File</div>
+            <p className="text-sm text-slate-600">
+              Choose an audio file from your computer to upload and process.
+            </p>
+          </button>
         </CardContent>
       </Card>
 
@@ -91,7 +82,7 @@ export default function EpisodeStartOptions({
           <CardContent className="flex items-center gap-3 text-sm text-amber-800">
             <AlertTriangle className="w-5 h-5" />
             <div>
-              We’ll email you as soon as each upload is transcribed so you can come back and assemble without waiting.
+              We'll email you as soon as your upload is transcribed so you can come back and assemble without waiting.
             </div>
           </CardContent>
         </Card>

@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import re
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 from fastapi import APIRouter, Body, Depends, HTTPException, status
@@ -200,11 +202,56 @@ def _resolve_media_path(filename: str) -> Path:
 
 
 def _load_transcript_words(filename: str) -> Tuple[List[Dict[str, Any]], Optional[Path]]:
+    # If frontend passes full GCS URL, extract just the base filename for stem
+    original_filename = filename
+    if filename.startswith("gs://"):
+        filename = Path(filename).name
+        _LOG.info(f"[intern] _load_transcript_words - extracted base filename: {filename}")
+    
     stem = Path(filename).stem
     tr_dir = TRANSCRIPTS_DIR
     tr_new = tr_dir / f"{stem}.json"
     tr_legacy = tr_dir / f"{stem}.words.json"
     transcript_path: Optional[Path] = None
+    
+    # PRIORITY 1: Try GCS bucket (production architecture)
+    try:
+        from api.core.database import get_session
+        from api.models.podcast import MediaItem
+        from sqlmodel import select
+        from infrastructure.gcs import download_bytes
+        import os
+        
+        session = next(get_session())
+        # Query with original_filename (may be full GCS URL)
+        media_item = session.exec(select(MediaItem).where(MediaItem.filename == original_filename)).first()
+        
+        if not media_item:
+            _LOG.info(f"[intern] MediaItem not found for {original_filename}, trying base filename {filename}")
+            media_item = session.exec(select(MediaItem).where(MediaItem.filename == filename)).first()
+        
+        if media_item:
+            user_id = str(media_item.user_id)
+            gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+            gcs_key = f"transcripts/{user_id}/{stem}.json"
+            
+            _LOG.info(f"[intern] Attempting GCS transcript download: gs://{gcs_bucket}/{gcs_key}")
+            content = download_bytes(gcs_bucket, gcs_key)
+            
+            if content:
+                # Cache locally for future calls
+                tr_dir.mkdir(parents=True, exist_ok=True)
+                tr_new.write_bytes(content)
+                _LOG.info(f"[intern] Downloaded transcript from GCS to {tr_new}")
+                return json.loads(content.decode("utf-8")), tr_new
+            else:
+                _LOG.warning(f"[intern] GCS download returned empty content for transcript")
+        else:
+            _LOG.warning(f"[intern] No MediaItem found in database for filename: {original_filename}")
+    except Exception as e:
+        _LOG.error(f"[intern] GCS transcript download failed (will try local): {e}", exc_info=True)
+    
+    # PRIORITY 2: Check local filesystem (dev environment or GCS failed)
     try:
         if tr_new.is_file():
             transcript_path = tr_new
@@ -215,6 +262,7 @@ def _load_transcript_words(filename: str) -> Tuple[List[Dict[str, Any]], Optiona
     except Exception:
         raise HTTPException(status_code=500, detail="Corrupt transcript file; please re-run upload")
 
+    # PRIORITY 3: Generate new transcript via AssemblyAI API
     try:
         words = transcription.get_word_timestamps(filename)
         try:
@@ -355,10 +403,10 @@ def _export_snippet(audio: "AudioSegment", filename: str, start_s: float, end_s:
             raise HTTPException(status_code=500, detail="Unable to prepare intern audio snippet")
     
     # Upload to GCS and generate signed URL
+    gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+    gcs_key = f"intern_snippets/{base_name}{mp3_path.suffix}"
+    
     try:
-        gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
-        gcs_key = f"intern_snippets/{base_name}{mp3_path.suffix}"
-        
         _LOG.info(f"[intern] Uploading snippet to GCS: gs://{gcs_bucket}/{gcs_key}")
         with open(mp3_path, "rb") as f:
             file_data = f.read()
@@ -367,7 +415,13 @@ def _export_snippet(audio: "AudioSegment", filename: str, start_s: float, end_s:
         
         # Generate signed URL (valid for 1 hour)
         signed_url = gcs.get_signed_url(gcs_bucket, gcs_key, expiration=3600)
-        _LOG.info(f"[intern] Generated signed URL for snippet: {signed_url}")
+        
+        # Fallback to public URL if signed URL generation failed (dev environment without private key)
+        if not signed_url:
+            signed_url = f"https://storage.googleapis.com/{gcs_bucket}/{gcs_key}"
+            _LOG.info(f"[intern] No signed URL available, using public URL: {signed_url}")
+        else:
+            _LOG.info(f"[intern] Generated signed URL for snippet: {signed_url}")
         
         # Clean up local file
         try:
@@ -378,18 +432,25 @@ def _export_snippet(audio: "AudioSegment", filename: str, start_s: float, end_s:
         return mp3_path.name, signed_url
     except Exception as exc:
         _LOG.error(f"[intern] Failed to upload snippet to GCS: {exc}", exc_info=True)
-        # Fallback to local static serving (won't work in production but better than crash)
-        return mp3_path.name, f"/static/intern/{mp3_path.name}"
+        # Clean up local file on error
+        try:
+            mp3_path.unlink(missing_ok=True)
+        except:
+            pass
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate audio preview for intern command. GCS upload failed: {str(exc)}"
+        )
 
 
 @router.post(
     "/prepare-by-file",
     status_code=status.HTTP_200_OK,
-    summary="Prepare intern command review data for an uploaded file",
+    summary="Prepare intern command review data for an uploaded file (text-based, no audio snippet)",
 )
 def prepare_intern_by_file(
     payload: Dict[str, Any] = Body(
-        ..., description="{ filename, preview_duration_s?, pre_roll_s?, cleanup_options?, voice_id?, template_id? }"
+        ..., description="{ filename, cleanup_options?, voice_id?, template_id? }"
     ),
     current_user: User = Depends(get_current_user),
 ):
@@ -419,81 +480,56 @@ def prepare_intern_by_file(
         except Exception as exc:
             _LOG.warning(f"[intern] Failed to fetch template voice: {exc}")
     
-    audio_path = _resolve_media_path(filename)
-    _LOG.info(f"[intern] Audio path resolved: {audio_path}")
-    
-    AudioSegmentCls = _require_audio_segment()
-    _LOG.info(f"[intern] AudioSegment class loaded: {AudioSegmentCls}")
-    
-    try:
-        audio = AudioSegmentCls.from_file(audio_path)
-        _LOG.info(f"[intern] Audio loaded successfully - duration: {len(audio)}ms, channels: {audio.channels}, frame_rate: {audio.frame_rate}")
-    except Exception as exc:
-        _LOG.error(f"[intern] Failed to load audio from {audio_path}: {exc}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Unable to open audio for intern review")
-
+    # Load transcript - NO AUDIO LOADING NEEDED
     words, transcript_path = _load_transcript_words(filename)
     commands, log = _detect_commands(words, transcript_path=transcript_path, cleanup_options=payload.get("cleanup_options"))
 
-    duration_s = len(audio) / 1000.0 if len(audio) else 0.0
-    preview_duration = float((payload or {}).get("preview_duration_s", 30.0))
-    preview_duration = min(max(preview_duration, 6.0), 45.0)
-    pre_roll = float((payload or {}).get("pre_roll_s", 0.0))
-    pre_roll = max(0.0, min(pre_roll, 5.0))
+    _LOG.info(f"[intern] Detected {len(commands)} intern commands in transcript")
 
     contexts: List[Dict[str, Any]] = []
     for cmd in commands:
         start_s = float(cmd.get("time") or 0.0)
-        snippet_start = max(0.0, start_s - pre_roll)
-        snippet_end = min(duration_s, snippet_start + preview_duration)
-        if math.isclose(snippet_end, snippet_start) or snippet_end <= snippet_start:
-            snippet_end = min(duration_s, start_s + preview_duration)
-            snippet_start = max(0.0, min(snippet_start, snippet_end - 0.5))
+        
+        # Default end: 8 seconds after intern keyword, or detected end marker
         default_end = cmd.get("context_end") or cmd.get("end_marker_end")
         try:
             default_end = float(default_end)
         except Exception:
-            default_end = None
-        if default_end is None:
-            default_end = min(snippet_end, start_s + min(8.0, preview_duration))
-        default_end = max(start_s + 0.5, min(default_end, snippet_end))
-        if snippet_end <= snippet_start:
-            continue
-        slug, audio_url = _export_snippet(audio, filename, snippet_start, snippet_end, suffix="intern")
-        transcript_preview = _collect_transcript_preview(words, snippet_start, snippet_end)
-        prompt_text = str(cmd.get("local_context") or transcript_preview or "").strip()
+            default_end = start_s + 8.0
         
-        # Extract word timestamps for this snippet window so frontend can update prompt text dynamically
-        snippet_words = []
+        # Max end: 30 seconds after intern keyword (reasonable limit)
+        max_end_s = start_s + 30.0
+        
+        # Extract words from intern keyword forward (up to 30s window for display)
+        display_words = []
         for w in words:
             try:
                 t = float((w or {}).get("start") or (w or {}).get("time") or 0.0)
             except Exception:
                 continue
-            if snippet_start <= t < snippet_end:
-                snippet_words.append({
+            if t >= start_s and t <= max_end_s:
+                display_words.append({
                     "word": str((w or {}).get("word") or ""),
                     "start": t,
                     "end": float((w or {}).get("end") or t),
                 })
+        
+        # Initial prompt text (from intern to default end)
+        prompt_text = _collect_transcript_preview(words, start_s, default_end)
+        if not prompt_text.strip():
+            prompt_text = str(cmd.get("local_context") or "").strip()
         
         contexts.append(
             {
                 "command_id": cmd.get("command_id"),
                 "intern_index": cmd.get("intern_index"),
                 "start_s": start_s,
-                "snippet_start_s": snippet_start,
-                "snippet_end_s": snippet_end,
                 "default_end_s": default_end,
-                "max_duration_s": snippet_end - snippet_start,
-                "duration_s": snippet_end - snippet_start,
+                "max_end_s": max_end_s,
                 "prompt_text": prompt_text,
-                "transcript_preview": transcript_preview,
-                "audio_url": audio_url,
-                "snippet_url": audio_url,
                 "filename": filename,
                 "voice_id": voice_id,
-                "words": snippet_words,
+                "words": display_words,  # All words from intern forward (up to 30s)
             }
         )
 
@@ -586,11 +622,13 @@ def execute_intern_command(
 
     enhancer = _require_ai_enhancer()
 
-    interpretation = enhancer.interpret_intern_command(prompt_text)
-    action = (interpretation or {}).get("action") or (
-        "add_to_shownotes" if (target_cmd.get("mode") == "shownote") else "generate_audio"
-    )
-    topic = (interpretation or {}).get("topic") or prompt_text
+    # Simple interpretation logic (interpret_intern_command is currently disabled in ai_enhancer)
+    # Only trigger shownote mode for EXPLICIT shownote requests (removed overly broad keywords like "summary", "summarize", "recap")
+    lowered_prompt = prompt_text.lower()
+    shownote_keywords = {"show notes", "shownotes", "show-note"}
+    action = "add_to_shownotes" if any(kw in lowered_prompt for kw in shownote_keywords) else "generate_audio"
+    action = action if target_cmd.get("mode") != "shownote" else "add_to_shownotes"  # Honor command mode
+    topic = prompt_text
 
     if override_text is not None and isinstance(override_text, str) and override_text.strip():
         answer = override_text.strip()
@@ -603,18 +641,84 @@ def execute_intern_command(
             answer = enhancer.get_answer_for_topic(topic, context=transcript_excerpt or prompt_text, mode=mode)
 
     answer = (answer or "").strip()
+    
+    # Aggressive post-processing: strip ALL formatting to ensure TTS-ready output
+    if answer and action != "add_to_shownotes":
+        # Remove bullet points (-, •, *, etc.)
+        answer = re.sub(r'^\s*[-•*]\s+', '', answer, flags=re.MULTILINE)
+        # Remove markdown bold/italic (**text**, *text*)
+        answer = re.sub(r'\*\*([^*]+)\*\*', r'\1', answer)
+        answer = re.sub(r'\*([^*]+)\*', r'\1', answer)
+        # Remove markdown headings (##, ###, etc.)
+        answer = re.sub(r'^#+\s+', '', answer, flags=re.MULTILINE)
+        # Collapse multiple newlines to single space (preserve sentence flow)
+        answer = re.sub(r'\n+', ' ', answer)
+        # Remove any remaining list markers that survived
+        answer = re.sub(r'\s*[-•*]\s+', ' ', answer)
+        # Normalize whitespace
+        answer = re.sub(r'\s+', ' ', answer).strip()
+    
     if not answer:
         answer = "I'm on it!"
 
     voice_id = voice_id_from_payload or target_cmd.get("voice_id")
     
-    # Return text only - TTS will be generated on frontend after user edits/approves
+    # Generate audio preview immediately (don't rely on frontend TTS generation)
+    audio_url = None
+    if voice_id and answer:
+        try:
+            _LOG.info(f"[intern] Generating TTS preview for response (voice_id: {voice_id})")
+            from api.services import ai_enhancer
+            from infrastructure import gcs
+            
+            # Generate TTS using ai_enhancer
+            audio_segment = ai_enhancer.generate_speech_from_text(
+                text=answer,
+                voice_id=voice_id,
+                user=current_user,
+                provider="elevenlabs"
+            )
+            
+            if audio_segment:
+                # Export AudioSegment to bytes
+                import io
+                buffer = io.BytesIO()
+                audio_segment.export(buffer, format="mp3")
+                buffer.seek(0)
+                audio_bytes = buffer.getvalue()
+                
+                # Upload to GCS
+                gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+                gcs_key = f"intern_audio/{current_user.id.hex}/{uuid.uuid4().hex}.mp3"
+                
+                gcs.upload_bytes(gcs_bucket, gcs_key, audio_bytes, content_type="audio/mpeg")
+                _LOG.info(f"[intern] TTS audio uploaded to GCS: gs://{gcs_bucket}/{gcs_key}")
+                
+                # Generate signed URL (1 hour expiry)
+                audio_url = gcs.get_signed_url(gcs_bucket, gcs_key, expiration=3600)
+                
+                if not audio_url:
+                    # Fallback to public URL if signed URL generation fails
+                    audio_url = f"https://storage.googleapis.com/{gcs_bucket}/{gcs_key}"
+                
+                _LOG.info(f"[intern] Generated audio preview URL: {audio_url[:100]}...")
+            else:
+                _LOG.warning(f"[intern] TTS generation returned no data")
+        except Exception as exc:
+            _LOG.error(f"[intern] Failed to generate TTS preview: {exc}", exc_info=True)
+            # Continue without audio - frontend can retry via separate TTS endpoint
+    else:
+        if not voice_id:
+            _LOG.warning(f"[intern] No voice_id configured - cannot generate audio preview")
+        if not answer:
+            _LOG.warning(f"[intern] No response text - cannot generate audio preview")
+    
     return {
         "command_id": target_cmd.get("command_id"),
         "start_s": resolved_start,
         "end_s": resolved_end,
         "response_text": answer,
         "voice_id": voice_id,
-        "audio_url": None,
+        "audio_url": audio_url,
         "log": log,
     }

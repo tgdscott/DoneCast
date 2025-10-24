@@ -14,10 +14,12 @@ from sqlmodel import select
 from api.core.database import get_session
 from api.models.notification import Notification
 from api.models.podcast import MediaCategory, MediaItem
+from api.models.user import User
 # Import the audio package and alias it to the expected name. The orchestrator
 # calls audio_processor.process_and_assemble_episode(...), and api.services.audio
 # re-exports process_and_assemble_episode from its __init__.py.
 from api.services import audio as audio_processor
+from api.services.mailer import mailer
 from api.core.paths import WS_ROOT as PROJECT_ROOT, FINAL_DIR, MEDIA_DIR
 from infrastructure import gcs
 from infrastructure.tasks_client import enqueue_http_task
@@ -82,7 +84,68 @@ def _cleanup_main_content(*, session, episode, main_content_filename: str) -> No
             auto_delete = False
         
         if not auto_delete:
-            logging.info("[cleanup] User has disabled auto-delete for raw audio files, skipping cleanup")
+            logging.info("[cleanup] User has disabled auto-delete for raw audio files, creating 'safe to delete' notification")
+            # Find the MediaItem to mark it as used
+            main_fn = os.path.basename(raw_value)
+            candidates: set[str] = {raw_value}
+            if main_fn:
+                candidates.add(main_fn)
+            if raw_value.startswith("gs://"):
+                try:
+                    without_scheme = raw_value[len("gs://") :]
+                    if without_scheme:
+                        candidates.add(without_scheme)
+                except Exception:
+                    pass
+            
+            query = select(MediaItem).where(
+                MediaItem.user_id == episode.user_id,
+                MediaItem.category == MediaCategory.main_content,
+            )
+            media_item = None
+            all_items = session.exec(query).all()
+            
+            for item in all_items:
+                stored = str(getattr(item, "filename", "") or "").strip()
+                if not stored:
+                    continue
+                if stored in candidates:
+                    media_item = item
+                    break
+                for candidate in candidates:
+                    if stored.endswith(candidate) or candidate.endswith(stored):
+                        media_item = item
+                        break
+                if media_item:
+                    break
+            
+            if media_item:
+                # Mark the MediaItem as used by this episode
+                media_item.used_in_episode_id = episode.id
+                
+                # Create notification for user
+                friendly_name = media_item.friendly_name or os.path.basename(media_item.filename)
+                episode_title = episode.title or "your episode"
+                
+                notification = Notification(
+                    user_id=user.id,
+                    type="info",
+                    title="Raw Audio File Ready to Delete",
+                    body=f"Your raw file '{friendly_name}' was successfully used in '{episode_title}' and can now be safely deleted from your Media Library."
+                )
+                session.add(notification)
+                
+                try:
+                    if not _commit_with_retry(session):
+                        logging.error("[cleanup] Failed to save notification and MediaItem update after retries")
+                    else:
+                        logging.info("[cleanup] ✅ Created notification and marked MediaItem as used in episode")
+                except Exception as e:
+                    logging.error("[cleanup] Exception creating notification: %s", e, exc_info=True)
+                    session.rollback()
+            else:
+                logging.warning("[cleanup] Could not find MediaItem to mark as used")
+            
             return
 
         logging.info("[cleanup] Starting cleanup for main_content_filename: %s", raw_value)
@@ -252,16 +315,159 @@ def _finalize_episode(
 ):
     episode = media_context.episode
     stream_log_path = str(ASSEMBLY_LOG_DIR / f"{episode.id}.log")
+    
+    # ========== CHECK IF AUDIO WAS AUPHONIC-PROCESSED DURING UPLOAD ==========
+    # For Pro tier users, audio is processed by Auphonic DURING UPLOAD (not assembly)
+    # We need to check if the MediaItem has auphonic_processed=True and use cleaned audio
+    auphonic_processed = False
+    use_auphonic = False  # For backward compatibility with existing code
+    auphonic_cleaned_audio_path = None
+    auphonic_processed_path = None  # For backward compatibility
+    
+    try:
+        from api.models.podcast import MediaItem, MediaCategory
+        from sqlmodel import select
+        
+        # Find MediaItem for this episode's main content
+        # CRITICAL: Use main_content_filename (original upload), NOT episode.working_audio_name (cleaned)
+        # working_audio_name gets updated to "cleaned_*.mp3" but MediaItem.filename is original upload
+        filename_search = main_content_filename.split("/")[-1]
+        
+        logging.info("[assemble] 🔍 Searching for MediaItem: user=%s, filename_contains='%s'", episode.user_id, filename_search)
+        
+        # Try to find by filename match
+        media_item = session.exec(
+            select(MediaItem)
+            .where(MediaItem.user_id == episode.user_id)
+            .where(MediaItem.category == MediaCategory.main_content)
+            .where(MediaItem.filename.contains(filename_search))
+            .order_by(MediaItem.created_at.desc())
+        ).first()
+        
+        if media_item:
+            logging.info(
+                "[assemble] 🔍 Found MediaItem id=%s, filename='%s', auphonic_processed=%s",
+                media_item.id,
+                media_item.filename,
+                media_item.auphonic_processed
+            )
+        else:
+            logging.warning("[assemble] ⚠️ No MediaItem found for filename search '%s'", filename_search)
+        
+        if media_item and media_item.auphonic_processed:
+            auphonic_processed = True
+            use_auphonic = True  # Set for backward compatibility
+            logging.info(
+                "[assemble] ✅ Audio was Auphonic-processed during upload (MediaItem %s)",
+                media_item.id
+            )
+            
+            # Use cleaned audio URL if available
+            if media_item.auphonic_cleaned_audio_url:
+                # Download cleaned audio from GCS
+                gcs_url = media_item.auphonic_cleaned_audio_url
+                if gcs_url.startswith("gs://"):
+                    from pathlib import Path as PathLib
+                    # tempfile already imported at module level
+                    
+                    # Download to temp location
+                    temp_dir = PathLib(tempfile.gettempdir()) / f"auphonic_{episode.id}"
+                    temp_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    temp_audio_path = temp_dir / f"auphonic_cleaned_{episode.id}.mp3"
+                    
+                    try:
+                        from infrastructure import gcs
+                        parts = gcs_url[5:].split("/", 1)
+                        bucket_name = parts[0]
+                        key = parts[1] if len(parts) > 1 else ""
+                        
+                        file_bytes = gcs.download_bytes(bucket_name, key)
+                        temp_audio_path.write_bytes(file_bytes)
+                        
+                        auphonic_cleaned_audio_path = temp_audio_path
+                        auphonic_processed_path = temp_audio_path  # For backward compatibility
+                        main_content_filename = str(temp_audio_path)
+                        
+                        logging.info(
+                            "[assemble] Downloaded Auphonic cleaned audio: %s (%d bytes)",
+                            temp_audio_path,
+                            len(file_bytes)
+                        )
+                    except Exception as e:
+                        logging.error("[assemble] Failed to download Auphonic cleaned audio: %s", e)
+                        auphonic_processed = False
+            
+            # Load Auphonic metadata (show notes, chapters)
+            if media_item.auphonic_metadata:
+                try:
+                    import json
+                    auphonic_meta = json.loads(media_item.auphonic_metadata)
+                    logging.info("[assemble] ✅ Auphonic metadata available: %s", list(auphonic_meta.keys()))
+                    
+                    # Save AI-generated metadata to Episode
+                    if auphonic_meta.get("brief_summary"):
+                        episode.brief_summary = auphonic_meta["brief_summary"]
+                        logging.info("[assemble] ✅ Saved brief_summary (%d chars)", len(auphonic_meta["brief_summary"]))
+                    
+                    if auphonic_meta.get("long_summary"):
+                        episode.long_summary = auphonic_meta["long_summary"]
+                        logging.info("[assemble] ✅ Saved long_summary (%d chars)", len(auphonic_meta["long_summary"]))
+                    
+                    if auphonic_meta.get("tags"):
+                        episode.episode_tags = json.dumps(auphonic_meta["tags"])
+                        logging.info("[assemble] ✅ Saved %d tags", len(auphonic_meta["tags"]))
+                    
+                    if auphonic_meta.get("chapters"):
+                        episode.episode_chapters = json.dumps(auphonic_meta["chapters"])
+                        logging.info("[assemble] ✅ Saved %d chapters", len(auphonic_meta["chapters"]))
+                    
+                except Exception as e:
+                    logging.warning("[assemble] Failed to parse Auphonic metadata: %s", e)
+        else:
+            logging.info("[assemble] Audio not Auphonic-processed, using standard pipeline")
+    
+    except Exception as e:
+        logging.error("[assemble] Failed to check Auphonic processing status: %s", e, exc_info=True)
+        auphonic_processed = False
+    
+    # Build cleanup options
+    if auphonic_processed:
+        # Skip filler/silence removal for Auphonic audio (already processed)
+        # BUT allow Flubber and Intern (user-directed features)
+        cleanup_opts = {
+            **transcript_context.mixer_only_options,
+            "internIntent": transcript_context.intern_intent,
+            "flubberIntent": transcript_context.flubber_intent,
+            "auphonic_processed": True,  # Pass flag to orchestrator_steps
+            "removePauses": False,  # Skip silence compression
+            "removeFillers": False,  # Skip filler removal
+        }
+        logging.info("[assemble] Using Auphonic-processed audio, skipping filler/silence removal")
+    else:
+        # Standard cleanup for AssemblyAI + custom processing
+        cleanup_opts = {
+            **transcript_context.mixer_only_options,
+            "internIntent": transcript_context.intern_intent,
+            "flubberIntent": transcript_context.flubber_intent,
+            "auphonic_processed": False,
+        }
+    
+    # ========== END AUPHONIC CHECK ==========
 
     # NEW: Check if we should use chunked processing for long files
-    from pathlib import Path as PathLib
-    from worker.tasks.assembly import chunked_processor
+    # NOTE: Chunked processing is skipped if Auphonic was used (already processed)
+    use_chunking = False
     
-    # Find the main audio file path
-    audio_name = episode.working_audio_name or main_content_filename
-    main_audio_path = MEDIA_DIR / audio_name if not PathLib(audio_name).is_absolute() else PathLib(audio_name)
-    
-    use_chunking = chunked_processor.should_use_chunking(main_audio_path)
+    if not auphonic_processed:  # Only use chunking if NOT Auphonic-processed
+        from pathlib import Path as PathLib
+        from worker.tasks.assembly import chunked_processor
+        
+        # Find the main audio file path
+        audio_name = episode.working_audio_name or main_content_filename
+        main_audio_path = MEDIA_DIR / audio_name if not PathLib(audio_name).is_absolute() else PathLib(audio_name)
+        
+        use_chunking = chunked_processor.should_use_chunking(main_audio_path)
     
     if use_chunking:
         logging.info("[assemble] File duration >10min, using chunked processing for episode_id=%s", episode.id)
@@ -394,23 +600,28 @@ def _finalize_episode(
             use_chunking = False
     
     # Determine which audio file to use for mixing
-    # If chunking was used successfully, use the reassembled file
-    # Otherwise, use the original cleaned audio
-    if use_chunking:
+    # Priority: Auphonic processed > chunked reassembled > original
+    if use_auphonic and auphonic_processed_path:
+        audio_input_path = str(auphonic_processed_path)
+    elif use_chunking:
         audio_input_path = main_content_filename  # This is the reassembled path
     else:
         audio_input_path = episode.working_audio_name or main_content_filename
     
-    # Prepare cleanup options - skip all cleaning if chunking was used
-    if use_chunking:
+    # Prepare cleanup options - respect existing cleanup_opts from Auphonic if set
+    # Otherwise, skip all cleaning if chunking was used, or use normal options
+    if use_auphonic:
+        # cleanup_opts already set by Auphonic block above (skip all cleaning)
+        pass
+    elif use_chunking:
         # Audio is already fully cleaned and reassembled - just mix it
+        # BUT: Intern/Flubber need to be applied at the mixing stage if user reviewed them
         cleanup_opts = {
             **transcript_context.mixer_only_options,
-            "internIntent": "skip",  # Skip intern processing
-            "flubberIntent": "skip",  # Skip filler removal
-            "removePauses": False,  # Skip silence removal
-            "removeFillers": False,  # Skip filler word removal
-            "internEnabled": False,  # Disable intern feature
+            "internIntent": transcript_context.intern_intent,  # Preserve user's intent (for Intern audio insertion)
+            "flubberIntent": "skip",  # Skip filler removal (already done in chunks)
+            "removePauses": False,  # Skip silence removal (already done in chunks)
+            "removeFillers": False,  # Skip filler word removal (already done in chunks)
         }
     else:
         # Normal cleanup options
@@ -520,8 +731,10 @@ def _finalize_episode(
             "[assemble] Failed to mirror final audio into MEDIA_DIR", exc_info=True
         )
 
+    # Initialize fallback_candidate BEFORE conditional usage (Python scoping fix)
+    fallback_candidate = FINAL_DIR / final_basename
+    
     if not final_path_obj.exists():
-        fallback_candidate = FINAL_DIR / final_basename
         if fallback_candidate.exists():
             final_path_obj = fallback_candidate
         else:
@@ -550,6 +763,51 @@ def _finalize_episode(
         )
 
     episode.final_audio_path = final_basename
+    
+    # ========== CHARGE CREDITS FOR ASSEMBLY ==========
+    try:
+        from api.services.billing import credits
+        
+        # Get audio duration in minutes (convert from milliseconds)
+        audio_duration_minutes = (episode.duration_ms / 1000 / 60) if episode.duration_ms else 0
+        
+        # Determine if Auphonic was used (costs more)
+        use_auphonic_flag = bool(auphonic_processed)
+        
+        # Charge credits for assembly
+        logging.info(
+            "[assemble] 💳 Charging credits: episode_id=%s, duration=%.2f minutes, auphonic=%s",
+            episode.id,
+            audio_duration_minutes,
+            use_auphonic_flag
+        )
+        
+        ledger_entry, cost_breakdown = credits.charge_for_assembly(
+            session=session,
+            user=session.get(User, episode.user_id),
+            episode_id=episode.id,
+            total_duration_minutes=audio_duration_minutes,
+            use_auphonic=use_auphonic_flag,
+            correlation_id=f"assembly_{episode.id}",
+        )
+        
+        logging.info(
+            "[assemble] ✅ Credits charged: %.2f credits (base=%.2f, pipeline=%s, multiplier=%.2fx)",
+            cost_breakdown['total_credits'],
+            cost_breakdown['base_cost'],
+            cost_breakdown['pipeline'],
+            cost_breakdown['multiplier']
+        )
+        
+    except Exception as credits_err:
+        logging.error(
+            "[assemble] ⚠️ Failed to charge credits for assembly (non-fatal): %s",
+            credits_err,
+            exc_info=True
+        )
+        # Don't fail the entire assembly if credit charging fails
+        # User still gets their episode, we just lose the billing record
+    # ========== END CREDIT CHARGING ==========
 
     # Upload final audio to GCS - REQUIRED, NO FALLBACK
     # GCS is the sole source of truth for all media files
@@ -656,6 +914,35 @@ def _finalize_episode(
     
     logging.info("[assemble] done. final=%s status_committed=True", final_path)
 
+    # Send email notification to user
+    try:
+        user = session.get(User, episode.user_id)
+        if user and user.email:
+            episode_title = episode.title or "Untitled Episode"
+            subject = "Your episode is ready to publish!"
+            body = (
+                f"Great news! Your episode '{episode_title}' has finished processing and is ready to publish.\n\n"
+                f"🎧 Your episode has been assembled with all your intro, outro, and music.\n\n"
+                f"Next steps:\n"
+                f"1. Preview the final audio to make sure it sounds perfect\n"
+                f"2. Add episode details (title, description, show notes)\n"
+                f"3. Publish to your podcast feed\n\n"
+                f"Go to your dashboard to review and publish:\n"
+                f"https://app.podcastplusplus.com/dashboard\n\n"
+                f"Happy podcasting!"
+            )
+            try:
+                sent = mailer.send(user.email, subject, body)
+                if sent:
+                    logging.info("[assemble] Email notification sent to %s for episode %s", user.email, episode.id)
+                else:
+                    logging.warning("[assemble] Email notification failed for %s", user.email)
+            except Exception as mail_err:
+                logging.warning("[assemble] Failed to send email notification: %s", mail_err, exc_info=True)
+    except Exception as user_err:
+        logging.warning("[assemble] Failed to fetch user for email notification: %s", user_err, exc_info=True)
+
+    # Create in-app notification
     try:
         note = Notification(
             user_id=episode.user_id,
@@ -721,6 +1008,41 @@ def orchestrate_create_podcast_episode(
 
             assert media_context is not None  # for type checkers
 
+            # ========== CHECK IF AUDIO WAS AUPHONIC-PROCESSED DURING UPLOAD (BEFORE transcript prep) ==========
+            # CRITICAL: Must check BEFORE prepare_transcript_context() to prevent double-processing
+            # If Auphonic processed the audio, we skip silence/filler removal
+            auphonic_processed = False
+            try:
+                from api.models.podcast import MediaItem, MediaCategory
+                from sqlmodel import select
+                
+                # Use main_content_filename (original upload), NOT episode.working_audio_name (cleaned)
+                filename_search = main_content_filename.split("/")[-1]
+                
+                logging.info("[assemble] 🔍 PRE-CHECK: Searching for MediaItem: user=%s, filename='%s'", user_id, filename_search)
+                
+                media_item = session.exec(
+                    select(MediaItem)
+                    .where(MediaItem.user_id == user_id)
+                    .where(MediaItem.category == MediaCategory.main_content)
+                    .where(MediaItem.filename.contains(filename_search))
+                    .order_by(MediaItem.created_at.desc())
+                ).first()
+                
+                if media_item:
+                    logging.info(
+                        "[assemble] 🔍 PRE-CHECK: Found MediaItem id=%s, auphonic_processed=%s",
+                        media_item.id,
+                        media_item.auphonic_processed
+                    )
+                    if media_item.auphonic_processed:
+                        auphonic_processed = True
+                        logging.info("[assemble] ⚠️ Auphonic-processed audio detected - will skip redundant processing")
+                else:
+                    logging.info("[assemble] 🔍 PRE-CHECK: No MediaItem found")
+            except Exception as e:
+                logging.error("[assemble] Failed Auphonic pre-check: %s", e, exc_info=True)
+
             transcript_context = transcript.prepare_transcript_context(
                 session=session,
                 media_context=media_context,
@@ -730,6 +1052,7 @@ def orchestrate_create_podcast_episode(
                 tts_values=tts_values,
                 user_id=user_id,
                 intents=intents,
+                auphonic_processed=auphonic_processed,  # Pass flag to skip processing
             )
 
             return _finalize_episode(

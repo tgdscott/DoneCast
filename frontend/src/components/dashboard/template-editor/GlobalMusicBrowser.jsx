@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Globe, Play, Plus, ChevronDown, ChevronRight, Music } from "lucide-react";
+import { Globe, Play, Pause, Plus, ChevronDown, ChevronRight, Music } from "lucide-react";
 import { makeApi } from "@/lib/apiClient";
 
 /**
@@ -12,14 +12,28 @@ import { makeApi } from "@/lib/apiClient";
 const GlobalMusicBrowser = ({ token, onAddMusicToRule }) => {
   const [globalMusic, setGlobalMusic] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(true);  // Default to open so all 8 tracks are visible
   const [playingId, setPlayingId] = useState(null);
+  const audioRef = useRef(null);  // For audio preview playback
 
+  // Auto-fetch on mount to immediately show available tracks
   useEffect(() => {
-    if (isOpen && !globalMusic.length && !loading) {
+    if (!globalMusic.length && !loading) {
       fetchGlobalMusic();
     }
-  }, [isOpen]);
+  }, []);  // Run once on mount
+
+  // Cleanup audio on unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        try {
+          audioRef.current.pause();
+          audioRef.current = null;
+        } catch {}
+      }
+    };
+  }, []);
 
   const fetchGlobalMusic = async () => {
     setLoading(true);
@@ -37,11 +51,69 @@ const GlobalMusicBrowser = ({ token, onAddMusicToRule }) => {
   };
 
   const handlePreview = (music) => {
-    // For now, just log - in future could implement audio preview
-    console.log('Preview music:', music);
-    setPlayingId(music.id);
-    // Simulate playing for 2 seconds
-    setTimeout(() => setPlayingId(null), 2000);
+    const previewUrl = music.preview_url || music.url || music.filename;
+    
+    if (!previewUrl) {
+      console.warn('No preview URL available for music:', music);
+      return;
+    }
+
+    // If already playing this track, stop it
+    if (playingId === music.id) {
+      try {
+        if (audioRef.current) {
+          audioRef.current.pause();
+          audioRef.current = null;
+        }
+      } catch {}
+      setPlayingId(null);
+      return;
+    }
+
+    // Stop any currently playing audio
+    try {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    } catch {}
+
+    // Start playing the new track
+    try {
+      const audio = new Audio(previewUrl);
+      audioRef.current = audio;
+      setPlayingId(music.id);
+
+      // Auto-stop after 20 seconds (preview mode)
+      const stopAt = 20;
+      const onTimeUpdate = () => {
+        if (audio.currentTime >= stopAt) {
+          audio.pause();
+          setPlayingId(null);
+          audio.removeEventListener('timeupdate', onTimeUpdate);
+        }
+      };
+      audio.addEventListener('timeupdate', onTimeUpdate);
+
+      // Handle natural end or errors
+      audio.onended = () => {
+        setPlayingId(null);
+        audio.removeEventListener('timeupdate', onTimeUpdate);
+      };
+      audio.onerror = () => {
+        console.error('Error playing preview for music:', music.display_name);
+        setPlayingId(null);
+        audio.removeEventListener('timeupdate', onTimeUpdate);
+      };
+
+      audio.play().catch((err) => {
+        console.error('Failed to play preview:', err);
+        setPlayingId(null);
+      });
+    } catch (err) {
+      console.error('Error setting up audio preview:', err);
+      setPlayingId(null);
+    }
   };
 
   const handleAddToRule = (music) => {
@@ -141,10 +213,19 @@ const GlobalMusicBrowser = ({ token, onAddMusicToRule }) => {
                           size="sm"
                           className="flex-1"
                           onClick={() => handlePreview(music)}
-                          disabled={playingId === music.id}
+                          disabled={!music.preview_url && !music.url && !music.filename}
                         >
-                          <Play className="w-3 h-3 mr-1" />
-                          {playingId === music.id ? 'Playing...' : 'Preview'}
+                          {playingId === music.id ? (
+                            <>
+                              <Pause className="w-3 h-3 mr-1" />
+                              Stop
+                            </>
+                          ) : (
+                            <>
+                              <Play className="w-3 h-3 mr-1" />
+                              Preview
+                            </>
+                          )}
                         </Button>
                         <Button
                           variant="default"

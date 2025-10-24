@@ -75,7 +75,7 @@ templates              = _safe_import("api.routers.templates")
 flubber                = _safe_import("api.routers.flubber")
 intern                 = _safe_import("api.routers.intern")
 users                  = _safe_import("api.routers.users")
-admin                  = _safe_import("api.routers.admin")
+admin                  = _safe_import("api.routers.admin")  # Uses admin/__init__.py (modular structure)
 podcasts               = _safe_import("api.routers.podcasts")
 importer               = _safe_import("api.routers.importer")
 public                 = _safe_import("api.routers.public")
@@ -84,6 +84,7 @@ debug                  = _safe_import("api.routers.debug")
 billing_router         = _safe_import("api.routers.billing")
 billing_config_router  = _safe_import("api.routers.billing_config")
 billing_webhook_router = _safe_import("api.routers.billing_webhook")
+billing_ledger_router  = _safe_import("api.routers.billing_ledger")
 notifications_router   = _safe_import("api.routers.notifications")
 music_router           = _safe_import("api.routers.music")
 ai_metadata            = _safe_import("api.routers.ai_metadata")
@@ -100,6 +101,10 @@ assistant_router       = _safe_import("api.routers.assistant")
 rss_feed_router        = _safe_import("api.routers.rss_feed")
 analytics_router       = _safe_import("api.routers.analytics")
 contact_router         = _safe_import("api.routers.contact")
+website_sections_router = _safe_import("api.routers.website_sections")
+sites_router           = _safe_import("api.routers.sites")
+website_publish_router = _safe_import("api.routers.podcasts.publish")
+auphonic_router        = _safe_import("api.routers.episodes.auphonic")
 
 def _maybe(app: FastAPI, r, prefix: str = "/api"):
     if r is not None:
@@ -159,6 +164,8 @@ def attach_routers(app: FastAPI) -> dict:
     availability['billing_config_router'] = billing_config_router is not None
     _maybe(app, billing_webhook_router)
     availability['billing_webhook_router'] = billing_webhook_router is not None
+    _maybe(app, billing_ledger_router)
+    availability['billing_ledger_router'] = billing_ledger_router is not None
     _maybe(app, notifications_router)
     availability['notifications_router'] = notifications_router is not None
     _maybe(app, ai_metadata)
@@ -179,12 +186,20 @@ def attach_routers(app: FastAPI) -> dict:
     availability['recurring'] = recurring is not None
     _maybe(app, assemblyai_router)
     availability['assemblyai_router'] = assemblyai_router is not None
-    _maybe(app, rss_feed_router)
+    _maybe(app, rss_feed_router, prefix="")  # RSS feeds at root level (/rss/...), not /api/rss
     availability['rss_feed_router'] = rss_feed_router is not None
     _maybe(app, analytics_router)
     availability['analytics_router'] = analytics_router is not None
     _maybe(app, contact_router)
     availability['contact_router'] = contact_router is not None
+    _maybe(app, website_sections_router)
+    availability['website_sections_router'] = website_sections_router is not None
+    _maybe(app, sites_router)  # Public website serving
+    availability['sites_router'] = sites_router is not None
+    _maybe(app, website_publish_router)  # Website publishing & domain provisioning
+    availability['website_publish_router'] = website_publish_router is not None
+    _maybe(app, auphonic_router)  # Auphonic outputs for episode assembly
+    availability['auphonic_router'] = auphonic_router is not None
 
     # Cloud Tasks internal hook (no prefix: it already has /api/tasks)
     app.include_router(tasks_router)

@@ -9,6 +9,7 @@ from sqlmodel import Session
 
 from api.core.config import settings
 from api.core.database import get_session
+from api.core.database_retry import retry_on_intrans
 from api.core import crud
 from api.models.user import User
 from api.models.settings import load_admin_settings
@@ -40,6 +41,7 @@ def _raise_jwt_missing(context: str) -> None:
     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
 
 
+@retry_on_intrans(max_retries=3, delay=0.5)
 async def get_current_user(
     request: Request,
     session: Session = Depends(get_session),
@@ -82,4 +84,53 @@ async def get_current_user(
 
     return user
 
-__all__ = ["get_current_user", "oauth2_scheme"]
+
+async def get_current_user_with_terms(
+    request: Request,
+    session: Session = Depends(get_session),
+    token: str = Depends(oauth2_scheme),
+) -> User:
+    """
+    Get current user and enforce Terms of Service acceptance.
+    
+    Use this dependency for endpoints that should be blocked if user hasn't accepted terms.
+    Exempted endpoints: /api/auth/*, /api/users/me, terms acceptance endpoints
+    """
+    user = await get_current_user(request=request, session=session, token=token)
+    
+    # Check if endpoint should be exempted from terms enforcement
+    path = request.url.path
+    exempted_paths = [
+        '/api/auth/',
+        '/api/users/me',
+        '/api/admin/',  # Admin endpoints exempt
+    ]
+    
+    if any(path.startswith(prefix) for prefix in exempted_paths):
+        return user
+    
+    # Enforce terms acceptance for all other endpoints
+    required_version = getattr(settings, "TERMS_VERSION", None)
+    accepted_version = user.terms_version_accepted
+    
+    if required_version and required_version != accepted_version:
+        logger.warning(
+            "[Terms Enforcement] Blocking user %s - terms not accepted (required: %s, accepted: %s)",
+            user.email,
+            required_version,
+            accepted_version
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "Terms acceptance required",
+                "message": "Please refresh your browser and accept the latest Terms of Use to continue.",
+                "required_version": required_version,
+                "accepted_version": accepted_version,
+            }
+        )
+    
+    return user
+
+
+__all__ = ["get_current_user", "get_current_user_with_terms", "oauth2_scheme"]

@@ -71,7 +71,13 @@ def upload_audio(
 ) -> Union[UploadResp, str]:
     """Upload the audio file; return AssemblyAI's upload_url string."""
     p = Path(file_path)
-    headers = {"authorization": api_key.strip(), "content-type": "application/octet-stream"}
+    stripped_key = api_key.strip()
+    
+    # Debug logging
+    import logging
+    logging.info("[assemblyai_upload] 🔑 key_len=%d key_prefix=%s", len(stripped_key), stripped_key[:8])
+    
+    headers = {"authorization": stripped_key, "content-type": "application/octet-stream"}
     http = session or _get_session()
     resp = http.post(f"{base_url}/upload", headers=headers, data=_stream_file(p))
     if resp.status_code != 200:

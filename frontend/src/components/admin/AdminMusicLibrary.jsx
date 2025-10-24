@@ -5,6 +5,16 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Play, Pause, Plus, Trash2, Save, Upload as UploadIcon, Link as LinkIcon } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { useAuth } from '@/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { makeApi, buildApiUrl } from '@/lib/apiClient';
@@ -17,6 +27,8 @@ export default function AdminMusicLibrary() {
   const [saving, setSaving] = useState(false);
   const [previewingId, setPreviewingId] = useState(null);
   const [uploadProgress, setUploadProgress] = useState({});
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [assetToDelete, setAssetToDelete] = useState(null);
   const audioRef = useRef(null);
 
   const loadAssets = async () => {
@@ -60,18 +72,30 @@ export default function AdminMusicLibrary() {
     setAssets(prev => [{ id: `new-${Date.now()}`, display_name: '', mood_tags: [], url: '', filename: '', isNew: true }, ...prev]);
   };
 
-  const removeAsset = async (asset) => {
-    if (String(asset.id).startsWith('new-')) {
-      setAssets(prev => prev.filter(a => a.id !== asset.id));
+  const openDeleteDialog = (asset) => {
+    setAssetToDelete(asset);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!assetToDelete) return;
+    
+    if (String(assetToDelete.id).startsWith('new-')) {
+      setAssets(prev => prev.filter(a => a.id !== assetToDelete.id));
+      setDeleteDialogOpen(false);
+      setAssetToDelete(null);
       return;
     }
-    if (!confirm('Delete this music asset?')) return;
+
     try {
-      await makeApi(token).del(`/api/admin/music/assets/${asset.id}`);
+      await makeApi(token).del(`/api/admin/music/assets/${assetToDelete.id}`);
       await loadAssets();
-      try { toast({ title: 'Deleted', description: `${asset.display_name || 'Asset'} removed.` }); } catch {}
+      try { toast({ title: 'Deleted', description: `${assetToDelete.display_name || 'Asset'} removed.` }); } catch {}
     } catch (e) {
       try { toast({ title: 'Delete failed', description: 'Could not remove asset', variant: 'destructive' }); } catch {}
+    } finally {
+      setDeleteDialogOpen(false);
+      setAssetToDelete(null);
     }
   };
 
@@ -223,8 +247,8 @@ export default function AdminMusicLibrary() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[48px]"></TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Source URL</TableHead>
+                <TableHead className="w-[280px]">Name</TableHead>
+                <TableHead className="w-[180px]">Source URL</TableHead>
                 <TableHead>Or Upload File</TableHead>
                 <TableHead>Mood Tags (comma-separated)</TableHead>
                 <TableHead className="w-[140px]"></TableHead>
@@ -276,7 +300,11 @@ export default function AdminMusicLibrary() {
                       </>
                     ) : (
                       <>
-                        <TableCell><span className="text-xs text-muted-foreground truncate" title={a.url}>{a.url || 'N/A'}</span></TableCell>
+                        <TableCell>
+                          <span className="text-xs text-muted-foreground block truncate max-w-[160px]" title={a.url}>
+                            {a.url || 'N/A'}
+                          </span>
+                        </TableCell>
                         <TableCell><span className="text-xs text-muted-foreground">Existing file</span></TableCell>
                       </>
                     )}
@@ -289,7 +317,7 @@ export default function AdminMusicLibrary() {
                       ) : (
                         <Button size="sm" onClick={() => saveAsset(a)} disabled={saving}><Save className="h-4 w-4 mr-1" /> Save</Button>
                       )}
-                      <Button size="sm" variant="destructive" onClick={()=> removeAsset(a)}><Trash2 className="h-4 w-4 mr-1" /> Delete</Button>
+                      <Button size="sm" variant="destructive" onClick={() => openDeleteDialog(a)}><Trash2 className="h-4 w-4 mr-1" /> Delete</Button>
                     </TableCell>
                   </TableRow>
                 );
@@ -298,6 +326,24 @@ export default function AdminMusicLibrary() {
           </Table>
         </CardContent>
       </Card>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Music Asset?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{assetToDelete?.display_name || 'this music asset'}</strong>? 
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-red-600 hover:bg-red-700">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -343,7 +343,14 @@ def minutes_precheck(
 ) -> Dict[str, Any]:
     """Return usage information to determine if processing minutes remain."""
 
-    tier = getattr(current_user, "tier", "free")
+    # Admin and SuperAdmin users have unlimited processing minutes
+    user_role = getattr(current_user, "role", None)
+    is_admin = getattr(current_user, "is_admin", False)
+    if user_role in ("admin", "superadmin") or is_admin:
+        tier = "unlimited"
+    else:
+        tier = getattr(current_user, "tier", "free")
+    
     limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
     max_minutes = limits.get("max_processing_minutes_month")
 
@@ -489,7 +496,14 @@ def assemble_or_queue(
     inline_available = _can_run_inline()
 
     # Quota check (same logic as router but service-level)
-    tier = getattr(current_user, 'tier', 'free')
+    # Admin and SuperAdmin users have unlimited processing minutes
+    user_role = getattr(current_user, "role", None)
+    is_admin = getattr(current_user, "is_admin", False)
+    if user_role in ("admin", "superadmin") or is_admin:
+        tier = "unlimited"
+    else:
+        tier = getattr(current_user, 'tier', 'free')
+    
     limits = TIER_LIMITS.get(tier, TIER_LIMITS['free'])
     max_eps = limits.get('max_episodes_month')
     if max_eps is not None:

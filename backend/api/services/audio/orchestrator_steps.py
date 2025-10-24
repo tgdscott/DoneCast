@@ -887,6 +887,25 @@ def primary_cleanup_and_rebuild(
         placeholder_audio = AudioSegment.silent(duration=1)
         return placeholder_audio, mutable_words, {}, 0
     
+    # Check if audio was processed by Auphonic (Pro tier)
+    auphonic_processed = bool(cleanup_options.get('auphonic_processed', False))
+    if auphonic_processed:
+        log.append("[FILLERS] Skipping filler removal (auphonic_processed=True)")
+        
+        # BUT: Still apply Flubber cuts if any words marked for deletion
+        has_flubber_markers = any(str(w.get('word', '')).strip() == '' for w in mutable_words)
+        if has_flubber_markers:
+            log.append("[FLUBBER_AUPHONIC] Applying Flubber cuts to Auphonic audio")
+            actual_audio = AudioSegment.from_file(content_path)
+            flubber_cut_audio = apply_flubber_cuts_to_audio(actual_audio, mutable_words, log)
+            return flubber_cut_audio, mutable_words, {}, 0
+        
+        # No Flubber cuts needed, return placeholder
+        log.append("[FILLERS] No Flubber markers, returning placeholder")
+        placeholder_audio = AudioSegment.silent(duration=1)
+        return placeholder_audio, mutable_words, {}, 0
+    
+    # Continue with standard filler removal for non-Auphonic audio
     raw_filler_list = (cleanup_options.get('fillerWords', []) or []) if isinstance(cleanup_options, dict) else []
     filler_words = set([str(w).strip().lower() for w in raw_filler_list if str(w).strip()])
     remove_fillers_flag = bool((cleanup_options or {}).get('removeFillers', True)) if isinstance(cleanup_options, dict) else True
@@ -987,7 +1006,14 @@ def compress_pauses_step(
     log: List[str],
 ) -> Tuple[AudioSegment, List[Dict[str, Any]]]:
     """Optionally compress long pauses and retime words."""
-    remove_pauses = bool(cleanup_options.get('removePauses', True)) if not mix_only else False
+    # Check if Auphonic processed (skip silence removal if yes)
+    auphonic_processed = bool(cleanup_options.get('auphonic_processed', False))
+    remove_pauses = bool(cleanup_options.get('removePauses', True)) if not (mix_only or auphonic_processed) else False
+    
+    if auphonic_processed:
+        log.append("[SILENCE] Skipping pause compression (auphonic_processed=True)")
+        return cleaned_audio, mutable_words
+    
     if remove_pauses:
         silence_cfg = {
             'maxPauseSeconds': float(cleanup_options.get('maxPauseSeconds', 1.5)),
@@ -1034,14 +1060,41 @@ def export_cleaned_audio_step(
         log.append(f"[EXPORT] Detected placeholder audio, copying from disk: {main_content_filename}")
         # Check if the file already exists (e.g., reassembled file from chunking)
         source_path = Path(main_content_filename)
+        
+        # If source_path is relative, resolve it against known directories
+        if not source_path.is_absolute():
+            # Try CLEANED_DIR first (most likely for reassembled files)
+            if (CLEANED_DIR / source_path).exists():
+                source_path = CLEANED_DIR / source_path
+            # Try MEDIA_DIR second
+            elif (MEDIA_DIR / source_path).exists():
+                source_path = MEDIA_DIR / source_path
+            # Try /tmp (for reassembled chunks)
+            elif (Path("/tmp") / source_path.name).exists():
+                source_path = Path("/tmp") / source_path.name
+            else:
+                log.append(f"[EXPORT] WARNING: Could not resolve relative path: {main_content_filename}")
+        
         if source_path.exists() and source_path.is_file():
             # Just copy the file instead of loading into memory
             import shutil
+            import gc
+            
+            # Windows fix: Release AudioSegment file handles before copying
+            # AudioSegment keeps file handles open, preventing shutil.copy2 on Windows
+            if cleaned_audio is not None:
+                try:
+                    del cleaned_audio  # Delete AudioSegment object
+                    gc.collect()  # Force garbage collection to close file handles
+                except Exception:
+                    pass
+            
             shutil.copy2(source_path, cleaned_path)
             log.append(f"[EXPORT] Copied cleaned audio from {source_path} to {cleaned_filename}")
         else:
-            # Fallback: load and export (shouldn't happen)
-            real_audio = AudioSegment.from_file(source_path)
+            # Fallback: try to load and export (last resort)
+            log.append(f"[EXPORT] WARNING: Source path does not exist: {source_path}, attempting fallback load...")
+            real_audio = AudioSegment.from_file(str(source_path))
             real_audio.export(cleaned_path, format="mp3")
             log.append(f"Saved cleaned content to {cleaned_filename} (loaded from disk)")
     else:
@@ -1747,6 +1800,94 @@ def write_final_transcripts_and_cleanup(
         log.append(f"[TRANSCRIPTS_CLEAN_ERROR] {e}")
 
 
+def apply_flubber_cuts_to_audio(
+    audio: AudioSegment,
+    mutable_words: List[Dict[str, Any]],
+    log: List[str],
+) -> AudioSegment:
+    """
+    Cut audio segments marked by Flubber (words with word="").
+    Used for Auphonic-processed audio where rebuild_audio_from_words won't run.
+    
+    This function finds spans of empty words (Flubber deletions) and removes them
+    from the audio without rebuilding the entire audio from words. This is necessary
+    for Auphonic-processed files because:
+    - Auphonic already removed fillers and excess silence
+    - Flubber is user-directed ("I made a mistake, cut it out")
+    - Auphonic doesn't know about user's "flubber" markers
+    - We need to preserve Auphonic's processing while still respecting Flubber cuts
+    
+    Args:
+        audio: Cleaned audio from Auphonic
+        mutable_words: Words list with Flubber-marked deletions (word="")
+        log: Log messages list
+        
+    Returns:
+        Audio with Flubber sections removed
+    """
+    # Find spans of empty words (Flubber deletions)
+    delete_spans = []
+    in_delete = False
+    start_ms = None
+    
+    for w in mutable_words:
+        word_text = str(w.get('word', '')).strip()
+        start_s = float(w.get('start', 0.0))
+        end_s = float(w.get('end', start_s))
+        
+        if word_text == '':  # Flubber-marked for deletion
+            if not in_delete:
+                start_ms = int(start_s * 1000)
+                in_delete = True
+        else:  # Normal word
+            if in_delete:
+                end_ms = int(start_s * 1000)  # End of delete span
+                delete_spans.append((start_ms, end_ms))
+                in_delete = False
+    
+    # Handle case where deletion goes to end of file
+    if in_delete and mutable_words:
+        last_end = float(mutable_words[-1].get('end', 0.0))
+        end_ms = int(last_end * 1000)
+        delete_spans.append((start_ms, end_ms))
+    
+    if not delete_spans:
+        log.append("[FLUBBER_AUDIO_CUTS] No Flubber markers found, audio unchanged")
+        return audio
+    
+    log.append(f"[FLUBBER_AUDIO_CUTS] Applying {len(delete_spans)} cuts to Auphonic audio")
+    
+    # Cut audio by keeping segments between deletions
+    segments = []
+    last_end = 0
+    
+    for start_ms, end_ms in delete_spans:
+        if start_ms > last_end:
+            segments.append(audio[last_end:start_ms])
+            log.append(f"[FLUBBER_CUT] Removed {end_ms - start_ms}ms at {start_ms}ms")
+        last_end = end_ms
+    
+    # Add final segment after last cut
+    if last_end < len(audio):
+        segments.append(audio[last_end:])
+    
+    if not segments:
+        log.append("[FLUBBER_AUDIO_CUTS] All audio removed by Flubber, returning silence")
+        return AudioSegment.silent(duration=0)
+    
+    # Concatenate segments
+    result = segments[0]
+    for seg in segments[1:]:
+        result += seg
+    
+    original_duration_ms = len(audio)
+    new_duration_ms = len(result)
+    removed_ms = original_duration_ms - new_duration_ms
+    log.append(f"[FLUBBER_AUDIO_CUTS] Complete: removed {removed_ms}ms total ({removed_ms / 1000.0:.2f}s)")
+    
+    return result
+
+
 __all__ = [
     'load_content_and_init_transcripts',
     'detect_and_prepare_ai_commands',
@@ -1756,6 +1897,7 @@ __all__ = [
     'export_cleaned_audio_step',
     'build_template_and_final_mix_step',
     'write_final_transcripts_and_cleanup',
+    'apply_flubber_cuts_to_audio',  # Add new function to exports
 ]
 
 

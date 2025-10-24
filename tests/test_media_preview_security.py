@@ -5,7 +5,7 @@ import pytest
 
 # Provide lightweight stand-ins for the recurring models package so importing
 # api.models.* during tests does not try to construct dialect-specific SQLModel
-# columns that require PostgreSQL features unavailable in the SQLite test DB.
+# columns (legacy compatibility - tests should use PostgreSQL now).
 if "api.models.recurring" not in sys.modules:
     stub = types.ModuleType("api.models.recurring")
 

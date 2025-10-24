@@ -293,10 +293,182 @@ def _read_existing_transcript_for(filename: str) -> List[Dict[str, Any]] | None:
     return None
 
 
-def transcribe_media_file(filename: str) -> List[Dict[str, Any]]:
+def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Synchronously transcribe a media file and persist transcript artifacts.
+    
+    Routes to appropriate transcription service based on user subscription tier:
+    - Pro users → Auphonic (transcription + audio processing)
+    - Other tiers → AssemblyAI (transcription only)
+    
+    Args:
+        filename: GCS URL or local path to audio file
+        user_id: UUID string of user (required for tier-based routing)
+        
+    Returns:
+        List of word dicts with start/end/word/speaker keys
+    """
 
-    """Synchronously transcribe a media file and persist transcript artifacts."""
+    # DEBUG: Log what we received
+    logging.info(f"[transcription] 🎬 CALLED with filename={filename}, user_id={user_id!r} (type={type(user_id).__name__})")
 
+    # ========== CHARGE CREDITS FOR TRANSCRIPTION (UPFRONT) ==========
+    # We charge upfront even if transcription fails because we pay the API regardless
+    if user_id:
+        try:
+            from api.core.database import get_session
+            from api.models.user import User
+            from api.services.billing import credits
+            from api.services.auphonic_helper import should_use_auphonic
+            from sqlmodel import select
+            from pydub import AudioSegment
+            
+            session = next(get_session())
+            user = session.exec(select(User).where(User.id == user_id)).first()
+            
+            if user:
+                # Get audio duration
+                try:
+                    if _is_gcs_path(filename):
+                        local_filename = _download_gcs_to_media(filename)
+                        audio_path = MEDIA_DIR / local_filename
+                    else:
+                        audio_path = MEDIA_DIR / filename
+                    
+                    audio = AudioSegment.from_file(str(audio_path))
+                    duration_minutes = len(audio) / 1000 / 60
+                    
+                    # Check if user is Pro tier (Auphonic) or other tiers (AssemblyAI)
+                    use_auphonic_flag = should_use_auphonic(user)
+                    
+                    logging.info(
+                        "[transcription] 💳 Charging credits: user=%s, duration=%.2f min, auphonic=%s",
+                        user.id,
+                        duration_minutes,
+                        use_auphonic_flag
+                    )
+                    
+                    ledger_entry, cost_breakdown = credits.charge_for_transcription(
+                        session=session,
+                        user=user,
+                        duration_minutes=duration_minutes,
+                        use_auphonic=use_auphonic_flag,
+                        correlation_id=f"transcription_{filename}_{uuid.uuid4().hex[:8]}",
+                    )
+                    
+                    logging.info(
+                        "[transcription] ✅ Credits charged: %.2f credits (pipeline=%s, multiplier=%.2fx)",
+                        cost_breakdown['total_credits'],
+                        cost_breakdown['pipeline'],
+                        cost_breakdown['multiplier']
+                    )
+                    
+                except Exception as audio_err:
+                    logging.warning("[transcription] ⚠️ Could not determine audio duration for billing: %s", audio_err)
+                    # Don't fail transcription if billing fails
+                    
+        except Exception as credits_err:
+            logging.error("[transcription] ⚠️ Failed to charge credits (non-fatal): %s", credits_err, exc_info=True)
+            # Don't fail transcription if credit charging fails
+    # ========== END CREDIT CHARGING ==========
+
+    # If user_id not provided, fall back to legacy behavior (AssemblyAI)
+    if user_id:
+        try:
+            from api.core.database import get_session
+            from api.models.user import User
+            from api.services.auphonic_helper import should_use_auphonic
+            from sqlmodel import select
+
+            session = next(get_session())
+            logging.info(f"[transcription] 🔍 Looking up user_id={user_id}")
+            user = session.exec(select(User).where(User.id == user_id)).first()
+
+            if not user:
+                logging.warning(f"[transcription] ⚠️ User not found: user_id={user_id}, falling back to AssemblyAI")
+            else:
+                logging.info(f"[transcription] ✅ Found user: id={user.id}, email={user.email}, tier={getattr(user, 'tier', 'NONE')}")
+
+            if user and should_use_auphonic(user):
+                # Pro user → Auphonic
+                logging.info(f"[transcription] user_id={user_id} tier={getattr(user, 'tier', 'unknown')} → Auphonic")
+                
+                from api.services.transcription_auphonic import auphonic_transcribe_and_process
+                
+                result = auphonic_transcribe_and_process(filename, str(user_id))
+                
+                # Update MediaItem with Auphonic outputs
+                from api.models.podcast import MediaItem
+                
+                # Find MediaItem by filename (could be partial match for GCS URLs)
+                filename_search = filename.split("/")[-1] if "/" in filename else filename
+                media_item = session.exec(
+                    select(MediaItem)
+                    .where(MediaItem.user_id == user.id)
+                    .where(MediaItem.filename.contains(filename_search))
+                    .order_by(MediaItem.created_at.desc())
+                ).first()
+                
+                if media_item:
+                    media_item.auphonic_processed = True
+                    media_item.auphonic_cleaned_audio_url = result.get("cleaned_audio_url")
+                    media_item.auphonic_original_audio_url = result.get("original_audio_url")
+                    
+                    # Save Auphonic metadata (legacy format for backward compatibility)
+                    if result.get("auphonic_output_file"):
+                        media_item.auphonic_output_file = result["auphonic_output_file"]
+                    
+                    # Store AI-generated metadata and chapters as JSON
+                    auphonic_meta = {}
+                    
+                    # Legacy show_notes support (deprecated in favor of brief_summary)
+                    if result.get("show_notes"):
+                        auphonic_meta["show_notes"] = result["show_notes"]
+                    
+                    # NEW: AI-generated summaries
+                    if result.get("brief_summary"):
+                        auphonic_meta["brief_summary"] = result["brief_summary"]
+                    if result.get("long_summary"):
+                        auphonic_meta["long_summary"] = result["long_summary"]
+                    
+                    # NEW: AI-extracted tags
+                    if result.get("tags"):
+                        auphonic_meta["tags"] = result["tags"]
+                    
+                    # Chapters
+                    if result.get("chapters"):
+                        auphonic_meta["chapters"] = result["chapters"]
+                    
+                    # Production UUID for tracking
+                    if result.get("production_uuid"):
+                        auphonic_meta["production_uuid"] = result["production_uuid"]
+                    
+                    if auphonic_meta:
+                        media_item.auphonic_metadata = json.dumps(auphonic_meta)
+                    
+                    session.add(media_item)
+                    session.commit()
+                    logging.info(f"[transcription] Updated MediaItem {media_item.id} with Auphonic outputs")
+                else:
+                    logging.warning(f"[transcription] Could not find MediaItem for filename={filename}")
+                
+                # Notify watchers and return transcript
+                notify_watchers_processed(filename)
+                return result["transcript"]
+            
+            elif user:
+                # Free/Creator/Unlimited → AssemblyAI (existing logic below)
+                logging.info(f"[transcription] user_id={user_id} tier={getattr(user, 'tier', 'unknown')} → AssemblyAI")
+            else:
+                logging.warning(f"[transcription] user_id={user_id} not found, using AssemblyAI")
+        
+        except Exception as e:
+            logging.error(f"[transcription] ❌ TIER_ROUTING_FAILED user_id={user_id} error_type={type(e).__name__} error={e}", exc_info=True)
+            # Fall through to AssemblyAI on error
+            logging.warning(f"[transcription] ⚠️ Falling back to AssemblyAI after routing error")
+    else:
+        logging.info(f"[transcription] No user_id provided, using AssemblyAI (legacy behavior)")
+    
+    # Legacy behavior: Use AssemblyAI (Free/Creator/Unlimited tiers or no user_id)
     # Global safeguard: allow disabling brand-new transcription at runtime.
     raw_toggle = os.getenv("ALLOW_TRANSCRIPTION") or os.getenv("TRANSCRIBE_ENABLED")
 

@@ -8,8 +8,58 @@ Self-hosted podcast creation platform with AI-powered features. Full-stack app: 
 
 ## ⚠️ Critical Constraints
 
+### NEVER Hallucinate, Assume, or Guess
+**CRITICAL: Details matter. Accuracy is non-negotiable.**
+
+- ❌ NEVER hallucinate instructions or specifications not explicitly given by the user
+- ❌ NEVER assume how features should work without asking
+- ❌ NEVER guess at implementation details
+- ✅ If you're unsure, ASK the user for clarification
+- ✅ Repeat back your understanding and ask for confirmation before implementing
+- ✅ State exactly what you know vs. what you're inferring
+
+**Example of correct behavior:**
+- User: "Pro tier should use Auphonic"
+- Agent: "To confirm: Pro tier → Auphonic pipeline. What about Free, Creator, and Unlimited tiers? Should they use AssemblyAI?"
+- NOT: "I'll set Creator and Enterprise to use Auphonic too since they're premium tiers."
+
+**When in doubt:** Ask, don't assume. Getting it wrong wastes time and creates bugs.
+
+### NEVER Start Builds Without Permission
+**ALWAYS ASK before running `gcloud builds submit`.** User manages builds in separate windows to avoid interruptions. Google charges heavily for builds, so each one must be intentional.
+
+**What to do instead:**
+- ✅ Prepare all code changes
+- ✅ Run local tests
+- ✅ Document what needs deploying
+- ✅ ASK: "Ready to deploy? I have X changes ready."
+- ❌ NEVER run `gcloud builds submit` automatically
+- ❌ NEVER use `isBackground: true` for build commands
+
 ### Production First
 **All fixes and features MUST prioritize production environment.** Local dev is nice-to-have but production stability is non-negotiable. If a change helps both, great. If it's a choice, production wins every time.
+
+### Branding: NEVER Use "Podcast++"
+**CRITICAL: Brand name must ALWAYS be "Podcast Plus Plus" or "Plus Plus" - NEVER "Podcast++"**
+
+This is non-negotiable for URL clarity and brand consistency. The ++ notation creates confusion with URLs and looks unprofessional.
+
+**Correct usage:**
+- ✅ "Podcast Plus Plus" (full name)
+- ✅ "Plus Plus" (short form)
+- ✅ "Powered by Podcast Plus Plus"
+- ✅ "Your Podcast Plus Plus RSS feeds"
+- ❌ "Podcast++" (NEVER use this anywhere)
+- ❌ "podcast++" (NEVER use this anywhere)
+
+**This applies to:**
+- UI text, labels, tooltips
+- Documentation, comments, commit messages
+- Error messages, logs
+- Email templates
+- RSS feed metadata
+- Footer branding
+- API responses
 
 ### User-Facing URLs: Never Use UUIDs
 **Public-facing URLs MUST use human-friendly identifiers** (slugs, readable IDs, names). This platform is designed for non-technical users - UUIDs in URLs are confusing and unprofessional.
@@ -29,6 +79,78 @@ Self-hosted podcast creation platform with AI-powered features. Full-stack app: 
 - ❌ Change existing DATABASE_URL value
 - ❌ Rotate API keys or tokens
 - ❌ Modify cloudbuild.yaml substitution values
+
+### Database Naming Convention (CRITICAL)
+**Table names:** NO underscores (e.g., `podcast`, `episode`, `podcastwebsite`, `mediaitem`)  
+**Column names:** YES underscores (e.g., `user_id`, `created_at`, `sections_order`)  
+**Exceptions:** Assistant tables DO have underscores (`assistant_conversation`, `assistant_message`, `feedback_submission`, `assistant_guidance`)
+
+**ALWAYS double-check table names before using in SQL or migrations.** Getting this wrong causes silent failures in PostgreSQL.
+
+### Flubber Feature (CRITICAL - DO NOT CONFUSE WITH FILLER WORD REMOVAL)
+
+**WHAT FLUBBER IS:**
+- User says the word "flubber" DURING RECORDING when they make a blatant mistake (e.g., mispronounce a word, say the wrong name, stumble over a sentence)
+- System detects the spoken keyword "flubber" in the transcript
+- Analyzes the audio BEFORE the "flubber" marker to find repeated/incorrect words
+- Cuts out several seconds (typically 5-30 seconds) of the "flub" section
+- This is a MANUAL, USER-TRIGGERED editing tool for fixing specific mistakes
+
+**WHAT FLUBBER IS NOT:**
+- ❌ NOT automatic filler word removal ("um", "uh", "like", "you know")
+- ❌ NOT AI-powered mistake detection
+- ❌ NOT continuous throughout the episode
+- ❌ NOT the same as Auphonic's automatic filler word cutting
+- ❌ NOT silence removal
+- ❌ NOT breath removal
+
+**Example Flubber Use Case:**
+1. User recording: "Welcome to episode 42 with our guest... uh... John... wait no... flubber... Welcome to episode 42 with our guest Sarah Johnson"
+2. User said "flubber" to mark that they want to cut the mistake
+3. System detects "flubber" keyword at timestamp 00:15
+4. Analyzes words before "flubber", finds repeated phrase "Welcome to episode 42 with our guest"
+5. Cuts from 00:10 to 00:15 (removes "John... wait no... flubber")
+6. Final audio: "Welcome to episode 42 with our guest Sarah Johnson" (seamless)
+
+**Code Location:**
+- `backend/api/routers/flubber.py` - Flubber detection & cutting endpoints
+- `backend/api/services/flubber_helper.py` - Audio cutting logic
+- `backend/api/services/keyword_detector.py` - "flubber" keyword detection in transcript
+
+**DO NOT:**
+- ❌ Call Flubber "filler word removal"
+- ❌ Compare Flubber to Auphonic's automatic filler word cutting (they are completely different)
+- ❌ Assume Flubber removes "um" or "uh" (it doesn't - it only cuts sections marked with the keyword "flubber")
+- ❌ Suggest Flubber as an alternative to automatic filler word removal tools
+
+**Filler word removal (separate feature we DON'T have):**
+- Automatic detection of "um", "uh", "like", "you know" throughout entire episode
+- Removes these words automatically without user marking them
+- Continuous processing, not keyword-triggered
+- We currently DO NOT have this feature (would need to build or use Auphonic)
+
+### Subscription Tier → Transcription Pipeline Routing (CRITICAL)
+
+**PRODUCTION SPECIFICATION (DO NOT CHANGE WITHOUT USER APPROVAL):**
+
+| Tier | Price | Transcription Pipeline | Audio Processing |
+|------|-------|----------------------|------------------|
+| **Pro** | $79/mo | **Auphonic** | Professional (denoise, leveling, EQ, filler removal) |
+| **Free** | 30 min | **AssemblyAI** | Custom (manual cleanup, Flubber, Intern) |
+| **Creator** | $39/mo | **AssemblyAI** | Custom (manual cleanup, Flubber, Intern) |
+| **Unlimited** | Custom | **AssemblyAI** | Custom (manual cleanup, Flubber, Intern) |
+
+**Key Implementation:**
+- `backend/api/services/auphonic_helper.py::should_use_auphonic()` - Tier routing logic
+- `backend/worker/tasks/assembly/orchestrator.py::_finalize_episode()` - Calls routing function
+- Only Pro tier returns `True`, all other tiers return `False`
+
+**CRITICAL RULES:**
+- ❌ NEVER assume Creator or Unlimited tiers use Auphonic
+- ❌ NEVER guess at tier behavior without checking the code
+- ✅ Pro tier = Auphonic (handles transcription, filler removal, all processing)
+- ✅ All other tiers = AssemblyAI + custom processing pipeline
+- ✅ If in doubt, ASK the user before changing tier routing logic
 
 ## Critical Architecture Patterns
 
@@ -245,22 +367,38 @@ gcloud builds submit --config=cloudbuild.yaml --region=us-west1
 
 > **Note:** These are NOT in priority order - all need fixing as time permits
 
-### Email Notifications (Broken)
-- **Problem:** Email notifications don't send for: (1) raw files ready for assembly, (2) episode assembly complete
-- **Location to check:** `services/mailer.py`, check for send triggers in `routers/media.py` (upload complete), `routers/tasks.py` or `services/episodes/assembler.py` (assembly complete)
+### Email Notifications (Partially Fixed - Oct 19)
+- **Status:** Episode assembly emails NOW FIXED ✅, raw file transcription emails still need investigation
+- **Fixed:** Episode assembly completion emails now send via `worker/tasks/assembly/orchestrator.py::_finalize_episode()`
+- **Remaining Problem:** Raw file transcription completion emails may not be working (needs verification)
+- **Location to check:** `services/mailer.py`, `routers/media.py` (upload complete), transcription task email triggers
+- **See:** `EPISODE_ASSEMBLY_EMAIL_FIX_OCT19.md` for completed fix details
 - **Related:** Email service configuration, SMTP settings, async task execution
 
-### Raw File Lifecycle Management (Missing Features)
-- **Problem 1:** No "safe to delete" message after raw file used in successful episode
-- **Problem 2:** No auto-delete setting for used raw files
-- **Location to check:** `models/podcast.py` (MediaItem model), `routers/media.py`, need to track episode→raw_file relationship and add cleanup logic
-- **Design note:** Need UI switch + backend job to mark/delete files after episode publish
+### Raw File Lifecycle Management (BACKEND COMPLETE - Oct 23)
+- **Status:** ✅ Backend implementation complete, ⏳ awaiting frontend integration
+- **Fixed:** "Safe to delete" notifications now created when auto-delete disabled
+- **Implementation:**
+  - Added `used_in_episode_id` field to MediaItem model (tracks which episode used the file)
+  - Enhanced `_cleanup_main_content()` in orchestrator to create notifications when auto_delete=False
+  - Migration 029 adds database column automatically on deployment
+  - Notification created: "Your raw file 'X' was successfully used in 'Episode Y' and can now be safely deleted"
+- **Files Modified:** 
+  - `backend/api/models/podcast.py` - MediaItem model
+  - `backend/worker/tasks/assembly/orchestrator.py` - Notification logic
+  - `backend/migrations/029_add_mediaitem_used_in_episode.py` - Database migration
+  - `backend/api/startup_tasks.py` - Migration registration
+- **Frontend TODO:** Media Library needs badges showing "Used in Episode X" for files where `used_in_episode_id IS NOT NULL`
+- **See:** `RAW_FILE_CLEANUP_NOTIFICATION_IMPLEMENTATION_OCT23.md` for complete technical details
 
-### Raw File "Processing" State Bug (Critical for Dev)
-- **Problem:** Raw files stuck in broken "processing" state when new build deployed
-- **Symptom:** Very annoying during frequent rebuilds
-- **Location to check:** `models/podcast.py` (MediaItem status field?), startup tasks that might need to reset orphaned processing states
-- **Possible fix:** Add migration to reset stale "processing" states on startup, or timeout logic
+### Raw File "Processing" State Bug (FIXED - Oct 23)
+- **Problem SOLVED:** Raw files stuck in broken "processing" state when new build deployed
+- **Root Cause:** Cloud Run ephemeral storage wiped on deployment, local transcript files lost
+- **Solution:** Proactive transcript recovery at startup (`_recover_raw_file_transcripts()` in `startup_tasks.py`)
+- **Implementation:** Queries `MediaTranscript` table, downloads missing transcripts from GCS, restores to local storage
+- **Files Modified:** `backend/api/startup_tasks.py`
+- **See:** `RAW_FILE_TRANSCRIPT_RECOVERY_FIX_OCT23.md` for complete technical details
+- **Status:** ✅ Fixed - transcript recovery runs automatically on every deployment
 
 ### Flubber Audio Cutting (Needs Testing)
 - **Status:** May be fixed but untested
@@ -312,11 +450,19 @@ gcloud builds submit --config=cloudbuild.yaml --region=us-west1
 - **Location to check:** `docs/AI_KNOWLEDGE_BASE.md`, `routers/assistant.py`, frontend `components/assistant/`
 - **Action needed:** Review knowledge base for accuracy, update outdated workflows, test common user questions
 
-### User Deletion 405 Error
-- **Status:** Currently broken in production
-- **Endpoint:** DELETE `/api/users/{user_id}` or admin equivalent
-- **Symptom:** 405 Method Not Allowed
-- **Location to check:** `routers/users.py`, `routers/admin.py`, `routing.py`
+### User Deletion 500 Error (FIXED - Oct 17)
+- **Problem:** 500 Internal Server Error when deleting users via admin dashboard
+- **Root Cause:** Database foreign key constraint violations - missing cascade deletion for child records
+- **Solution:** Implemented comprehensive cascade deletion for all user-related tables (terms, verifications, subscriptions, notifications, assistant data, websites)
+- **Files Fixed:** `backend/api/routers/admin/users.py`
+- **See:** `ADMIN_USER_DELETE_500_FIX_OCT17.md`
+
+### Admin Podcasts Tab (FIXED - Oct 17)
+- **Problem:** Podcasts tab in admin dashboard completely broken
+- **Root Cause:** Missing `useResolvedTimezone()` hook in `AdminPodcastsTab` component
+- **Solution:** Added timezone hook and defensive date formatting with fallbacks
+- **Files Fixed:** `frontend/src/components/admin-dashboard.jsx`
+- **See:** `ADMIN_PODCASTS_TAB_FIX_OCT17.md`
 
 ### OP3 Analytics Intermittent Issues
 - **Status:** Ongoing reliability problems
@@ -387,8 +533,53 @@ gcloud builds submit --config=cloudbuild.yaml --region=us-west1
 - **See:** `INTRO_OUTRO_CONTINUE_FIX_OCT14.md` for full details
 - **Status:** ✅ Fixed - awaiting production verification
 
+### TERMS VERSION MANAGEMENT (Oct 22 - CRITICAL FIX)
+- **Problem SOLVED**: Users forced to re-accept terms multiple times per day
+- **Root Cause**: `TERMS_VERSION` bumped from "2025-09-01" to "2025-09-19" but existing users still had old version
+- **Solution**: Automatic migration on startup (`backend/migrations/099_auto_update_terms_versions.py`)
+- **Files Modified**: 
+  - `backend/api/core/config.py` - Updated TERMS_VERSION with warning comments
+  - `backend/api/startup_tasks.py` - Added auto-migration execution
+  - `backend/migrations/099_auto_update_terms_versions.py` - NEW migration file
+- **CRITICAL RULE**: Only bump `TERMS_VERSION` when terms content actually changes (not for deployments/dates)
+- **See**: `TERMS_RE_ACCEPTANCE_BUG_FIX_OCT22.md` for complete fix documentation
+- **See**: `TERMS_VERSION_MANAGEMENT_CRITICAL.md` for management guidelines
+- **Status**: ✅ Fixed - auto-migration runs on every deployment
+
+### OAuth Google Login Timeouts (FIXED - Oct 19)
+- **Problem:** Intermittent 30-second timeout when clicking "Sign in with Google", works on refresh
+- **Root Cause:** (1) OAuth client fetching Google metadata on EVERY request, (2) No retry logic for transient network failures
+- **Solution:** Global OAuth client caching + automatic retry with cache invalidation on timeout
+- **Files Modified:**
+  - `backend/api/routers/auth/utils.py` - Added `_oauth_client_cache` global, cache OAuth client after first successful init
+  - `backend/api/routers/auth/oauth.py` - Added 3-attempt retry loop with timeout detection in `login_google()` endpoint
+- **Benefits:**
+  - Metadata fetched ONCE per server lifetime (not per-request) = 99% of timeouts eliminated
+  - Automatic retry (3 attempts) for transient failures = better UX
+  - User-friendly 503 error message instead of generic 500
+- **See:** `OAUTH_TIMEOUT_RESILIENCE_OCT19.md` for complete technical analysis
+- **Status:** ✅ Fixed - awaiting production testing
+
 *Update this section as issues are discovered or resolved - not in priority order*
+
+## Recent UI Improvements
+
+### Episode Creation Two-Button Interface (Oct 19)
+- **Change:** Dashboard now shows TWO separate entry points for episode creation instead of one combined flow
+- **Buttons:**
+  - **"Record or Upload Audio"** (Mic icon) - Always visible, primary style, goes directly to recorder/uploader
+  - **"Assemble New Episode"** (Library icon) - Conditional visibility (only when ready audio exists), outline style, goes to Step 2 with preuploaded mode
+- **Visibility Logic:** "Assemble New Episode" only shows when `preuploadItems.some((item) => item?.transcript_ready) === true`
+- **Files Modified:**
+  - `frontend/src/components/dashboard.jsx` - Two-button implementation
+  - `frontend/src/components/dashboard/hooks/usePodcastCreator.js` - Step 2 title changed to "Select Main Content"
+  - `frontend/src/components/dashboard/podcastCreatorSteps/StepUploadAudio.jsx` - Removed confusing audio prep checklist
+- **Rationale:** Separates "prepare audio" from "create episode" workflows to reduce cognitive load for users with ready audio
+- **Icons:** lucide-react `Mic` and `Library` icons
+- **Tour Impact:** Dashboard tour needs update - `data-tour-id="dashboard-new-episode"` no longer exists, now `dashboard-record-upload` and `dashboard-assemble-episode`
+- **See:** `EPISODE_INTERFACE_SEPARATION_OCT19.md` for full implementation details
+- **Status:** ✅ Implemented - awaiting production testing
 
 ---
 
-*Last updated: 2025-10-14*
+*Last updated: 2025-10-19*

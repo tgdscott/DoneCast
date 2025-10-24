@@ -22,6 +22,10 @@ export default function Waveform({ src, height = 96, start, end, onReady, onMark
 
   useEffect(() => {
     if (!containerRef.current) return;
+    
+    // Detect if mobile for touch optimizations
+    const isMobile = window.innerWidth < 768;
+    
     const ws = WaveSurfer.create({
       container: containerRef.current,
       waveColor: '#9CA3AF',
@@ -30,6 +34,10 @@ export default function Waveform({ src, height = 96, start, end, onReady, onMark
       height,
       normalize: true,
       backend: 'webaudio',
+      // Mobile optimizations
+      interact: true,
+      hideScrollbar: isMobile,
+      minPxPerSec: isMobile ? 50 : 100, // Larger waveform segments for easier touch
     });
     const regions = ws.registerPlugin(RegionsPlugin.create());
     wsRef.current = ws;
@@ -38,6 +46,17 @@ export default function Waveform({ src, height = 96, start, end, onReady, onMark
     ws.on('ready', () => {
       if (typeof onReady === 'function') onReady(ws);
       try { setDurationSec(ws.getDuration()); } catch {}
+      
+      // Prevent zoom on double-tap (mobile)
+      if (containerRef.current) {
+        const preventZoom = (e) => {
+          if (e.touches && e.touches.length > 1) {
+            e.preventDefault();
+          }
+        };
+        containerRef.current.addEventListener('touchstart', preventZoom, { passive: false });
+      }
+      
       // initialize region if provided
       if (typeof start === 'number') {
         const s = Math.max(0, start);
@@ -136,11 +155,11 @@ export default function Waveform({ src, height = 96, start, end, onReady, onMark
           />
         )}
       </div>
-      <div className="mt-1 flex items-center gap-2">
+      <div className="mt-2 flex items-center gap-2 flex-wrap">
         <button
           type="button"
           onClick={handlePlayPause}
-          className="px-2 py-1 text-xs rounded border bg-white hover:bg-gray-50"
+          className="touch-target px-3 py-2 text-sm rounded border bg-white hover:bg-gray-50"
         >
           {isPlaying ? 'Pause' : 'Play'}
         </button>
@@ -148,7 +167,7 @@ export default function Waveform({ src, height = 96, start, end, onReady, onMark
           <button
             type="button"
             onClick={handleCut}
-            className="px-2 py-1 text-xs rounded border bg-red-50 text-red-700 hover:bg-red-100"
+            className="touch-target px-3 py-2 text-sm rounded border bg-red-50 text-red-700 hover:bg-red-100"
           >
             {cutButtonLabel}
           </button>

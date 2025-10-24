@@ -140,8 +140,8 @@ def _generate_podcast_rss(podcast: Podcast, episodes: List[Episode], base_url: s
             logger.info(f"RSS Feed: Generating audio URL for episode {episode.episode_number}: {episode.gcs_audio_path}")
             audio_url = get_public_audio_url(episode.gcs_audio_path, expiration_days=7)
             if audio_url:
-                # Add OP3 analytics prefix for download tracking
-                audio_url = f"https://op3.dev/e/{audio_url}"
+                # Add self-hosted OP3 analytics prefix for download tracking
+                audio_url = f"https://analytics.podcastplusplus.com/e/{audio_url}"
                 logger.info(f"RSS Feed: Generated OP3-prefixed URL for episode {episode.episode_number}")
             else:
                 logger.warning(f"RSS Feed: Failed to generate audio URL for episode {episode.episode_number}")
@@ -230,11 +230,27 @@ def get_podcast_feed(
     if not podcast:
         raise HTTPException(status_code=404, detail="Podcast not found")
     
-    # Get all published episodes, ordered by publish date (newest first)
+    # Get all episodes with audio available, regardless of published/scheduled status
+    # CRITICAL FIX (Oct 21): Scheduled episodes MUST be playable - they have assembled audio in GCS
+    # The publish_at date controls WHEN they appear in podcast apps, but the audio itself
+    # should be accessible as soon as it exists (for preview, manual editor, etc.)
+    #
+    # Include episodes that are:
+    # 1. Published (status == published)
+    # 2. Scheduled (status has future publish_at) - these have assembled audio ready
+    # 3. Processed (status == processed) - fallback for episodes without explicit publish
+    #
+    # Filter out:
+    # - Episodes without audio (no gcs_audio_path)
+    # - Draft/pending/error episodes
     statement = (
         select(Episode)
         .where(Episode.podcast_id == podcast.id)
-        .where(Episode.status == EpisodeStatus.published)
+        .where(
+            (Episode.status == EpisodeStatus.published) |
+            (Episode.status == EpisodeStatus.processed)  # Includes scheduled episodes
+        )
+        .where(Episode.gcs_audio_path != None)  # Must have audio in GCS
         .order_by(desc(Episode.publish_at))
     )
     episodes = session.exec(statement).all()

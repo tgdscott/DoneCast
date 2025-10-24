@@ -3,10 +3,50 @@ import react from '@vitejs/plugin-react'
 import path from "path"
 import { visualizer } from 'rollup-plugin-visualizer'
 
+// Chunk load retry plugin - handles stale chunk errors after deployments
+function chunkLoadRetryPlugin() {
+  return {
+    name: 'chunk-load-retry',
+    async buildEnd() {
+      // No-op at build time
+    },
+    transformIndexHtml() {
+      return [
+        {
+          tag: 'script',
+          injectTo: 'head-prepend',
+          children: `
+            // Detect chunk load failures and retry with cache bust
+            const originalImport = window.__vite_dynamic_import__;
+            if (originalImport) {
+              window.__vite_dynamic_import__ = async (id) => {
+                try {
+                  return await originalImport(id);
+                } catch (error) {
+                  // Check if this is a chunk load failure
+                  if (error?.message?.includes('Failed to fetch dynamically imported module')) {
+                    console.warn('[Chunk Retry] Stale chunk detected, reloading page...');
+                    // Force hard reload to get fresh HTML with new chunk hashes
+                    window.location.reload();
+                    // Return a never-resolving promise to prevent further errors
+                    return new Promise(() => {});
+                  }
+                  throw error;
+                }
+              };
+            }
+          `,
+        },
+      ];
+    },
+  };
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
     react(),
+    chunkLoadRetryPlugin(),
     ...(process.env.ANALYZE_BUNDLE ? [visualizer({ filename: 'dist/bundle-stats.html', open: true })] : []),
   ],
   build: {

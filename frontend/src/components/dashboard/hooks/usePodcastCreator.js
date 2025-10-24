@@ -13,6 +13,7 @@ export default function usePodcastCreator({
   preselectedMainFilename,
   preselectedTranscriptReady,
   creatorMode = 'standard',
+  wasRecorded = false,
   preselectedStartStep,
 }) {
   const { user: authUser } = useAuth();
@@ -55,6 +56,7 @@ export default function usePodcastCreator({
   const [minutesPrecheck, setMinutesPrecheck] = useState(null);
   const [minutesPrecheckPending, setMinutesPrecheckPending] = useState(false);
   const [minutesPrecheckError, setMinutesPrecheckError] = useState(null);
+  const [precheckRetrigger, setPrecheckRetrigger] = useState(0);
   const [episodeDetails, setEpisodeDetails] = useState({
     season: '1',
     episodeNumber: '',
@@ -302,7 +304,7 @@ export default function usePodcastCreator({
     return () => {
       cancelled = true;
     };
-  }, [token, selectedTemplate?.id, uploadedFilename]);
+  }, [token, selectedTemplate?.id, uploadedFilename, precheckRetrigger]);
 
   useEffect(() => {
     const tplId = selectedTemplate?.id;
@@ -760,12 +762,15 @@ export default function usePodcastCreator({
     let canceled = false;
     const api = makeApi(token);
     const payload = { filename: sourceFilename };
-    try {
-      const voiceId = resolveInternVoiceId();
-      if (voiceId) payload.voice_id = voiceId;
-    } catch (_) {}
     if (selectedTemplate?.id) {
       payload.template_id = selectedTemplate.id;
+      // Let backend resolve voice from template
+    } else {
+      // Only include voice_id if no template (fallback)
+      try {
+        const voiceId = resolveInternVoiceId();
+        if (voiceId) payload.voice_id = voiceId;
+      } catch (_) {}
     }
 
     (async () => {
@@ -889,7 +894,7 @@ export default function usePodcastCreator({
   }, [jobId, token, expectedEpisodeId]);
 
   const steps = useMemo(() => {
-    const stepTwoTitle = creatorMode === 'preuploaded' ? 'Choose Audio' : 'Upload Audio';
+    const stepTwoTitle = creatorMode === 'preuploaded' ? 'Choose Audio' : 'Select Main Content';
     const stepTwoIcon = creatorMode === 'preuploaded' ? 'Library' : 'FileUp';
     return [
       { number: 1, title: 'Select Template', icon: 'BookText' },
@@ -1596,10 +1601,13 @@ export default function usePodcastCreator({
       const payload = {
         filename,
         end_s: endSeconds,
-        voice_id: resolveInternVoiceId() || undefined,
       };
       if (selectedTemplate?.id) {
         payload.template_id = selectedTemplate.id;
+        // Let backend resolve voice from template
+      } else {
+        // Only include voice_id if no template (fallback)
+        payload.voice_id = resolveInternVoiceId() || undefined;
       }
       const commandId = context?.command_id ?? context?.intern_index ?? context?.id ?? context?.index ?? (typeof context?.__index === 'number' ? context.__index : null);
       if (commandId != null) payload.command_id = commandId;
@@ -1694,10 +1702,13 @@ export default function usePodcastCreator({
           setStatusMessage('Preparing intern commands...');
           const api = makeApi(token);
           const payload = { filename: sourceFilename };
-          const voiceId = resolveInternVoiceId();
-          if (voiceId) payload.voice_id = voiceId;
           if (selectedTemplate?.id) {
             payload.template_id = selectedTemplate.id;
+            // Let backend resolve voice from template
+          } else {
+            // Only include voice_id if no template (fallback)
+            const voiceId = resolveInternVoiceId();
+            if (voiceId) payload.voice_id = voiceId;
           }
           const data = await api.post('/api/intern/prepare-by-file', payload);
           const contexts = Array.isArray(data?.contexts)
@@ -2082,6 +2093,10 @@ export default function usePodcastCreator({
     setCurrentStep(3);
   };
 
+  const retryMinutesPrecheck = useCallback(() => {
+    setPrecheckRetrigger(prev => prev + 1);
+  }, []);
+
   return {
     currentStep,
     setCurrentStep,
@@ -2091,6 +2106,7 @@ export default function usePodcastCreator({
     setSelectedTemplate,
     uploadedFile,
     uploadedFilename,
+    wasRecorded,
     fileInputRef,
     coverArtInputRef,
     coverCropperRef,
@@ -2159,6 +2175,7 @@ export default function usePodcastCreator({
     minutesDialog,
     setMinutesDialog,
     refreshUsage,
+    retryMinutesPrecheck,
     buildActive,
     cancelBuild,
     handleTemplateSelect,

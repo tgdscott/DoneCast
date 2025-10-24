@@ -9,6 +9,7 @@ from sqlmodel import Session
 from api.core import crud
 from api.core.config import settings
 from api.core.database import get_session
+from api.core.ip_utils import get_client_ip
 from api.models.user import User, UserPublic
 
 from .utils import get_current_user, to_user_public
@@ -53,10 +54,9 @@ async def accept_terms(
             status_code=400,
             detail="Terms version mismatch. Please refresh and accept the latest terms.",
         )
-    try:
-        ip = request.client.host if request and request.client else None
-    except Exception:
-        ip = None
+    
+    # Get the real client IP address (handles Cloud Run proxy)
+    ip = get_client_ip(request)
     ua = request.headers.get("user-agent", "") if request and request.headers else None
     crud.record_terms_acceptance(
         session=session,
