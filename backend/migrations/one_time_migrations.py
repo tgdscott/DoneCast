@@ -13,35 +13,40 @@ from __future__ import annotations
 import logging
 from sqlalchemy import inspect, text
 from api.core.database import engine
+from .migration_tracker import run_migration_once, get_pending_migrations
 
 log = logging.getLogger(__name__)
 
 
 def run_one_time_migrations() -> dict[str, bool]:
     """
-    Execute all one-time migrations.
+    Execute all one-time migrations using tracker to prevent re-running.
     
     Returns:
         dict mapping migration name to completion status (True = completed/skipped)
     """
     results = {}
     
-    # Add new migrations here as needed
-    # Once they show "skipped" in production, delete them and the function
+    # Run migrations only if not already completed (tracked in migration_tracker table)
+    # Once they show "already completed, skipping" delete them and the function
     
-    # Example migration (DELETE THIS after it runs in production):
-    results["ensure_user_admin_column"] = _ensure_user_admin_column()
-    results["ensure_user_role_column"] = _ensure_user_role_column()
-    results["ensure_user_terms_columns"] = _ensure_user_terms_columns()
-    results["ensure_episode_gcs_columns"] = _ensure_episode_gcs_columns()
-    results["ensure_rss_feed_columns"] = _ensure_rss_feed_columns()
-    results["ensure_website_sections_columns"] = _ensure_website_sections_columns()
-    results["ensure_auphonic_columns"] = _ensure_auphonic_columns()
-    results["ensure_tier_configuration_tables"] = _ensure_tier_configuration_tables()
-    results["ensure_mediaitem_episode_tracking"] = _ensure_mediaitem_episode_tracking()
-    results["ensure_feedback_enhanced_columns"] = _ensure_feedback_enhanced_columns()
-    results["audit_terms_acceptance"] = _audit_terms_acceptance()
-    results["auto_migrate_terms_versions"] = _auto_migrate_terms_versions()
+    results["ensure_user_admin_column"] = run_migration_once("ensure_user_admin_column", _ensure_user_admin_column)
+    results["ensure_user_role_column"] = run_migration_once("ensure_user_role_column", _ensure_user_role_column)
+    results["ensure_user_terms_columns"] = run_migration_once("ensure_user_terms_columns", _ensure_user_terms_columns)
+    results["ensure_episode_gcs_columns"] = run_migration_once("ensure_episode_gcs_columns", _ensure_episode_gcs_columns)
+    results["ensure_rss_feed_columns"] = run_migration_once("ensure_rss_feed_columns", _ensure_rss_feed_columns)
+    results["ensure_website_sections_columns"] = run_migration_once("ensure_website_sections_columns", _ensure_website_sections_columns)
+    results["ensure_auphonic_columns"] = run_migration_once("ensure_auphonic_columns", _ensure_auphonic_columns)
+    results["ensure_tier_configuration_tables"] = run_migration_once("ensure_tier_configuration_tables", _ensure_tier_configuration_tables)
+    results["ensure_mediaitem_episode_tracking"] = run_migration_once("ensure_mediaitem_episode_tracking", _ensure_mediaitem_episode_tracking)
+    results["ensure_feedback_enhanced_columns"] = run_migration_once("ensure_feedback_enhanced_columns", _ensure_feedback_enhanced_columns)
+    results["audit_terms_acceptance"] = run_migration_once("audit_terms_acceptance", _audit_terms_acceptance)
+    results["auto_migrate_terms_versions"] = run_migration_once("auto_migrate_terms_versions", _auto_migrate_terms_versions)
+    
+    # Check for pending migrations
+    pending = get_pending_migrations()
+    if pending:
+        log.warning(f"[migrations] Migrations with failures: {', '.join(pending)}")
     
     return results
 
