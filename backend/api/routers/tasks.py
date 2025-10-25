@@ -23,6 +23,11 @@ from pydantic import BaseModel, ValidationError
 from starlette.requests import ClientDisconnect
 
 from api.core.paths import MEDIA_DIR
+from worker.tasks.assembly.chunk_worker import (
+    ProcessChunkPayload,
+    run_chunk_processing,
+    validate_process_chunk_payload,
+)
 
 log = logging.getLogger("tasks.transcribe")
 
@@ -281,6 +286,7 @@ async def assemble_episode_task(request: Request, x_tasks_auth: str | None = Hea
 
 # -------------------- Process Audio Chunk (Cloud Tasks) --------------------
 
+
 class ProcessChunkIn(BaseModel):
     """Payload for processing a single audio chunk."""
     episode_id: str
@@ -523,7 +529,6 @@ def run_chunk_processing(payload_data: Dict[str, Any]) -> None:
             exc,
         )
 
-
 @router.post("/process-chunk")
 async def process_chunk_task(request: Request, x_tasks_auth: str | None = Header(default=None)):
     """Process a single audio chunk via Cloud Tasks.
@@ -556,13 +561,14 @@ async def process_chunk_task(request: Request, x_tasks_auth: str | None = Header
         raise HTTPException(status_code=400, detail="invalid JSON body")
 
     try:
-        payload = _validate_process_chunk_payload(data)
+        payload: ProcessChunkPayload = validate_process_chunk_payload(data)
     except ValidationError as ve:
         raise HTTPException(status_code=400, detail=f"invalid payload: {ve}")
 
     import multiprocessing
     process = multiprocessing.Process(
         target=run_chunk_processing,
+
         args=(payload.model_dump(),),
         name=f"chunk-{payload.chunk_id}",
         daemon=False,  # CRITICAL: Allow process to finish even if parent exits

@@ -255,13 +255,16 @@ def enqueue_http_task(path: str, body: dict) -> dict:
         raise ValueError("Missing required Cloud Tasks configuration: GOOGLE_CLOUD_PROJECT, TASKS_LOCATION, TASKS_QUEUE")
     parent = client.queue_path(project, location, queue)
     
-    # Route assembly tasks to dedicated worker service for isolation
-    # Other tasks can still go to main API service
-    if "/assemble" in path:
+    # Route heavy tasks to dedicated worker service for isolation
+    if "/assemble" in path or "/process-chunk" in path:
         base_url = os.getenv("WORKER_URL_BASE") or os.getenv("TASKS_URL_BASE")
     else:
         base_url = os.getenv("TASKS_URL_BASE")
+
+    if not base_url:
+        raise ValueError("Missing TASKS_URL_BASE (and WORKER_URL_BASE for worker-bound tasks)")
     
+    base_url = base_url.rstrip("/")
     url = f"{base_url}{path}"
     
     # Build HTTP request
