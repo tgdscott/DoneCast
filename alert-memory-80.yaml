@@ -1,0 +1,14 @@
+displayName: "Memory Usage Above 80%"
+notificationChannels:
+  - "projects/podcast612/notificationChannels/2227377111059803454"
+conditions:
+  - displayName: "High Memory Usage"
+    conditionThreshold:
+      filter: 'resource.type="cloud_run_revision" AND resource.labels.service_name="podcast-api" AND metric.type="run.googleapis.com/container/memory/utilizations"'
+      comparison: COMPARISON_GT
+      thresholdValue: 0.8
+      duration: 300s
+      aggregations:
+        - alignmentPeriod: 60s
+          perSeriesAligner: ALIGN_PERCENTILE_99
+combiner: OR

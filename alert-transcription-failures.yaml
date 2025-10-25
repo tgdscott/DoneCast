@@ -1,0 +1,11 @@
+displayName: "Transcription Failures"
+notificationChannels:
+  - "projects/podcast612/notificationChannels/2227377111059803454"
+conditions:
+  - displayName: "Transcription Errors"
+    conditionMatchedLog:
+      filter: 'resource.type="cloud_run_revision" AND resource.labels.service_name="podcast-api" AND (textPayload=~"ERROR.*transcription.*failed" OR textPayload=~"ERROR.*AssemblyAI" OR textPayload=~"ERROR.*Auphonic")'
+alertStrategy:
+  notificationRateLimit:
+    period: 300s
+combiner: OR

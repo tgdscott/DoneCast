@@ -1,23 +1,52 @@
-﻿.venv/
+﻿# Python virtual environments
+.venv/
 venv/
+
+# Environment files
 .env*
+
+# Node.js
 node_modules/
 frontend/node_modules/
 frontend/.vite/
 frontend/.next/
 frontend/dist/
+
+# Build artifacts
 dist/
 build/
+
+# Python cache
 **/__pycache__/
 **/*.pyc
+*.pyc
+__pycache__/
+
+# OS files
 .DS_Store
 Thumbs.db
+
+# Git
 .git/
+.github/
+
+# Audio files (dev only - production uses GCS)
 *.wav
 *.mp3
 *.flac
 *.ogg
 *.m4a
+*.aac
+*.mp4
+*.webm
+
+# Local development directories (CRITICAL - these are huge!)
+backend/local_media/
+backend/local_tmp/
+local_media/
+local_tmp/
+
+# Legacy/archive directories
 ai_segments/
 assembly_logs/
 cleaned_audio/
@@ -28,10 +57,32 @@ transcripts/
 backend/cleaned_audio/
 backend/media_uploads/
 backend/final_episodes/
+_archive/
+_spreaker_removal_backup/
+
+# Database tools
 cloud-sql-proxy.exe
+
+# Logs and temp files
 logs.txt
 recent_logs*.txt
 recent_logs*.json
 backup_*.txt
+*.log
+
+# Recovery/temp directories
 _cloudrun_recover_*/
 recovered-app/
+temp_migration/
+tmp/
+
+# Documentation (not needed in production)
+docs/
+*.md
+!README.md
+
+# Test files
+tests/
+backend/tests/
+pytest.ini
+.pytest_cache/

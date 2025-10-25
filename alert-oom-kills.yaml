@@ -1,0 +1,11 @@
+displayName: "OOM Kills Detected"
+notificationChannels:
+  - "projects/podcast612/notificationChannels/2227377111059803454"
+conditions:
+  - displayName: "Out of Memory Errors"
+    conditionMatchedLog:
+      filter: 'resource.type="cloud_run_revision" AND textPayload=~"Memory limit.*exceeded"'
+alertStrategy:
+  notificationRateLimit:
+    period: 300s
+combiner: OR

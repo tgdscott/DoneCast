@@ -1,0 +1,11 @@
+displayName: "Episode Assembly Failures"
+notificationChannels:
+  - "projects/podcast612/notificationChannels/2227377111059803454"
+conditions:
+  - displayName: "Assembly Task Errors"
+    conditionMatchedLog:
+      filter: 'resource.type="cloud_run_revision" AND resource.labels.service_name="podcast-api" AND (textPayload=~"ERROR.*assemble.*failed" OR textPayload=~"ERROR.*chunk.*failed")'
+alertStrategy:
+  notificationRateLimit:
+    period: 300s
+combiner: OR

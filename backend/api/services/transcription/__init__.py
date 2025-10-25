@@ -310,6 +310,47 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
 
     # DEBUG: Log what we received
     logging.info(f"[transcription] 🎬 CALLED with filename={filename}, user_id={user_id!r} (type={type(user_id).__name__})")
+    
+    # ========== IDEMPOTENCY CHECK: Prevent duplicate transcriptions ==========
+    # Critical for container restarts: if this file is already transcribed, return cached result
+    try:
+        from api.core.database import get_session
+        from api.models.transcription import MediaTranscript
+        from sqlmodel import select
+        
+        session = next(get_session())
+        
+        # Check if transcript already exists for this filename
+        existing_transcript = session.exec(
+            select(MediaTranscript).where(MediaTranscript.filename == filename)
+        ).first()
+        
+        if existing_transcript:
+            logging.warning(
+                "[transcription] ⚠️ IDEMPOTENCY: Transcript already exists for %s (created %s) - returning cached result to prevent duplicate charges",
+                filename,
+                existing_transcript.created_at
+            )
+            
+            # Return cached transcript data
+            try:
+                import json
+                transcript_meta = json.loads(existing_transcript.transcript_meta_json or "{}")
+                if transcript_meta.get("words"):
+                    logging.info(
+                        "[transcription] ✅ Returning %d words from cached transcript",
+                        len(transcript_meta["words"])
+                    )
+                    return transcript_meta["words"]
+                else:
+                    logging.warning("[transcription] ⚠️ Cached transcript has no words, will re-transcribe")
+            except Exception as cache_err:
+                logging.error("[transcription] ❌ Failed to parse cached transcript: %s", cache_err)
+                # Fall through to re-transcribe if cache is corrupt
+    except Exception as idempotency_err:
+        logging.error("[transcription] ⚠️ Idempotency check failed (non-fatal): %s", idempotency_err)
+        # Fall through to transcribe if idempotency check fails
+    # ========== END IDEMPOTENCY CHECK ==========
 
     # ========== CHARGE CREDITS FOR TRANSCRIPTION (UPFRONT) ==========
     # We charge upfront even if transcription fails because we pay the API regardless

@@ -12,7 +12,6 @@ mounts it early.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -24,7 +23,6 @@ from pydantic import BaseModel, ValidationError
 from starlette.requests import ClientDisconnect
 
 from api.core.paths import MEDIA_DIR
-from api.services.transcription import transcribe_media_file  # type: ignore
 
 log = logging.getLogger("tasks.transcribe")
 
@@ -55,6 +53,9 @@ async def _dispatch_transcription(
     suppress_errors: bool
 ) -> None:
     """Execute transcription in a worker thread, optionally suppressing exceptions."""
+    import asyncio
+    from api.services.transcription import transcribe_media_file  # type: ignore
+    
     loop = asyncio.get_running_loop()
     log.info("event=tasks.transcribe.start filename=%s user_id=%s request_id=%s", filename, user_id, request_id)
     try:
@@ -141,6 +142,7 @@ async def transcribe_endpoint(request: Request, x_tasks_auth: str | None = Heade
 
     if _IS_DEV:
         _ensure_local_media_present(filename)
+        import asyncio
         asyncio.create_task(_dispatch_transcription(filename, user_id, request_id, suppress_errors=True))
         return {"started": True, "async": True}
 

@@ -25,10 +25,12 @@ def enqueue_task(
     *,
     url_base: Optional[str] = None,
     schedule_seconds: Optional[int] = None,
+    dispatch_deadline_seconds: Optional[int] = None,
 ) -> str:
     """
     Enqueue an HTTP task to POST JSON payload to the given internal path.
     path: e.g. '/internal/tasks/transcribe'
+    dispatch_deadline_seconds: Max time for HTTP request (default 30s, max 1800s)
     """
     client = tasks_v2.CloudTasksClient()
     parent = _queue_path(client)
@@ -49,6 +51,15 @@ def enqueue_task(
         },
         body=json.dumps(payload).encode("utf-8"),
     )
+    
+    # Set dispatch deadline (max time for HTTP request to complete)
+    # Default Cloud Tasks timeout is 30s, which is too short for transcription/assembly
+    # Max allowed is 1800s (30 minutes)
+    if dispatch_deadline_seconds:
+        from google.protobuf import duration_pb2
+        deadline = duration_pb2.Duration()
+        deadline.seconds = min(dispatch_deadline_seconds, 1800)  # Cap at 30 min max
+        http_request.dispatch_deadline = deadline
 
     task = tasks_v2.Task(http_request=http_request)
 

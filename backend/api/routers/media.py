@@ -279,13 +279,17 @@ async def upload_media_files(
             if category == MediaCategory.main_content:
                 # Use Cloud Tasks to schedule transcription
                 from infrastructure.tasks_client import enqueue_http_task  # type: ignore
-                enqueue_http_task("/api/tasks/transcribe", {
+                task_result = enqueue_http_task("/api/tasks/transcribe", {
                     "filename": safe_filename,
                     "user_id": str(current_user.id)  # Pass user_id for tier-based routing
                 })
-        except Exception:
+                import logging
+                logging.getLogger("api.media").info(f"Transcription task enqueued for {safe_filename}: {task_result}")
+        except Exception as e:
             # Non-fatal; upload should still succeed
-            pass
+            # But log the error so we can diagnose why transcription isn't starting
+            import logging
+            logging.getLogger("api.media").error(f"Failed to enqueue transcription task for {safe_filename}: {e}", exc_info=True)
 
     session.commit()
     for item in created_items:
@@ -755,13 +759,13 @@ async def register_upload(
                     # Pro users → Auphonic transcription API
                     # Free/Creator/Unlimited → AssemblyAI transcription API
                     from infrastructure.tasks_client import enqueue_http_task  # type: ignore
-                    enqueue_http_task("/api/tasks/transcribe", {
+                    task_result = enqueue_http_task("/api/tasks/transcribe", {
                         "filename": gcs_url,
                         "user_id": str(current_user.id)
                     })
-                    log.info(f"Scheduled transcription for media_id={media_item.id}, user_id={current_user.id}, gcs_path={gcs_url}")
+                    log.info(f"Transcription task enqueued for media_id={media_item.id}, user_id={current_user.id}, gcs_path={gcs_url}, task={task_result}")
                 except Exception as trans_err:
-                    log.warning(f"Failed to schedule transcription: {trans_err}")
+                    log.error(f"Failed to enqueue transcription task for media_id={media_item.id}: {trans_err}", exc_info=True)
         
         except HTTPException:
             raise

@@ -282,7 +282,7 @@ def charge_for_transcription(
         'duration_minutes': duration_minutes,
         'base_rate': TRANSCRIPTION_RATE,
         'pipeline': cost_calc['pipeline'],
-        'multiplier': cost_calc['multipliers'].get('auphonic'),
+        'multiplier': cost_calc['multipliers'].get('auphonic') or 1.0,
         'total_credits': credits
     }
     

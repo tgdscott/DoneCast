@@ -42,6 +42,7 @@ def run_one_time_migrations() -> dict[str, bool]:
     results["ensure_feedback_enhanced_columns"] = run_migration_once("ensure_feedback_enhanced_columns", _ensure_feedback_enhanced_columns)
     results["audit_terms_acceptance"] = run_migration_once("audit_terms_acceptance", _audit_terms_acceptance)
     results["auto_migrate_terms_versions"] = run_migration_once("auto_migrate_terms_versions", _auto_migrate_terms_versions)
+    results["add_ledgerreason_enum_values"] = run_migration_once("add_ledgerreason_enum_values", _add_ledgerreason_enum_values)
     
     # Check for pending migrations
     pending = get_pending_migrations()
@@ -375,3 +376,23 @@ def _auto_migrate_terms_versions() -> bool:
     except Exception as e:
         log.warning("[migrate] Terms version migration failed: %s", e)
         return False
+
+
+def _add_ledgerreason_enum_values() -> bool:
+    """Add missing enum values to ledgerreason (migration 100)."""
+    import importlib.util
+    import os
+    
+    try:
+        migration_path = os.path.join(os.path.dirname(__file__), '100_add_ledgerreason_enum_values.py')
+        spec = importlib.util.spec_from_file_location('ledger_enum_migration', migration_path)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            module.upgrade()
+        log.debug("[migrate] LedgerReason enum migration completed")
+        return True
+    except Exception as e:
+        log.warning("[migrate] LedgerReason enum migration failed: %s", e)
+        return False
+

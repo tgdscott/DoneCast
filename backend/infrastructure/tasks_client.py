@@ -233,16 +233,30 @@ def enqueue_http_task(path: str, body: dict) -> dict:
         base_url = os.getenv("TASKS_URL_BASE")
     
     url = f"{base_url}{path}"
-    task = {
-        "http_request": {
-            "http_method": tasks_v2.HttpMethod.POST,
-            "url": url,
-            "headers": {"Content-Type": "application/json", "X-Tasks-Auth": os.getenv("TASKS_AUTH")},
-            "body": json.dumps(body).encode(),
-        }
-    }
+    
+    # Build HTTP request
+    http_request = tasks_v2.HttpRequest(
+        http_method=tasks_v2.HttpMethod.POST,
+        url=url,
+        headers={"Content-Type": "application/json", "X-Tasks-Auth": os.getenv("TASKS_AUTH")},
+        body=json.dumps(body).encode(),
+    )
+    
+    # Build task with dispatch deadline
+    # Transcription: Up to 30 minutes for long audio files (Cloud Tasks max is 1800s)
+    # Assembly: Up to 30 minutes for complex episodes with many segments
+    # Chunk Processing: Up to 30 minutes for large chunk downloads and processing
+    # Default Cloud Tasks timeout is only 30s, which causes premature retries
+    # dispatch_deadline is set on the Task object, not HttpRequest
+    if "/transcribe" in path or "/assemble" in path or "/process-chunk" in path:
+        from google.protobuf import duration_pb2
+        deadline = duration_pb2.Duration()
+        deadline.seconds = 1800  # 30 minutes (max allowed by Cloud Tasks)
+        task = tasks_v2.Task(http_request=http_request, dispatch_deadline=deadline)
+    else:
+        task = tasks_v2.Task(http_request=http_request)
     created = client.create_task(request={"parent": parent, "task": task})
-    log.info("event=tasks.cloud.enqueued path=%s url=%s task_name=%s", path, url, created.name)
+    log.info("event=tasks.cloud.enqueued path=%s url=%s task_name=%s deadline=%ds", path, url, created.name, 1800 if ("/transcribe" in path or "/assemble" in path or "/process-chunk" in path) else 30)
     return {"name": created.name}
 
 

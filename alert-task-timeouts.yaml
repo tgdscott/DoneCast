@@ -1,0 +1,11 @@
+displayName: "Cloud Tasks Deadline Exceeded"
+notificationChannels:
+  - "projects/podcast612/notificationChannels/2227377111059803454"
+conditions:
+  - displayName: "Task Timeout Errors"
+    conditionMatchedLog:
+      filter: 'resource.type="cloud_run_revision" AND (textPayload=~"deadline exceeded" OR textPayload=~"DEADLINE_EXCEEDED" OR textPayload=~"Task timed out")'
+alertStrategy:
+  notificationRateLimit:
+    period: 300s
+combiner: OR

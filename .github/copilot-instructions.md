@@ -242,11 +242,36 @@ Several background tasks available (see `.vscode/tasks.json`):
 4. Add route to `attach_routers()` call (order matters for precedence)
 5. Test with `pytest -q tests/api/test_new_feature.py`
 
-### Database Migrations (Additive Only)
-- **No Alembic:** Migrations are Python functions in `backend/migrations/` (numbered like `001_add_slug_column.py`)
-- Execute in `api/startup_tasks.py` → `run_startup_tasks()` (runs in background thread on app start)
-- **Pattern:** Check if change exists before applying (e.g., column exists check via SQLAlchemy inspector)
-- Migrations run automatically on deploy; no manual `alembic upgrade` needed
+### Database Migrations (Manual via PGAdmin)
+- **CRITICAL: All migrations done manually by user via PGAdmin**
+- **Your job:** Provide ONLY the SQL commands needed
+- **DO NOT:**
+  - ❌ Create Python migration files
+  - ❌ Register migrations in `one_time_migrations.py`
+  - ❌ Add to `startup_tasks.py`
+  - ❌ Use Alembic or any automated migration system
+- **DO:**
+  - ✅ Generate clean SQL with idempotent checks (IF NOT EXISTS, DO $$ blocks)
+  - ✅ Include verification queries at the end
+  - ✅ Explain what each SQL statement does
+  - ✅ Provide rollback SQL if applicable
+- **Example output format:**
+  ```sql
+  -- Add new column with safety check
+  DO $$
+  BEGIN
+      IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'users' AND column_name = 'new_field'
+      ) THEN
+          ALTER TABLE users ADD COLUMN new_field TEXT;
+      END IF;
+  END$$;
+  
+  -- Verify
+  SELECT column_name, data_type FROM information_schema.columns 
+  WHERE table_name = 'users' AND column_name = 'new_field';
+  ```
 
 ### Cloud Tasks Queue (Production Pattern)
 - **Local dev:** Tasks may run inline or via local emulator (controlled by `CELERY_AUTO_FALLBACK` env var)

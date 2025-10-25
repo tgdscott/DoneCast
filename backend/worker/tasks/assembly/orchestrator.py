@@ -524,7 +524,7 @@ def _finalize_episode(
             
             # Wait for all chunks to complete
             import time
-            max_wait_seconds = 900  # 15 minutes
+            max_wait_seconds = 1800  # 30 minutes (matches Cloud Tasks deadline)
             poll_interval = 5  # 5 seconds
             start_time = time.time()
             

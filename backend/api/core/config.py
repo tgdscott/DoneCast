@@ -86,6 +86,10 @@ class Settings(BaseSettings):
     PODCAST_WEBSITE_BASE_DOMAIN: str = "podcastplusplus.com"
     PODCAST_WEBSITE_GCS_BUCKET: str = "ppp-websites-us-west1"
     PODCAST_WEBSITE_CUSTOM_DOMAIN_MIN_TIER: str = "pro"
+    
+    # --- Cloud CDN (for faster media delivery and lower bandwidth costs) ---
+    CDN_ENABLED: bool = True  # Set to False to bypass CDN and use direct GCS URLs
+    CDN_IP: str = "34.120.53.200"  # Cloud CDN global load balancer IP
 
     # --- Legal ---
     # CRITICAL: Only change TERMS_VERSION when terms content actually changes!
