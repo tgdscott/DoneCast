@@ -9,7 +9,6 @@ from sqlmodel import Session
 
 from api.core.config import settings
 from api.core.database import get_session
-from api.core.database_retry import retry_on_intrans
 from api.core import crud
 from api.models.user import User
 from api.models.settings import load_admin_settings
@@ -41,7 +40,6 @@ def _raise_jwt_missing(context: str) -> None:
     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
 
 
-@retry_on_intrans(max_retries=3, delay=0.5)
 async def get_current_user(
     request: Request,
     session: Session = Depends(get_session),

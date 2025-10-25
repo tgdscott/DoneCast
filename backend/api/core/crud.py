@@ -4,7 +4,6 @@ from typing import Optional, List, Dict, Any, cast
 from uuid import UUID
 import json
 
-from .database_retry import retry_on_intrans
 from .security import get_password_hash
 from ..models.user import User, UserCreate, UserPublic, UserTermsAcceptance
 from ..models.podcast import Podcast, PodcastTemplate, PodcastTemplateCreate, Episode, EpisodeStatus
@@ -34,7 +33,6 @@ def record_terms_acceptance(session: Session, user: User, version: str, ip: str 
     session.refresh(event)
     return event
 
-@retry_on_intrans(max_retries=3, delay=0.5)
 def get_user_by_email(session: Session, email: str) -> Optional[User]:
     statement = select(User).where(User.email == email)
     return session.exec(statement).first()
