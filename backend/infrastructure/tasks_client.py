@@ -151,6 +151,30 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
             ).start()
             print(f"DEV MODE assemble dispatched for episode {episode_id}")
 
+    def _dispatch_process_chunk(payload: dict) -> None:
+            try:
+                from api.routers.tasks import run_chunk_processing  # type: ignore
+            except Exception as import_err:  # pragma: no cover
+                print(f"DEV MODE chunk processing import failed: {import_err}")
+                return
+
+            chunk_id = str(payload.get("chunk_id") or "").strip() or "unknown"
+
+            def _runner() -> None:
+                try:
+                    print(f"DEV MODE chunk processing start for chunk {chunk_id}")
+                    run_chunk_processing(payload)
+                    print(f"DEV MODE chunk processing finished for chunk {chunk_id}")
+                except Exception as exc:  # pragma: no cover
+                    print(f"DEV MODE chunk processing error for {chunk_id}: {exc}")
+
+            threading.Thread(
+                target=_runner,
+                name=f"dev-process-chunk-{chunk_id}",
+                daemon=True,
+            ).start()
+            print(f"DEV MODE chunk processing dispatched for chunk {chunk_id}")
+
         # Allow forcing legacy loopback for debugging perf of the tasks endpoint
     if os.getenv("TASKS_FORCE_HTTP_LOOPBACK"):
             import httpx
@@ -171,6 +195,8 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
                 print(f"DEV MODE loopback failed ({e}); falling back to direct thread dispatch")
                 if "/assemble" in path:
                     _dispatch_assemble(body)
+                elif "/process-chunk" in path:
+                    _dispatch_process_chunk(body)
                 else:
                     _dispatch_transcribe(body)
                 return {"name": "local-loopback-failed"}
@@ -195,6 +221,8 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
             print(f"DEV MODE loopback failed ({e}); falling back to direct thread dispatch")
             if "/assemble" in path:
                 _dispatch_assemble(body)
+            elif "/process-chunk" in path:
+                _dispatch_process_chunk(body)
             else:
                 _dispatch_transcribe(body)
             return {"name": "local-loopback-failed"}
@@ -202,6 +230,8 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
     # Default: immediate background dispatch based on path
     if "/assemble" in path:
         _dispatch_assemble(body)
+    elif "/process-chunk" in path:
+        _dispatch_process_chunk(body)
     else:
         _dispatch_transcribe(body)
     try:
