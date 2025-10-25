@@ -79,16 +79,19 @@ DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT", "5432")
 
 _POOL_KWARGS = {
-    # Enable pool_pre_ping to validate connections before use (Cloud SQL Proxy compatible)
-    "pool_pre_ping": True,
+    # CRITICAL: Disable pool_pre_ping to avoid INTRANS errors
+    # pool_pre_ping tries to toggle autocommit during health check
+    # If connection is in INTRANS state, this raises ProgrammingError
+    # Instead, rely on pool_reset_on_return and aggressive pool_recycle
+    "pool_pre_ping": False,
     "pool_size": int(os.getenv("DB_POOL_SIZE", 5)),
     "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", 10)),
-    # Cloud SQL Proxy can maintain stable connections - use reasonable recycle time
-    # Cloud SQL itself times out after 10 minutes of inactivity, so recycle before that
-    "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", 540)),  # 9 minutes (before Cloud SQL 10min timeout)
+    # Aggressive recycle to avoid stale connections (3 minutes instead of 9)
+    # Since we disabled pool_pre_ping, recycle connections more frequently
+    "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", 180)),  # 3 minutes
     "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", 30)),
     # CRITICAL: Force ROLLBACK on all connections returned to pool
-    # This is the ultimate safeguard against INTRANS state corruption
+    # This prevents INTRANS corruption by cleaning up uncommitted transactions
     "pool_reset_on_return": "rollback",
     "future": True,
     # PostgreSQL connection args to handle long-running operations
@@ -161,17 +164,22 @@ def _handle_checkout(dbapi_connection, connection_record, connection_proxy):
     # Force ROLLBACK on checkout to ensure clean connection state
     # This is a safety net for any connections that leaked back to pool in INTRANS state
     try:
-        # Check transaction status via psycopg connection
-        if hasattr(dbapi_connection, 'info') and hasattr(dbapi_connection.info, 'transaction_status'):
+        # For psycopg3, check transaction status directly
+        if hasattr(dbapi_connection, 'pgconn'):
+            # Access underlying libpq connection to check transaction status
             from psycopg import pq  # type: ignore
+            status = dbapi_connection.pgconn.transaction_status
+            
             # INTRANS = 2 (transaction in progress)
-            if dbapi_connection.info.transaction_status == pq.TransactionStatus.INTRANS:
+            if status == pq.TransactionStatus.INTRANS:
                 log.warning("[db-pool] Connection in INTRANS state on checkout - forcing ROLLBACK")
                 dbapi_connection.rollback()
+            elif status == pq.TransactionStatus.INERROR:
+                log.warning("[db-pool] Connection in INERROR state on checkout - forcing ROLLBACK")
+                dbapi_connection.rollback()
     except Exception as exc:
-        # If we can't check/rollback, invalidate the connection to be safe
-        log.error("[db-pool] Failed to check/rollback on checkout, invalidating connection: %s", exc)
-        connection_proxy._checkin_failed = True  # Mark for invalidation
+        # If we can't check/rollback, log but don't fail - pool_reset_on_return will handle it
+        log.debug("[db-pool] Could not check transaction status on checkout: %s", exc)
 
 
 def _handle_checkin(dbapi_connection, connection_record):
