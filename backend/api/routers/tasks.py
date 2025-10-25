@@ -257,8 +257,24 @@ async def assemble_episode_task(request: Request, x_tasks_auth: str | None = Hea
     process.start()
     log.info("event=tasks.assemble.dispatched episode_id=%s pid=%s", payload.episode_id, process.pid)
     
-    # Return immediately with 202 Accepted
-    return {"ok": True, "status": "processing", "episode_id": payload.episode_id}
+    # CRITICAL: Wait for assembly to complete before returning
+    # If we return immediately, Cloud Run scales down and kills the child process
+    # This prevents episodes from getting stuck in "processing" status
+    process.join(timeout=3600)  # 1 hour max (same as Cloud Run timeout)
+    
+    if process.is_alive():
+        log.error("event=tasks.assemble.timeout episode_id=%s", payload.episode_id)
+        process.terminate()
+        process.join(timeout=5)
+        return {"ok": False, "status": "timeout", "episode_id": payload.episode_id}
+    
+    exit_code = process.exitcode
+    if exit_code == 0:
+        log.info("event=tasks.assemble.success episode_id=%s", payload.episode_id)
+        return {"ok": True, "status": "completed", "episode_id": payload.episode_id}
+    else:
+        log.error("event=tasks.assemble.failed episode_id=%s exit_code=%s", payload.episode_id, exit_code)
+        return {"ok": False, "status": "error", "episode_id": payload.episode_id, "exit_code": exit_code}
 
 
 # -------------------- Process Audio Chunk (Cloud Tasks) --------------------

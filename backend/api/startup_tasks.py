@@ -360,35 +360,43 @@ def run_startup_tasks() -> None:
         except Exception as e:
             log.error("[startup] create_db_and_tables failed (continuing): %s", e)
 
-    # One-time migrations - separated into dedicated file for cleanup
-    with _timing("one_time_migrations"):
-        from migrations.one_time_migrations import run_one_time_migrations
-        results = run_one_time_migrations()
-        
-        # Smart cleanup detection
-        if all(results.values()):
-            log.info("✅ [startup] All one-time migrations complete!")
-            log.info("📝 [startup] Safe to clear backend/migrations/one_time_migrations.py after production verification")
-        else:
-            incomplete = [name for name, done in results.items() if not done]
-            log.info("⏳ [startup] Migrations still pending: %s", ", ".join(incomplete))
+    # One-time migrations - can be disabled via DISABLE_STARTUP_MIGRATIONS env var
+    # Set DISABLE_STARTUP_MIGRATIONS=1 in production after all migrations complete
+    _DISABLE_MIGRATIONS = (os.getenv("DISABLE_STARTUP_MIGRATIONS") or "").strip().lower() in {"1", "true", "yes", "on"}
+    if not _DISABLE_MIGRATIONS:
+        with _timing("one_time_migrations"):
+            from migrations.one_time_migrations import run_one_time_migrations
+            results = run_one_time_migrations()
+            
+            # Smart cleanup detection
+            if all(results.values()):
+                log.info("✅ [startup] All one-time migrations complete!")
+                log.info("📝 [startup] Safe to set DISABLE_STARTUP_MIGRATIONS=1 in production")
+            else:
+                incomplete = [name for name, done in results.items() if not done]
+                log.info("⏳ [startup] Migrations still pending: %s", ", ".join(incomplete))
+    else:
+        log.info("[startup] Skipping one_time_migrations (DISABLE_STARTUP_MIGRATIONS=1)")
     
     # Audit users without terms acceptance (read-only, for monitoring)
-    with _timing("audit_terms_acceptance"):
-        try:
-            import sys
-            import importlib.util
-            migration_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'migrations', '999_audit_terms_acceptance.py')
-            spec = importlib.util.spec_from_file_location('audit_terms_migration', migration_path)
-            if spec and spec.loader:
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                with session_scope() as session:
-                    module.audit_users_without_terms(session)
-        except Exception as exc:
-            log.warning("[startup] audit_terms_acceptance failed (non-critical): %s", exc)
+    # Can be disabled via DISABLE_STARTUP_MIGRATIONS
+    if not _DISABLE_MIGRATIONS:
+        with _timing("audit_terms_acceptance"):
+            try:
+                import sys
+                import importlib.util
+                migration_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'migrations', '999_audit_terms_acceptance.py')
+                spec = importlib.util.spec_from_file_location('audit_terms_migration', migration_path)
+                if spec and spec.loader:
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+                    with session_scope() as session:
+                        module.audit_users_without_terms(session)
+            except Exception as exc:
+                log.warning("[startup] audit_terms_acceptance failed (non-critical): %s", exc)
     
     # Auto-migrate users with old terms versions to current (CRITICAL: prevents "accept terms daily" bug)
+    # This ALWAYS runs even if DISABLE_STARTUP_MIGRATIONS=1 because it's critical for UX
     with _timing("auto_migrate_terms_versions"):
         try:
             import sys
