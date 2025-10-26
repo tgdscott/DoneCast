@@ -74,6 +74,8 @@ class AnalysisAgent(BaseAgent):
 You are the site reliability lead. A monitoring alert has fired in Slack.
 Return JSON with the following keys: summary, suspected_causes (list of strings), diagnostic_steps (list of strings), severity (one of critical, high, medium, low), requires_manual_confirmation (boolean).
 
+Set requires_manual_confirmation=true ONLY for critical infrastructure issues (container crashes, database failures, network outages) or high-severity production incidents. Set to false for low/medium severity issues like individual task failures, slow responses, or minor errors.
+
 Alert message:
 ---
 {alert.payload.text}

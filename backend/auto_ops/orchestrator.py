@@ -74,6 +74,20 @@ class AlertOrchestrator:
             LOGGER.exception("Analysis agent failed")
             return self._handle_agent_failure(alert, stage="analysis")
 
+        # If the analysis requires manual confirmation, post triage and wait for human approval
+        if analysis.requires_manual_confirmation:
+            LOGGER.info(
+                "Alert %s requires manual confirmation (%s severity). Posting triage only.",
+                alert.metadata.ts,
+                analysis.severity.value,
+            )
+            triage_summary = build_summary(analysis, [])
+            triage_summary.final_status = (
+                "Manual review required. Reply 'proceed', 'approve', or 'fix' to authorize automated remediation."
+            )
+            self._post_to_slack(alert, triage_summary)
+            return triage_summary
+
         turns: List[AgentTurn] = []
         for iteration in range(1, self._settings.max_iterations + 1):
             LOGGER.info("Iteration %s for alert %s", iteration, alert.metadata.ts)
