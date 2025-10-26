@@ -92,13 +92,30 @@ def get_tier_config(session: Session, tier_name: str) -> dict[str, Any]:
     """
     tier_name = tier_name.lower().strip()
     
+    # Special case: admin/superadmin tiers get unlimited everything
+    if tier_name in ('admin', 'superadmin'):
+        return {
+            'monthly_credits': None,  # Unlimited
+            'max_episodes_month': None,  # Unlimited
+            'audio_pipeline': 'auphonic',  # Best pipeline
+            'manual_editor': True,
+            'analytics_basic': True,
+            'analytics_advanced': True,
+            'custom_branding': True,
+            'priority_support': True,
+            'ai_tts_credits_month': None,  # Unlimited
+        }
+    
     # Try database first
     configs = load_tier_configs(session)
     if tier_name in configs:
         return configs[tier_name]
     
     # Fallback to hard-coded constants (migration period)
-    log.warning(f"[tier_service] Tier '{tier_name}' not in database, falling back to TIER_LIMITS")
+    if tier_name not in ('free', 'creator', 'pro', 'unlimited'):
+        log.warning(f"[tier_service] Unknown tier '{tier_name}', defaulting to 'free' tier limits")
+        tier_name = 'free'
+    
     legacy = TIER_LIMITS.get(tier_name, TIER_LIMITS.get('free', {}))
     
     # Convert legacy format to new format
