@@ -623,6 +623,38 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
         except Exception:  # pragma: no cover - best effort persistence
             pass
 
+        # CRITICAL: Mark MediaItem as transcript_ready BEFORE notifying watchers
+        # This ensures files become available for assembly even without watchers
+        try:
+            from api.core.database import get_session
+            from api.models.podcast import MediaItem
+            from sqlmodel import select
+            
+            session = next(get_session())
+            media_item = session.exec(
+                select(MediaItem).where(MediaItem.filename == filename)
+            ).first()
+            
+            if media_item:
+                # Handle instrumental/empty transcripts
+                if not words or len(words) == 0:
+                    logging.warning("[transcription] ⚠️ Empty transcript (instrumental/no speech) for %s", filename)
+                    media_item.transcript_ready = True  # Mark ready anyway so user can use it
+                    media_item.transcription_error = "No speech detected (instrumental music or silence)"
+                else:
+                    media_item.transcript_ready = True
+                    media_item.transcription_error = None  # Clear any previous errors
+                
+                session.add(media_item)
+                session.commit()
+                logging.info("[transcription] ✅ Marked MediaItem %s as transcript_ready=%s (words=%d)", 
+                             media_item.id, media_item.transcript_ready, len(words))
+            else:
+                logging.warning("[transcription] ⚠️ Could not find MediaItem for filename=%s", filename)
+        except Exception as mark_err:
+            logging.error("[transcription] ❌ Failed to mark MediaItem as ready: %s", mark_err, exc_info=True)
+            # Don't fail the entire transcription if this fails
+
         notify_watchers_processed(filename)
         return words
     except Exception as exc:
