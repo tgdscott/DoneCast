@@ -124,7 +124,16 @@ export default function StepEpisodeDetails({
             </li>
           </ul>
           <p className="text-xs text-slate-500">
-            Need to brainstorm? The front-page guide has examples for titles, calls-to-action, and launch checklists.
+            Need to brainstorm? The{' '}
+            <a 
+              href="https://www.podcastplusplus.com/guide" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:text-blue-800 underline"
+            >
+              front-page guide
+            </a>
+            {' '}has examples for titles, calls-to-action, and launch checklists.
           </p>
         </CardContent>
       </Card>
