@@ -13,6 +13,25 @@ log = logging.getLogger(__name__)
 
 
 def _compose_prompt(inp: SuggestTitleIn) -> str:
+    # If current_text provided, we're refining an existing title
+    if inp.current_text:
+        parts = [
+            "You are an expert podcast title editor. Refine and improve the following episode title to make it more engaging, SEO-friendly, and compelling.",
+            f"\nCurrent title:\n{inp.current_text}",
+        ]
+        if inp.extra_instructions:
+            parts.append("\nAdditional instructions:\n" + inp.extra_instructions)
+        if inp.transcript_path:
+            try:
+                with open(inp.transcript_path, "r", encoding="utf-8", errors="ignore") as f:
+                    text = f.read(10000)  # Shorter excerpt for refinement
+                parts.append("\nTranscript excerpt (for context):\n" + text)
+            except Exception:
+                pass
+        parts.append("\nReturn only the refined title text (no explanations).")
+        return "\n".join(parts)
+    
+    # Otherwise, generate a new title from scratch
     parts = [inp.base_prompt or BASE_TITLE_PROMPT]
     recent = get_recent_titles(inp.podcast_id, n=inp.history_count)
     if recent:

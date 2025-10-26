@@ -16,6 +16,7 @@ class SuggestTitleIn(BaseModel):
     base_prompt: Optional[str] = None
     extra_instructions: Optional[str] = None
     history_count: int = 10
+    current_text: Optional[str] = None  # If provided, refine this instead of generating new
 
 
 class SuggestNotesIn(BaseModel):
@@ -26,6 +27,7 @@ class SuggestNotesIn(BaseModel):
     base_prompt: Optional[str] = None
     extra_instructions: Optional[str] = None
     history_count: int = 10
+    current_text: Optional[str] = None  # If provided, refine this instead of generating new
 
 
 class SuggestTagsIn(BaseModel):
