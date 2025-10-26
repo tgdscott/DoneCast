@@ -207,7 +207,7 @@ steps:
             --platform=managed \
             --timeout=3600 \
             --cpu=2 \
-            --memory=2Gi \
+            --memory=4Gi \
             --min-instances=0 \
             --max-instances=5 \
             --concurrency=80 \
@@ -271,7 +271,7 @@ steps:
             --platform=managed \
             --timeout=3600 \
             --cpu=1 \
-            --memory=2Gi \
+            --memory=4Gi \
             --min-instances=0 \
             --max-instances=5 \
             --port=8080 \
