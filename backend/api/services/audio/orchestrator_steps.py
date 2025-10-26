@@ -1080,6 +1080,14 @@ def export_cleaned_audio_step(
             import shutil
             import gc
             
+            # Check if source and destination are the same file
+            try:
+                if source_path.resolve() == cleaned_path.resolve():
+                    log.append(f"[EXPORT] Source and destination are the same file, skipping copy: {cleaned_path}")
+                    return cleaned_filename, cleaned_path
+            except Exception as resolve_err:
+                log.append(f"[EXPORT] WARNING: Could not compare file paths: {resolve_err}")
+            
             # Windows fix: Release AudioSegment file handles before copying
             # AudioSegment keeps file handles open, preventing shutil.copy2 on Windows
             if cleaned_audio is not None:
