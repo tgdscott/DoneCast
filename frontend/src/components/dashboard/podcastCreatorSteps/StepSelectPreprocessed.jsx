@@ -256,7 +256,7 @@ export default function StepSelectPreprocessed({
                         <FileAudio className={`w-10 h-10 ${ready ? 'text-blue-500' : 'text-slate-400'}`} />
                         <div className="flex-1 space-y-1">
                           <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-medium text-slate-800">{displayName}</span>
                               {ready ? (
                                 <Badge variant={isSelected ? 'default' : 'outline'} className="bg-emerald-100 text-emerald-700 border-emerald-200">
@@ -265,6 +265,11 @@ export default function StepSelectPreprocessed({
                               ) : (
                                 <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-200">
                                   Processing
+                                </Badge>
+                              )}
+                              {item.used_in_episode_id && (
+                                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-300">
+                                  ✓ Already Used
                                 </Badge>
                               )}
                             </div>
