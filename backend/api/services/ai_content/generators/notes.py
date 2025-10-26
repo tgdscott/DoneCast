@@ -20,6 +20,27 @@ def _load_transcript(path: str) -> str:
 
 
 def _compose_prompt(inp: SuggestNotesIn) -> str:
+    # If current_text provided, use refine mode instead of generation mode
+    if inp.current_text:
+        parts: List[str] = [
+            "You are an expert podcast description editor. Refine and improve the following episode description.",
+            f"\nCurrent description:\n{inp.current_text}"
+        ]
+        recent = get_recent_notes(inp.podcast_id, n=inp.history_count)
+        if recent:
+            examples = "\n\n".join(f"Example notes:\n{n}" for n in recent[:3])
+            parts.append("Style reference from past episodes (maintain consistency):\n" + examples)
+        if inp.transcript_path:
+            tx = _load_transcript(inp.transcript_path)
+            if tx:
+                parts.append("Episode transcript (use to improve accuracy):\n" + tx)
+        if inp.extra_instructions:
+            parts.append("Extra instructions:\n" + inp.extra_instructions)
+        parts.append("Return an improved description (2-4 sentences) followed by refined bullet highlights.")
+        parts.append("Format:\nDescription: <text>\nBullets:\n- <point>\n- <point>")
+        return "\n\n".join(parts)
+    
+    # Original generation mode (no current_text)
     parts: List[str] = [inp.base_prompt or BASE_NOTES_PROMPT]
     recent = get_recent_notes(inp.podcast_id, n=inp.history_count)
     if recent:
