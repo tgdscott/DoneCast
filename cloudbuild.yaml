@@ -91,6 +91,7 @@ steps:
   - name: gcr.io/cloud-builders/docker
     args:
       [ 'build',
+        '-f', 'Dockerfile.api',
         '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:latest',
         '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$BUILD_ID',
         '.' ]

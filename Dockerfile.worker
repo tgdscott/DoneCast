@@ -19,9 +19,9 @@ WORKDIR /app
 COPY backend/ /app/
 
 # Install Python dependencies
-# Note: We reuse the same requirements as the API service
+# Note: We use requirements.lock.txt for pinned versions to avoid dependency resolution errors
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.lock.txt
 
 # Set Python path so imports work correctly
 ENV PYTHONPATH=/app:$PYTHONPATH

@@ -35,6 +35,11 @@ backend/local_media
 # Tests not needed in runtime container (they can be in a test-specific build if desired)
 tests
 
+# Documentation and analysis files (100+ MD files not needed at runtime)
+*.md
+README.md
+!backend/README.md
+
 # Temporary / scratch
 tmp/
 *.tmp
