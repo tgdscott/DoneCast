@@ -816,15 +816,23 @@ export default function PodcastPlusDashboard() {
                     <CardDescription>Create a new episode from your shows & templates.</CardDescription>
                   </CardHeader>
                   <CardContent className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                    <div className="flex items-center gap-6 text-sm">
-                      <div className="text-center">
+                    <div className="flex items-center gap-3 text-sm">
+                      <button
+                        onClick={() => setCurrentView('podcasts')}
+                        className="flex flex-col items-center gap-1 px-4 py-2 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors cursor-pointer"
+                        title="View all shows"
+                      >
                         <div className="text-[11px] tracking-wide text-gray-500">Shows</div>
-                        <div className="font-semibold text-gray-800 mt-0.5">{podcasts.length}</div>
-                      </div>
-                      <div className="text-center">
+                        <div className="font-semibold text-gray-800">{podcasts.length}</div>
+                      </button>
+                      <button
+                        onClick={() => setCurrentView('episodes')}
+                        className="flex flex-col items-center gap-1 px-4 py-2 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors cursor-pointer"
+                        title="View all episodes"
+                      >
                         <div className="text-[11px] tracking-wide text-gray-500">Episodes</div>
-                        <div className="font-semibold text-gray-800 mt-0.5">{stats?.total_episodes ?? '–'}</div>
-                      </div>
+                        <div className="font-semibold text-gray-800">{stats?.total_episodes ?? '–'}</div>
+                      </button>
                     </div>
                       <div className="flex flex-col gap-2 w-full md:w-auto">
                         {canCreateEpisode && (
