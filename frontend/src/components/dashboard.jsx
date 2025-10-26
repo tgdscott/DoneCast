@@ -818,16 +818,16 @@ export default function PodcastPlusDashboard() {
                   <CardContent className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                     <div className="flex items-center gap-3 text-sm">
                       <button
-                        onClick={() => setCurrentView('podcasts')}
-                        className="flex flex-col items-center gap-1 px-4 py-2 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors cursor-pointer"
+                        onClick={() => setCurrentView('podcastManager')}
+                        className="flex flex-col items-center gap-1 px-4 py-2 rounded-full border border-gray-300 hover:border-gray-400 hover:bg-gray-50 transition-colors cursor-pointer"
                         title="View all shows"
                       >
                         <div className="text-[11px] tracking-wide text-gray-500">Shows</div>
                         <div className="font-semibold text-gray-800">{podcasts.length}</div>
                       </button>
                       <button
-                        onClick={() => setCurrentView('episodes')}
-                        className="flex flex-col items-center gap-1 px-4 py-2 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors cursor-pointer"
+                        onClick={() => setCurrentView('episodeHistory')}
+                        className="flex flex-col items-center gap-1 px-4 py-2 rounded-full border border-gray-300 hover:border-gray-400 hover:bg-gray-50 transition-colors cursor-pointer"
                         title="View all episodes"
                       >
                         <div className="text-[11px] tracking-wide text-gray-500">Episodes</div>
