@@ -42,6 +42,10 @@ def suggest_title(inp: SuggestTitleIn) -> SuggestTitleOut:
     dur_ms = int((time.time() - t0) * 1000)
     if len(title) > 120:
         title = title[:120].rstrip()
+    
+    # Apply title case formatting (capitalize first letter of each major word)
+    title = _apply_title_case(title)
+    
     # Apply simple series prefix if history uses pattern like "E123 – Title"
     try:
         recent = get_recent_titles(inp.podcast_id, n=inp.history_count)
@@ -63,3 +67,36 @@ def suggest_title(inp: SuggestTitleIn) -> SuggestTitleOut:
     est_out = len(title) // 4
     log.info("[ai_title] dur_ms=%s in_tok~%s out_tok~%s", dur_ms, est_in, est_out)
     return SuggestTitleOut(title=title)
+
+
+def _apply_title_case(text: str) -> str:
+    """
+    Apply proper title case capitalization.
+    Capitalizes first letter of each word except common articles/prepositions.
+    """
+    # Words that should stay lowercase unless they're the first word
+    lowercase_words = {
+        'a', 'an', 'and', 'as', 'at', 'but', 'by', 'for', 'from', 'in', 
+        'into', 'nor', 'of', 'on', 'or', 'so', 'the', 'to', 'up', 'with', 'yet'
+    }
+    
+    words = text.split()
+    if not words:
+        return text
+    
+    # Always capitalize first and last word
+    result = []
+    for i, word in enumerate(words):
+        # Preserve existing acronyms/all-caps words (e.g., "AI", "SEO")
+        if word.isupper() and len(word) > 1:
+            result.append(word)
+        # First or last word always capitalized
+        elif i == 0 or i == len(words) - 1:
+            result.append(word.capitalize())
+        # Check if it's a lowercase word
+        elif word.lower() in lowercase_words:
+            result.append(word.lower())
+        else:
+            result.append(word.capitalize())
+    
+    return ' '.join(result)

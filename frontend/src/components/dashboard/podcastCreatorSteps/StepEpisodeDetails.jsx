@@ -196,7 +196,7 @@ export default function StepEpisodeDetails({
                   onClick={onSuggestTitle}
                   disabled={!transcriptReady || isAssembling || isPublishing || isAiTitleBusy}
                 >
-                  <Wand2 className="w-4 h-4 mr-1" /> AI Suggest Title
+                  <Wand2 className="w-4 h-4 mr-1" /> Suggest New Title
                 </Button>
                 {!transcriptReady && (
                   <span className="text-xs text-gray-500 flex items-center gap-1">
@@ -257,7 +257,7 @@ export default function StepEpisodeDetails({
                 onClick={onSuggestDescription}
                 disabled={!transcriptReady || isAssembling || isPublishing || isAiDescBusy}
               >
-                <Wand2 className="w-4 h-4 mr-1" /> AI Suggest Description
+                <Wand2 className="w-4 h-4 mr-1" /> Suggest New Description
               </Button>
               {!transcriptReady && (
                 <span className="text-xs text-gray-500 flex items-center gap-1">
