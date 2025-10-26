@@ -17,9 +17,9 @@ COPY backend/ /app/backend/
 COPY conftest.py /app/
 
 # Install Python dependencies
-# Use requirements.lock.txt for pinned versions to avoid dependency resolution errors
+# Use requirements.txt with minimum version constraints to avoid dependency conflicts
 RUN python -m pip install --upgrade pip setuptools wheel \
-  && pip install --no-cache-dir -r /app/backend/requirements.lock.txt \
+  && pip install --no-cache-dir -r /app/backend/requirements.txt \
   && pip check \
   && python -c "import importlib; [importlib.import_module(m) for m in ('jose','passlib','feedparser','stripe','celery','google.cloud.storage','authlib','psycopg')]"
 
