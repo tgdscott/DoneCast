@@ -1,4 +1,4 @@
-﻿fastapi
+fastapi
 uvicorn[standard]
 gunicorn
 starlette
@@ -30,3 +30,4 @@ google-cloud-aiplatform
 google-cloud-tasks
 psutil>=5.9.0
 openai>=1.0.0
+slack_sdk>=3.27.0
