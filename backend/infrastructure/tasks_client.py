@@ -201,33 +201,7 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
                     _dispatch_transcribe(body)
                 return {"name": "local-loopback-failed"}
 
-        # Default: immediate background dispatch based on path
-    if os.getenv("TASKS_FORCE_HTTP_LOOPBACK"):
-        import httpx
-        base = (os.getenv("TASKS_URL_BASE") or os.getenv("APP_BASE_URL") or f"http://127.0.0.1:{os.getenv('API_PORT','8000')}").rstrip("/")
-        if ":5173" in base and not os.getenv("TASKS_FORCE_VITE_PROXY"):
-            base = f"http://127.0.0.1:{os.getenv('API_PORT','8000')}"
-        api_url = f"{base}{path}"
-        auth_secret = os.getenv("TASKS_AUTH", "a-secure-local-secret")
-        headers = {"Content-Type": "application/json", "X-Tasks-Auth": auth_secret}
-        print(f"DEV MODE (forced loopback): POST {api_url}")
-        try:
-            with httpx.Client(timeout=30.0) as client:  # shorter timeout since this is optional
-                r = client.post(api_url, json=body, headers=headers)
-                r.raise_for_status()
-                print("DEV MODE loopback call successful.")
-                return {"name": f"local-loopback-{datetime.utcnow().isoformat()}"}
-        except Exception as e:  # pragma: no cover
-            print(f"DEV MODE loopback failed ({e}); falling back to direct thread dispatch")
-            if "/assemble" in path:
-                _dispatch_assemble(body)
-            elif "/process-chunk" in path:
-                _dispatch_process_chunk(body)
-            else:
-                _dispatch_transcribe(body)
-            return {"name": "local-loopback-failed"}
-
-    # Default: immediate background dispatch based on path
+    # Default: immediate background dispatch based on path (non-loopback dev mode)
     if "/assemble" in path:
         _dispatch_assemble(body)
     elif "/process-chunk" in path:

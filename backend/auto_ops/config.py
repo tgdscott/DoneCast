@@ -19,7 +19,14 @@ class AutoOpsSettings(BaseSettings):
         ..., description="Channel ID where alert notifications are posted."
     )
     openai_api_key: str = Field(
-        ..., description="API key for the model that powers the cooperating agents."
+        ..., description="API key for GitHub Models or OpenAI (powers the cooperating agents)."
+    )
+    api_base_url: Optional[str] = Field(
+        None,
+        description=(
+            "Optional API base URL. Use 'https://models.inference.ai.azure.com' for GitHub Models, "
+            "or leave None for standard OpenAI API."
+        ),
     )
     repository_root: Path = Field(
         Path("."),
@@ -52,7 +59,10 @@ class AutoOpsSettings(BaseSettings):
     )
     model: str = Field(
         "gpt-4o-mini",
-        description="Model name passed to the OpenAI API for all agent calls.",
+        description=(
+            "Model name to use. GitHub Models examples: 'gpt-4o', 'o1-preview', "
+            "'claude-3.5-sonnet', 'gemini-2.0-flash-exp'. OpenAI: 'gpt-4o-mini', 'gpt-4o'."
+        ),
     )
     dry_run: bool = Field(
         False,
@@ -70,7 +80,7 @@ class AutoOpsSettings(BaseSettings):
 
     class Config:
         env_prefix = "AUTO_OPS_"
-        env_file = ".env"
+        env_file = [".env.local", ".env"]  # Try .env.local first, then .env
         env_file_encoding = "utf-8"
         extra = "ignore"
 

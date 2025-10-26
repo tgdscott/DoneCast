@@ -206,11 +206,13 @@ steps:
             --region=${_REGION} \
             --platform=managed \
             --timeout=3600 \
-            --cpu=2 \
+            --cpu=4 \
             --memory=4Gi \
-            --min-instances=0 \
-            --max-instances=5 \
+            --min-instances=1 \
+            --max-instances=10 \
             --concurrency=80 \
+            --execution-environment=gen2 \
+            --cpu-boost \
             --update-env-vars="CLOUDPOD_MAX_MIX_BUFFER_BYTES=536870912" \
             --update-secrets="GCS_SIGNER_KEY_JSON=gcs-signer-key:latest,AUPHONIC_API_KEY=AUPHONIC_API_KEY:latest"
         }
@@ -270,10 +272,12 @@ steps:
             --region=${_REGION} \
             --platform=managed \
             --timeout=3600 \
-            --cpu=1 \
+            --cpu=2 \
             --memory=4Gi \
             --min-instances=0 \
-            --max-instances=5 \
+            --max-instances=3 \
+            --concurrency=10 \
+            --execution-environment=gen2 \
             --port=8080 \
             --set-env-vars="CLOUDPOD_MAX_MIX_BUFFER_BYTES=536870912,MEDIA_ROOT=/tmp,INSTANCE_CONNECTION_NAME=podcast612:us-west1:podcast-db,GOOGLE_CLOUD_PROJECT=podcast612,TASKS_LOCATION=us-west1,TASKS_QUEUE=ppp-queue,APP_ENV=production,AI_PROVIDER=vertex,VERTEX_PROJECT=podcast612,VERTEX_LOCATION=us-central1,VERTEX_MODEL=gemini-2.5-flash-lite,USE_CLOUD_TASKS=1,DB_POOL_SIZE=5,DB_MAX_OVERFLOW=2,DB_POOL_RECYCLE=300,DB_POOL_TIMEOUT=15,GCS_CHUNK_MB=32,MEDIA_BUCKET=ppp-media-us-west1,TRANSCRIPTS_BUCKET=ppp-transcripts-us-west1" \
             --set-secrets="DB_USER=DB_USER:latest,DB_PASS=DB_PASS:latest,DB_NAME=DB_NAME:latest,DATABASE_URL=DATABASE_URL:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,ELEVENLABS_API_KEY=ELEVENLABS_API_KEY:latest,ASSEMBLYAI_API_KEY=ASSEMBLYAI_API_KEY:latest,TASKS_AUTH=TASKS_AUTH:latest,GCS_SIGNER_KEY_JSON=gcs-signer-key:latest,AUPHONIC_API_KEY=AUPHONIC_API_KEY:latest"

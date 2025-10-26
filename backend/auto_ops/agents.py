@@ -1,4 +1,4 @@
-"""Agent implementations powered by the OpenAI API."""
+"""Agent implementations powered by the OpenAI API (GitHub Copilot models)."""
 
 from __future__ import annotations
 
@@ -50,6 +50,16 @@ class BaseAgent:
 
     def _complete_json(self, user_prompt: str) -> dict:
         content = self._complete(user_prompt)
+        # Strip markdown code fences if present (```json ... ```)
+        content = content.strip()
+        if content.startswith("```json"):
+            content = content[7:]  # Remove ```json
+        if content.startswith("```"):
+            content = content[3:]  # Remove ```
+        if content.endswith("```"):
+            content = content[:-3]  # Remove trailing ```
+        content = content.strip()
+        
         try:
             return json.loads(content)
         except json.JSONDecodeError as exc:
@@ -99,8 +109,14 @@ class FixAgent(BaseAgent):
             )
         prompt = """
 You are the primary incident responder tasked with implementing a fix.
-You must return JSON with the keys plan (string), patch (string or null), validation_steps (list of strings), confidence (float between 0 and 1).
-Use patch to share code diffs in unified format if relevant. Keep validation steps actionable and executable in the repo {repo_root}.
+You must return JSON with the keys:
+- plan (string, not array): A detailed narrative description of the fix approach
+- patch (string or null): Code diffs in unified format if relevant
+- validation_steps (array of strings): Actionable steps to validate the fix
+- confidence (float between 0 and 1): Your confidence level in this fix
+
+Important: The 'plan' field must be a single string, not an array.
+Keep validation steps actionable and executable in the repo {repo_root}.
 """.strip().format(repo_root=self._repository_root)
         prompt += "\n\nAlert summary:\n" + analysis.summary
         if analysis.diagnostic_steps:
@@ -108,8 +124,13 @@ Use patch to share code diffs in unified format if relevant. Keep validation ste
         if history_snippets:
             prompt += "\n\nConversation so far:\n" + "\n---\n".join(history_snippets)
         payload = self._complete_json(prompt)
+        # Handle case where plan is returned as array instead of string
+        plan = payload.get("plan", "")
+        if isinstance(plan, list):
+            plan = "\n".join(str(item) for item in plan)
+        
         return FixProposal(
-            plan=payload.get("plan", ""),
+            plan=plan,
             patch=payload.get("patch"),
             validation_steps=payload.get("validation_steps", []),
             confidence=float(payload.get("confidence", 0.5)),

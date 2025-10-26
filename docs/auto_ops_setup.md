@@ -6,7 +6,7 @@ This document explains how to wire the new cooperative-agent workflow into your 
 
 - Python 3.11+ installed locally or on the host where the orchestrator will run.
 - Ability to create/manage Slack apps and tokens in the target workspace.
-- An OpenAI API key (or another compatible provider if you adapt the agents).
+- A Google Gemini API key (the orchestrator uses Gemini 2.0 Flash Experimental).
 - Git access to this repository so the orchestrator can inspect and eventually modify code.
 
 When running inside a production environment (e.g., a VM or container), ensure that outbound HTTPS access to Slack and your LLM provider is allowed.
@@ -27,14 +27,13 @@ When running inside a production environment (e.g., a VM or container), ensure t
 
 ## 2. Provision model credentials
 
-The orchestrator currently targets OpenAI models. Provide an API key with access to `gpt-4o-mini` or better. Export it as `AUTO_OPS_OPENAI_API_KEY` (see the environment table below). If you prefer a different vendor, swap the OpenAI client inside `backend/auto_ops/agents.py` and keep the JSON outputs the same. You can validate the credential with:
+The orchestrator uses Google Gemini 2.0 Flash Experimental. You'll need a Gemini API key, which uses the same key as your existing `GEMINI_API_KEY` configuration. Export it as `AUTO_OPS_GEMINI_API_KEY` (see the environment table below). You can validate the credential with:
 
 ```bash
-curl https://api.openai.com/v1/models \
-  -H "Authorization: Bearer $AUTO_OPS_OPENAI_API_KEY"
+curl "https://generativelanguage.googleapis.com/v1beta/models?key=$AUTO_OPS_GEMINI_API_KEY"
 ```
 
-The request should return a JSON payload listing available models; if it returns 401/403, double-check the key and account permissions.
+The request should return a JSON payload listing available Gemini models; if it returns 401/403, double-check the key and permissions.
 
 ## 3. Configure environment variables
 
@@ -44,7 +43,7 @@ The runner reads all configuration through `backend/auto_ops/config.py`. The mos
 | --- | --- |
 | `AUTO_OPS_SLACK_BOT_TOKEN` | Bot token created in step 1. |
 | `AUTO_OPS_SLACK_ALERT_CHANNEL` | Channel ID where alerts arrive. |
-| `AUTO_OPS_OPENAI_API_KEY` | API key for the model powering the agents. |
+| `AUTO_OPS_GEMINI_API_KEY` | Gemini API key for the model powering the agents. |
 | `AUTO_OPS_REPOSITORY_ROOT` | Optional path hint passed to the fixer agent (defaults to the repo root). |
 | `AUTO_OPS_MAX_ITERATIONS` | Override the maximum fixer/reviewer back-and-forth (default 3). |
 | `AUTO_OPS_DAEMON_MODE` | Set to `true` to keep the runner polling continuously. |
@@ -52,6 +51,7 @@ The runner reads all configuration through `backend/auto_ops/config.py`. The mos
 | `AUTO_OPS_STATE_FILE` | Path to the JSON file that stores the last processed Slack timestamp. |
 | `AUTO_OPS_SLACK_THREAD_PREFIX` | Optional string prepended to Slack replies (e.g. `[auto-ops]`). |
 | `AUTO_OPS_DRY_RUN` | Set to `true` to test the agents without posting back to Slack. |
+| `AUTO_OPS_MODEL` | Gemini model name (default: `gemini-2.0-flash-exp`). |
 
 You can drop these values inside the backend `.env` that is already loaded by Pydantic. A starter `.env` section might look like:
 
@@ -61,7 +61,8 @@ AUTO_OPS_SLACK_BOT_TOKEN=xoxb-your-token
 AUTO_OPS_SLACK_ALERT_CHANNEL=C01234567
 
 # Models
-AUTO_OPS_OPENAI_API_KEY=sk-...
+AUTO_OPS_GEMINI_API_KEY=your-gemini-api-key
+AUTO_OPS_MODEL=gemini-2.0-flash-exp
 
 # Runtime
 AUTO_OPS_STATE_FILE=/var/lib/auto-ops/state.json
@@ -80,7 +81,7 @@ From the `backend/` directory run:
 pip install -r requirements.txt
 ```
 
-This pulls in `slack_sdk` (Slack Web API) and `openai`. If you are deploying to a container image, bake this command into your Dockerfile or build script.
+This pulls in `slack_sdk` (Slack Web API) and `google-generativeai`. If you are deploying to a container image, bake this command into your Dockerfile or build script.
 
 ## 5. Run the orchestrator
 
@@ -126,7 +127,7 @@ The architecture is intentionally modular. If you want a deployment agent to shi
 - Add unit tests/mocks before letting the fixer agent push commits automatically.
 - Provide the agents with runbooks or service documentation by enriching the prompts in `backend/auto_ops/agents.py`.
 - Slack’s rate limits are generous, but the orchestrator already batches requests and sorts results chronologically.
-- Periodically rotate the Slack and OpenAI tokens. Restart the orchestrator after updating credentials.
+- Periodically rotate the Slack and Gemini tokens. Restart the orchestrator after updating credentials.
 - If the orchestrator fails with `SlackApiError: not_in_channel`, re-run `/invite @auto-ops` in the alert channel.
 - Use `AUTO_OPS_SLACK_THREAD_PREFIX` to make automated responses easy to filter during incident post-mortems.
 

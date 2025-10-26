@@ -40,7 +40,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
     settings = AutoOpsSettings()
     slack_client = SlackAlertClient(settings.slack_bot_token, settings.slack_alert_channel)
-    openai_client = OpenAI(api_key=settings.openai_api_key)
+    
+    # Create OpenAI client with optional custom base_url for GitHub Models
+    openai_kwargs = {"api_key": settings.openai_api_key}
+    if settings.api_base_url:
+        openai_kwargs["base_url"] = settings.api_base_url
+    openai_client = OpenAI(**openai_kwargs)
+    
     orchestrator = AlertOrchestrator(settings=settings, slack_client=slack_client, openai_client=openai_client)
     tracker = StateTracker(settings.state_file)
 
