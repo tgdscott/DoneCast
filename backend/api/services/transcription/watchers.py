@@ -129,6 +129,26 @@ def notify_watchers_processed(filename: str) -> None:
                 fallback=(watches[0].friendly_name if watches and watches[0].friendly_name else None),
             )
 
+            # CRITICAL: Mark MediaItem as transcript_ready=True so it appears in Media Library
+            # This was missing - transcripts completed but files never became "ready to assemble"
+            try:
+                from api.models.podcast import MediaItem
+                from sqlmodel import select
+                
+                # Find MediaItem by filename (exact match or GCS path match)
+                media_item = session.exec(
+                    select(MediaItem).where(MediaItem.filename == filename)
+                ).first()
+                
+                if media_item:
+                    media_item.transcript_ready = True
+                    session.add(media_item)
+                    log.info("[transcribe] Marked MediaItem %s as transcript_ready=True", media_item.id)
+                else:
+                    log.warning("[transcribe] Could not find MediaItem for filename=%s to mark transcript_ready", filename)
+            except Exception as mark_err:
+                log.error("[transcribe] Failed to mark MediaItem as transcript_ready: %s", mark_err, exc_info=True)
+                # Don't fail the entire notification flow if this fails
 
             for watch in watches:
                 email = (watch.notify_email or "").strip()
