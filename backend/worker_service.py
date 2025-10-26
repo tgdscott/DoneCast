@@ -48,6 +48,13 @@ _IS_DEV = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") o
 
 log.info("event=worker.init.config_loaded is_dev=%s", _IS_DEV)
 
+from worker.tasks import create_podcast_episode
+from worker.tasks.assembly.chunk_worker import (
+    ProcessChunkPayload,
+    run_chunk_processing,
+    validate_process_chunk_payload,
+)
+
 
 # -------------------- Health Check --------------------
 
@@ -136,7 +143,6 @@ async def assemble_episode_worker(request: Request, x_tasks_auth: str | None = H
     
     try:
         # Import here to avoid loading heavy dependencies on startup
-        from worker.tasks import create_podcast_episode
         
         result = create_podcast_episode(
             episode_id=payload.episode_id,
@@ -160,6 +166,71 @@ async def assemble_episode_worker(request: Request, x_tasks_auth: str | None = H
             status_code=500,
             detail=f"Assembly failed: {str(exc)}"
         )
+
+
+# -------------------- Chunk Processing --------------------
+
+@app.post("/api/tasks/process-chunk")
+async def process_chunk_worker(request: Request, x_tasks_auth: str | None = Header(default=None)):
+    """Process a single chunk synchronously within the worker service."""
+
+    if not _IS_DEV:
+        if not x_tasks_auth or x_tasks_auth != _TASKS_AUTH:
+            log.warning("event=worker.chunk.unauthorized")
+            raise HTTPException(status_code=401, detail="unauthorized")
+
+    try:
+        raw_body = await request.body()
+    except ClientDisconnect:
+        log.warning("event=worker.chunk.client_disconnect")
+        raise HTTPException(status_code=499, detail="client disconnected")
+
+    raw_body = (raw_body or b"").strip()
+    if not raw_body:
+        raise HTTPException(status_code=400, detail="request body required")
+
+    try:
+        data = json.loads(raw_body.decode("utf-8", errors="ignore"))
+        if not isinstance(data, dict):
+            raise ValueError("body must be JSON object")
+    except Exception as exc:
+        log.error("event=worker.chunk.bad_body error=%s", exc)
+        raise HTTPException(status_code=400, detail="invalid JSON body")
+
+    try:
+        payload: ProcessChunkPayload = validate_process_chunk_payload(data)
+    except ValidationError as ve:
+        log.error("event=worker.chunk.invalid_payload error=%s", ve)
+        raise HTTPException(status_code=400, detail=f"invalid payload: {ve}")
+
+    log.info(
+        "event=worker.chunk.start episode_id=%s chunk_id=%s pid=%s",
+        payload.episode_id,
+        payload.chunk_id,
+        os.getpid(),
+    )
+
+    try:
+        run_chunk_processing(payload)
+    except Exception as exc:
+        log.exception(
+            "event=worker.chunk.error episode_id=%s chunk_id=%s",
+            payload.episode_id,
+            payload.chunk_id,
+        )
+        raise HTTPException(status_code=500, detail=f"Chunk processing failed: {exc}")
+
+    log.info(
+        "event=worker.chunk.done episode_id=%s chunk_id=%s",
+        payload.episode_id,
+        payload.chunk_id,
+    )
+    return {
+        "ok": True,
+        "status": "completed",
+        "chunk_id": payload.chunk_id,
+        "episode_id": payload.episode_id,
+    }
 
 
 # -------------------- Startup --------------------
