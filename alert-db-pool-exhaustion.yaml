@@ -1,0 +1,52 @@
+displayName: Database Connection Pool High Usage
+documentation:
+  content: |
+    Database connection pool usage has exceeded 80%.
+    This can lead to connection exhaustion and request failures.
+    
+    Common causes:
+    - Connection leaks (sessions not properly closed)
+    - Increased traffic without pool scaling
+    - Long-running queries holding connections
+    - Transaction deadlocks
+    - Cloud SQL Proxy issues
+    
+    Recommended actions:
+    - Review recent database-heavy code changes
+    - Check for unclosed database sessions in error handlers
+    - Consider increasing SQLALCHEMY_POOL_SIZE
+    - Monitor Cloud SQL connection count vs max_connections
+    - Check for slow queries blocking connections
+    - Verify pool recycle settings (prevent stale connections)
+  mimeType: text/markdown
+
+conditions:
+  - displayName: DB Pool Usage > 80%
+    conditionThreshold:
+      filter: |
+        resource.type = "cloud_run_revision"
+        AND resource.labels.service_name = "podcast-api"
+        AND (
+          textPayload =~ "QueuePool limit.*reached"
+          OR textPayload =~ "Connection pool exhausted"
+          OR textPayload =~ "TimeoutError.*QueuePool"
+        )
+        AND severity >= WARNING
+      aggregations:
+        - alignmentPeriod: 120s
+          perSeriesAligner: ALIGN_RATE
+          crossSeriesReducer: REDUCE_SUM
+          groupByFields:
+            - resource.service_name
+      comparison: COMPARISON_GT
+      thresholdValue: 0.05
+      duration: 120s
+
+alertStrategy:
+  autoClose: 1800s
+
+notificationChannels:
+  - projects/podcast612/notificationChannels/7975467987455629516
+
+combiner: OR
+enabled: true

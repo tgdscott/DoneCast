@@ -1,0 +1,53 @@
+displayName: Episode Assembly Success Rate Low
+documentation:
+  content: |
+    Episode assembly success rate has dropped below 95%.
+    This directly impacts user experience and platform reliability.
+    
+    Common causes:
+    - FFmpeg processing errors (audio format issues)
+    - Missing media files (GCS upload failures)
+    - Transcription service failures
+    - Insufficient memory/CPU for large episodes
+    - Cloud Tasks timeout issues
+    - Template configuration errors
+    
+    Recommended actions:
+    - Check recent episode assembly logs for patterns
+    - Verify media file availability in GCS
+    - Review FFmpeg command errors
+    - Check Cloud Tasks queue health
+    - Investigate transcription service status
+    - Look for specific user/podcast patterns in failures
+  mimeType: text/markdown
+
+conditions:
+  - displayName: Assembly Failures > 5%
+    conditionThreshold:
+      filter: |
+        resource.type = "cloud_run_revision"
+        AND resource.labels.service_name = "podcast-api"
+        AND (
+          textPayload =~ "Episode assembly failed"
+          OR textPayload =~ "AssemblyError"
+          OR textPayload =~ "Failed to assemble episode"
+        )
+        AND severity >= ERROR
+      aggregations:
+        - alignmentPeriod: 600s
+          perSeriesAligner: ALIGN_RATE
+          crossSeriesReducer: REDUCE_SUM
+          groupByFields:
+            - resource.service_name
+      comparison: COMPARISON_GT
+      thresholdValue: 0.05
+      duration: 300s
+
+alertStrategy:
+  autoClose: 3600s
+
+notificationChannels:
+  - projects/podcast612/notificationChannels/7975467987455629516
+
+combiner: OR
+enabled: true

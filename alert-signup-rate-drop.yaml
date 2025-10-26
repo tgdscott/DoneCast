@@ -1,0 +1,51 @@
+displayName: User Signup Rate Anomaly
+documentation:
+  content: |
+    User signup rate has dropped significantly compared to recent average.
+    This could indicate issues with the registration flow or marketing problems.
+    
+    Common causes:
+    - Email verification issues
+    - Registration endpoint errors
+    - OAuth provider outages (Google)
+    - Frontend registration form bugs
+    - Marketing campaign ended
+    - Spam filter blocking verification emails
+    
+    Recommended actions:
+    - Test registration flow end-to-end
+    - Check email delivery logs
+    - Verify Google OAuth is working
+    - Review frontend console errors
+    - Check for rate limiting on registration endpoint
+    - Compare with marketing campaign schedule
+  mimeType: text/markdown
+
+conditions:
+  - displayName: Signup Rate < 50% of 24h Average
+    conditionThreshold:
+      filter: |
+        resource.type = "cloud_run_revision"
+        AND resource.labels.service_name = "podcast-api"
+        AND (
+          textPayload =~ "User registered successfully"
+          OR textPayload =~ "New user created"
+        )
+      aggregations:
+        - alignmentPeriod: 3600s
+          perSeriesAligner: ALIGN_RATE
+          crossSeriesReducer: REDUCE_SUM
+          groupByFields:
+            - resource.service_name
+      comparison: COMPARISON_LT
+      thresholdValue: 0.0001  # Adjust based on actual signup rate
+      duration: 7200s
+
+alertStrategy:
+  autoClose: 14400s
+
+notificationChannels:
+  - projects/podcast612/notificationChannels/7975467987455629516
+
+combiner: OR
+enabled: false  # Disabled by default - enable after establishing baseline

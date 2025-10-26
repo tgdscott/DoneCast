@@ -1,0 +1,44 @@
+displayName: API Response Latency High
+documentation:
+  content: |
+    API response time has exceeded 2 seconds for the 95th percentile.
+    This indicates potential performance degradation.
+    
+    Common causes:
+    - Database query performance issues
+    - External API timeouts (AssemblyAI, Auphonic, Stripe)
+    - Memory pressure causing GC pauses
+    - Insufficient CPU allocation
+    
+    Recommended actions:
+    - Check database connection pool usage
+    - Review slow query logs
+    - Check for external service outages
+    - Consider scaling up Cloud Run instances
+  mimeType: text/markdown
+
+conditions:
+  - displayName: API P95 Latency > 2s
+    conditionThreshold:
+      filter: |
+        resource.type = "cloud_run_revision"
+        AND resource.labels.service_name = "podcast-api"
+        AND metric.type = "run.googleapis.com/request_latencies"
+      aggregations:
+        - alignmentPeriod: 60s
+          perSeriesAligner: ALIGN_DELTA
+          crossSeriesReducer: REDUCE_PERCENTILE_95
+          groupByFields:
+            - resource.service_name
+      comparison: COMPARISON_GT
+      thresholdValue: 2000
+      duration: 300s
+
+alertStrategy:
+  autoClose: 1800s
+
+notificationChannels:
+  - projects/podcast612/notificationChannels/7975467987455629516
+
+combiner: OR
+enabled: true

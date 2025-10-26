@@ -1,0 +1,47 @@
+displayName: Cloud Tasks Queue Backlog
+documentation:
+  content: |
+    Cloud Tasks queue has accumulated a backlog of pending tasks.
+    This indicates worker capacity issues or task processing failures.
+    
+    Common causes:
+    - Worker service down or unhealthy
+    - Task processing errors causing retries
+    - Insufficient worker capacity for load
+    - Database connection issues blocking workers
+    - External service timeouts (AssemblyAI, Auphonic)
+    
+    Recommended actions:
+    - Check worker service health and logs
+    - Review task failure patterns
+    - Consider scaling worker instances
+    - Check for stuck tasks with max retries
+    - Verify external service availability
+    - Look for database connection pool exhaustion
+  mimeType: text/markdown
+
+conditions:
+  - displayName: Queue Depth > 100 Tasks
+    conditionThreshold:
+      filter: |
+        resource.type = "cloud_tasks_queue"
+        AND resource.labels.queue_id =~ ".*"
+        AND metric.type = "cloudtasks.googleapis.com/queue/depth"
+      aggregations:
+        - alignmentPeriod: 300s
+          perSeriesAligner: ALIGN_MAX
+          crossSeriesReducer: REDUCE_SUM
+          groupByFields:
+            - resource.queue_id
+      comparison: COMPARISON_GT
+      thresholdValue: 100
+      duration: 600s
+
+alertStrategy:
+  autoClose: 3600s
+
+notificationChannels:
+  - projects/podcast612/notificationChannels/7975467987455629516
+
+combiner: OR
+enabled: true
