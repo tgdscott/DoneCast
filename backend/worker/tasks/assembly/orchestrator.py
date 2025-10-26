@@ -824,6 +824,10 @@ def _finalize_episode(
             credits_err,
             exc_info=True
         )
+        # Rollback the session to recover from the failed transaction
+        session.rollback()
+        # Re-load the episode after rollback to ensure it's attached to the session
+        session.refresh(episode)
         # Don't fail the entire assembly if credit charging fails
         # User still gets their episode, we just lose the billing record
     # ========== END CREDIT CHARGING ==========

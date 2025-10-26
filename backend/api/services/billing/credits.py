@@ -118,11 +118,24 @@ def charge_credits(
         episode_id: Optional episode this relates to
         notes: Optional notes
         cost_breakdown: Optional dict with cost calculation details
-        correlation_id: Optional idempotency key
+        correlation_id: Optional idempotency key - if provided and already exists, returns existing entry
     
     Returns:
         ProcessingMinutesLedger record
     """
+    # Idempotency check: if correlation_id provided, check if already exists
+    if correlation_id:
+        stmt = select(ProcessingMinutesLedger).where(
+            ProcessingMinutesLedger.correlation_id == correlation_id
+        )
+        existing = session.exec(stmt).first()
+        if existing:
+            log.info(
+                f"[credits] Charge already exists for correlation_id={correlation_id}, "
+                f"returning existing entry (idempotent retry)"
+            )
+            return existing
+    
     # Calculate equivalent minutes for legacy field (credits / 1.5)
     minutes = int(credits / BASE_CREDIT_RATE)
     
