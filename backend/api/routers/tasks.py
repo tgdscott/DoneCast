@@ -564,16 +564,20 @@ async def process_chunk_task(request: Request, x_tasks_auth: str | None = Header
     except ValidationError as ve:
         raise HTTPException(status_code=400, detail=f"invalid payload: {ve}")
 
-    import multiprocessing
-    process = multiprocessing.Process(
-        target=run_chunk_processing,
-        args=(payload.model_dump(),),
-        name=f"chunk-{payload.chunk_id}",
-        daemon=False,  # CRITICAL: Allow process to finish even if parent exits
-    )
-    process.start()
-    log.info("event=chunk.dispatched episode_id=%s chunk_id=%s pid=%s",
-            payload.episode_id, payload.chunk_id, process.pid)
+    log.info("event=chunk.dispatched episode_id=%s chunk_id=%s",
+            payload.episode_id, payload.chunk_id)
     
-    return {"ok": True, "status": "processing", "chunk_id": payload.chunk_id}
+    # Run chunk processing SYNCHRONOUSLY (not multiprocessing.Process)
+    # Cloud Run kills orphaned child processes, causing silent failures
+    # Blocking the request ensures the process completes
+    try:
+        run_chunk_processing(payload.model_dump())
+        log.info("event=chunk.handler_complete episode_id=%s chunk_id=%s",
+                payload.episode_id, payload.chunk_id)
+    except Exception as e:
+        log.exception("event=chunk.handler_error episode_id=%s chunk_id=%s err=%s",
+                     payload.episode_id, payload.chunk_id, e)
+        raise HTTPException(status_code=500, detail=f"chunk processing failed: {e}")
+    
+    return {"ok": True, "status": "completed", "chunk_id": payload.chunk_id}
 
