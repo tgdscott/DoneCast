@@ -65,6 +65,14 @@ async def get_current_user(
     user = crud.get_user_by_email(session=session, email=email)
     if user is None:
         raise credentials_exception
+    
+    # Block users who have requested account deletion (soft-deleted view)
+    if getattr(user, "is_deleted_view", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account has been deleted. Contact support@podcastplusplus.com to restore access during the grace period."
+        )
+    
     try:
         admin_settings = load_admin_settings(session)
     except Exception:

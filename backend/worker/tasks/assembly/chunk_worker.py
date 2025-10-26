@@ -244,15 +244,28 @@ def run_chunk_processing(payload_data: Mapping[str, Any] | ProcessChunkPayload) 
                 ".wav",
                 "_cleaned.mp3",
             ).replace("gs://ppp-media-us-west1/", "")
-            worker_log.info("event=chunk.upload path=%s", cleaned_gcs_path)
+            worker_log.info("event=chunk.upload.start path=%s", cleaned_gcs_path)
 
-            cleaned_bytes = cleaned_audio_path.read_bytes()
-            cleaned_uri = gcs.upload_bytes(
-                "ppp-media-us-west1",
-                cleaned_gcs_path,
-                cleaned_bytes,
-                content_type="audio/mpeg",
-            )
+            try:
+                cleaned_bytes = cleaned_audio_path.read_bytes()
+                worker_log.info("event=chunk.upload.bytes_read size=%d", len(cleaned_bytes))
+                
+                # Force GCS client re-init in multiprocessing child (not inherited from parent)
+                import infrastructure.gcs as gcs_module
+                cleaned_uri = gcs_module.upload_bytes(
+                    "ppp-media-us-west1",
+                    cleaned_gcs_path,
+                    cleaned_bytes,
+                    content_type="audio/mpeg",
+                )
+                worker_log.info("event=chunk.upload.success uri=%s", cleaned_uri)
+            except Exception as upload_err:
+                worker_log.exception(
+                    "event=chunk.upload.failed path=%s err=%s",
+                    cleaned_gcs_path,
+                    upload_err,
+                )
+                raise
 
             worker_log.info(
                 "event=chunk.complete episode_id=%s chunk_id=%s cleaned_uri=%s",

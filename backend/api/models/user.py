@@ -40,6 +40,13 @@ class User(UserBase, table=True):
     terms_accepted_at: Optional[datetime] = Field(default=None, description="When the user accepted the current terms")
     terms_accepted_ip: Optional[str] = Field(default=None, max_length=64, description="IP address at latest acceptance")
     is_admin: bool = Field(default=False, description="Whether this user has admin privileges (legacy field, use role field instead)")
+    
+    # Soft deletion fields for user self-deletion with grace period
+    deletion_requested_at: Optional[datetime] = Field(default=None, description="When deletion was requested (user or admin)")
+    deletion_scheduled_for: Optional[datetime] = Field(default=None, description="When actual deletion will occur (after grace period)")
+    deletion_requested_by: Optional[str] = Field(default=None, max_length=10, description="'user' or 'admin' - determines if admin notification sent")
+    deletion_reason: Optional[str] = Field(default=None, description="Optional reason provided by user")
+    is_deleted_view: bool = Field(default=False, description="User-facing deleted state - blocks login, appears deleted to user")
 
     # This creates the link back to the templates that belong to this user
     templates: List["PodcastTemplate"] = Relationship(back_populates="user")
