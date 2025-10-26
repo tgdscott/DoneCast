@@ -153,7 +153,7 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
 
     def _dispatch_process_chunk(payload: dict) -> None:
             try:
-                from worker.tasks.assembly.chunk_worker import run_chunk_processing  # type: ignore
+                from api.routers.tasks import run_chunk_processing  # type: ignore
             except Exception as import_err:  # pragma: no cover
                 print(f"DEV MODE chunk processing import failed: {import_err}")
                 return
