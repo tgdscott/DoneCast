@@ -102,7 +102,9 @@ export default function PodcastCreator({
     missingTitle,
     missingEpisodeNumber,
     handleAISuggestTitle,
+    handleAIRefineTitle,
     handleAISuggestDescription,
+    handleAIRefineDescription,
     handleAssemble,
     assemblyComplete,
     processingEstimate,
@@ -442,7 +444,9 @@ export default function PodcastCreator({
             onAssemble={handleAssemble}
             onDetailsChange={handleDetailsChange}
             onSuggestTitle={handleAISuggestTitle}
+            onRefineTitle={handleAIRefineTitle}
             onSuggestDescription={handleAISuggestDescription}
+            onRefineDescription={handleAIRefineDescription}
             onPublishModeChange={setPublishMode}
             onPublishVisibilityChange={setPublishVisibility}
             onScheduleDateChange={setScheduleDate}

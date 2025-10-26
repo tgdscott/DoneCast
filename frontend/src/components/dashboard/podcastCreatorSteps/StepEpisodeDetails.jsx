@@ -25,7 +25,9 @@ export default function StepEpisodeDetails({
   onAssemble,
   onDetailsChange,
   onSuggestTitle,
+  onRefineTitle,
   onSuggestDescription,
+  onRefineDescription,
   onPublishModeChange,
   onPublishVisibilityChange,
   onScheduleDateChange,
@@ -198,6 +200,16 @@ export default function StepEpisodeDetails({
                 >
                   <Wand2 className="w-4 h-4 mr-1" /> Suggest New Title
                 </Button>
+                {episodeDetails.title && episodeDetails.title.trim() && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={onRefineTitle}
+                    disabled={!transcriptReady || isAssembling || isPublishing || isAiTitleBusy}
+                  >
+                    <RefreshCw className="w-4 h-4 mr-1" /> Refine Current
+                  </Button>
+                )}
                 {!transcriptReady && (
                   <span className="text-xs text-gray-500 flex items-center gap-1">
                     <Loader2 className="w-3 h-3 animate-spin" /> Waiting for transcript…
@@ -259,6 +271,16 @@ export default function StepEpisodeDetails({
               >
                 <Wand2 className="w-4 h-4 mr-1" /> Suggest New Description
               </Button>
+              {episodeDetails.description && episodeDetails.description.trim() && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={onRefineDescription}
+                  disabled={!transcriptReady || isAssembling || isPublishing || isAiDescBusy}
+                >
+                  <RefreshCw className="w-4 h-4 mr-1" /> Refine Current
+                </Button>
+              )}
               {!transcriptReady && (
                 <span className="text-xs text-gray-500 flex items-center gap-1">
                   <Loader2 className="w-3 h-3 animate-spin" /> Waiting for transcript…

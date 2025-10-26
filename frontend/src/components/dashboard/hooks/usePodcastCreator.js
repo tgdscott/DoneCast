@@ -1203,7 +1203,8 @@ export default function usePodcastCreator({
 
   const suggestTitle = async (opts = {}) => {
     const force = !!opts.force;
-    if (!force && aiCacheRef.current.title) return aiCacheRef.current.title;
+    const currentText = opts.currentText || null;
+    if (!force && !currentText && aiCacheRef.current.title) return aiCacheRef.current.title;
     const api = makeApi(token);
     const payload = {
       episode_id: expectedEpisodeId || crypto.randomUUID(),
@@ -1213,6 +1214,10 @@ export default function usePodcastCreator({
       base_prompt: '',
       extra_instructions: selectedTemplate?.ai_settings?.title_instructions || '',
     };
+    // Add current_text if refining
+    if (currentText) {
+      payload.current_text = currentText;
+    }
     let title = '';
     try {
       const res = await api.post('/api/ai/title', payload);
@@ -1233,13 +1238,14 @@ export default function usePodcastCreator({
       } catch {}
       return '';
     }
-    aiCacheRef.current.title = title;
+    if (!currentText) aiCacheRef.current.title = title;  // Only cache new generations, not refinements
     return title;
   };
 
   const suggestNotes = async (opts = {}) => {
     const force = !!opts.force;
-    if (!force && aiCacheRef.current.notes) return aiCacheRef.current.notes;
+    const currentText = opts.currentText || null;
+    if (!force && !currentText && aiCacheRef.current.notes) return aiCacheRef.current.notes;
     const api = makeApi(token);
     const payload = {
       episode_id: expectedEpisodeId || crypto.randomUUID(),
@@ -1249,6 +1255,10 @@ export default function usePodcastCreator({
       base_prompt: '',
       extra_instructions: selectedTemplate?.ai_settings?.notes_instructions || '',
     };
+    // Add current_text if refining
+    if (currentText) {
+      payload.current_text = currentText;
+    }
     let desc = '';
     try {
       const res = await api.post('/api/ai/notes', payload);
@@ -1269,7 +1279,7 @@ export default function usePodcastCreator({
       } catch {}
       return '';
     }
-    aiCacheRef.current.notes = desc;
+    if (!currentText) aiCacheRef.current.notes = desc;  // Only cache new generations, not refinements
     return desc;
   };
 
@@ -1317,11 +1327,45 @@ export default function usePodcastCreator({
     } finally { setIsAiTitleBusy(false); }
   };
 
+  const handleAIRefineTitle = async () => {
+    if (isAiTitleBusy) return;
+    const currentTitle = (episodeDetails?.title || '').trim();
+    if (!currentTitle) {
+      try { toast({ title: 'No title to refine', description: 'Please enter a title first, then use Refine to improve it.', variant: 'default' }); } catch {}
+      return;
+    }
+    setIsAiTitleBusy(true);
+    try {
+      const title = await suggestTitle({ force: true, currentText: currentTitle });
+      if (title && !/[a-f0-9]{16,}/i.test(title)) {
+        handleDetailsChange('title', title);
+      }
+    } finally { setIsAiTitleBusy(false); }
+  };
+
   const handleAISuggestDescription = async () => {
     if (isAiDescBusy) return;
     setIsAiDescBusy(true);
     try {
       const notes = await suggestNotes({ force: true });
+      const cleaned = (notes || '')
+        .replace(/^(?:\*\*?)?description:?\*?\*?\s*/i, '')
+        .replace(/^#+\s*description\s*/i, '')
+        .trim();
+      if (cleaned) handleDetailsChange('description', cleaned);
+    } finally { setIsAiDescBusy(false); }
+  };
+
+  const handleAIRefineDescription = async () => {
+    if (isAiDescBusy) return;
+    const currentDesc = (episodeDetails?.description || '').trim();
+    if (!currentDesc) {
+      try { toast({ title: 'No description to refine', description: 'Please enter a description first, then use Refine to improve it.', variant: 'default' }); } catch {}
+      return;
+    }
+    setIsAiDescBusy(true);
+    try {
+      const notes = await suggestNotes({ force: true, currentText: currentDesc });
       const cleaned = (notes || '')
         .replace(/^(?:\*\*?)?description:?\*?\*?\s*/i, '')
         .replace(/^#+\s*description\s*/i, '')
@@ -2188,7 +2232,9 @@ export default function usePodcastCreator({
     handleTtsChange,
     handleDetailsChange,
     handleAISuggestTitle,
+    handleAIRefineTitle,
     handleAISuggestDescription,
+    handleAIRefineDescription,
     handleAssemble,
     handleFlubberConfirm,
     handleFlubberCancel,
