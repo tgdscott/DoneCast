@@ -325,7 +325,7 @@ async def process_chunk_task(request: Request, x_tasks_auth: str | None = Header
     import multiprocessing
     process = multiprocessing.Process(
         target=run_chunk_processing,
-        args=(payload.to_dict(),),
+        args=(payload,),
         name=f"chunk-{payload.chunk_id}",
         daemon=False,  # CRITICAL: Allow process to finish even if parent exits
     )

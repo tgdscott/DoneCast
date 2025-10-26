@@ -54,6 +54,9 @@ def validate_process_chunk_payload(data: Mapping[str, Any]) -> ProcessChunkPaylo
 def run_chunk_processing(payload_data: Mapping[str, Any] | ProcessChunkPayload) -> None:
     """Execute the chunk-processing worker logic synchronously."""
 
+    payload: ProcessChunkPayload | None = None
+    payload_dict: Dict[str, Any] | None = None
+
     try:
         if isinstance(payload_data, ProcessChunkPayload):
             payload = payload_data
@@ -62,10 +65,15 @@ def run_chunk_processing(payload_data: Mapping[str, Any] | ProcessChunkPayload) 
             payload = validate_process_chunk_payload(payload_data)
             payload_dict = dict(payload_data)
     except ValidationError as exc:
+        payload_repr: Mapping[str, Any] | Dict[str, Any]
+        if isinstance(payload_data, ProcessChunkPayload):
+            payload_repr = payload_data.to_dict()
+        else:
+            payload_repr = dict(payload_data)
         log.error(
             "event=chunk.payload_invalid err=%s payload=%s",
             exc,
-            dict(payload_data),
+            payload_repr,
         )
         return
 
@@ -260,11 +268,10 @@ def run_chunk_processing(payload_data: Mapping[str, Any] | ProcessChunkPayload) 
                 cleaned_uri,
             )
     except Exception as exc:  # pragma: no cover - defensive
-        worker_log = logging.getLogger("tasks.process_chunk.worker")
-        worker_log.exception(
+        log.exception(
             "event=chunk.error episode_id=%s chunk_id=%s err=%s",
-            getattr(payload, "episode_id", payload_dict.get("episode_id")),
-            getattr(payload, "chunk_id", payload_dict.get("chunk_id")),
+            getattr(payload, "episode_id", (payload_dict or {}).get("episode_id")),
+            getattr(payload, "chunk_id", (payload_dict or {}).get("chunk_id")),
             exc,
         )
 

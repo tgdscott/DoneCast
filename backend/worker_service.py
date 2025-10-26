@@ -48,14 +48,6 @@ _IS_DEV = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") o
 
 log.info("event=worker.init.config_loaded is_dev=%s", _IS_DEV)
 
-from worker.tasks import create_podcast_episode
-from worker.tasks.assembly.chunk_worker import (
-    ProcessChunkPayload,
-    run_chunk_processing,
-    validate_process_chunk_payload,
-)
-
-
 # -------------------- Health Check --------------------
 
 @app.get("/")
@@ -140,10 +132,11 @@ async def assemble_episode_worker(request: Request, x_tasks_auth: str | None = H
 
     # Execute assembly SYNCHRONOUSLY in this request
     log.info("event=worker.assemble.start episode_id=%s pid=%s", payload.episode_id, os.getpid())
-    
+
     try:
         # Import here to avoid loading heavy dependencies on startup
-        
+        from worker.tasks import create_podcast_episode
+
         result = create_podcast_episode(
             episode_id=payload.episode_id,
             template_id=payload.template_id,
@@ -178,6 +171,12 @@ async def process_chunk_worker(request: Request, x_tasks_auth: str | None = Head
         if not x_tasks_auth or x_tasks_auth != _TASKS_AUTH:
             log.warning("event=worker.chunk.unauthorized")
             raise HTTPException(status_code=401, detail="unauthorized")
+
+    from worker.tasks.assembly.chunk_worker import (
+        ProcessChunkPayload,
+        run_chunk_processing,
+        validate_process_chunk_payload,
+    )
 
     try:
         raw_body = await request.body()
