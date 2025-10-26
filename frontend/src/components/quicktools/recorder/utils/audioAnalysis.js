@@ -26,22 +26,22 @@ export const analyzeMicCheckLevels = (peakLevels, currentGain) => {
   
   // CRITICAL: Check for actual speech/audio content
   // During a 5-second mic check, we expect substantial audio activity when user is speaking
-  // Silence detection: Very low max OR very few active samples
-  if (max < 0.08 || samplesAbove10 < 10) {
+  // Silence detection: Very low max OR very few active samples (RELAXED - was 0.08/10)
+  if (max < 0.05 || samplesAbove5 < 8) {
     status = 'silent';
     message = '🔇 No audio detected';
     suggestion = 'Your microphone appears to be muted or you didn\'t speak during the test.\n\n• Check Windows Sound Settings\n• Make sure the microphone isn\'t muted\n• Speak at normal volume during the mic check\n• Try unplugging and replugging the mic';
     requireRedo = true;
   } 
-  // Too quiet: Some audio but consistently very low (needs to be MUCH louder)
-  else if (max < 0.20 || (avg < 0.08 && samplesAbove10 < 50)) {
+  // Too quiet: Some audio but consistently very low (RELAXED - was 0.20/0.08/50)
+  else if (max < 0.15 || (avg < 0.05 && samplesAbove10 < 30)) {
     status = 'too_quiet';
     message = '🔉 Microphone is too quiet';
     suggestion = 'We can barely hear you.\n\n• In Windows Sound Settings, increase microphone volume to 70-80%\n• Speak closer to the microphone\n• Make sure you\'re using the right microphone input\n• Speak louder and more clearly';
     requireRedo = true;
   }
-  // Clipping: Too many samples hitting the ceiling
-  else if (samplesAbove50 > peakLevels.length * 0.3 || max > 0.95) {
+  // Clipping: Too many samples hitting the ceiling (RELAXED - was 0.3/0.95, now 0.5/0.98)
+  else if (samplesAbove50 > peakLevels.length * 0.5 || max > 0.98) {
     status = 'clipping';
     message = '⚠️ Audio is too loud (distorting)';
     suggestion = 'Your audio is clipping and will sound distorted.\n\n• In Windows Sound Settings, reduce microphone volume to 40-60%\n• Move back from the microphone\n• Speak a bit more softly';
