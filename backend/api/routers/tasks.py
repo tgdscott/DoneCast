@@ -286,7 +286,6 @@ async def assemble_episode_task(request: Request, x_tasks_auth: str | None = Hea
 
 # -------------------- Process Audio Chunk (Cloud Tasks) --------------------
 
-
 class ProcessChunkIn(BaseModel):
     """Payload for processing a single audio chunk."""
     episode_id: str
@@ -568,7 +567,6 @@ async def process_chunk_task(request: Request, x_tasks_auth: str | None = Header
     import multiprocessing
     process = multiprocessing.Process(
         target=run_chunk_processing,
-
         args=(payload.model_dump(),),
         name=f"chunk-{payload.chunk_id}",
         daemon=False,  # CRITICAL: Allow process to finish even if parent exits

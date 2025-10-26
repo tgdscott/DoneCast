@@ -55,7 +55,6 @@ from worker.tasks.assembly.chunk_worker import (
     validate_process_chunk_payload,
 )
 
-
 # -------------------- Health Check --------------------
 
 @app.get("/")
@@ -140,7 +139,7 @@ async def assemble_episode_worker(request: Request, x_tasks_auth: str | None = H
 
     # Execute assembly SYNCHRONOUSLY in this request
     log.info("event=worker.assemble.start episode_id=%s pid=%s", payload.episode_id, os.getpid())
-    
+
     try:
         # Import here to avoid loading heavy dependencies on startup
         

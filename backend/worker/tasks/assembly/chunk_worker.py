@@ -62,6 +62,7 @@ def run_chunk_processing(payload_data: Mapping[str, Any] | ProcessChunkPayload) 
             payload = validate_process_chunk_payload(payload_data)
             payload_dict = dict(payload_data)
     except ValidationError as exc:
+
         log.error(
             "event=chunk.payload_invalid err=%s payload=%s",
             exc,
