@@ -488,7 +488,7 @@ export default function PodcastPlusDashboard() {
     return () => clearInterval(pollInterval);
   }, [token, currentView, preuploadItems, refreshPreuploads]);
   
-  // Fetch notifications
+  // Fetch notifications with polling every 10 seconds
   useEffect(() => {
     if(!token) return;
     let cancelled = false;
@@ -510,7 +510,17 @@ export default function PodcastPlusDashboard() {
         }
       } catch {}
     };
+    
+    // Load immediately
     load();
+    
+    // Then poll every 10 seconds
+    const interval = setInterval(load, 10000);
+    
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [token]);
   // BroadcastChannel listener for checkout success -> refetch notifications
   useEffect(() => {
@@ -1138,12 +1148,21 @@ export default function PodcastPlusDashboard() {
                   </div>
                   {notifications.length === 0 && <div className="p-3 text-sm text-gray-500">No notifications</div>}
                   {notifications.map(n => (
-                    <div key={n.id} className="p-3 text-sm border-b last:border-b-0 flex flex-col gap-1">
+                    <div 
+                      key={n.id} 
+                      className={`p-3 text-sm border-b last:border-b-0 flex flex-col gap-1 ${
+                        n.type === 'error' ? 'bg-red-50 border-red-200' : ''
+                      }`}
+                    >
                       <div className="flex items-center justify-between">
-                        <div className="font-medium mr-2 truncate">{n.title}</div>
+                        <div className={`font-medium mr-2 truncate ${
+                          n.type === 'error' ? 'text-red-700' : ''
+                        }`}>{n.title}</div>
                         <div className="text-[11px] text-gray-500 whitespace-nowrap">{formatShort(n.created_at, resolvedTimezone)}</div>
                       </div>
-                      {n.body && <div className="text-gray-600 text-xs">{n.body}</div>}
+                      {n.body && <div className={`text-xs ${
+                        n.type === 'error' ? 'text-red-600' : 'text-gray-600'
+                      }`}>{n.body}</div>}
                       {!n.read_at && <button className="text-xs text-blue-600 self-start" onClick={async ()=>{ try { const api = makeApi(token); await api.post(`/api/notifications/${n.id}/read`); setNotifications(curr=>curr.map(x=>x.id===n.id?{...x,read_at:new Date().toISOString()}:x)); } catch{} }}>Mark read</button>}
                     </div>
                   ))}

@@ -93,7 +93,7 @@
   .brand-plusplus {
     --background: 0 0% 100%;
     --foreground: 210 59% 11%;        /* Ink #0B1B2B */
-    --primary: 185 84% 38%;           /* Breeze Teal #0FA3B1 */
+    --primary: 220 100% 30%;          /* Blue theme (was Breeze Teal #0FA3B1) */
     --primary-foreground: 0 0% 100%;
   --logo-vibrant-green: 130 80% 45%;
   --logo-vibrant-green-rgb: 86 204 53;
@@ -104,7 +104,7 @@
     --muted: 169 52% 94%;
     --muted-foreground: 180 59% 14%;
     --border: 220 13% 91%;
-    --ring: 185 84% 38%;
+    --ring: 220 100% 30%;
     /* Plus Plus look (softer, friendlier, clearly different) */
     --radius: 14px;
   }
@@ -120,7 +120,7 @@
     /* Use default base sizing to avoid oversized text; components can opt-in to larger sizes */
   }
 
-  /* Plus Plus links and accents clearly teal */
+  /* Plus Plus links and accents clearly blue */
   html.brand-plusplus a { color: hsl(var(--primary)); }
   html.brand-plusplus a:hover { opacity: .9; }
   html.pref-large-text {
@@ -161,7 +161,7 @@
     color: hsl(var(--primary-foreground));
     fill: currentColor;
   }
-  /* Teal boxes with text-teal issue: normalize text color */
+  /* Colored boxes with text issue: normalize text color */
   .brand-plusplus .teal-box, .brand-plusplus .bg-secondary, .brand-plusplus .bg-muted {
     color: hsl(var(--foreground));
   }

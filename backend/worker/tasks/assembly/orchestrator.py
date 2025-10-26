@@ -301,6 +301,25 @@ def _mark_episode_error(session, episode, reason: str) -> None:
             logging.error("[_mark_episode_error] Failed to commit error status after retries")
     except Exception:
         session.rollback()
+    
+    # Create error notification for user
+    try:
+        episode_title = episode.title or "Untitled Episode"
+        notification = Notification(
+            user_id=episode.user_id,
+            type="error",
+            title="Episode Assembly Failed",
+            body=f"Failed to assemble '{episode_title}': {reason}"
+        )
+        session.add(notification)
+        if not _commit_with_retry(session):
+            logging.error("[_mark_episode_error] Failed to create error notification after retries")
+        else:
+            logging.info("[_mark_episode_error] ✅ Created error notification for user")
+    except Exception as e:
+        logging.error("[_mark_episode_error] Exception creating error notification: %s", e, exc_info=True)
+        session.rollback()
+    
     logging.error("[assemble] %s", reason)
 
 

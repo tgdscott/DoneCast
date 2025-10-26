@@ -74,7 +74,8 @@ export default function TopBar({ onSwitch, active }) {
   useEffect(() => {
     let cancelled = false;
     if (!token) { setNotifications([]); return; }
-    (async () => {
+    
+    const fetchNotifications = async () => {
       try {
         const api = makeApi(token);
         const r = await api.get("/api/notifications/");
@@ -84,8 +85,18 @@ export default function TopBar({ onSwitch, active }) {
       } catch {
         // ignore
       }
-    })();
-    return () => { cancelled = true; };
+    };
+    
+    // Fetch immediately
+    fetchNotifications();
+    
+    // Then poll every 10 seconds
+    const interval = setInterval(fetchNotifications, 10000);
+    
+    return () => { 
+      cancelled = true; 
+      clearInterval(interval);
+    };
   }, [token]);
 
   const unread = notifications.filter((n) => !n.read_at).length;
@@ -163,12 +174,21 @@ export default function TopBar({ onSwitch, active }) {
                 <div className="p-3 text-sm text-gray-500">No notifications</div>
               )}
               {notifications.map((n) => (
-                <div key={n.id} className="p-3 text-sm border-b last:border-b-0 flex flex-col gap-1">
+                <div 
+                  key={n.id} 
+                  className={`p-3 text-sm border-b last:border-b-0 flex flex-col gap-1 ${
+                    n.type === 'error' ? 'bg-red-50 border-red-200' : ''
+                  }`}
+                >
                   <div className="flex items-center justify-between">
-                    <div className="font-medium mr-2 truncate">{n.title}</div>
+                    <div className={`font-medium mr-2 truncate ${
+                      n.type === 'error' ? 'text-red-700' : ''
+                    }`}>{n.title}</div>
                     <div className="text-[11px] text-gray-500 whitespace-nowrap">{formatShort(n.created_at, resolvedTimezone)}</div>
                   </div>
-                  {n.body && <div className="text-gray-600 text-xs">{n.body}</div>}
+                  {n.body && <div className={`text-xs ${
+                    n.type === 'error' ? 'text-red-600' : 'text-gray-600'
+                  }`}>{n.body}</div>}
                   {!n.read_at && (
                     <button className="text-xs text-blue-600 self-start" onClick={() => markOneRead(n.id)}>
                       Mark read

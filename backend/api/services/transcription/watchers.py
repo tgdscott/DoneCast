@@ -184,7 +184,7 @@ def notify_watchers_processed(filename: str) -> None:
 
 
 def mark_watchers_failed(filename: str, detail: str) -> None:
-    """Record a failure for any outstanding watchers."""
+    """Record a failure for any outstanding watchers and create error notifications."""
 
     try:
         with Session(db.engine) as session:
@@ -201,6 +201,20 @@ def mark_watchers_failed(filename: str, detail: str) -> None:
 
                 watch.last_status = f"error:{detail[:120]}"
                 session.add(watch)
+                
+                # Create error notification for user
+                try:
+                    friendly = _friendly_name(session, filename, fallback=filename)
+                    notification = Notification(
+                        user_id=watch.user_id,
+                        type="error",
+                        title="Transcription Failed",
+                        body=f"Failed to transcribe '{friendly}': {detail[:200]}"
+                    )
+                    session.add(notification)
+                    log.info("[transcribe] Created error notification for user %s", watch.user_id)
+                except Exception as notif_err:
+                    log.warning("[transcribe] Failed to create error notification: %s", notif_err, exc_info=True)
 
             session.commit()
     except Exception:  # pragma: no cover - defensive guardrail
