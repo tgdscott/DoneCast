@@ -24,34 +24,41 @@ class SlackAlertClient:
     def fetch_alerts(self, *, oldest: Optional[str] = None, limit: int = 10) -> List[Alert]:
         """Return the most recent alerts posted in the configured channel."""
 
-        params = {"channel": self._channel_id, "limit": limit}
-        if oldest:
-            params["oldest"] = oldest
-        try:
-            response = self._client.conversations_history(**params)
-        except SlackApiError as exc:
-            LOGGER.error("Failed to fetch Slack history: %s", exc)
-            return []
-        messages: Iterable[dict] = response.get("messages", [])
+        cursor: Optional[str] = None
         alerts: List[Alert] = []
-        for message in messages:
-            ts = message.get("ts")
-            if not ts:
-                continue
-            text = message.get("text", "").strip()
-            attachments = [att.get("text", "") for att in message.get("attachments", [])]
-            permalink = self._build_permalink(ts)
-            alert = Alert(
-                metadata=AlertMetadata(
-                    channel=self._channel_id,
-                    ts=ts,
-                    sender=message.get("user") or message.get("bot_id"),
-                    permalink=permalink,
-                ),
-                payload=AlertPayload(text=text, attachments=attachments),
-                created_at=datetime.fromtimestamp(float(ts), tz=timezone.utc),
-            )
-            alerts.append(alert)
+        while True:
+            params = {"channel": self._channel_id, "limit": limit}
+            if oldest:
+                params["oldest"] = oldest
+            if cursor:
+                params["cursor"] = cursor
+            try:
+                response = self._client.conversations_history(**params)
+            except SlackApiError as exc:
+                LOGGER.error("Failed to fetch Slack history: %s", exc)
+                break
+            messages: Iterable[dict] = response.get("messages", [])
+            for message in messages:
+                ts = message.get("ts")
+                if not ts:
+                    continue
+                text = message.get("text", "").strip()
+                attachments = [att.get("text", "") for att in message.get("attachments", [])]
+                permalink = self._build_permalink(ts)
+                alert = Alert(
+                    metadata=AlertMetadata(
+                        channel=self._channel_id,
+                        ts=ts,
+                        sender=message.get("user") or message.get("bot_id"),
+                        permalink=permalink,
+                    ),
+                    payload=AlertPayload(text=text, attachments=attachments),
+                    created_at=datetime.fromtimestamp(float(ts), tz=timezone.utc),
+                )
+                alerts.append(alert)
+            cursor = response.get("response_metadata", {}).get("next_cursor") or None
+            if not cursor:
+                break
         # Slack returns newest first; reverse for chronological processing.
         alerts.sort(key=lambda alert: float(alert.metadata.ts))
         return alerts

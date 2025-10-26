@@ -16,7 +16,7 @@ from .slack import SlackAlertClient
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the CloudPod auto-ops orchestrator")
+    parser = argparse.ArgumentParser(description="Run the CloudPod repo auto-ops orchestrator")
     parser.add_argument(
         "--daemon",
         action="store_true",

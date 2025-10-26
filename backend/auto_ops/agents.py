@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Iterable, List
 
-from openai import OpenAI
+from openai import OpenAI, OpenAIError
 
 from .models import (
     AgentTurn,
@@ -32,14 +32,17 @@ class BaseAgent:
         self._temperature = temperature
 
     def _complete(self, user_prompt: str) -> str:
-        response = self._client.chat.completions.create(
-            model=self._model,
-            temperature=self._temperature,
-            messages=[
-                {"role": "system", "content": self._system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
+        try:
+            response = self._client.chat.completions.create(
+                model=self._model,
+                temperature=self._temperature,
+                messages=[
+                    {"role": "system", "content": self._system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+        except OpenAIError as exc:
+            raise AgentExecutionError("Agent call failed") from exc
         try:
             return response.choices[0].message.content or ""
         except (AttributeError, IndexError) as exc:  # pragma: no cover - defensive

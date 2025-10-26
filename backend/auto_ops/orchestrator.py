@@ -45,7 +45,7 @@ class AlertOrchestrator:
             openai_client,
             settings.model,
             system_prompt=(
-                "You are a senior production engineer with write access to the CloudPod repository. "
+                "You are a senior production engineer with write access to the CloudPod repo. "
                 "Generate precise remediation plans and code patches when possible."
             ),
             temperature=0.2,
