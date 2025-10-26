@@ -25,6 +25,7 @@ class AlertMetadata(BaseModel):
     ts: str = Field(..., description="Slack timestamp identifier for the message.")
     sender: Optional[str] = Field(None, description="Slack user ID who posted the alert.")
     permalink: Optional[str] = None
+    severity: Optional[str] = Field(None, description="Severity extracted from monitoring system (critical/high/medium/low).")
 
 
 class AlertPayload(BaseModel):

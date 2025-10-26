@@ -70,11 +70,29 @@ class AnalysisAgent(BaseAgent):
     """Agent responsible for translating alerts into actionable summaries."""
 
     def analyze(self, alert: Alert) -> AnalysisResult:
+        # If severity is already provided by the monitoring system, use it
+        if alert.metadata.severity:
+            severity = Severity(alert.metadata.severity.lower())
+            # Require manual confirmation for high/critical severity from monitoring system
+            requires_confirmation = severity in (Severity.HIGH, Severity.CRITICAL)
+        else:
+            # Fallback: let AI decide severity
+            severity = None
+            requires_confirmation = None
+        
         prompt = f"""
 You are the site reliability lead. A monitoring alert has fired in Slack.
-Return JSON with the following keys: summary, suspected_causes (list of strings), diagnostic_steps (list of strings), severity (one of critical, high, medium, low), requires_manual_confirmation (boolean).
+Return JSON with the following keys: summary, suspected_causes (list of strings), diagnostic_steps (list of strings)"""
+        
+        # Only ask AI for severity if not provided by monitoring system
+        if severity is None:
+            prompt += """, severity (one of critical, high, medium, low), requires_manual_confirmation (boolean).
 
-Set requires_manual_confirmation=true ONLY for critical infrastructure issues (container crashes, database failures, network outages) or high-severity production incidents. Set to false for low/medium severity issues like individual task failures, slow responses, or minor errors.
+Set requires_manual_confirmation=true ONLY for critical infrastructure issues (container crashes, database failures, network outages) or high-severity production incidents. Set to false for low/medium severity issues like individual task failures, slow responses, or minor errors."""
+        else:
+            prompt += "."
+        
+        prompt += f"""
 
 Alert message:
 ---
@@ -84,12 +102,13 @@ Attachments:
 {chr(10).join(alert.payload.attachments) if alert.payload.attachments else 'None'}
         """
         payload = self._complete_json(prompt)
+        
         return AnalysisResult(
             summary=payload.get("summary", ""),
             suspected_causes=payload.get("suspected_causes", []),
             diagnostic_steps=payload.get("diagnostic_steps", []),
-            severity=Severity(payload.get("severity", "medium")),
-            requires_manual_confirmation=bool(payload.get("requires_manual_confirmation", False)),
+            severity=severity or Severity(payload.get("severity", "medium")),
+            requires_manual_confirmation=requires_confirmation if requires_confirmation is not None else bool(payload.get("requires_manual_confirmation", False)),
         )
 
 

@@ -43,7 +43,12 @@ class SlackAlertClient:
                 if not ts:
                     continue
                 text = message.get("text", "").strip()
-                attachments = [att.get("text", "") for att in message.get("attachments", [])]
+                attachments_raw = message.get("attachments", [])
+                attachments = [att.get("text", "") for att in attachments_raw]
+                
+                # Extract severity from Google Cloud Monitoring alert metadata
+                severity = self._extract_severity(message, attachments_raw)
+                
                 permalink = self._build_permalink(ts)
                 alert = Alert(
                     metadata=AlertMetadata(
@@ -51,6 +56,7 @@ class SlackAlertClient:
                         ts=ts,
                         sender=message.get("user") or message.get("bot_id"),
                         permalink=permalink,
+                        severity=severity,
                     ),
                     payload=AlertPayload(text=text, attachments=attachments),
                     created_at=datetime.fromtimestamp(float(ts), tz=timezone.utc),
@@ -69,6 +75,35 @@ class SlackAlertClient:
         except SlackApiError:
             return None
         return response.get("permalink")
+
+    def _extract_severity(self, message: dict, attachments: List[dict]) -> Optional[str]:
+        """Extract severity from Google Cloud Monitoring alert metadata."""
+        # Check attachment fields for severity (Google Cloud Monitoring format)
+        for attachment in attachments:
+            fields = attachment.get("fields", [])
+            for field in fields:
+                title = field.get("title", "").lower()
+                value = field.get("value", "").lower()
+                if "severity" in title:
+                    # Normalize severity values: Warning -> medium, Error -> high, Critical -> critical
+                    if "warning" in value:
+                        return "medium"
+                    elif "error" in value or "alert" in value:
+                        return "high"
+                    elif "critical" in value:
+                        return "critical"
+                    return value  # Return as-is if it's already normalized
+        
+        # Fallback: check message text for severity keywords
+        text = message.get("text", "").lower()
+        if "critical" in text:
+            return "critical"
+        elif "error" in text or "failed" in text:
+            return "high"
+        elif "warning" in text:
+            return "medium"
+        
+        return None  # No severity detected, let AI decide
 
     def post_reply(self, thread_ts: str, *, text: Optional[str] = None, blocks: Optional[List[dict]] = None) -> None:
         """Post a message in a Slack thread."""
