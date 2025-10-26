@@ -27,7 +27,7 @@ export const analyzeMicCheckLevels = (peakLevels, currentGain) => {
   // CRITICAL: Check for actual speech/audio content
   // During a 5-second mic check, we expect substantial audio activity when user is speaking
   // Silence detection: Very low max OR very few active samples
-  if (max < 0.08 || samplesAbove10 < 20) {
+  if (max < 0.08 || samplesAbove10 < 10) {
     status = 'silent';
     message = '🔇 No audio detected';
     suggestion = 'Your microphone appears to be muted or you didn\'t speak during the test.\n\n• Check Windows Sound Settings\n• Make sure the microphone isn\'t muted\n• Speak at normal volume during the mic check\n• Try unplugging and replugging the mic';

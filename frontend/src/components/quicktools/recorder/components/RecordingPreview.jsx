@@ -195,25 +195,24 @@ export const RecordingPreview = ({
             </div>
           </>
         ) : (
-          <div className="bg-green-50 border border-green-300 rounded-lg p-6 space-y-3">
+          <div className="bg-green-50 border border-green-300 rounded-lg p-6 space-y-4">
             <div className="flex items-center justify-center text-green-800">
               <CheckCircle className="w-6 h-6 mr-2" />
               <span className="text-lg font-medium">Recording Saved!</span>
             </div>
-            <p className="text-center text-green-700">
-              <strong>{savedDisplayName}</strong>
-            </p>
             
             {/* Transcription Status */}
             {transcriptReady ? (
-              <p className="text-center text-green-700 font-medium">
+              <p className="text-center text-green-700 font-medium text-base">
                 ✅ Transcript is ready!
               </p>
             ) : (
-              <div className="space-y-2">
-                <p className="text-center text-green-700">
-                  <Loader2 className="w-4 h-4 inline-block animate-spin mr-1" />
-                  Transcription in progress...
+              <div className="space-y-3">
+                <p className="text-center text-green-700 text-base">
+                  We're transcribing your audio now.
+                </p>
+                <p className="text-center text-green-700 text-base font-medium">
+                  We'll let you know when it's ready!
                 </p>
                 {showTimeoutNotice && (
                   <p className="text-center text-yellow-700 text-sm">
@@ -227,10 +226,9 @@ export const RecordingPreview = ({
             {onFinish && (
               <Button
                 onClick={onFinish}
-                variant="outline"
                 className="w-full mt-4"
               >
-                Done
+                Back to Dashboard
               </Button>
             )}
           </div>

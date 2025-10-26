@@ -211,6 +211,21 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
     };
   }, [serverStem, token]);
 
+  // Auto-navigate to dashboard after successful save (with 3-second delay to show success message)
+  useEffect(() => {
+    if (!serverFilename || !onFinish) return;
+    
+    const timer = setTimeout(() => {
+      onFinish({
+        filename: serverFilename,
+        hint: serverStem,
+        transcriptReady: transcriptReady
+      });
+    }, 3000); // 3 seconds to read the success message
+    
+    return () => clearTimeout(timer);
+  }, [serverFilename, serverStem, transcriptReady, onFinish]);
+
   // Keyboard shortcut: Space to start/stop
   useEffect(() => {
     const isEditable = (el) => {
