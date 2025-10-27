@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, LayoutDashboard, User, Palette, Radio, Clock } from "lucide-react";
+import { ArrowLeft, LayoutDashboard, User, Palette, Radio, Clock, AlertTriangle, Trash2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +16,7 @@ import {
 import ComfortMenu from "@/components/common/ComfortMenu.jsx";
 import AudioCleanupSettings from "@/components/dashboard/AudioCleanupSettings";
 import AdminSettings from "@/components/dashboard/AdminSettings";
+import { AccountDeletionDialog, CancelDeletionDialog } from "@/components/dashboard/AccountDeletionDialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/AuthContext.jsx";
 import { makeApi, buildApiUrl } from "@/lib/apiClient";
@@ -30,9 +31,14 @@ export default function Settings({ token }) {
   const [timezone, setTimezone] = useState("");
   const [useDeviceTimezone, setUseDeviceTimezone] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
+  const [deletionDialogOpen, setDeletionDialogOpen] = useState(false);
+  const [cancelDeletionDialogOpen, setCancelDeletionDialogOpen] = useState(false);
   const pollRef = useRef(null);
   
   const deviceTimezoneInfo = detectDeviceTimezoneInfo();
+
+  const isScheduledForDeletion = authUser?.scheduled_for_deletion_at != null;
+  const gracePeriodEndsAt = authUser?.grace_period_ends_at;
 
   useEffect(() => {
     setFirstName(authUser?.first_name || "");
@@ -80,6 +86,27 @@ export default function Settings({ token }) {
     firstName.trim() !== (authUser?.first_name || "") ||
     lastName.trim() !== (authUser?.last_name || "") ||
     (useDeviceTimezone ? 'device' : timezone) !== (authUser?.timezone || "");
+
+  const handleDeletionSuccess = () => {
+    // Refresh user data to get updated deletion status
+    refreshUser({ force: true });
+  };
+
+  const formatGracePeriodDate = (dateString) => {
+    if (!dateString) return "";
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+    } catch {
+      return dateString;
+    }
+  };
 
   return (
     <div className="mx-auto max-w-5xl space-y-8 bg-slate-50/80 p-6">
@@ -219,6 +246,92 @@ export default function Settings({ token }) {
       <AudioCleanupSettings />
 
       <AdminSettings />
+
+      {/* Danger Zone - Account Deletion */}
+      <SectionCard
+        icon={<AlertTriangle className="h-5 w-5 text-white" />}
+        title="Danger Zone"
+        subtitle="Permanent actions that cannot be easily undone."
+        defaultOpen={false}
+        variant="danger"
+      >
+        <SectionItem
+          icon={<Trash2 className="h-4 w-4 text-white" />}
+          title="Delete Account"
+          description="Permanently delete your account and all associated data."
+        >
+          {isScheduledForDeletion ? (
+            <div className="space-y-4">
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold text-amber-900">
+                      Your account is scheduled for deletion
+                    </p>
+                    <p className="text-sm text-amber-800">
+                      Grace period ends: <span className="font-medium">{formatGracePeriodDate(gracePeriodEndsAt)}</span>
+                    </p>
+                    <p className="text-xs text-amber-700">
+                      You can cancel this deletion at any time before the grace period ends. All your data will be preserved.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <Button
+                variant="default"
+                onClick={() => setCancelDeletionDialogOpen(true)}
+                className="gap-2 bg-green-600 hover:bg-green-700"
+              >
+                <XCircle className="h-4 w-4" />
+                Cancel Deletion & Restore Account
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold text-red-900">
+                      This action has serious consequences
+                    </p>
+                    <ul className="text-sm text-red-800 space-y-1">
+                      <li>• All your podcasts and episodes will be deleted</li>
+                      <li>• Published RSS feeds will stop working</li>
+                      <li>• All media files and transcripts will be removed</li>
+                      <li>• You'll have a grace period to cancel (2-30 days based on content)</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+              <Button
+                variant="destructive"
+                onClick={() => setDeletionDialogOpen(true)}
+                className="gap-2"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete My Account
+              </Button>
+            </div>
+          )}
+        </SectionItem>
+      </SectionCard>
+
+      {/* Deletion Dialogs */}
+      <AccountDeletionDialog
+        open={deletionDialogOpen}
+        onOpenChange={setDeletionDialogOpen}
+        token={token}
+        userEmail={authUser?.email || ""}
+        onSuccess={handleDeletionSuccess}
+      />
+      <CancelDeletionDialog
+        open={cancelDeletionDialogOpen}
+        onOpenChange={setCancelDeletionDialogOpen}
+        token={token}
+        onSuccess={handleDeletionSuccess}
+      />
 
     </div>
   );

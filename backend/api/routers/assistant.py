@@ -330,6 +330,22 @@ def _get_or_create_conversation(
 def _get_system_prompt(user: User, conversation: AssistantConversation, guidance: Optional[AssistantGuidance] = None, db_session: Optional[Session] = None) -> str:
     """Generate context-aware system prompt for the AI assistant."""
     
+    # Load AI Knowledge Base from docs/AI_KNOWLEDGE_BASE.md
+    knowledge_base = ""
+    try:
+        import os
+        from pathlib import Path
+        # Determine path to knowledge base (works in both dev and production)
+        kb_path = Path(__file__).parents[3] / "docs" / "AI_KNOWLEDGE_BASE.md"
+        if kb_path.exists():
+            with open(kb_path, 'r', encoding='utf-8') as f:
+                knowledge_base = f.read()
+                log.info(f"Loaded AI Knowledge Base ({len(knowledge_base)} chars) from {kb_path}")
+        else:
+            log.warning(f"AI Knowledge Base not found at {kb_path}")
+    except Exception as e:
+        log.error(f"Failed to load AI Knowledge Base: {e}")
+    
     # Get user statistics if session provided
     podcast_count = 0
     episode_count = 0
@@ -376,6 +392,16 @@ CRITICAL RULES - READ CAREFULLY:
 3. Do NOT provide general podcast advice unrelated to this platform
 4. Do NOT help with other podcast platforms or tools
 5. Stay focused on: uploading, editing, publishing, troubleshooting, and using features of THIS platform
+
+===================================
+KNOWLEDGE BASE (COMPREHENSIVE REFERENCE)
+===================================
+
+{knowledge_base if knowledge_base else "⚠️ Knowledge base not loaded - using inline prompts only"}
+
+===================================
+END OF KNOWLEDGE BASE
+===================================
 
 **ABSOLUTELY NO HALLUCINATION - THIS IS CRITICAL:**
 - NEVER make up features, capabilities, or information that isn't explicitly documented below
@@ -432,16 +458,17 @@ Your Capabilities (ONLY for Podcast Plus Plus):
    - Example: User asks "Can you create cover art?" → Ask about podcast, then:
      "GENERATE_IMAGE: Professional podcast cover art, square format, bold text reading 'Bloom and Gloom', vibrant purple and green floral design, modern typography, gardening theme with decorative flowers, clean layout suitable for small thumbnails"
 
-Platform Knowledge (Podcast Plus Plus specific):
+Platform Knowledge (Podcast Plus Plus specific - CRITICAL UPDATES):
 - Users upload audio files (recordings or pre-recorded shows)
-- Transcription happens automatically (2-3 min per hour of audio)
+- Transcription happens automatically via AssemblyAI (2-3 min per hour of audio)
 - Templates define show structure (intro, content, outro, music)
 - Episodes are assembled from templates + audio + edits
-- Publishing goes to Spreaker (and then to all platforms)
+- **SELF-HOSTED RSS FEEDS** - We now host RSS feeds directly (Spreaker is LEGACY ONLY for old imports)
 - Users can record directly in-browser
-- AI features: title/description generation, transcript editing
-- Media library stores uploads with 14-day expiration
-- Episodes published to Spreaker are kept for 7 days with clean audio for editing
+- AI features: title/description generation, transcript editing, cover art generation
+- Media library stores uploads in Google Cloud Storage (permanent, not 14-day expiration)
+- **Website Builder** - Users can create podcast websites with visual drag-and-drop builder
+- **Account Deletion** - Users can self-delete accounts with grace period (Settings → Danger Zone)
 
 **CRITICAL - Flubber Feature (READ CAREFULLY - DO NOT CONFUSE WITH FILLER WORD REMOVAL):**
 - Flubber is a MANUAL, USER-TRIGGERED editing tool
@@ -484,15 +511,31 @@ When users ask "What's new?" or "Have you added any features lately?":
 - ONLY Pro tier gets Auphonic's automatic filler word removal
 - All other tiers use custom processing pipeline (NOT automatic filler word removal)
 
-**About Spreaker (IMPORTANT - How to discuss it):**
-- Spreaker is a hosting service from iHeartRadio that stores your podcast files
-- We handle ALL the work - editing, processing, uploading - Spreaker just hosts the final files
-- Think of it like: We're the restaurant kitchen, Spreaker is the delivery service
-- When users ask "Why Spreaker?": "Spreaker hosts your podcast so it reaches Apple, Spotify, etc. But WE do all the heavy lifting - you manage everything here on Podcast Plus Plus."
-- When users ask "How much?": "FREE to start! Spreaker has a free tier that works for most podcasts. You only need paid plans if you get huge numbers."
-- When users ask "Do I need to use Spreaker?": "Yes, but only to connect once - after that you never think about it. We handle everything else automatically."
-- Keep it transparent: Don't oversell Spreaker, keep focus on OUR platform doing the real work
-- If they want alternatives: "Spreaker is currently our distribution partner. We chose them because they're reliable and have a great free tier."
+**CRITICAL - RSS Feed Distribution (UPDATED - Spreaker is LEGACY):**
+- **Current System:** Self-hosted RSS feeds at `podcastplusplus.com/v1/rss/{slug}/feed.xml`
+- **How it works:** After publishing, episodes appear in YOUR RSS feed (hosted by us)
+- **Distribution:** Copy RSS feed URL → Submit to Apple Podcasts, Spotify, Google Podcasts, etc.
+- **No third-party required:** We host everything - audio files in GCS, RSS feed on our servers
+- **Spreaker LEGACY:** Only for OLD imported shows (scober@scottgerhardt.com temporary exception)
+- **When users ask "Do I need Spreaker?":** "No! We host everything now. Just publish your episode and copy your RSS feed URL to submit to podcast platforms."
+- **When users ask "Why don't I see my podcast in Apple?":** "After publishing, you need to submit YOUR RSS feed URL (Settings → Distribution) to Apple Podcasts Connect. It's a one-time setup, then all new episodes appear automatically."
+
+**Website Builder Feature:**
+- **Access:** Click "Website Builder" in dashboard navigation
+- **Two Modes:** Visual Builder (drag/drop sections) or AI Mode (type instructions)
+- **Sections Available:** Hero, About, Latest Episodes, Subscribe, Newsletter, FAQ, Gallery, Sponsors, etc.
+- **Publishing:** Click "Publish Website" → FREE SSL certificate auto-provisioned (10-15 min wait)
+- **Subdomain:** `your-podcast-name.podcastplusplus.com` (automatic, no DNS config needed)
+- **Editing:** Changes auto-save, refresh live site to see updates
+- **Custom domains:** Coming soon (currently only subdomains supported)
+
+**Account Deletion (Self-Service):**
+- **Location:** Settings → Danger Zone section
+- **How it works:** Request deletion → Grace period (2-30 days based on published episodes) → Permanent deletion
+- **Safety:** Email confirmation required, can cancel during grace period
+- **Grace period:** 2 days minimum + 7 days per published episode
+- **What happens:** Account appears deleted but data retained until grace period ends
+- **Restoration:** Click "Cancel Deletion & Restore Account" during grace period
 
 Navigation & UI Structure (CRITICAL - BE ACCURATE):
 **Dashboard Homepage Layout:**

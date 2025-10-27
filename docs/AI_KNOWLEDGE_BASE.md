@@ -3,9 +3,11 @@
 **Purpose:** Comprehensive reference for AI assistant to provide accurate, helpful answers  
 **Audience:** AI system (Mike Czech), used for context injection  
 **Format:** Q&A style, structured data, common patterns  
-**Last Updated:** October 12, 2025
+**Last Updated:** October 27, 2025
 
 **Assistant Name:** Mike Czech (short for "Mic Check" - get it?)
+
+**CRITICAL: This knowledge base is loaded dynamically into Mike's system prompt via backend/api/routers/assistant.py**
 
 ---
 
@@ -29,10 +31,13 @@
 
 An AI-powered podcast hosting and production platform that combines:
 - **Audio processing** (FFmpeg-based assembly, normalization, mixing)
-- **AI features** (transcription, content suggestions, voice generation)
+- **AI features** (transcription, content suggestions, voice generation, cover art generation)
 - **Template system** (reusable episode structures)
-- **Self-hosted RSS** (distribution to all podcast platforms)
-- **Media management** (cloud storage with automatic URL management)
+- **Self-hosted RSS** (we host RSS feeds directly - no third-party required)
+- **Website Builder** (drag-and-drop podcast website creation with free SSL)
+- **Media management** (Google Cloud Storage with permanent file hosting)
+
+**CRITICAL BRANDING:** Always say "Podcast Plus Plus" or "Plus Plus" - NEVER "Podcast++"
 
 ### Tech Stack Summary
 
@@ -933,6 +938,15 @@ category-filter
 - Fixed transcript readiness checking
 - Improved error messaging
 
+**v2.1 (2025-10-27):** 
+- Self-hosted RSS feeds (Spreaker is LEGACY ONLY)
+- Website Builder with visual drag-and-drop editor
+- User self-service account deletion with grace period
+- Cover art AI generation
+- Speaker identification (beta)
+- Admin credit viewer
+- Two-button episode creation interface
+
 **v1.9 (2025-10-10):**
 - Self-hosted RSS feed implementation
 - Episode scheduling feature
@@ -942,6 +956,394 @@ category-filter
 - Stripe billing integration
 - Usage tracking and quotas
 - Admin panel enhancements
+
+---
+
+## Website Builder Feature (NEW - October 2025)
+
+### Overview
+Users can create professional podcast websites with drag-and-drop visual builder. Hosted on `*.podcastplusplus.com` subdomains with FREE Google-managed SSL certificates.
+
+### Access
+- **Dashboard Navigation:** Click "Website Builder" button
+- **Select Podcast:** Choose which podcast to create website for
+- **One website per podcast:** Each podcast gets its own dedicated website
+
+### Building Modes
+
+**1. Visual Builder Mode (RECOMMENDED)**
+- Drag & drop sections to reorder
+- Toggle sections on/off with eye icon
+- Configure each section with gear icon (settings)
+- Add new sections from palette
+- Delete sections with trash icon
+- Live preview as changes are made
+- Click "Save" after configuring each section
+
+**2. AI Mode (Legacy)**
+- Type instructions: "Make the hero section purple"
+- AI adjusts layout based on natural language
+- Less precise than Visual Builder
+
+### Available Sections
+
+**Layout Sections (Sticky):**
+- **Header** - Logo, navigation menu, optional audio player (stays at top)
+- **Footer** - Social links, subscribe buttons, copyright (bottom of page)
+
+**Core Content:**
+- **Hero** - Large banner with podcast name, tagline, CTA
+- **About** - Show overview
+- **Latest Episodes** - Recent episodes with play buttons
+- **Subscribe** - Platform links (Apple, Spotify, etc.)
+
+**Marketing & Community:**
+- **Newsletter** - Email signup form
+- **Testimonials** - Listener reviews/quotes
+- **Sponsors** - Partner showcase
+- **Gallery** - Photo/video grid
+- **FAQ** - Frequently asked questions
+- **Reviews** - Rating displays
+- **Events** - Upcoming shows/appearances
+- **Donation** - Support links
+- **Merch** - Product showcase
+- **Transcripts** - Episode transcripts
+- **Community Links** - Discord, Slack, forums
+- **Press Kit** - Media resources
+
+### Publishing Process
+
+**Steps:**
+1. Create/edit website using Visual Builder
+2. Click **"Publish Website"** button (green button in status card)
+3. Wait **10-15 minutes** for SSL certificate provisioning
+4. Notification appears when live
+5. Visit subdomain: `your-podcast-name.podcastplusplus.com`
+
+**What Happens:**
+- Status changes to **"Published"** (green badge)
+- FREE SSL certificate auto-provisioned by Google
+- Subdomain activated (format: `podcast-name.podcastplusplus.com`)
+- Website becomes publicly accessible with HTTPS
+- No manual DNS configuration needed
+
+**Subdomain:**
+- Automatically created from podcast name
+- Format: `podcast-slug.podcastplusplus.com`
+- SSL certificate is FREE (Google-managed, auto-renewing)
+
+### Editing Published Websites
+- Make changes in Visual Builder
+- Changes **auto-save**
+- Refresh live site to see updates (may take a few seconds)
+- No republish needed for content changes
+
+### Unpublishing
+- Click **"Unpublish"** button
+- Website returns to **draft** status (amber badge)
+- Subdomain still resolves but shows "Website Not Found" error
+- Domain mapping NOT deleted (can republish instantly)
+
+### Status Indicators
+- **Draft** (Amber): Not publicly accessible, preview mode only
+- **Published** (Green): Live, SSL active, subdomain working
+- **Updating** (Blue): Changes being deployed (brief)
+
+### Troubleshooting
+
+**"Publish" button disabled:**
+- Create website first (click "Create my site")
+- Website must have subdomain configured
+- Check you're not already publishing
+
+**"Not Found" after publishing:**
+- Wait 10-15 minutes for SSL certificate
+- Check "Last generated" time in status card
+- Try `/preview` endpoint for draft version
+
+**SSL certificate not ready:**
+- Auto-notification when ready
+- Poll status: Refresh button every 30 seconds
+- Max wait: 15 minutes (usually 10 minutes)
+
+**Changes not appearing:**
+- Clear browser cache (Ctrl+Shift+R / Cmd+Shift+R)
+- Wait a few seconds for CDN propagation
+- Verify you saved section configurations
+
+### Common Questions
+
+**Q: How much does publishing cost?**
+A: Publishing is **FREE**. SSL certificates provided by Google at no cost.
+
+**Q: Can I use my own domain?**
+A: Custom domains (BYOD - Bring Your Own Domain) are coming soon. Currently only `*.podcastplusplus.com` subdomains.
+
+**Q: How many websites can I create?**
+A: One website per podcast. Multiple podcasts = multiple websites.
+
+**Q: Can I unpublish and republish?**
+A: Yes! Unpublishing sets website to draft. Republishing reactivates the same subdomain instantly (no SSL wait).
+
+---
+
+## Account Deletion (Self-Service)
+
+### Overview
+Users can self-delete their accounts with built-in safety features and grace period. Located in **Settings → Danger Zone** section.
+
+### How It Works
+
+**Request Deletion:**
+1. Navigate to **Settings** (click Settings in navigation)
+2. Scroll to **"Danger Zone"** section (collapsed by default)
+3. Click **"Delete My Account"** button
+4. **Modal opens** with:
+   - Clear warning about consequences
+   - Grace period explanation (2-30 days based on published episodes)
+   - Email confirmation field (must match exactly)
+   - Optional reason field for feedback
+5. Type email address exactly as shown
+6. Click **"Schedule Account Deletion"**
+
+**What Happens:**
+- Account enters grace period (2-30 days)
+- Grace period calculation: **2 days minimum + 7 days per published episode**
+- Account appears deleted but data is retained
+- User can cancel and restore during grace period
+- After grace period ends, data is **permanently deleted**
+- All podcasts, episodes, media files, settings removed
+- Published RSS feeds stop working
+
+**During Grace Period:**
+- Settings page shows amber warning banner
+- Displays grace period end date
+- **"Cancel Deletion & Restore Account"** button visible (green)
+- User can log in and cancel at any time
+
+**Cancellation (Restoration):**
+1. Log in (account still accessible during grace period)
+2. Go to **Settings → Danger Zone**
+3. See amber banner: "Your account is scheduled for deletion"
+4. Click **"Cancel Deletion & Restore Account"** button
+5. Confirm in modal
+6. Account immediately restored (back to normal)
+
+### Safety Features
+
+**Backend Safety:**
+- Email confirmation required (must match user's email exactly)
+- Admin users cannot self-delete (backend blocks)
+- Grace period prevents accidental deletions
+- Soft delete during grace period (data retained)
+- Automatic cleanup after grace period expires
+- Comprehensive logging of all deletion actions
+
+**Frontend Safety:**
+- Email validation (must match exactly, case-insensitive)
+- Clear warnings about consequences listed
+- Grace period explanation before confirmation
+- Visual feedback for email mismatch
+- Loading states prevent double-submission
+- Success/error toast notifications
+- Danger zone collapsed by default (not visible immediately)
+
+### User Model Fields
+The deletion system uses these fields on the user account:
+
+```json
+{
+  "scheduled_for_deletion_at": "2025-11-12T15:30:00Z",  // When deletion was requested
+  "grace_period_ends_at": "2025-11-28T15:30:00Z",       // When permanent deletion occurs
+  "deletion_reason": "Optional user feedback"
+}
+```
+
+**Checking Deletion Status:**
+- If `scheduled_for_deletion_at` is not null → account scheduled for deletion
+- If `grace_period_ends_at` passed → account will be deleted automatically
+
+### API Endpoints
+
+**Request Deletion:**
+```
+POST /api/users/me/request-deletion
+Body: {
+  "confirm_email": "user@example.com",
+  "reason": "Optional feedback"
+}
+Response: {
+  "message": "Account scheduled for deletion",
+  "grace_period_days": 16,
+  "grace_period_ends_at": "2025-11-12T15:30:00Z",
+  "published_episode_count": 2
+}
+```
+
+**Cancel Deletion:**
+```
+POST /api/users/me/cancel-deletion
+Response: {
+  "message": "Account deletion cancelled",
+  "user_id": 123
+}
+```
+
+### Common Questions
+
+**Q: How long is the grace period?**
+A: **2 days minimum + 7 days per published episode.** For example:
+- 0 published episodes = 2 days
+- 1 published episode = 9 days (2 + 7)
+- 2 published episodes = 16 days (2 + 14)
+- Maximum appears to be 30 days
+
+**Q: Can I cancel after deleting?**
+A: Yes! During the grace period, you can log in and click **"Cancel Deletion & Restore Account"** in Settings. After grace period expires, deletion is permanent.
+
+**Q: What data is deleted?**
+A: **Everything:**
+- All podcasts and episodes
+- All media files (audio, intros, outros, music)
+- All transcripts and AI-generated content
+- All templates and settings
+- Published RSS feeds stop working
+- Podcast websites unpublished
+
+**Q: Can admins delete their own accounts?**
+A: No. Admin users cannot self-delete for safety. Contact support to delete admin accounts.
+
+**Q: Will I get a confirmation email?**
+A: Yes (if email notifications enabled). You'll receive:
+- Confirmation email when deletion scheduled
+- Reminder emails during grace period
+- Final warning before permanent deletion
+
+### UI Location
+**Settings → Danger Zone → Delete Account**
+- Collapsed by default (not immediately visible)
+- Red color scheme (indicates danger)
+- Clear warnings and explanations
+- Two-step confirmation process
+
+---
+
+## RSS Feed Distribution (UPDATED - Spreaker is LEGACY)
+
+### Current System (Self-Hosted)
+**Podcast Plus Plus now hosts RSS feeds directly.** No third-party service required.
+
+**RSS Feed URL Format:**
+```
+https://podcastplusplus.com/v1/rss/{podcast-slug}/feed.xml
+```
+
+**Example:**
+```
+https://podcastplusplus.com/v1/rss/my-awesome-podcast/feed.xml
+```
+
+### How It Works
+
+**Publishing Episodes:**
+1. User creates and assembles episode
+2. Clicks **"Publish"** (or schedules for later)
+3. Episode added to RSS feed within 5 minutes
+4. Audio files hosted in Google Cloud Storage
+5. Signed URLs generated (7-day expiration, auto-renewed)
+6. RSS feed updates automatically
+
+**Distribution to Podcast Platforms:**
+1. Copy RSS feed URL from **Settings → Distribution**
+2. Submit to Apple Podcasts Connect: https://podcastsconnect.apple.com
+3. Submit to Spotify for Podcasters: https://podcasters.spotify.com
+4. Submit to Google Podcasts Manager: https://podcastsmanager.google.com
+5. Each platform reviews (Apple: 5-10 business days)
+6. Once approved, **all new episodes appear automatically** in that platform
+
+**What We Host:**
+- RSS feed XML (self-hosted on our servers)
+- Audio files (Google Cloud Storage with signed URLs)
+- Cover art images (Google Cloud Storage)
+- Episode metadata (title, description, publication dates)
+
+**No Third-Party Required:**
+- We are NOT using Spreaker anymore (legacy only)
+- We are NOT using Libsyn, Buzzsprout, or other hosting services
+- Everything is hosted by Podcast Plus Plus directly
+
+### Spreaker (LEGACY ONLY)
+
+**⚠️ CRITICAL: Spreaker integration is REMOVED for all users except `scober@scottgerhardt.com` (temporary exception for migration)**
+
+**When Users Ask About Spreaker:**
+- "We no longer use Spreaker! We host everything ourselves now."
+- "You don't need to connect to Spreaker or any third-party service."
+- "Just publish your episode and copy your RSS feed URL to submit to Apple/Spotify."
+
+**Old Imported Shows:**
+- Some old podcasts were imported from Spreaker
+- These shows may still reference Spreaker in metadata
+- New episodes publish to our self-hosted RSS feed (not Spreaker)
+- Spreaker-specific features removed from UI
+
+**DO NOT:**
+- Suggest users connect to Spreaker
+- Mention Spreaker in onboarding workflows
+- Direct users to Spreaker documentation
+- Claim Spreaker integration is required
+
+**DO:**
+- Explain we host RSS feeds ourselves
+- Direct users to copy RSS feed URL from Settings
+- Guide through platform submission process (Apple, Spotify, etc.)
+- Emphasize simplicity: "We handle everything - just publish and submit your RSS feed!"
+
+### RSS Feed Features
+
+**Automatic Updates:**
+- New episodes appear in feed within 5 minutes
+- Podcast apps check feeds every 15-60 minutes
+- Force refresh in podcast app to see new episodes immediately
+
+**Signed URLs:**
+- Audio file URLs expire after 7 days
+- System automatically regenerates before expiration
+- No user action needed (completely automatic)
+
+**OP3 Analytics Integration:**
+- Download tracking via OP3 prefix
+- Stats visible in Analytics dashboard
+- Per-episode and per-podcast metrics
+
+**RSS Feed Elements:**
+- iTunes/Apple Podcasts categories
+- Explicit content flags
+- Episode artwork (optional)
+- Season/episode numbering
+- Publication dates (can schedule future)
+
+### Common Questions
+
+**Q: Why don't I see my podcast in Apple Podcasts yet?**
+A: After publishing episodes, you need to:
+1. Copy your RSS feed URL (Settings → Distribution)
+2. Submit to Apple Podcasts Connect (https://podcastsconnect.apple.com)
+3. Wait for Apple review (5-10 business days)
+4. Once approved, your show appears in Apple Podcasts
+5. Same process for Spotify, Google Podcasts, etc.
+
+**Q: How long until new episodes appear in podcast apps?**
+A: Episodes appear in YOUR RSS feed within 5 minutes. Podcast apps cache feeds for 15-60 minutes. Total time: 15-65 minutes maximum. Force refresh in the app to see immediately.
+
+**Q: Do I need to pay for hosting?**
+A: No! RSS feed hosting is included in your Podcast Plus Plus subscription. Audio files stored in Google Cloud Storage (included).
+
+**Q: Can I use my own RSS feed URL?**
+A: Not currently. All feeds hosted at `podcastplusplus.com/v1/rss/{slug}/feed.xml`. Custom RSS URLs coming soon.
+
+**Q: What if my RSS feed URL changes?**
+A: RSS feed URLs are permanent based on your podcast slug. Won't change unless you manually change the podcast slug in settings.
 
 ---
 

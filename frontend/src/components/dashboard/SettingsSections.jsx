@@ -4,20 +4,29 @@ import { useId, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export function SectionCard({ icon, number, title, subtitle, defaultOpen = true, children }) {
+export function SectionCard({ icon, number, title, subtitle, defaultOpen = true, variant = "default", children }) {
   const [open, setOpen] = useState(defaultOpen);
   const bodyId = useId();
+  
+  const isDanger = variant === "danger";
+  
   const Badge = () => {
     if (icon) {
       return (
-        <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-900/90 text-white">
+        <span className={cn(
+          "flex h-10 w-10 items-center justify-center rounded-2xl text-white",
+          isDanger ? "bg-red-600/90" : "bg-slate-900/90"
+        )}>
           {icon}
         </span>
       );
     }
     if (typeof number !== 'undefined') {
       return (
-        <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-slate-900 text-sm font-semibold text-white">
+        <span className={cn(
+          "flex h-9 w-9 items-center justify-center rounded-2xl text-sm font-semibold text-white",
+          isDanger ? "bg-red-600" : "bg-slate-900"
+        )}>
           {number}
         </span>
       );
@@ -26,7 +35,12 @@ export function SectionCard({ icon, number, title, subtitle, defaultOpen = true,
   };
 
   return (
-    <section className="rounded-3xl border border-slate-200 bg-white/80 shadow-sm">
+    <section className={cn(
+      "rounded-3xl border shadow-sm",
+      isDanger 
+        ? "border-red-200 bg-red-50/50" 
+        : "border-slate-200 bg-white/80"
+    )}>
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
@@ -37,20 +51,30 @@ export function SectionCard({ icon, number, title, subtitle, defaultOpen = true,
         <div className="flex items-center gap-3">
           <Badge />
           <div>
-            <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
-            {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
+            <h3 className={cn(
+              "text-lg font-semibold",
+              isDanger ? "text-red-900" : "text-slate-900"
+            )}>{title}</h3>
+            {subtitle && <p className={cn(
+              "text-sm",
+              isDanger ? "text-red-700" : "text-muted-foreground"
+            )}>{subtitle}</p>}
           </div>
         </div>
         <ChevronDown
           className={cn(
-            'h-5 w-5 text-slate-500 transition-transform duration-200',
-            open ? 'rotate-180' : ''
+            'h-5 w-5 transition-transform duration-200',
+            open ? 'rotate-180' : '',
+            isDanger ? "text-red-500" : "text-slate-500"
           )}
           aria-hidden="true"
         />
       </button>
       {open && (
-        <div id={bodyId} className="space-y-4 border-t border-slate-100 px-5 pb-5 pt-4">
+        <div id={bodyId} className={cn(
+          "space-y-4 border-t px-5 pb-5 pt-4",
+          isDanger ? "border-red-100" : "border-slate-100"
+        )}>
           {children}
         </div>
       )}
