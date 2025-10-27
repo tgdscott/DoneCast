@@ -237,9 +237,22 @@ def _recover_raw_file_transcripts(limit: int | None = None) -> None:
                         recovered, skipped, failed)
             else:
                 log.debug("[startup] No transcripts needed recovery")
+            
+            # Explicit commit to finalize any session state
+            try:
+                session.commit()
+            except Exception as commit_exc:
+                log.warning("[startup] Transcript recovery commit failed: %s", commit_exc)
+                session.rollback()
                 
     except Exception as e:
         log.warning("[startup] Raw file transcript recovery failed: %s", e)
+        # Ensure any failed transactions are cleaned up
+        try:
+            with session_scope() as cleanup_session:
+                cleanup_session.rollback()
+        except Exception:
+            pass  # Cleanup failed, continuing
 
 
 def _recover_stuck_processing_episodes(limit: int | None = None) -> None:
@@ -349,11 +362,18 @@ def _recover_stuck_processing_episodes(limit: int | None = None) -> None:
                 try:
                     session.commit()
                     log.info("[startup] Recovered %d stuck episodes (marked for retry)", recovered)
-                except Exception:
-                    log.warning("[startup] Failed to commit recovered episodes", exc_info=True)
+                except Exception as commit_exc:
+                    log.warning("[startup] Failed to commit recovered episodes: %s", commit_exc)
+                    session.rollback()
                     
     except Exception as e:
         log.warning("[startup] _recover_stuck_processing_episodes failed: %s", e)
+        # Ensure any failed transactions are cleaned up
+        try:
+            with session_scope() as cleanup_session:
+                cleanup_session.rollback()
+        except Exception:
+            pass  # Cleanup failed, continuing
 
 
 # Additional obsolete migration functions removed - now in migrations/one_time_migrations.py
@@ -428,10 +448,24 @@ def run_startup_tasks() -> None:
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
                 with session_scope() as session:
-                    module.migrate(session)
+                    try:
+                        module.migrate(session)
+                    except Exception as migration_exc:
+                        # Ensure session is rolled back before raising
+                        try:
+                            session.rollback()
+                        except Exception:
+                            pass  # Already rolled back
+                        raise migration_exc
         except Exception as exc:
             log.error("[startup] auto_migrate_terms_versions failed (CRITICAL): %s", exc)
             # Don't crash startup, but log loudly since this affects all users
+            # CRITICAL: Explicitly rollback any dangling transactions in the connection pool
+            try:
+                with session_scope() as cleanup_session:
+                    cleanup_session.rollback()
+            except Exception:
+                pass  # Cleanup failed, but we logged the original error
     
     # Always recover raw file transcripts - prevents "processing" state after deployment
     # Uses SMALL limit (50) to minimize startup time
