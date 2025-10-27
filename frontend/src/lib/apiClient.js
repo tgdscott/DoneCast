@@ -8,12 +8,31 @@ function deriveApiOriginFromWindowOrigin() {
   if (typeof window === 'undefined' || typeof window.location === 'undefined') {
     return '';
   }
-  const host = window.location.hostname || '';
-  if (LOCAL_LIKE_HOSTS.has(host)) {
+
+  const host = (window.location.hostname || '').toLowerCase();
+  if (!host || LOCAL_LIKE_HOSTS.has(host)) {
     return '';
   }
-  // Default production API host when no build-time override is provided.
-  return 'https://api.podcastplusplus.com';
+
+  const origin = typeof window.location.origin === 'string' ? window.location.origin : '';
+
+  const domainMatches = (needle) => host === needle || host.endsWith(`.${needle}`);
+
+  if (host === 'api.podcastplusplus.com' || host === 'api.getpodcastplus.com') {
+    // If we're already on the API origin (e.g., Storybook, local previews), reuse it directly.
+    return origin || `https://${host}`;
+  }
+
+  if (domainMatches('getpodcastplus.com')) {
+    return 'https://api.getpodcastplus.com';
+  }
+
+  if (domainMatches('podcastplusplus.com')) {
+    return 'https://api.podcastplusplus.com';
+  }
+
+  // Unknown production host – fall back to same-origin and let proxy configuration handle it.
+  return '';
 }
 
 export function resolveRuntimeApiBase() {
