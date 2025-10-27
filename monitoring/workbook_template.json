@@ -1,0 +1,138 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# 🎧 Podcast Plus Plus Operations Dashboard\n\n### Real-time system health, performance metrics, and business intelligence\n\n---"
+      }
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "ParametersItem/1.0",
+        "parameters": [
+          {
+            "id": "timeRange",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "type": 4,
+            "value": {
+              "durationMs": 3600000
+            },
+            "typeSettings": {
+              "selectableValues": [
+                {
+                  "durationMs": 300000,
+                  "createdTime": "2023-01-01T00:00:00.000Z",
+                  "isInitialTime": false,
+                  "grain": "PT1M",
+                  "useDashboardTimeRange": false
+                },
+                {
+                  "durationMs": 3600000,
+                  "createdTime": "2023-01-01T00:00:00.000Z",
+                  "isInitialTime": false,
+                  "grain": "PT5M",
+                  "useDashboardTimeRange": false
+                },
+                {
+                  "durationMs": 86400000,
+                  "createdTime": "2023-01-01T00:00:00.000Z",
+                  "isInitialTime": false,
+                  "grain": "PT1H",
+                  "useDashboardTimeRange": false
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "traces\r\n| where timestamp > ago({TimeRange:seconds}s)\r\n| where cloud_RunRevision_s contains \"podcast-api\"\r\n| summarize \r\n    [\"📊 Total Events\"] = count(),\r\n    [\"🚨 Critical\"] = countif(severityLevel >= 4),\r\n    [\"❌ Errors\"] = countif(severityLevel == 3),\r\n    [\"⚠️ Warnings\"] = countif(severityLevel == 2),\r\n    [\"📈 Error Rate %\"] = round(countif(severityLevel >= 3) * 100.0 / count(), 2)",
+        "size": 3,
+        "title": "🎯 System Health Overview",
+        "queryType": 0,
+        "visualization": "tiles",
+        "tileSettings": {
+          "showBorder": false,
+          "titleContent": {
+            "columnMatch": "Column",
+            "formatter": 1
+          },
+          "subtitleContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "auto"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "requests\r\n| where timestamp > ago({TimeRange:seconds}s)\r\n| where cloud_RunRevision_s contains \"podcast-api\"\r\n| extend LatencyMs = duration / 10000.0\r\n| summarize \r\n    [\"🌐 Total Requests\"] = count(),\r\n    [\"⚡ Avg Latency\"] = strcat(round(avg(LatencyMs), 0), \"ms\"),\r\n    [\"🐌 P95 Latency\"] = strcat(round(percentile(LatencyMs, 95), 0), \"ms\"),\r\n    [\"💥 Error Rate\"] = strcat(round(countif(resultCode >= 400) * 100.0 / count(), 1), \"%\")",
+        "size": 3,
+        "title": "🚀 API Performance Metrics",
+        "queryType": 0,
+        "visualization": "tiles"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "traces\r\n| where timestamp > ago({TimeRange:seconds}s)\r\n| where cloud_RunRevision_s contains \"podcast-api\"\r\n| where message contains \"episode\" and (message contains \"assembly\" or message contains \"processing\")\r\n| extend EpisodeEvent = case(\r\n    message contains \"start\" or message contains \"begin\", \"🚀 Started\",\r\n    message contains \"transcription\", \"🎤 Transcription\",\r\n    message contains \"chunk\", \"🔧 Processing\",\r\n    message contains \"upload\", \"☁️ Upload\",\r\n    message contains \"complete\", \"✅ Completed\",\r\n    message contains \"failed\", \"❌ Failed\",\r\n    \"⏳ Other\"\r\n)\r\n| summarize Count = count() by EpisodeEvent, bin(timestamp, {TimeRange:seconds}s / 20)\r\n| order by timestamp desc",
+        "size": 0,
+        "title": "📺 Episode Processing Pipeline",
+        "queryType": 0,
+        "visualization": "areachart"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "traces\r\n| where timestamp > ago({TimeRange:seconds}s)\r\n| where cloud_RunRevision_s contains \"podcast-api\"\r\n| where severityLevel >= 3\r\n| extend ErrorCategory = case(\r\n    message contains \"assembly\", \"🔧 Episode Assembly\",\r\n    message contains \"transcription\", \"🎤 Transcription\",\r\n    message contains \"GCS\", \"☁️ Cloud Storage\",\r\n    message contains \"database\", \"🗄️ Database\",\r\n    message contains \"auth\", \"🔐 Authentication\",\r\n    message contains \"billing\", \"💳 Billing\",\r\n    \"❓ Other\"\r\n)\r\n| summarize \r\n    [\"Count\"] = count(),\r\n    [\"Latest Error\"] = max(timestamp),\r\n    [\"Sample Message\"] = take_any(message)\r\nby ErrorCategory\r\n| order by Count desc",
+        "size": 0,
+        "title": "🚨 Error Breakdown by Category",
+        "queryType": 0,
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "traces\r\n| where timestamp > ago({TimeRange:seconds}s)\r\n| where cloud_RunRevision_s contains \"podcast-api\"\r\n| where message contains \"tier\" or message contains \"Pro\" or message contains \"Creator\" or message contains \"Free\"\r\n| extend UserTier = case(\r\n    message contains \"Pro\", \"💎 Pro\",\r\n    message contains \"Creator\", \"🎨 Creator\",\r\n    message contains \"Unlimited\", \"🚀 Unlimited\",\r\n    message contains \"Free\", \"🆓 Free\",\r\n    \"❓ Unknown\"\r\n)\r\n| summarize \r\n    [\"Activity Count\"] = count(),\r\n    [\"Unique Users\"] = dcount(extract(@\"user[_\\s]+(\\d+)\", 1, message))\r\nby UserTier\r\n| order by [\"Activity Count\"] desc",
+        "size": 4,
+        "title": "👥 User Activity by Tier",
+        "queryType": 0,
+        "visualization": "piechart"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "traces\r\n| where timestamp > ago({TimeRange:seconds}s)\r\n| where cloud_RunRevision_s contains \"podcast-api\"\r\n| where message contains \"auphonic\" or message contains \"assemblyai\"\r\n| extend TranscriptionService = case(\r\n    message contains \"auphonic\", \"🎯 Auphonic (Pro)\",\r\n    message contains \"assemblyai\", \"🤖 AssemblyAI\",\r\n    \"❓ Unknown\"\r\n)\r\n| extend ServiceStatus = case(\r\n    message contains \"success\" or message contains \"complete\", \"✅ Success\",\r\n    message contains \"failed\" or message contains \"error\", \"❌ Failed\",\r\n    \"⏳ Processing\"\r\n)\r\n| summarize Count = count() by TranscriptionService, ServiceStatus\r\n| evaluate pivot(ServiceStatus)",
+        "size": 4,
+        "title": "🎤 Transcription Service Health",
+        "queryType": 0,
+        "visualization": "table"
+      }
+    }
+  ],
+  "fallbackResourceIds": [
+    "/subscriptions/YOUR_SUBSCRIPTION_ID/resourceGroups/YOUR_RESOURCE_GROUP"
+  ],
+  "fromTemplateId": "sentinel-UserWorkbook",
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}

@@ -1,0 +1,177 @@
+# Podcast Plus Plus - Custom Alert Rules for Log Analytics
+# These complement your existing YAML alerts with log-based monitoring
+
+## ========================================
+## CRITICAL ERROR ALERTS
+## ========================================
+
+### High Error Rate Alert
+```
+traces
+| where timestamp > ago(5m)
+| where cloud_RunRevision_s contains "podcast-api"
+| where severityLevel >= 3
+| summarize ErrorCount = count()
+| where ErrorCount > 10  // More than 10 errors in 5 minutes
+```
+
+### Episode Assembly Failure Spike
+```
+traces
+| where timestamp > ago(10m)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "assembly" and (message contains "failed" or message contains "ERROR")
+| summarize FailureCount = count(),
+           AffectedUsers = dcount(extract(@"user[_\s]+(\d+)", 1, message))
+| where FailureCount > 3  // More than 3 assembly failures in 10 minutes
+```
+
+### GCS Operation Failure Alert
+```
+traces
+| where timestamp > ago(5m)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "GCS" and (message contains "failed" or message contains "error")
+| summarize GCSFailures = count()
+| where GCSFailures > 5  // More than 5 GCS failures in 5 minutes
+```
+
+### User Authentication Crisis
+```
+traces
+| where timestamp > ago(15m)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "auth" and (message contains "failed" or message contains "timeout")
+| summarize AuthFailures = count(),
+           UniqueIPs = dcount(client_ip)
+| where AuthFailures > 20  // More than 20 auth failures in 15 minutes
+```
+
+## ========================================
+## PERFORMANCE DEGRADATION ALERTS
+## ========================================
+
+### API Response Time Spike
+```
+requests
+| where timestamp > ago(5m)
+| where cloud_RunRevision_s contains "podcast-api"
+| where duration > 50000000  // 5+ seconds (duration in nanoseconds)
+| summarize SlowRequests = count(),
+           P95Duration = percentile(duration / 10000.0, 95)
+| where SlowRequests > 5  // More than 5 slow requests
+```
+
+### Database Query Performance Alert
+```
+traces
+| where timestamp > ago(10m)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "query" and message matches regex @"[0-9]+\.?[0-9]*\s*(ms|seconds)"
+| extend QueryDuration = extract(@"([0-9]+\.?[0-9]*)\s*(ms|seconds)", 1, message)
+| extend DurationMs = case(
+    message contains "seconds", todouble(QueryDuration) * 1000,
+    todouble(QueryDuration)
+)
+| where DurationMs > 2000  // Queries slower than 2 seconds
+| summarize SlowQueries = count(),
+           AvgDuration = avg(DurationMs)
+| where SlowQueries > 3
+```
+
+## ========================================
+## BUSINESS IMPACT ALERTS
+## ========================================
+
+### Revenue-Impacting Events
+```
+traces
+| where timestamp > ago(15m)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "stripe" and (message contains "failed" or message contains "error")
+| summarize PaymentIssues = count()
+| where PaymentIssues > 3  // More than 3 payment issues
+```
+
+### Onboarding Funnel Breakdown
+```
+traces
+| where timestamp > ago(30m)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "verification" and message contains "failed"
+| summarize VerificationFailures = count()
+| where VerificationFailures > 10  // High verification failure rate
+```
+
+### Pro Tier Service Degradation
+```
+traces
+| where timestamp > ago(10m)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "auphonic" and (message contains "error" or message contains "failed")
+| summarize AuphonicIssues = count()
+| where AuphonicIssues > 2  // Auphonic problems affecting Pro users
+```
+
+## ========================================
+## SECURITY ALERTS
+## ========================================
+
+### Brute Force Attack Detection
+```
+requests
+| where timestamp > ago(10m)
+| where cloud_RunRevision_s contains "podcast-api"
+| where resultCode == 401 or resultCode == 403
+| summarize FailedAttempts = count() by client_IP
+| where FailedAttempts > 20  // More than 20 failed attempts from single IP
+```
+
+### Unusual Traffic Spike
+```
+requests
+| where timestamp > ago(5m)
+| where cloud_RunRevision_s contains "podcast-api"
+| summarize RequestCount = count(),
+           UniqueIPs = dcount(client_IP)
+| where RequestCount > 1000  // Unusually high traffic volume
+```
+
+## ========================================
+## USAGE GUIDELINES
+## ========================================
+
+### How to Use These Alerts:
+
+1. **Copy queries to Azure Monitor**
+   - Go to Azure Portal → Monitor → Logs
+   - Paste query and test with your data
+   - Create alert rule from query
+
+2. **Set appropriate thresholds**
+   - Adjust time windows based on your traffic patterns
+   - Modify count thresholds based on baseline metrics
+   - Test alerts in staging environment first
+
+3. **Configure notification channels**
+   - Email for critical issues
+   - SMS for service outages
+   - Slack/Teams for operational alerts
+
+4. **Alert fatigue prevention**
+   - Use progressive escalation
+   - Group related alerts
+   - Implement auto-resolution timeouts
+
+### Recommended Alert Severity Levels:
+
+- **Critical (P1)**: Service down, data loss, security breach
+- **High (P2)**: Significant performance degradation, payment issues
+- **Medium (P3)**: Elevated error rates, feature degradation
+- **Low (P4)**: Informational, trending issues
+
+### Sample Alert Schedule:
+- Critical: Immediate notification (24/7)
+- High: 5 minute delay, business hours priority
+- Medium: 15 minute delay, normal escalation
+- Low: Daily digest, no immediate action required

@@ -1,0 +1,445 @@
+# Podcast Plus Plus - Specialized Monitoring Queries
+# Advanced KQL queries for specific operational scenarios and deep diagnostics
+
+## ========================================
+## PRODUCTION INCIDENT RESPONSE QUERIES
+## ========================================
+
+### 🚨 Emergency Health Check (Run First During Incident)
+```kql
+let timeWindow = 15m;
+let now = now();
+traces
+| where timestamp > ago(timeWindow)
+| where cloud_RunRevision_s contains "podcast-api"
+| summarize 
+    TotalEvents = count(),
+    CriticalErrors = countif(severityLevel >= 4),
+    Errors = countif(severityLevel == 3), 
+    Warnings = countif(severityLevel == 2),
+    LastError = max(iff(severityLevel >= 3, timestamp, datetime(null))),
+    SampleCriticalError = take_any(iff(severityLevel >= 4, message, ""))
+| extend 
+    ErrorRate = round((Errors + CriticalErrors) * 100.0 / TotalEvents, 2),
+    HealthStatus = case(
+        CriticalErrors > 0, "🔴 CRITICAL",
+        ErrorRate > 20, "🟠 DEGRADED", 
+        ErrorRate > 5, "🟡 WARNING",
+        "🟢 HEALTHY"
+    ),
+    MinutesSinceLastError = iff(isnotempty(LastError), round(datetime_diff('minute', now, LastError), 1), 0.0)
+```
+
+### 🔥 Real-Time Error Stream (Last 5 Minutes)
+```kql
+traces
+| where timestamp > ago(5m)
+| where cloud_RunRevision_s contains "podcast-api"
+| where severityLevel >= 3
+| extend 
+    ErrorType = case(
+        message contains "500" or message contains "Internal Server Error", "🚫 Server Error",
+        message contains "timeout" or message contains "deadline", "⏰ Timeout",
+        message contains "memory" or message contains "OOM", "💾 Memory",
+        message contains "database" or message contains "connection", "🗄️ Database",
+        message contains "GCS" or message contains "cloud storage", "☁️ Storage",
+        message contains "assembly" or message contains "processing", "🔧 Processing",
+        "❓ Other"
+    ),
+    UserId = extract(@"user[_\s]+(\d+)", 1, message),
+    EpisodeId = extract(@"episode[_\s]+(\d+)", 1, message)
+| project timestamp, ErrorType, severityLevel, UserId, EpisodeId, message
+| order by timestamp desc
+```
+
+### 🎯 Service Cascade Failure Detection
+```kql
+traces
+| where timestamp > ago(10m)
+| where cloud_RunRevision_s contains "podcast"
+| where severityLevel >= 3
+| extend Service = case(
+    cloud_RunRevision_s contains "api", "API",
+    cloud_RunRevision_s contains "worker", "Worker", 
+    cloud_RunRevision_s contains "frontend", "Frontend",
+    "Unknown"
+)
+| summarize 
+    ErrorCount = count(),
+    FirstError = min(timestamp),
+    LastError = max(timestamp),
+    ErrorSpread = datetime_diff('minute', max(timestamp), min(timestamp))
+by Service, bin(timestamp, 1m)
+| where ErrorCount > 5  // Services with >5 errors per minute
+| order by FirstError asc
+```
+
+## ========================================
+## DEEP DIVE DIAGNOSTIC QUERIES
+## ========================================
+
+### 🔬 Episode Processing Deep Dive
+```kql
+let episodeId = "EPISODE_ID_HERE";  // Replace with actual episode ID
+traces
+| where timestamp > ago(24h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains episodeId
+| extend 
+    ProcessingStage = case(
+        message contains "upload", "1️⃣ Upload",
+        message contains "transcription" and message contains "start", "2️⃣ Transcription Start",
+        message contains "transcription" and message contains "complete", "3️⃣ Transcription Complete",
+        message contains "assembly" and message contains "start", "4️⃣ Assembly Start", 
+        message contains "chunk", "5️⃣ Chunk Processing",
+        message contains "combine" or message contains "merge", "6️⃣ Audio Combining",
+        message contains "GCS" and message contains "upload", "7️⃣ GCS Upload",
+        message contains "publish", "8️⃣ Publishing",
+        message contains "complete" or message contains "finished", "9️⃣ Complete",
+        "❓ Other"
+    ),
+    IsError = severityLevel >= 3,
+    Duration = extract(@"took (\d+\.?\d*)\s*(ms|seconds|minutes)", 1, message),
+    DurationUnit = extract(@"took \d+\.?\d*\s*(ms|seconds|minutes)", 1, message)
+| project timestamp, ProcessingStage, IsError, Duration, DurationUnit, severityLevel, message
+| order by timestamp asc
+```
+
+### 👤 User Journey Analysis
+```kql
+let userId = "USER_ID_HERE";  // Replace with actual user ID
+traces
+| where timestamp > ago(48h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains userId
+| extend 
+    Action = case(
+        message contains "login" or message contains "auth", "🔐 Authentication",
+        message contains "upload", "📁 File Upload",
+        message contains "episode" and message contains "create", "📝 Episode Creation",
+        message contains "transcription", "🎤 Transcription",
+        message contains "assembly", "🔧 Episode Assembly",
+        message contains "publish", "📡 Publishing",
+        message contains "billing" or message contains "stripe", "💳 Billing",
+        message contains "error" or message contains "failed", "❌ Error",
+        "📊 General Activity"
+    ),
+    Tier = extract(@"tier[:\s]+(\w+)", 1, message),
+    IsError = severityLevel >= 3
+| summarize 
+    ActionCount = count(),
+    ErrorCount = countif(IsError),
+    FirstAction = min(timestamp),
+    LastAction = max(timestamp),
+    UserTier = take_any(Tier)
+by Action
+| extend ErrorRate = round(ErrorCount * 100.0 / ActionCount, 1)
+| order by FirstAction asc
+```
+
+### 🌐 Geographic Error Distribution (If Available)
+```kql
+traces
+| where timestamp > ago(6h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where severityLevel >= 3
+| extend 
+    ClientIP = extract(@"client_ip[:\s]+([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)", 1, message),
+    Country = geo_info_from_ip_address(ClientIP)["country"],
+    Region = geo_info_from_ip_address(ClientIP)["state"]
+| where isnotempty(Country)
+| summarize 
+    ErrorCount = count(),
+    UniqueIPs = dcount(ClientIP),
+    SampleError = take_any(message)
+by Country, Region
+| where ErrorCount > 2  // Countries with >2 errors
+| order by ErrorCount desc
+```
+
+## ========================================
+## CAPACITY PLANNING & OPTIMIZATION
+## ========================================
+
+### 📈 Traffic Pattern Analysis
+```kql
+requests
+| where timestamp > ago(7d)
+| where cloud_RunRevision_s contains "podcast-api"
+| extend 
+    Hour = hourofday(timestamp),
+    DayOfWeek = dayofweek(timestamp),
+    Endpoint = case(
+        url contains "/api/episodes", "Episodes",
+        url contains "/api/media", "Media",
+        url contains "/api/auth", "Auth", 
+        url contains "/api/users", "Users",
+        "Other"
+    )
+| summarize 
+    RequestCount = count(),
+    AvgLatency = avg(duration / 10000.0),
+    ErrorRate = countif(resultCode >= 400) * 100.0 / count()
+by Hour, DayOfWeek, Endpoint
+| order by Hour asc, DayOfWeek asc
+```
+
+### 💾 Resource Utilization Trends
+```kql
+performanceCounters
+| where timestamp > ago(24h)
+| where cloud_RunRevision_s contains "podcast"
+| where counterName in ("Memory usage", "CPU usage", "Request rate")
+| summarize 
+    AvgValue = avg(value),
+    MaxValue = max(value),
+    P95Value = percentile(value, 95)
+by counterName, cloud_RunRevision_s, bin(timestamp, 1h)
+| order by timestamp desc
+```
+
+### 🚀 Scaling Recommendation Analysis
+```kql
+let timeWindow = 2h;
+let errorThreshold = 10.0;  // 10% error rate
+let latencyThreshold = 2000.0;  // 2 seconds
+requests
+| where timestamp > ago(timeWindow)
+| where cloud_RunRevision_s contains "podcast-api"
+| extend LatencyMs = duration / 10000.0
+| summarize 
+    RequestCount = count(),
+    ErrorRate = countif(resultCode >= 400) * 100.0 / count(),
+    P95Latency = percentile(LatencyMs, 95),
+    P99Latency = percentile(LatencyMs, 99)
+by bin(timestamp, 15m)
+| extend 
+    NeedsScaling = case(
+        ErrorRate > errorThreshold and P95Latency > latencyThreshold, "🔴 URGENT - Scale Up",
+        ErrorRate > errorThreshold, "🟠 Scale Up - Errors",
+        P95Latency > latencyThreshold, "🟡 Scale Up - Latency", 
+        RequestCount < 10, "🔵 Consider Scale Down",
+        "🟢 Optimal"
+    )
+| project timestamp, RequestCount, ErrorRate, P95Latency, NeedsScaling
+| order by timestamp desc
+```
+
+## ========================================
+## BUSINESS INTELLIGENCE QUERIES
+## ========================================
+
+### 💰 Revenue Impact Assessment
+```kql
+traces
+| where timestamp > ago(24h)
+| where cloud_RunRevision_s contains "podcast-api"
+| extend 
+    IsBillingEvent = message contains "stripe" or message contains "billing" or message contains "subscription",
+    IsPaymentError = message contains "payment" and (message contains "failed" or message contains "error"),
+    IsProTierIssue = message contains "Pro" and severityLevel >= 3,
+    IsAuphonicIssue = message contains "auphonic" and (message contains "failed" or message contains "error"),
+    UserTier = extract(@"tier[:\s]+(\w+)", 1, message),
+    UserId = extract(@"user[_\s]+(\d+)", 1, message)
+| where IsBillingEvent or IsPaymentError or IsProTierIssue or IsAuphonicIssue
+| summarize 
+    TotalEvents = count(),
+    PaymentErrors = countif(IsPaymentError),
+    ProTierIssues = countif(IsProTierIssue),
+    AuphonicIssues = countif(IsAuphonicIssue),
+    AffectedUsers = dcount(UserId),
+    RevenueRisk = case(
+        PaymentErrors > 5, "🔴 HIGH - Payment Processing Issues",
+        ProTierIssues > 3, "🟠 MEDIUM - Pro Service Degradation",
+        AuphonicIssues > 2, "🟡 LOW - Auphonic Service Issues",
+        "🟢 MINIMAL"
+    )
+| project RevenueRisk, PaymentErrors, ProTierIssues, AuphonicIssues, AffectedUsers
+```
+
+### 📊 Feature Adoption & Usage Analytics
+```kql
+traces
+| where timestamp > ago(7d)
+| where cloud_RunRevision_s contains "podcast-api"
+| extend 
+    Feature = case(
+        message contains "flubber", "Flubber (Audio Editing)",
+        message contains "intern", "Intern (Voice Commands)", 
+        message contains "auphonic", "Auphonic (Pro Processing)",
+        message contains "tts" or message contains "text-to-speech", "Text-to-Speech",
+        message contains "manual edit", "Manual Editor",
+        message contains "schedule", "Episode Scheduling",
+        message contains "analytics", "Analytics Dashboard",
+        ""
+    ),
+    UserTier = extract(@"tier[:\s]+(\w+)", 1, message),
+    UserId = extract(@"user[_\s]+(\d+)", 1, message)
+| where isnotempty(Feature)
+| summarize 
+    UsageCount = count(),
+    UniqueUsers = dcount(UserId),
+    UsersByTier = make_set(UserTier)
+by Feature
+| extend AdoptionRate = round(UniqueUsers * 100.0 / 100, 1)  // Assuming ~100 active users
+| order by UsageCount desc
+```
+
+### 🎯 Customer Success Metrics
+```kql
+let timeWindow = 30d;
+traces
+| where timestamp > ago(timeWindow)
+| where cloud_RunRevision_s contains "podcast-api"
+| extend 
+    IsOnboarding = message contains "onboarding" or message contains "registration",
+    IsEpisodeComplete = message contains "episode" and message contains "published",
+    IsUserActive = message contains "upload" or message contains "assembly",
+    UserId = extract(@"user[_\s]+(\d+)", 1, message),
+    UserTier = extract(@"tier[:\s]+(\w+)", 1, message)
+| summarize 
+    NewUsers = dcountif(UserId, IsOnboarding),
+    CompletedEpisodes = countif(IsEpisodeComplete),
+    ActiveUsers = dcountif(UserId, IsUserActive),
+    TierDistribution = make_set(UserTier)
+by bin(timestamp, 1d)
+| extend 
+    EpisodePerUser = round(todouble(CompletedEpisodes) / todouble(ActiveUsers), 2),
+    OnboardingSuccess = round(todouble(ActiveUsers) / todouble(NewUsers) * 100.0, 1)
+| project timestamp, NewUsers, ActiveUsers, CompletedEpisodes, EpisodePerUser, OnboardingSuccess
+| order by timestamp desc
+```
+
+## ========================================
+## SPECIALIZED TROUBLESHOOTING
+## ========================================
+
+### 🔄 Retry Pattern Analysis
+```kql
+traces
+| where timestamp > ago(2h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "retry" or message contains "attempt"
+| extend 
+    RetryCount = extract(@"attempt (\d+)", 1, message),
+    Service = case(
+        message contains "auphonic", "Auphonic",
+        message contains "assemblyai", "AssemblyAI",
+        message contains "GCS", "Google Cloud Storage",
+        message contains "database", "Database",
+        "Unknown Service"
+    ),
+    IsSuccess = message contains "success" or message contains "complete",
+    IsFinalFailure = message contains "max retries" or message contains "giving up"
+| where isnotempty(RetryCount)
+| summarize 
+    TotalRetries = count(),
+    SuccessfulRetries = countif(IsSuccess),
+    FinalFailures = countif(IsFinalFailure),
+    MaxRetryCount = max(toint(RetryCount))
+by Service
+| extend 
+    RetrySuccessRate = round(SuccessfulRetries * 100.0 / TotalRetries, 1),
+    ServiceHealth = case(
+        FinalFailures > 5, "🔴 CRITICAL - High Failure Rate",
+        RetrySuccessRate < 50, "🟠 DEGRADED - Low Success Rate",
+        MaxRetryCount > 5, "🟡 WARNING - High Retry Count",
+        "🟢 HEALTHY"
+    )
+| order by FinalFailures desc
+```
+
+### 🕸️ Dependency Chain Analysis
+```kql
+traces
+| where timestamp > ago(1h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "calling" or message contains "request to" or message contains "response from"
+| extend 
+    ExternalService = case(
+        message contains "auphonic", "Auphonic API",
+        message contains "assemblyai", "AssemblyAI API",
+        message contains "stripe", "Stripe API",
+        message contains "sendgrid", "SendGrid API",
+        message contains "google", "Google APIs",
+        message contains "storage.googleapis.com", "GCS API",
+        "Unknown Service"
+    ),
+    IsRequest = message contains "calling" or message contains "request to",
+    IsResponse = message contains "response from",
+    IsError = severityLevel >= 3,
+    ResponseTime = extract(@"(\d+)ms", 1, message),
+    StatusCode = extract(@"status (\d+)", 1, message)
+| where isnotempty(ExternalService)
+| summarize 
+    RequestCount = countif(IsRequest),
+    ResponseCount = countif(IsResponse),
+    ErrorCount = countif(IsError),
+    AvgResponseTime = avg(toint(ResponseTime)),
+    StatusCodes = make_set(StatusCode)
+by ExternalService, bin(timestamp, 5m)
+| extend 
+    ServiceHealth = case(
+        ErrorCount > 3, "🔴 FAILING",
+        todouble(ResponseCount) / todouble(RequestCount) < 0.8, "🟠 SLOW",
+        AvgResponseTime > 5000, "🟡 DEGRADED",
+        "🟢 HEALTHY"
+    )
+| order by timestamp desc, ErrorCount desc
+```
+
+### 🚪 Connection Pool Exhaustion Detection
+```kql
+traces
+| where timestamp > ago(30m)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "pool" or message contains "connection" or message contains "database"
+| extend 
+    IsPoolExhausted = message contains "pool exhausted" or message contains "no available connections",
+    IsConnectionTimeout = message contains "connection timeout" or message contains "acquire timeout",
+    IsDeadlock = message contains "deadlock" or message contains "lock timeout",
+    ConnectionCount = extract(@"(\d+) connections", 1, message),
+    PoolSize = extract(@"pool size (\d+)", 1, message),
+    WaitTime = extract(@"wait (\d+)ms", 1, message)
+| where IsPoolExhausted or IsConnectionTimeout or IsDeadlock or isnotempty(ConnectionCount)
+| summarize 
+    PoolExhaustionEvents = countif(IsPoolExhausted),
+    TimeoutEvents = countif(IsConnectionTimeout),
+    DeadlockEvents = countif(IsDeadlock),
+    MaxConnectionsUsed = max(toint(ConnectionCount)),
+    MaxWaitTime = max(toint(WaitTime)),
+    SampleMessage = take_any(message)
+by bin(timestamp, 5m)
+| where PoolExhaustionEvents > 0 or TimeoutEvents > 2 or DeadlockEvents > 0
+| order by timestamp desc
+```
+
+## ========================================
+## USAGE INSTRUCTIONS
+## ========================================
+
+### How to Use These Queries:
+
+1. **Emergency Response**: Use the first section during active incidents
+2. **Deep Dive**: Replace placeholder IDs (EPISODE_ID_HERE, USER_ID_HERE) with actual values
+3. **Capacity Planning**: Run weekly to identify scaling needs
+4. **Business Intelligence**: Use monthly for product and growth insights
+5. **Troubleshooting**: Deploy when investigating specific technical issues
+
+### Query Customization:
+
+- **Time Windows**: Adjust `ago(1h)` to match your investigation scope
+- **Thresholds**: Modify error counts and percentages based on your baseline
+- **Service Names**: Update to match your exact Cloud Run service names
+- **Field Names**: Adapt to your logging structure and field naming
+
+### Performance Notes:
+
+- These queries are optimized for incident response (shorter time windows)
+- For historical analysis, add sampling: `| sample 10000`
+- Cache results for repeated analysis
+- Use parameters in workbooks for dynamic time ranges
+
+---
+
+**🔧 Pro Tip**: Save frequently used queries as "Functions" in Log Analytics for quick access during incidents. Create shortcuts for the most critical diagnostic queries.

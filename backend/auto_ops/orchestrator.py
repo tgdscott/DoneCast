@@ -155,29 +155,80 @@ class AlertOrchestrator:
 
 
 class StateTracker:
-    """Persists the timestamp of the latest processed alert across runs."""
+    """Persists alert processing history to prevent duplicate actions."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, cooldown_hours: int = 24) -> None:
         self._path = path
-        self._state = {"latest_ts": None}
+        self._cooldown_hours = cooldown_hours
+        self._state = {"latest_ts": None, "processed_alerts": {}}
         self._load()
 
     @property
     def latest_ts(self) -> str | None:
         return self._state.get("latest_ts")
 
+    def has_processed(self, alert: Alert) -> bool:
+        """Check if this specific alert has been processed recently."""
+        alert_key = self._get_alert_key(alert)
+        last_processed = self._state.get("processed_alerts", {}).get(alert_key)
+        
+        if last_processed is None:
+            return False
+        
+        # Check if cooldown period has passed
+        import time
+        cooldown_seconds = self._cooldown_hours * 3600
+        if time.time() - last_processed > cooldown_seconds:
+            # Cooldown expired, can process again
+            return False
+        
+        return True
+
+    def mark_processed(self, alert: Alert) -> None:
+        """Mark an alert as processed with current timestamp."""
+        import time
+        alert_key = self._get_alert_key(alert)
+        if "processed_alerts" not in self._state:
+            self._state["processed_alerts"] = {}
+        self._state["processed_alerts"][alert_key] = time.time()
+        self._cleanup_old_entries()
+        self._persist()
+
     def update(self, ts: str) -> None:
+        """Update the latest timestamp seen."""
         self._state["latest_ts"] = ts
         self._persist()
+
+    def _get_alert_key(self, alert: Alert) -> str:
+        """Generate a unique key for an alert based on its content."""
+        # Use a combination of text snippet and severity to identify similar alerts
+        text_snippet = alert.payload.text[:100] if alert.payload.text else "unknown"
+        severity = alert.metadata.severity or "unknown"
+        # Create a stable hash-like key
+        return f"{severity}:{hash(text_snippet)}"
+
+    def _cleanup_old_entries(self) -> None:
+        """Remove processed alerts older than 7 days to prevent unbounded growth."""
+        import time
+        max_age = 7 * 24 * 3600  # 7 days
+        cutoff = time.time() - max_age
+        
+        processed = self._state.get("processed_alerts", {})
+        self._state["processed_alerts"] = {
+            key: ts for key, ts in processed.items() if ts > cutoff
+        }
 
     def _load(self) -> None:
         if not self._path.exists():
             return
         try:
             self._state = json.loads(self._path.read_text("utf-8"))
+            # Ensure processed_alerts exists (backward compatibility)
+            if "processed_alerts" not in self._state:
+                self._state["processed_alerts"] = {}
         except json.JSONDecodeError:
             LOGGER.warning("State file %s was invalid JSON; resetting", self._path)
-            self._state = {"latest_ts": None}
+            self._state = {"latest_ts": None, "processed_alerts": {}}
 
     def _persist(self) -> None:
         if self._path.parent and not self._path.parent.exists():

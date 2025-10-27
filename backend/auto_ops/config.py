@@ -77,6 +77,15 @@ class AutoOpsSettings(BaseSettings):
             " automated responses."
         ),
     )
+    alert_cooldown_hours: int = Field(
+        24,
+        ge=1,
+        le=168,  # max 1 week
+        description=(
+            "Prevent re-processing the same alert within this many hours. "
+            "Prevents repetitive comments on persistent alerts."
+        ),
+    )
 
     class Config:
         env_prefix = "AUTO_OPS_"

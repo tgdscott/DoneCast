@@ -1,0 +1,537 @@
+# Podcast Plus Plus - Log Analytics Queries
+# Comprehensive monitoring queries for bug detection, performance, and system health
+
+## ========================================
+## 1. ERROR DETECTION & BUG ANALYSIS
+## ========================================
+
+### Critical Errors (Last 24 Hours)
+```
+let timeRange = 24h;
+traces
+| where timestamp > ago(timeRange)
+| where cloud_RunRevision_s contains "podcast-api"
+| where severityLevel >= 3  // Error level and above
+| where message contains "ERROR" or message contains "CRITICAL" or message contains "FATAL"
+| extend ErrorType = case(
+    message contains "assembly", "Episode Assembly",
+    message contains "transcription", "Transcription",
+    message contains "GCS", "Google Cloud Storage",
+    message contains "database", "Database",
+    message contains "auth", "Authentication",
+    message contains "billing", "Billing/Stripe",
+    message contains "email", "Email Service",
+    message contains "auphonic", "Auphonic Integration",
+    "Other"
+)
+| summarize Count = count(), 
+           LatestError = max(timestamp),
+           SampleMessages = make_list(message, 3)
+    by ErrorType, severityLevel
+| order by Count desc
+```
+
+### Episode Processing Failures
+```
+traces
+| where timestamp > ago(7d)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "assemble" and (message contains "failed" or message contains "ERROR")
+| extend EpisodeId = extract(@"episode[_\s]+(\d+)", 1, message)
+| extend UserId = extract(@"user[_\s]+(\d+)", 1, message)
+| extend FailureReason = case(
+    message contains "GCS", "GCS Upload Failed",
+    message contains "ffmpeg", "Audio Processing Failed", 
+    message contains "timeout", "Processing Timeout",
+    message contains "memory", "Memory Issues",
+    message contains "chunk", "Chunk Processing Failed",
+    "Unknown Failure"
+)
+| summarize Count = count(),
+           LastFailure = max(timestamp),
+           AffectedUsers = dcount(UserId),
+           SampleErrors = make_list(message, 2)
+    by FailureReason
+| order by Count desc
+```
+
+### User Authentication Issues
+```
+traces
+| where timestamp > ago(24h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "auth" or message contains "login" or message contains "oauth"
+| where severityLevel >= 2  // Warning and above
+| extend AuthIssueType = case(
+    message contains "oauth" and message contains "timeout", "OAuth Timeout",
+    message contains "jwt" and message contains "invalid", "Invalid JWT",
+    message contains "verification" and message contains "code", "Email Verification Failed",
+    message contains "registration", "Registration Issues",
+    message contains "terms", "Terms Acceptance Issues",
+    "Other Auth Issue"
+)
+| summarize Count = count(),
+           UniqueIPs = dcount(client_ip),
+           SampleMessages = make_list(message, 2)
+    by AuthIssueType
+| order by Count desc
+```
+
+## ========================================
+## 2. PERFORMANCE MONITORING
+## ========================================
+
+### API Response Time Analysis
+```
+requests
+| where timestamp > ago(1h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where isnotempty(duration)
+| extend DurationMs = duration / 10000.0  // Convert to milliseconds
+| extend EndpointGroup = case(
+    url contains "/api/episodes", "Episodes",
+    url contains "/api/podcasts", "Podcasts", 
+    url contains "/api/media", "Media Upload",
+    url contains "/api/tasks", "Background Tasks",
+    url contains "/api/auth", "Authentication",
+    url contains "/api/users", "User Management",
+    url contains "/api/analytics", "Analytics",
+    "Other"
+)
+| summarize AvgDuration = avg(DurationMs),
+           P95Duration = percentile(DurationMs, 95),
+           P99Duration = percentile(DurationMs, 99),
+           RequestCount = count(),
+           ErrorRate = countif(resultCode >= 400) * 100.0 / count()
+    by EndpointGroup
+| order by P95Duration desc
+```
+
+### Slow Database Queries
+```
+traces
+| where timestamp > ago(2h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "query" or message contains "SQL" or message contains "database"
+| where message matches regex @"\d+\.\d+\s*(ms|seconds)"
+| extend QueryDuration = extract(@"(\d+\.?\d*)\s*(ms|seconds)", 1, message)
+| extend DurationMs = case(
+    message contains "seconds", todouble(QueryDuration) * 1000,
+    todouble(QueryDuration)
+)
+| where DurationMs > 500  // Queries slower than 500ms
+| extend QueryType = case(
+    message contains "SELECT", "SELECT",
+    message contains "INSERT", "INSERT", 
+    message contains "UPDATE", "UPDATE",
+    message contains "DELETE", "DELETE",
+    "UNKNOWN"
+)
+| summarize AvgDuration = avg(DurationMs),
+           MaxDuration = max(DurationMs),
+           Count = count()
+    by QueryType
+| order by AvgDuration desc
+```
+
+### Memory Usage Patterns
+```
+performanceCounters
+| where timestamp > ago(6h)
+| where cloud_RunRevision_s contains "podcast"
+| where counterName == "Memory usage"
+| summarize AvgMemory = avg(value),
+           MaxMemory = max(value),
+           P95Memory = percentile(value, 95)
+    by bin(timestamp, 15m), cloud_RunRevision_s
+| order by timestamp desc
+```
+
+## ========================================
+## 3. BUSINESS LOGIC MONITORING
+## ========================================
+
+### Transcription Service Health
+```
+traces
+| where timestamp > ago(4h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "transcription" or message contains "assemblyai" or message contains "auphonic"
+| extend ServiceType = case(
+    message contains "auphonic", "Auphonic",
+    message contains "assemblyai", "AssemblyAI",
+    "Unknown"
+)
+| extend TranscriptionStatus = case(
+    message contains "started" or message contains "begin", "Started",
+    message contains "completed" or message contains "finished", "Completed",
+    message contains "failed" or message contains "error", "Failed",
+    message contains "timeout", "Timeout",
+    "In Progress"
+)
+| summarize Count = count(),
+           SuccessRate = countif(TranscriptionStatus == "Completed") * 100.0 / count()
+    by ServiceType, TranscriptionStatus
+| order by ServiceType, Count desc
+```
+
+### Episode Assembly Pipeline Health
+```
+traces
+| where timestamp > ago(12h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "assembly" or message contains "orchestrator"
+| extend AssemblyStage = case(
+    message contains "start" or message contains "begin", "Started",
+    message contains "chunk", "Chunk Processing",
+    message contains "combine" or message contains "merge", "Audio Combining",
+    message contains "upload" and message contains "GCS", "GCS Upload",
+    message contains "publish", "Publishing",
+    message contains "complete" or message contains "finished", "Completed",
+    message contains "failed" or message contains "error", "Failed",
+    "Unknown Stage"
+)
+| summarize Count = count(),
+           UniqueEpisodes = dcount(extract(@"episode[_\s]+(\d+)", 1, message))
+    by AssemblyStage, bin(timestamp, 1h)
+| order by timestamp desc, Count desc
+```
+
+### User Tier Distribution & Usage
+```
+traces
+| where timestamp > ago(24h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "tier" or message contains "subscription" or message contains "Pro" or message contains "Creator"
+| extend UserTier = case(
+    message contains "Pro", "Pro",
+    message contains "Creator", "Creator", 
+    message contains "Unlimited", "Unlimited",
+    message contains "Free", "Free",
+    "Unknown"
+)
+| extend ActionType = case(
+    message contains "upload", "Media Upload",
+    message contains "transcription", "Transcription",
+    message contains "assembly", "Episode Assembly",
+    message contains "auphonic", "Auphonic Processing",
+    "General Usage"
+)
+| summarize UsageCount = count(),
+           UniqueUsers = dcount(extract(@"user[_\s]+(\d+)", 1, message))
+    by UserTier, ActionType
+| order by UserTier, UsageCount desc
+```
+
+## ========================================
+## 4. INFRASTRUCTURE HEALTH 
+## ========================================
+
+### Cloud Run Instance Health
+```
+requests
+| where timestamp > ago(2h)
+| where cloud_RunRevision_s contains "podcast"
+| summarize RequestCount = count(),
+           ErrorRate = countif(resultCode >= 400) * 100.0 / count(),
+           AvgLatency = avg(duration / 10000.0),
+           P95Latency = percentile(duration / 10000.0, 95)
+    by cloud_RunRevision_s, bin(timestamp, 10m)
+| order by timestamp desc
+```
+
+### GCS Upload/Download Success Rates
+```
+traces
+| where timestamp > ago(6h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "GCS" or message contains "gcs_" or message contains "cloud storage"
+| extend GCSOperation = case(
+    message contains "upload", "Upload",
+    message contains "download", "Download", 
+    message contains "delete", "Delete",
+    message contains "list", "List",
+    "Unknown"
+)
+| extend GCSResult = case(
+    message contains "success" or message contains "completed", "Success",
+    message contains "failed" or message contains "error", "Failed",
+    "In Progress"
+)
+| summarize OperationCount = count(),
+           SuccessRate = countif(GCSResult == "Success") * 100.0 / count()
+    by GCSOperation, bin(timestamp, 30m)
+| order by timestamp desc, OperationCount desc
+```
+
+### Database Connection Pool Health
+```
+traces
+| where timestamp > ago(2h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "database" or message contains "connection" or message contains "pool"
+| extend DBEvent = case(
+    message contains "pool" and message contains "exhausted", "Pool Exhausted",
+    message contains "connection" and message contains "timeout", "Connection Timeout",
+    message contains "connection" and message contains "failed", "Connection Failed",
+    message contains "deadlock", "Deadlock",
+    message contains "slow query", "Slow Query",
+    "Normal Operation"
+)
+| summarize Count = count(),
+           SampleMessages = make_list(message, 3)
+    by DBEvent, bin(timestamp, 15m)
+| where DBEvent != "Normal Operation"
+| order by timestamp desc, Count desc
+```
+
+## ========================================
+## 5. USER EXPERIENCE MONITORING
+## ========================================
+
+### Registration & Onboarding Funnel
+```
+traces
+| where timestamp > ago(24h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "registration" or message contains "onboarding" or message contains "verification"
+| extend OnboardingStep = case(
+    message contains "registration" and message contains "start", "Registration Started",
+    message contains "email" and message contains "sent", "Verification Email Sent",
+    message contains "verification" and message contains "success", "Email Verified",
+    message contains "onboarding" and message contains "complete", "Onboarding Complete",
+    message contains "terms" and message contains "accept", "Terms Accepted",
+    "Other Step"
+)
+| summarize UserCount = dcount(extract(@"user[_\s]+(\d+)", 1, message)),
+           EventCount = count()
+    by OnboardingStep, bin(timestamp, 1h)
+| order by timestamp desc
+```
+
+### Episode Creation Success Rate
+```
+traces
+| where timestamp > ago(24h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "episode" and (message contains "created" or message contains "assembly" or message contains "published")
+| extend EpisodeEvent = case(
+    message contains "created" or message contains "new episode", "Episode Created",
+    message contains "assembly" and message contains "start", "Assembly Started",
+    message contains "assembly" and message contains "complete", "Assembly Completed", 
+    message contains "published", "Episode Published",
+    message contains "failed", "Episode Failed",
+    "Other Event"
+)
+| summarize EventCount = count(),
+           UniqueEpisodes = dcount(extract(@"episode[_\s]+(\d+)", 1, message)),
+           UniqueUsers = dcount(extract(@"user[_\s]+(\d+)", 1, message))
+    by EpisodeEvent, bin(timestamp, 2h)
+| order by timestamp desc, EventCount desc
+```
+
+## ========================================
+## 6. SECURITY & ABUSE MONITORING
+## ========================================
+
+### Suspicious Activity Detection
+```
+requests
+| where timestamp > ago(2h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where resultCode == 429 or resultCode == 403 or resultCode == 401
+| summarize RequestCount = count(),
+           UniqueEndpoints = dcount(url),
+           ResultCodes = make_set(resultCode)
+    by client_IP, bin(timestamp, 10m)
+| where RequestCount > 10  // More than 10 blocked requests in 10 minutes
+| order by RequestCount desc
+```
+
+### Failed Login Attempts
+```
+traces
+| where timestamp > ago(6h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "login" and (message contains "failed" or message contains "invalid")
+| extend FailureReason = case(
+    message contains "password", "Invalid Password",
+    message contains "email", "Invalid Email",
+    message contains "locked", "Account Locked",
+    message contains "rate limit", "Rate Limited",
+    "Other Failure"
+)
+| summarize AttemptCount = count(),
+           UniqueIPs = dcount(client_ip)
+    by FailureReason, bin(timestamp, 15m)
+| where AttemptCount > 5  // More than 5 failures in 15 minutes
+| order by timestamp desc, AttemptCount desc
+```
+
+## ========================================
+## 7. CUSTOM BUSINESS METRICS
+## ========================================
+
+### Revenue Impact Monitoring
+```
+traces
+| where timestamp > ago(12h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "stripe" or message contains "billing" or message contains "subscription"
+| extend BillingEvent = case(
+    message contains "subscription" and message contains "created", "New Subscription",
+    message contains "subscription" and message contains "cancelled", "Cancelled Subscription",
+    message contains "payment" and message contains "failed", "Payment Failed",
+    message contains "usage" and message contains "exceeded", "Usage Exceeded",
+    message contains "tier" and message contains "upgrade", "Tier Upgrade",
+    "Other Billing Event"
+)
+| summarize EventCount = count(),
+           UniqueUsers = dcount(extract(@"user[_\s]+(\d+)", 1, message))
+    by BillingEvent, bin(timestamp, 1h)
+| order by timestamp desc
+```
+
+### Content Processing Volume
+```
+traces
+| where timestamp > ago(24h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "upload" or message contains "processing" or message contains "minutes"
+| extend ContentType = case(
+    message contains "main_content", "Main Content",
+    message contains "intro", "Intro",
+    message contains "outro", "Outro", 
+    message contains "music", "Background Music",
+    message contains "sfx", "Sound Effects",
+    "Other Content"
+)
+| extend ProcessingMinutes = toreal(extract(@"(\d+\.?\d*) minutes", 1, message))
+| where isnotempty(ProcessingMinutes)
+| summarize TotalMinutes = sum(ProcessingMinutes),
+           FileCount = count(),
+           AvgFileLength = avg(ProcessingMinutes)
+    by ContentType, bin(timestamp, 4h)
+| order by timestamp desc, TotalMinutes desc
+```
+
+## ========================================
+## 8. ALERT-WORTHY QUERIES  
+## ========================================
+
+### Critical System Health Alert
+```
+// Use this for immediate alerting on critical issues
+traces
+| where timestamp > ago(5m)
+| where cloud_RunRevision_s contains "podcast-api"
+| where severityLevel >= 4  // Error and Critical only
+| where message contains "CRITICAL" or 
+        message contains "OUT OF MEMORY" or
+        message contains "DATABASE DOWN" or
+        message contains "GCS UNAVAILABLE"
+| summarize CriticalEvents = count(),
+           SampleMessage = take_any(message)
+    by severityLevel
+| where CriticalEvents > 0
+```
+
+### Episode Processing Backlog Alert
+```
+// Alert when too many episodes are stuck in processing
+traces
+| where timestamp > ago(30m)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "assembly" and message contains "timeout"
+| summarize StuckEpisodes = count(),
+           UniqueUsers = dcount(extract(@"user[_\s]+(\d+)", 1, message))
+| where StuckEpisodes > 5  // More than 5 stuck episodes in 30 minutes
+```
+
+### User Experience Degradation Alert
+```
+// Alert when user-facing operations are failing
+requests
+| where timestamp > ago(10m)
+| where cloud_RunRevision_s contains "podcast-api"
+| where url contains "/api/" and not(url contains "/tasks/")  // User-facing APIs only
+| summarize TotalRequests = count(),
+           ErrorRequests = countif(resultCode >= 400),
+           ErrorRate = countif(resultCode >= 400) * 100.0 / count()
+| where ErrorRate > 15  // More than 15% error rate
+```
+
+## ========================================
+## 9. TREND ANALYSIS QUERIES
+## ========================================
+
+### Weekly Growth Metrics
+```
+traces
+| where timestamp > ago(7d)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "registration" and message contains "complete"
+| summarize NewUsers = count() by bin(timestamp, 1d)
+| order by timestamp asc
+```
+
+### Feature Usage Trends
+```
+traces
+| where timestamp > ago(7d)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains "flubber" or message contains "intern" or message contains "auphonic"
+| extend FeatureUsed = case(
+    message contains "flubber", "Flubber (Editing)",
+    message contains "intern", "Intern (Voice Commands)",
+    message contains "auphonic", "Auphonic (Pro Processing)",
+    "Unknown Feature"
+)
+| summarize UsageCount = count(),
+           UniqueUsers = dcount(extract(@"user[_\s]+(\d+)", 1, message))
+    by FeatureUsed, bin(timestamp, 1d)
+| order by timestamp desc, UsageCount desc
+```
+
+## ========================================
+## 10. TROUBLESHOOTING QUERIES
+## ========================================
+
+### Find Specific User's Recent Activity
+```
+// Replace USER_ID with actual user ID
+let userId = "123";
+traces
+| where timestamp > ago(24h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains strcat("user ", userId) or message contains strcat("user_", userId)
+| project timestamp, severityLevel, message
+| order by timestamp desc
+| limit 50
+```
+
+### Trace Specific Episode Processing
+```
+// Replace EPISODE_ID with actual episode ID
+let episodeId = "456";
+traces
+| where timestamp > ago(48h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where message contains strcat("episode ", episodeId) or message contains strcat("episode_", episodeId)
+| project timestamp, severityLevel, message
+| order by timestamp asc
+```
+
+### Debug API Endpoint Issues
+```
+// Replace ENDPOINT_PATH with actual path like "/api/episodes"
+let endpointPath = "/api/episodes";
+requests
+| where timestamp > ago(2h)
+| where cloud_RunRevision_s contains "podcast-api"
+| where url contains endpointPath
+| where resultCode >= 400
+| project timestamp, url, resultCode, duration, client_IP
+| order by timestamp desc
+| limit 100
+```

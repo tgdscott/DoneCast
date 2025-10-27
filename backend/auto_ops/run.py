@@ -48,17 +48,33 @@ def main(argv: Optional[list[str]] = None) -> int:
     openai_client = OpenAI(**openai_kwargs)
     
     orchestrator = AlertOrchestrator(settings=settings, slack_client=slack_client, openai_client=openai_client)
-    tracker = StateTracker(settings.state_file)
+    
+    # StateTracker with configurable cooldown
+    tracker = StateTracker(settings.state_file, cooldown_hours=settings.alert_cooldown_hours)
 
     daemon_enabled = args.daemon or (settings.daemon_mode and not args.once)
 
     while True:
         alerts = slack_client.fetch_alerts(oldest=tracker.latest_ts)
+        
+        # Filter out already-processed alerts (both by timestamp and by content)
         if tracker.latest_ts is not None:
             alerts = [alert for alert in alerts if float(alert.metadata.ts) > float(tracker.latest_ts)]
-        if alerts:
-            orchestrator.process_alerts(alerts)
+        
+        # Further filter to skip alerts we've recently processed
+        new_alerts = [alert for alert in alerts if not tracker.has_processed(alert)]
+        
+        if new_alerts:
+            logging.info(f"Processing {len(new_alerts)} new alert(s) (skipped {len(alerts) - len(new_alerts)} duplicate(s))")
+            for alert in new_alerts:
+                orchestrator.process_alert(alert)
+                tracker.mark_processed(alert)
+            
+            # Update latest timestamp
             tracker.update(alerts[-1].metadata.ts)
+        elif alerts:
+            logging.info(f"Skipped {len(alerts)} duplicate alert(s)")
+        
         if not daemon_enabled:
             break
         time.sleep(settings.poll_interval_seconds)
