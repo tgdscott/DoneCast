@@ -43,6 +43,7 @@ import {
   Mail,
   MailCheck,
   ArrowLeft,
+  Coins,
 } from "lucide-react";
 import React, { useState, useEffect } from "react";
 import { useAuth } from "@/AuthContext";
@@ -253,6 +254,9 @@ export default function AdminDashboard() {
   
   // Admin tier confirmation dialog state
   const [adminTierDialog, setAdminTierDialog] = useState({ open: false, userId: null, userName: '', confirmText: '' });
+  
+  // Credit viewer dialog state
+  const [creditViewerDialog, setCreditViewerDialog] = useState({ open: false, userId: null, userData: null, loading: false });
 
   const updateUser = async (id, payload) => {
     // Special handling for admin tier assignment - requires confirmation
@@ -309,6 +313,19 @@ export default function AdminDashboard() {
       toastApiError(e, 'Failed to grant admin access');
     } finally {
       setSavingIds(prev => { const n = new Set(prev); n.delete(userId); return n; });
+    }
+  }
+  
+  const viewUserCredits = async (userId) => {
+    setCreditViewerDialog({ open: true, userId, userData: null, loading: true });
+    
+    try {
+      const api = makeApi(token);
+      const data = await api.get(`/api/admin/users/${userId}/credits`);
+      setCreditViewerDialog(prev => ({ ...prev, userData: data, loading: false }));
+    } catch(e) {
+      toastApiError(e, 'Failed to load credit data');
+      setCreditViewerDialog({ open: false, userId: null, userData: null, loading: false });
     }
   }
 
@@ -978,6 +995,16 @@ export default function AdminDashboard() {
                                     Prep
                                   </Button>
                                 )}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 px-2 text-[10px] text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                  onClick={() => viewUserCredits(user.id)}
+                                  title="View credit balance and usage"
+                                >
+                                  <Coins className="h-3 w-3 mr-1" />
+                                  Credits
+                                </Button>
                                 {isSuperAdmin && (
                                   <Button
                                     variant="ghost"
@@ -1847,6 +1874,158 @@ export default function AdminDashboard() {
               className="bg-orange-600 hover:bg-orange-700"
             >
               Grant Admin Access
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Credit Viewer Dialog */}
+      <Dialog open={creditViewerDialog.open} onOpenChange={(open) => !open && setCreditViewerDialog({ open: false, userId: null, userData: null, loading: false })}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Coins className="h-5 w-5 text-blue-600" />
+              Credit Usage Details
+            </DialogTitle>
+            <DialogDescription>
+              {creditViewerDialog.userData?.email && (
+                <span className="font-medium">{creditViewerDialog.userData.email}</span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          
+          {creditViewerDialog.loading ? (
+            <div className="py-8 text-center text-gray-500">Loading credit data...</div>
+          ) : creditViewerDialog.userData ? (
+            <div className="space-y-6">
+              {/* Summary Stats */}
+              <div className="grid grid-cols-3 gap-4">
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-xs text-gray-500 mb-1">Credit Balance</div>
+                    <div className="text-2xl font-bold text-blue-600">
+                      {creditViewerDialog.userData.credits_balance.toFixed(1)}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      ≈ {creditViewerDialog.userData.credits_balance.toFixed(0)} minutes
+                    </div>
+                  </CardContent>
+                </Card>
+                
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-xs text-gray-500 mb-1">Allocated</div>
+                    <div className="text-2xl font-bold text-gray-700">
+                      {creditViewerDialog.userData.credits_allocated !== null 
+                        ? creditViewerDialog.userData.credits_allocated.toFixed(0)
+                        : '∞'}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      Tier: {creditViewerDialog.userData.tier}
+                    </div>
+                  </CardContent>
+                </Card>
+                
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-xs text-gray-500 mb-1">Used This Month</div>
+                    <div className="text-2xl font-bold text-red-600">
+                      {creditViewerDialog.userData.credits_used_this_month.toFixed(1)}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {creditViewerDialog.userData.credits_allocated !== null 
+                        ? `${((creditViewerDialog.userData.credits_used_this_month / creditViewerDialog.userData.credits_allocated) * 100).toFixed(0)}% of limit`
+                        : 'Unlimited tier'}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+              
+              {/* Usage Breakdown */}
+              {creditViewerDialog.userData.credits_breakdown && (
+                <div>
+                  <div className="text-sm font-semibold text-gray-700 mb-3">Monthly Breakdown</div>
+                  <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+                    {creditViewerDialog.userData.credits_breakdown.transcription > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600">Transcription</span>
+                        <span className="font-medium">{creditViewerDialog.userData.credits_breakdown.transcription.toFixed(1)} credits</span>
+                      </div>
+                    )}
+                    {creditViewerDialog.userData.credits_breakdown.assembly > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600">Episode Assembly</span>
+                        <span className="font-medium">{creditViewerDialog.userData.credits_breakdown.assembly.toFixed(1)} credits</span>
+                      </div>
+                    )}
+                    {creditViewerDialog.userData.credits_breakdown.tts_generation > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600">TTS Generation</span>
+                        <span className="font-medium">{creditViewerDialog.userData.credits_breakdown.tts_generation.toFixed(1)} credits</span>
+                      </div>
+                    )}
+                    {creditViewerDialog.userData.credits_breakdown.auphonic_processing > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600">Auphonic Processing</span>
+                        <span className="font-medium">{creditViewerDialog.userData.credits_breakdown.auphonic_processing.toFixed(1)} credits</span>
+                      </div>
+                    )}
+                    {creditViewerDialog.userData.credits_breakdown.storage > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600">Storage</span>
+                        <span className="font-medium">{creditViewerDialog.userData.credits_breakdown.storage.toFixed(1)} credits</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              
+              {/* Recent Charges */}
+              {creditViewerDialog.userData.recent_charges && creditViewerDialog.userData.recent_charges.length > 0 && (
+                <div>
+                  <div className="text-sm font-semibold text-gray-700 mb-3">Recent Charges (Last 20)</div>
+                  <div className="border rounded-lg overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="text-xs">Date</TableHead>
+                          <TableHead className="text-xs">Type</TableHead>
+                          <TableHead className="text-xs">Episode</TableHead>
+                          <TableHead className="text-xs text-right">Credits</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {creditViewerDialog.userData.recent_charges.map((charge) => (
+                          <TableRow key={charge.id}>
+                            <TableCell className="text-xs text-gray-600">
+                              {new Date(charge.timestamp).toLocaleDateString()}
+                            </TableCell>
+                            <TableCell className="text-xs">
+                              <Badge variant={charge.direction === 'DEBIT' ? 'destructive' : 'default'} className="text-xs">
+                                {charge.reason}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-xs text-gray-600 truncate max-w-[200px]">
+                              {charge.episode_title || charge.notes || '—'}
+                            </TableCell>
+                            <TableCell className={`text-xs text-right font-medium ${charge.direction === 'DEBIT' ? 'text-red-600' : 'text-green-600'}`}>
+                              {charge.direction === 'DEBIT' ? '-' : '+'}{charge.credits.toFixed(1)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="py-8 text-center text-gray-500">No data available</div>
+          )}
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreditViewerDialog({ open: false, userId: null, userData: null, loading: false })}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

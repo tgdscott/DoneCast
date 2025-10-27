@@ -696,4 +696,99 @@ def delete_user(
         )
 
 
+@router.get("/users/{user_id}/credits")
+async def get_user_credits(
+    user_id: UUID,
+    session: Session = Depends(get_session),
+    admin_user: User = Depends(get_current_admin_user),
+) -> Dict[str, Any]:
+    """
+    Get credit usage details for a specific user (Admin only).
+    
+    Returns:
+        - Credit balance
+        - Monthly usage breakdown
+        - Recent charges (last 20)
+        - Tier allocation
+    """
+    log.info(f"[ADMIN] Credit check requested by {admin_user.email} for user_id: {user_id}")
+    
+    # Verify user exists
+    user = crud.get_user_by_id(session, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Get credit balance
+    from api.services.billing import credits
+    balance = credits.get_user_credit_balance(session, user_id)
+    
+    # Get tier allocation
+    from api.services import tier_service
+    tier = getattr(user, 'tier', 'free') or 'free'
+    tier_credits = tier_service.get_tier_credits(session, tier)
+    
+    # Get monthly breakdown
+    from datetime import datetime, timezone
+    from api.services.billing import usage as usage_svc
+    
+    now = datetime.now(timezone.utc)
+    start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    breakdown = usage_svc.month_credits_breakdown(session, user_id, start_of_month, now)
+    
+    # Get recent charges (last 20)
+    from sqlmodel import select, desc as sqlmodel_desc
+    from api.models.usage import ProcessingMinutesLedger
+    
+    stmt = (
+        select(ProcessingMinutesLedger)
+        .where(ProcessingMinutesLedger.user_id == user_id)
+        .order_by(sqlmodel_desc(ProcessingMinutesLedger.created_at))
+        .limit(20)
+    )
+    recent = session.exec(stmt).all()
+    
+    recent_charges = []
+    for entry in recent:
+        charge = {
+            "id": entry.id,
+            "timestamp": entry.created_at.isoformat() if entry.created_at else None,
+            "episode_id": str(entry.episode_id) if entry.episode_id else None,
+            "direction": entry.direction.value if hasattr(entry.direction, 'value') else str(entry.direction),
+            "reason": entry.reason.value if hasattr(entry.reason, 'value') else str(entry.reason),
+            "credits": float(entry.credits),
+            "minutes": entry.minutes,
+            "notes": entry.notes
+        }
+        
+        # Try to get episode title if episode_id exists
+        if entry.episode_id:
+            try:
+                episode = session.get(Episode, entry.episode_id)
+                if episode:
+                    charge["episode_title"] = episode.title
+            except Exception:
+                pass
+        
+        recent_charges.append(charge)
+    
+    return {
+        "user_id": str(user_id),
+        "email": user.email,
+        "first_name": getattr(user, 'first_name', None),
+        "last_name": getattr(user, 'last_name', None),
+        "tier": tier,
+        "credits_balance": float(balance),
+        "credits_allocated": float(tier_credits) if tier_credits is not None else None,
+        "credits_used_this_month": float(breakdown.get('total', 0)),
+        "credits_breakdown": {
+            "transcription": float(breakdown.get('transcription', 0)),
+            "assembly": float(breakdown.get('assembly', 0)),
+            "tts_generation": float(breakdown.get('tts_generation', 0)),
+            "auphonic_processing": float(breakdown.get('auphonic_processing', 0)),
+            "storage": float(breakdown.get('storage', 0)),
+        },
+        "recent_charges": recent_charges
+    }
+
+
 __all__ = ["router"]
