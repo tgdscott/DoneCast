@@ -1,10 +1,11 @@
-from sqlmodel import SQLModel, Field, Relationship
+from sqlmodel import SQLModel, Field, Relationship, Column
 from typing import List, Optional, Literal, Union
 from datetime import datetime
 from uuid import UUID, uuid4
 import json
 from enum import Enum
 from sqlalchemy import UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSON
 
 from .user import User
 
@@ -70,6 +71,9 @@ class PodcastBase(SQLModel):
     verified_at: Optional[datetime] = Field(default=None)
     # Friendly URL slug for public-facing URLs (RSS feeds, websites, etc.)
     slug: Optional[str] = Field(default=None, index=True, unique=True, max_length=100, description="URL-friendly slug for public links (e.g., 'my-awesome-podcast')")
+    # Speaker identification settings
+    has_guests: bool = Field(default=False, description="This podcast regularly features guests")
+    speaker_intros: Optional[dict] = Field(default=None, sa_column=Column(JSON), description="Voice intro files for speaker identification - format: {'hosts': [{'name': 'Scott', 'gcs_path': 'gs://...', 'duration_ms': 2000}]}")
 
 class Podcast(PodcastBase, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
@@ -331,6 +335,9 @@ class Episode(SQLModel, table=True):
     # Self-hosted RSS feed requirements
     audio_file_size: Optional[int] = Field(default=None, description="Audio file size in bytes (required for RSS <enclosure> length attribute)")
     duration_ms: Optional[int] = Field(default=None, description="Episode duration in milliseconds (for iTunes <duration> tag)")
+    
+    # Speaker identification (per-episode guests)
+    guest_intros: Optional[list] = Field(default=None, sa_column=Column(JSON), description="Per-episode guest voice intros for speaker identification - format: [{'name': 'Sarah', 'gcs_path': 'gs://...', 'duration_ms': 2000}]")
 
     processed_at: datetime = Field(default_factory=datetime.utcnow)
     created_at: datetime = Field(default_factory=datetime.utcnow, description="Creation timestamp (added via migration)")

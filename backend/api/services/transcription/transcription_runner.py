@@ -33,6 +33,69 @@ def _assign_speakers_from_utterances(words: List[Dict[str, Any]], utterances: Li
             w["speaker"] = u_speaker
 
 
+def map_speaker_labels(
+    words: List[Dict[str, Any]],
+    speaker_names: List[str],
+    intro_duration_s: float
+) -> None:
+    """
+    Map AssemblyAI's generic speaker labels (Speaker A/B/C) to actual names.
+    Also strips the intro section and adjusts timestamps.
+    
+    Modifies the words list in-place.
+    
+    Args:
+        words: List of word dicts with 'speaker', 'start', 'end' fields (in seconds)
+        speaker_names: Ordered list of speaker names matching intro order
+            (e.g., ["Scott", "Amber", "Sarah"])
+        intro_duration_s: Total duration of prepended intros in seconds
+            (words before this timestamp are removed)
+    """
+    if not speaker_names:
+        logging.info("[speaker_id] No speaker names configured, keeping generic labels")
+        return
+    
+    # Build speaker map: "Speaker A" -> "Scott", "Speaker B" -> "Amber", etc.
+    speaker_map: Dict[str, str] = {}
+    for idx, name in enumerate(speaker_names):
+        generic_label = chr(65 + idx)  # A, B, C, D...
+        speaker_map[f"Speaker {generic_label}"] = name
+    
+    logging.info("[speaker_id] Speaker mapping: %s", speaker_map)
+    logging.info("[speaker_id] Stripping intro section: %.2fs", intro_duration_s)
+    
+    # Filter words and remap speakers
+    filtered_words: List[Dict[str, Any]] = []
+    removed_count = 0
+    
+    for w in words:
+        # Skip words in intro section
+        if w.get("start", 0) < intro_duration_s:
+            removed_count += 1
+            continue
+        
+        # Map speaker label
+        original_speaker = w.get("speaker")
+        if original_speaker in speaker_map:
+            w["speaker"] = speaker_map[original_speaker]
+        
+        # Adjust timestamps (subtract intro duration)
+        w["start"] = max(0.0, w.get("start", 0) - intro_duration_s)
+        w["end"] = max(0.0, w.get("end", 0) - intro_duration_s)
+        
+        filtered_words.append(w)
+    
+    logging.info(
+        "[speaker_id] Removed %d intro words, kept %d content words",
+        removed_count,
+        len(filtered_words)
+    )
+    
+    # Replace words list contents
+    words.clear()
+    words.extend(filtered_words)
+
+
 def _normalize_completed_transcript(data: TranscriptResp) -> NormalizedResult:
     logging.info(
         "[assemblyai] server flags -> filter_profanity=%s punctuate=%s format_text=%s disfluencies=%s speech_model=%s",
