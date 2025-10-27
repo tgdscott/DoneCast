@@ -433,8 +433,18 @@ def make_signed_url(
     *,
     method: str = "GET",
     content_type: Optional[str] = None,
+    use_cdn: bool = True,
 ) -> str:
-    """Return a signed URL or dev fallback for the given object."""
+    """Return a signed URL or dev fallback for the given object.
+    
+    Args:
+        bucket: GCS bucket name
+        key: Object key within bucket
+        minutes: Expiration time in minutes
+        method: HTTP method (GET, PUT, etc.)
+        content_type: Optional MIME type for PUT
+        use_cdn: Convert to CDN URL for playback (default: True). Set False for API uploads (AssemblyAI).
+    """
 
     minutes = max(1, int(minutes or 0))
     try:
@@ -447,7 +457,8 @@ def make_signed_url(
         )
         
         # Convert GET requests to use CDN for better performance
-        if url and method.upper() == "GET":
+        # Skip CDN for API uploads (AssemblyAI, Auphonic) as they may reject HTTP or IP-based URLs
+        if url and method.upper() == "GET" and use_cdn:
             url = _convert_to_cdn_url(url)
             
     except Exception as exc:

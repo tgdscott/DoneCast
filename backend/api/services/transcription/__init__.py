@@ -107,8 +107,13 @@ def _store_media_transcript_metadata(
 ) -> None:
     """Persist transcript metadata for a media upload for future reuse."""
 
+    logger = logging.getLogger("transcription")
+    
     cleaned = (filename or "").strip()
+    logger.info("[transcript_save] 🔍 ENTER: filename='%s'", cleaned)
+    
     if not cleaned:
+        logger.warning("[transcript_save] ❌ SKIP: Empty filename")
         return
 
     payload: Dict[str, Any] = {}
@@ -125,7 +130,10 @@ def _store_media_transcript_metadata(
     if gcs_url:
         payload.setdefault("gcs_url", gcs_url)
 
+    logger.info("[transcript_save] 📦 Payload keys: %s", list(payload.keys()))
+    
     if not payload:
+        logger.warning("[transcript_save] ❌ SKIP: Empty payload")
         return
 
     try:
@@ -134,26 +142,37 @@ def _store_media_transcript_metadata(
         from api.core import database as db
         from api.models.podcast import MediaItem
         from api.models.transcription import MediaTranscript
-    except Exception:
-        logging.getLogger("transcription").warning(
-            "[transcription] Unable to import dependencies for transcript persistence", exc_info=True
+        
+        logger.info("[transcript_save] ✅ Imports successful")
+    except Exception as import_exc:
+        logger.error(
+            "[transcript_save] ❌ FATAL: Import failed: %s", import_exc, exc_info=True
         )
         return
 
     candidates = _candidate_filenames(cleaned)
     if cleaned not in candidates:
         candidates.insert(0, cleaned)
+    
+    logger.info("[transcript_save] 🔎 Candidate filenames: %s", candidates)
 
     try:
+        logger.info("[transcript_save] 🔌 Opening database session...")
         with Session(db.engine) as session:
+            logger.info("[transcript_save] 🔍 Searching for MediaItem in candidates...")
             media_item = session.exec(
                 select(MediaItem).where(MediaItem.filename.in_(candidates))
             ).first()
             media_item_id = getattr(media_item, "id", None) if media_item else None
+            
+            logger.info("[transcript_save] MediaItem: id=%s", media_item_id)
 
+            logger.info("[transcript_save] 🔍 Searching for existing MediaTranscript...")
             existing = session.exec(
                 select(MediaTranscript).where(MediaTranscript.filename.in_(candidates))
             ).all()
+            
+            logger.info("[transcript_save] Found %d existing MediaTranscript records", len(existing))
 
             target = None
             for record in existing:
@@ -167,6 +186,7 @@ def _store_media_transcript_metadata(
             now = datetime.utcnow()
 
             if target is not None:
+                logger.info("[transcript_save] ♻️ Updating existing MediaTranscript id=%s", target.id)
                 target.filename = cleaned
                 target.transcript_meta_json = serialized
                 target.updated_at = now
@@ -174,20 +194,26 @@ def _store_media_transcript_metadata(
                     target.media_item_id = media_item_id
                 session.add(target)
             else:
-                session.add(
-                    MediaTranscript(
-                        media_item_id=media_item_id,
-                        filename=cleaned,
-                        transcript_meta_json=serialized,
-                        created_at=now,
-                        updated_at=now,
-                    )
+                logger.info("[transcript_save] ➕ Creating NEW MediaTranscript")
+                new_record = MediaTranscript(
+                    media_item_id=media_item_id,
+                    filename=cleaned,
+                    transcript_meta_json=serialized,
+                    created_at=now,
+                    updated_at=now,
                 )
+                session.add(new_record)
+                logger.info("[transcript_save] MediaTranscript record created in session")
 
+            logger.info("[transcript_save] 💾 Committing to database...")
             session.commit()
-    except Exception:
-        logging.getLogger("transcription").warning(
-            "[transcription] Failed to persist media transcript metadata for %s", cleaned, exc_info=True
+            logger.info("[transcript_save] ✅ SUCCESS: MediaTranscript saved for '%s'", cleaned)
+    except Exception as db_exc:
+        logger.error(
+            "[transcript_save] ❌ DATABASE ERROR for '%s': %s", 
+            cleaned, 
+            db_exc, 
+            exc_info=True
         )
 
 
