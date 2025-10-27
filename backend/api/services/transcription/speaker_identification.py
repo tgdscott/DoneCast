@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, cast
+from uuid import UUID
 from pydub import AudioSegment
 
 logger = logging.getLogger(__name__)
@@ -236,3 +237,86 @@ def get_speaker_order(
                 speaker_names.append(name)
     
     return speaker_names
+
+
+def map_speaker_labels(
+    words: List[Dict],
+    podcast_id: UUID,
+    episode_id: UUID,
+    speaker_intros: Optional[Dict[str, Any]] = None,
+    guest_intros: Optional[List[Dict[str, Any]]] = None,
+    intro_duration_s: Optional[float] = None,  # DEPRECATED: No longer prepending intros
+) -> List[Dict]:
+    """Map generic speaker labels to real names based on speaker order.
+    
+    SIMPLIFIED APPROACH (Phase 1):
+    - Maps "Speaker A" to first speaker in speaker_intros (usually host)
+    - Maps "Speaker B" to second speaker (co-host or first guest)
+    - Maps "Speaker C+" to remaining guests
+    
+    This assumes:
+    - Host speaks first (reasonable assumption for most podcasts)
+    - Speaker order in config matches speaking order
+    
+    FUTURE ENHANCEMENT (Phase 2):
+    - Re-transcribe with prepended voice intros for voice-based identification
+    - Use intro_duration_s to strip intro section from timestamps
+    
+    Args:
+        words: List of word dicts with {word, start, end, speaker}
+        podcast_id: UUID of podcast (for logging)
+        episode_id: UUID of episode (for logging)
+        speaker_intros: Dict with podcast-level host configuration
+        guest_intros: List of episode-level guest configuration
+        intro_duration_s: DEPRECATED - Duration of prepended intros (not used in Phase 1)
+    
+    Returns:
+        Modified words list with speaker labels mapped to real names
+    """
+    if not words:
+        return words
+    
+    # Build ordered list of speaker names (hosts first, then guests)
+    speaker_order = get_speaker_order(speaker_intros or {}, guest_intros or [])
+    
+    if not speaker_order:
+        logger.info(
+            "[speaker_id] No speaker configuration, keeping generic labels (podcast=%s, episode=%s)",
+            podcast_id,
+            episode_id
+        )
+        return words
+    
+    logger.info(
+        "[speaker_id] Speaker order: %s (podcast=%s, episode=%s)",
+        speaker_order,
+        podcast_id,
+        episode_id
+    )
+    
+    # Map generic labels to real names
+    # "Speaker A" → speaker_order[0]
+    # "Speaker B" → speaker_order[1]
+    # "Speaker C" → speaker_order[2], etc.
+    label_map = {}
+    for idx, name in enumerate(speaker_order):
+        generic_label = f"Speaker {chr(65 + idx)}"  # A, B, C, ...
+        label_map[generic_label] = name
+    
+    # Apply mapping to all words
+    mapped_count = 0
+    for word in words:
+        if "speaker" in word and word["speaker"]:
+            generic_label = word["speaker"]
+            if generic_label in label_map:
+                word["speaker"] = label_map[generic_label]
+                mapped_count += 1
+    
+    logger.info(
+        "[speaker_id] Mapped %d words to real names (podcast=%s, episode=%s)",
+        mapped_count,
+        podcast_id,
+        episode_id
+    )
+    
+    return words

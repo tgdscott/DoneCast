@@ -526,6 +526,66 @@ def prepare_transcript_context(
             )
             words_json_path = None
 
+    # ========== SPEAKER IDENTIFICATION: Map generic labels to real names ==========
+    # After transcript is loaded, map "Speaker A/B/C" to actual host/guest names
+    # based on podcast speaker configuration and episode guest list
+    if words_json_path and Path(words_json_path).is_file():
+        try:
+            from api.services.transcription.speaker_identification import map_speaker_labels
+            from api.models.podcast import Podcast
+            from sqlmodel import select
+            
+            # Load podcast speaker configuration
+            podcast = session.exec(
+                select(Podcast).where(Podcast.id == episode.podcast_id)
+            ).first()
+            
+            if podcast:
+                # Get host speaker intros from podcast
+                speaker_intros = podcast.speaker_intros or {}
+                # Get guest intros from episode (if any)
+                guest_intros = episode.guest_intros or []
+                
+                # Only map if we have speaker configuration
+                if speaker_intros or guest_intros:
+                    logging.info(
+                        "[assemble] 🎙️ Speaker identification: %d hosts, %d guests",
+                        len(speaker_intros),
+                        len(guest_intros)
+                    )
+                    
+                    # Load transcript words
+                    with open(words_json_path, 'r', encoding='utf-8') as f:
+                        words = json.load(f)
+                    
+                    # Map speaker labels (modifies words in-place)
+                    mapped_words = map_speaker_labels(
+                        words=words,
+                        podcast_id=episode.podcast_id,
+                        episode_id=episode.id,
+                        speaker_intros=speaker_intros,
+                        guest_intros=guest_intros
+                    )
+                    
+                    # Save mapped transcript back to file
+                    with open(words_json_path, 'w', encoding='utf-8') as f:
+                        json.dump(mapped_words, f, ensure_ascii=False, indent=2)
+                    
+                    logging.info("[assemble] ✅ Speaker labels mapped to real names")
+                else:
+                    logging.info("[assemble] ℹ️ No speaker configuration, skipping speaker mapping")
+            else:
+                logging.warning("[assemble] ⚠️ Podcast not found, cannot map speaker labels")
+                
+        except Exception as speaker_err:
+            logging.warning(
+                "[assemble] ⚠️ Speaker label mapping failed (non-fatal): %s",
+                speaker_err,
+                exc_info=True
+            )
+            # Don't fail assembly if speaker mapping fails
+    # ========== END SPEAKER IDENTIFICATION ==========
+
     us, ss, ins, censor_cfg = _build_engine_configs(media_context.cleanup_settings)
     sfx_map = _build_sfx_map(session=session, episode=episode)
 
