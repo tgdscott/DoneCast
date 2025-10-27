@@ -125,18 +125,19 @@ from pathlib import Path as _Path
 def _launch_startup_tasks() -> None:
     """Run additive migrations & housekeeping in background.
 
+    CRITICAL: To meet Cloud Run's 2-second startup requirement, this function launches
+    a background thread that runs AFTER the HTTP server is ready. This prevents slow
+    database/GCS operations from blocking container health checks.
+
     Environment controls:
       SKIP_STARTUP_MIGRATIONS=1 -> skip entirely
-      BLOCKING_STARTUP_TASKS=1 or STARTUP_TASKS_MODE=sync -> run inline (legacy behavior)
+      BLOCKING_STARTUP_TASKS=1 or STARTUP_TASKS_MODE=sync -> run inline (NOT RECOMMENDED in prod)
     """
     skip = (os.getenv("SKIP_STARTUP_MIGRATIONS") or "").lower() in {"1","true","yes","on"}
     mode = (os.getenv("STARTUP_TASKS_MODE") or "async").lower()
     blocking_flag = (os.getenv("BLOCKING_STARTUP_TASKS") or "").lower() in {"1","true","yes","on"}
     sentinel_path = _Path(os.getenv("STARTUP_SENTINEL_PATH", "/tmp/ppp_startup_done"))
     single = (os.getenv("SINGLE_STARTUP_TASKS") or "1").lower() in {"1","true","yes","on"}
-    
-    # NOTE: Transcript recovery moved into run_startup_tasks() to avoid duplicate execution
-    # (was running twice: once here, once in startup_tasks.py)
     
     if skip:
         log.warning("[deferred-startup] SKIP_STARTUP_MIGRATIONS=1 -> skipping run_startup_tasks()")
@@ -145,7 +146,7 @@ def _launch_startup_tasks() -> None:
         log.info("[deferred-startup] Sentinel %s exists -> skipping startup tasks", sentinel_path)
         return
     if blocking_flag or mode == "sync":
-        log.info("[deferred-startup] Running startup tasks synchronously (blocking mode)")
+        log.warning("[deferred-startup] BLOCKING mode enabled - startup will be SLOW (not recommended for Cloud Run)")
         try:
             run_startup_tasks()
             log.info("[deferred-startup] Startup tasks complete (sync)")
@@ -157,10 +158,14 @@ def _launch_startup_tasks() -> None:
         except Exception as e:  # pragma: no cover
             log.exception("[deferred-startup] Startup tasks failed (sync): %s", e)
         return
+    
+    # Run in background thread with delay to ensure HTTP server is ready first
     def _runner():
+        # Wait 5 seconds to let container become healthy before heavy operations
+        _time.sleep(5.0)
         start_ts = _time.time()
         try:
-            log.info("[deferred-startup] Background startup tasks begin")
+            log.info("[deferred-startup] Background startup tasks begin (after 5s delay)")
             run_startup_tasks()
             elapsed = _time.time() - start_ts
             log.info("[deferred-startup] Startup tasks complete in %.2fs", elapsed)
@@ -174,7 +179,7 @@ def _launch_startup_tasks() -> None:
     try:
         thread = threading.Thread(target=_runner, name="startup-tasks", daemon=True)
         thread.start()
-        log.info("[deferred-startup] Launched background thread for startup tasks (thread=%s)", thread.name)
+        log.info("[deferred-startup] Launched background thread (will start after 5s delay)")
     except Exception as e:  # pragma: no cover
         log.exception("[deferred-startup] Could not launch background startup tasks: %s", e)
 

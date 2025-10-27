@@ -127,9 +127,17 @@ def _recover_raw_file_transcripts(limit: int | None = None) -> None:
     
     PERFORMANCE: Uses small limit (50) by default to minimize startup time.
     """
+    # FAST PATH: Skip if TRANSCRIPTS_DIR already has files (container reuse, not fresh start)
+    try:
+        from api.core.paths import TRANSCRIPTS_DIR
+        if TRANSCRIPTS_DIR.exists() and any(TRANSCRIPTS_DIR.iterdir()):
+            log.debug("[startup] Transcripts directory already populated, skipping recovery")
+            return
+    except Exception:
+        pass  # Continue to recovery if check fails
+    
     try:
         with session_scope() as session:
-            from api.core.paths import TRANSCRIPTS_DIR
             from api.models.transcription import MediaTranscript
             
             # Use smaller default limit (50) for faster startup - only recent transcripts need recovery
@@ -356,6 +364,10 @@ def run_startup_tasks() -> None:
 
     Heavy tasks are gated by STARTUP_HEAVY_TASKS env flag (on/off/auto) and
     use STARTUP_ROW_LIMIT to cap per-start scans. Default is OFF in prod.
+    
+    PERFORMANCE: Recovery tasks run with aggressive limits (50/30) to minimize
+    startup latency. Cloud Run has a 2-second health check threshold - exceeding
+    this causes restart death spirals.
     """
     log.info("[startup] begin (env=%s heavy=%s row_limit=%s)", _APP_ENV, _HEAVY_ENABLED, _ROW_LIMIT)
 
@@ -422,12 +434,14 @@ def run_startup_tasks() -> None:
             # Don't crash startup, but log loudly since this affects all users
     
     # Always recover raw file transcripts - prevents "processing" state after deployment
+    # Uses SMALL limit (50) to minimize startup time
     with _timing("recover_raw_file_transcripts"):
-        _recover_raw_file_transcripts()
+        _recover_raw_file_transcripts(limit=50)
     
     # Always recover stuck episodes - this is critical for good UX after deployments
+    # Uses SMALL limit (30) to minimize startup time
     with _timing("recover_stuck_episodes"):
-        _recover_stuck_processing_episodes()
+        _recover_stuck_processing_episodes(limit=30)
 
     if not _HEAVY_ENABLED:
         log.info("[startup] heavy tasks disabled (STARTUP_HEAVY_TASKS=%s)", _HEAVY_FLAG)
