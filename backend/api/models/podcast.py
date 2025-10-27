@@ -217,6 +217,9 @@ class MediaItem(SQLModel, table=True):
     # Track which episode consumed this raw file (for 'safe to delete' notifications when auto-delete is disabled)
     used_in_episode_id: Optional[UUID] = Field(default=None, foreign_key="episode.id", description="Episode that used this raw file during assembly")
     
+    # Transcription status - True when transcript is available and file is ready for assembly
+    transcript_ready: bool = Field(default=False, description="True when transcription is complete and file is ready for episode assembly")
+    
     # Auphonic integration fields (Pro tier only)
     auphonic_processed: bool = Field(default=False, description="True if Auphonic processed this file (Pro tier)")
     auphonic_cleaned_audio_url: Optional[str] = Field(default=None, description="GCS URL of Auphonic's cleaned/processed audio")
