@@ -106,6 +106,7 @@ sites_router           = _safe_import("api.routers.sites")
 website_publish_router = _safe_import("api.routers.podcasts.publish")
 auphonic_router        = _safe_import("api.routers.episodes.auphonic")
 user_deletion_router   = _safe_import("api.routers.users.deletion")
+speakers_router        = _safe_import("api.routers.speakers")
 
 def _maybe(app: FastAPI, r, prefix: str = "/api"):
     if r is not None:
@@ -203,6 +204,8 @@ def attach_routers(app: FastAPI) -> dict:
     availability['auphonic_router'] = auphonic_router is not None
     _maybe(app, user_deletion_router)  # User self-deletion with grace period
     availability['user_deletion_router'] = user_deletion_router is not None
+    _maybe(app, speakers_router)  # Speaker identification configuration
+    availability['speakers_router'] = speakers_router is not None
 
     # Cloud Tasks internal hook (no prefix: it already has /api/tasks)
     app.include_router(tasks_router)
