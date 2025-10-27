@@ -329,6 +329,68 @@ Voice-activated commands that let podcasters edit while recording. Instead of st
 - "Flubber cutting too much" → Adjust natural pause detection sensitivity in settings
 - "Intern not removing sections" → Ensure you said the complete stop phrase
 
+### Speaker Identification (BETA)
+
+**What is Speaker Identification?**
+Automatically labels who's speaking in your podcast transcripts. Instead of generic "Speaker A", "Speaker B", you see actual names like "Scott", "Amber".
+
+**How it works:**
+1. **Phase 1 (CURRENT):** Order-based mapping
+   - Configure speakers in Podcast Settings
+   - System maps "Speaker A" → First configured speaker (usually host)
+   - Maps "Speaker B" → Second speaker (co-host or guest)
+   - Assumes host speaks first (reasonable for most podcasts)
+
+2. **Phase 2 (COMING SOON):** Voice-based identification
+   - Record short voice intros ("Hi, my name is Scott") for each host
+   - System prepends intros before transcription
+   - AssemblyAI learns voices → Consistent labels
+   - Works even if speaking order changes
+
+**Current Setup (Manual via SQL):**
+```sql
+-- Configure speakers for your podcast
+UPDATE podcast 
+SET 
+    has_guests = FALSE,
+    speaker_intros = '{
+        "hosts": [
+            {"name": "Scott", "gcs_path": null},
+            {"name": "Amber", "gcs_path": null}
+        ]
+    }'::jsonb
+WHERE id = '<YOUR_PODCAST_ID>';
+```
+
+**Future Setup (UI Coming Soon):**
+- Podcast Settings → Speakers tab
+- Add host names + record voice intros
+- Drag to reorder (sets speaking order)
+- Episode creation → Add guest names (if applicable)
+
+**User Questions:**
+
+**Q: "Why is Scott sometimes Speaker A and sometimes Speaker B?"**  
+A: "AssemblyAI assigns labels based on who speaks first. With Speaker Identification enabled, we map those generic labels to real names based on your podcast configuration. Soon you'll be able to record voice intros for even more accurate identification!"
+
+**Q: "How do I set up speaker names?"**  
+A: "Right now, speaker identification is in beta and requires manual database configuration. The UI for managing speakers is coming soon! Contact support if you'd like this enabled for your podcast."
+
+**Q: "Can I add guests to episodes?"**  
+A: "Yes! Once the UI is ready, you'll be able to add guest names (and optional voice intros) during episode creation. The system will automatically identify them in transcripts."
+
+**Technical Details:**
+- Works for 2+ speakers (unlimited)
+- Guest configuration per-episode
+- Host configuration at podcast level
+- Non-blocking: Episodes without config still work (generic labels preserved)
+- Zero additional transcription cost (Phase 1)
+
+**Limitations:**
+- Phase 1 requires consistent speaking order
+- No UI yet (database configuration required)
+- Voice intros not yet implemented
+
 ### Background Music Ducking
 
 **What is ducking?**
