@@ -25,14 +25,21 @@ Self-hosted podcast creation platform with AI-powered features. Full-stack app: 
 
 **When in doubt:** Ask, don't assume. Getting it wrong wastes time and creates bugs.
 
-### NEVER Start Builds Without Permission
-**ALWAYS ASK before running `gcloud builds submit`.** User manages builds in separate windows to avoid interruptions. Google charges heavily for builds, so each one must be intentional.
+### NEVER Start Builds or Push to Git Without Permission
+**ALWAYS ASK before running `gcloud builds submit` or `git push`.** User manages these operations in **separate, isolated windows** to prevent interruptions. This is a critical workflow requirement.
+
+**User's Workflow:**
+- User handles ALL `git push` and `gcloud builds submit` commands in dedicated windows
+- These operations run in isolation and cannot be interrupted by AI agent activity
+- Agent should NEVER attempt these commands unless explicitly requested
 
 **What to do instead:**
 - ✅ Prepare all code changes
+- ✅ Commit changes to local git (`git add` + `git commit` are OK)
 - ✅ Run local tests
-- ✅ Document what needs deploying
-- ✅ ASK: "Ready to deploy? I have X changes ready."
+- ✅ Document what needs deploying/pushing
+- ✅ ASK: "Ready to deploy? I have X changes ready." or "Ready to push? I have X commits ready."
+- ❌ NEVER run `git push` automatically
 - ❌ NEVER run `gcloud builds submit` automatically
 - ❌ NEVER use `isBackground: true` for build commands
 
