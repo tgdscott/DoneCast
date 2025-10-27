@@ -592,8 +592,8 @@ async def get_usage(current_user: User = Depends(get_current_user), session: Ses
     start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     breakdown = usage_svc.month_credits_breakdown(session, current_user.id, start_of_month, now)
     
-    # Convert minutes to credits for backward compatibility (1 min = 1.5 credits)
-    credits_from_minutes = (minutes_used * 1.5) if minutes_used else 0
+    # Convert minutes to credits for backward compatibility (1 min = 1 credit)
+    credits_from_minutes = (minutes_used * 1.0) if minutes_used else 0
     total_credits_used = breakdown.get('total', credits_from_minutes)
     
     return {

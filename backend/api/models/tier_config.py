@@ -87,12 +87,12 @@ TIER_FEATURE_DEFINITIONS: list[TierFeatureDefinition] = [
     TierFeatureDefinition(
         key="monthly_credits",
         label="Monthly Credits",
-        description="Base monthly credits allocation (1.5x minutes)",
+        description="Base monthly credits allocation (1x minutes)",
         category="credits",
         type="number",
-        default_value=90,
+        default_value=60,
         min_value=0,
-        help_text="1 minute of audio = 1.5 credits. Free: 90 (60 min), Creator: 450 (300 min), Pro: 1500 (1000 min)"
+        help_text="1 minute of audio = 1 credit. Free: 60 (60 min), Creator: 300 (300 min), Pro: 1000 (1000 min)"
     ),
     TierFeatureDefinition(
         key="max_episodes_month",

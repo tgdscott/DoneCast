@@ -209,11 +209,11 @@ def month_credits_breakdown(
         if r.direction != LedgerDirection.DEBIT:
             continue
         
-        # Get credits value (fallback to minutes * 1.5 if credits column not yet populated)
+        # Get credits value (fallback to minutes * 1.0 if credits column not yet populated)
         credits_used = getattr(r, 'credits', None)
         if credits_used is None:
-            # Legacy records without credits field
-            credits_used = r.minutes * 1.5
+            # Legacy records without credits field (1 minute = 1 credit)
+            credits_used = r.minutes * 1.0
         
         # Map reason to category
         reason_str = r.reason.value if hasattr(r.reason, 'value') else str(r.reason)

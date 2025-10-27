@@ -34,7 +34,7 @@ class ProcessingMinutesLedger(SQLModel, table=True):
     - DEBIT: charge minutes/credits (e.g., processing audio, TTS generation)
     - CREDIT: refund minutes/credits (e.g., system error, manual adjust)
 
-    NEW: Credits-based billing (1 minute = 1.5 credits baseline)
+    NEW: Credits-based billing (1 minute = 1 credit baseline)
     - credits field: precise credit amount charged (includes multipliers)
     - minutes field: kept for backward compatibility
     - cost_breakdown_json: detailed cost calculation for transparency
@@ -45,7 +45,7 @@ class ProcessingMinutesLedger(SQLModel, table=True):
     episode_id: Optional[UUID] = Field(default=None, index=True)
 
     minutes: int = Field(description="Positive number of minutes for this entry (legacy)")
-    credits: float = Field(default=0.0, description="Precise credit amount (1 min = 1.5 credits baseline, includes multipliers)")
+    credits: float = Field(default=0.0, description="Precise credit amount (1 min = 1 credit baseline, includes multipliers)")
     direction: LedgerDirection = Field(default=LedgerDirection.DEBIT)
     reason: LedgerReason = Field(default=LedgerReason.PROCESS_AUDIO)
 

@@ -23,8 +23,8 @@ def _get_default_features_for_tier(tier_name: str) -> dict:
     # Tier-specific overrides
     if tier_name == "free":
         features.update({
-            'monthly_credits': 90,  # 60 minutes * 1.5
-            'max_episodes_month': 5,
+            'monthly_credits': 60,  # 60 minutes * 1
+            'max_episodes_month': 3,
             'audio_pipeline': 'assemblyai',
             'tts_provider': 'standard',
             'manual_editor': True,
@@ -35,8 +35,8 @@ def _get_default_features_for_tier(tier_name: str) -> dict:
     
     elif tier_name == "creator":
         features.update({
-            'monthly_credits': 450,  # 300 minutes * 1.5
-            'max_episodes_month': 50,
+            'monthly_credits': 300,  # 300 minutes * 1
+            'max_episodes_month': 10,
             'audio_pipeline': 'assemblyai',
             'tts_provider': 'elevenlabs',
             'elevenlabs_voices': 1,
@@ -52,7 +52,7 @@ def _get_default_features_for_tier(tier_name: str) -> dict:
     
     elif tier_name == "pro":
         features.update({
-            'monthly_credits': 1500,  # 1000 minutes * 1.5
+            'monthly_credits': 1000,  # 1000 minutes * 1
             'max_episodes_month': 500,
             'audio_pipeline': 'auphonic',  # Pro uses Auphonic!
             'auto_filler_removal': True,

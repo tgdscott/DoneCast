@@ -118,9 +118,9 @@ def get_tier_config(session: Session, tier_name: str) -> dict[str, Any]:
     
     legacy = TIER_LIMITS.get(tier_name, TIER_LIMITS.get('free', {}))
     
-    # Convert legacy format to new format
+    # Convert legacy format to new format (1 minute = 1 credit)
     return {
-        'monthly_credits': legacy.get('max_processing_minutes_month', 0) * 1.5 if legacy.get('max_processing_minutes_month') is not None else None,
+        'monthly_credits': legacy.get('max_processing_minutes_month', 0) * 1.0 if legacy.get('max_processing_minutes_month') is not None else None,
         'max_episodes_month': legacy.get('max_episodes_month'),
         # Default values for other features
         'audio_pipeline': 'auphonic' if tier_name == 'pro' else 'assemblyai',
@@ -220,8 +220,8 @@ def calculate_processing_cost(
     tier = getattr(user, 'tier', 'free') or 'free'
     config = get_tier_config(session, tier)
     
-    # Base conversion: 1 minute = 1.5 credits
-    BASE_CREDIT_RATE = 1.5
+    # Base conversion: 1 minute = 1 credit
+    BASE_CREDIT_RATE = 1.0
     
     # Determine pipeline
     if use_auphonic is None:

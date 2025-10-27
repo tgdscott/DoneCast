@@ -25,11 +25,11 @@ log = logging.getLogger(__name__)
 
 
 # Credit cost rates (baseline, before multipliers)
-BASE_CREDIT_RATE = 1.5  # 1 minute = 1.5 credits
+BASE_CREDIT_RATE = 1.0  # 1 minute = 1 credit
 
 # Feature-specific baseline rates
-TRANSCRIPTION_RATE = 1.5  # Per minute of audio transcribed
-TTS_GENERATION_RATE = 1.5  # Per minute of TTS generated
+TRANSCRIPTION_RATE = 1.0  # Per minute of audio transcribed
+TTS_GENERATION_RATE = 1.0  # Per minute of TTS generated
 ASSEMBLY_BASE_COST = 5.0  # Flat cost per episode assembled
 STORAGE_RATE_PER_GB_MONTH = 2.0  # Per GB per month
 

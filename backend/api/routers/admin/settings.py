@@ -111,12 +111,12 @@ def get_comprehensive_tier_config(
             values=values
         ))
     
-    # Get hard-coded values for comparison
+    # Get hard-coded values for comparison (1 minute = 1 credit)
     hard_coded = {}
     for tier_name in tier_names:
         legacy = TIER_LIMITS.get(tier_name, {})
         hard_coded[tier_name] = {
-            'monthly_credits': legacy.get('max_processing_minutes_month', 0) * 1.5 if legacy.get('max_processing_minutes_month') is not None else None,
+            'monthly_credits': legacy.get('max_processing_minutes_month', 0) * 1.0 if legacy.get('max_processing_minutes_month') is not None else None,
             'max_episodes_month': legacy.get('max_episodes_month'),
             'audio_pipeline': 'auphonic' if tier_name == 'pro' else 'assemblyai',
         }

@@ -346,7 +346,7 @@ export default function AdminTierEditorV2() {
           <CardDescription>
             Configure features and credits for each subscription tier. Changes take effect immediately after saving.
             <div className="mt-2 flex items-center gap-2">
-              <Badge variant="outline">1 minute = 1.5 credits</Badge>
+              <Badge variant="outline">1 minute = 1 credit</Badge>
               <Badge variant="outline">Database-driven feature gating</Badge>
             </div>
           </CardDescription>
@@ -629,7 +629,7 @@ export default function AdminTierEditorV2() {
                     <div className="flex justify-between">
                       <span className="text-gray-600">Minutes:</span>
                       <span className="font-medium">
-                        {credits === null ? 'Unlimited' : Math.floor(credits / 1.5).toLocaleString()}
+                        {credits === null ? 'Unlimited' : Math.floor(credits / 1.0).toLocaleString()}
                       </span>
                     </div>
                     <div className="flex justify-between">

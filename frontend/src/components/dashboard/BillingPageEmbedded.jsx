@@ -344,7 +344,7 @@ export default function BillingPageEmbedded({ token, onBack }) {
                       </div>
                     </div>
                     <div className="text-xs text-gray-500">
-                      ≈ {(usage.credits_balance / 1.5).toFixed(1)} minutes equivalent
+                      ≈ {(usage.credits_balance / 1.0).toFixed(1)} minutes equivalent
                     </div>
                   </div>
                   
