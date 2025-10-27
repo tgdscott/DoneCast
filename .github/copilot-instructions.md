@@ -36,7 +36,27 @@ Self-hosted podcast creation platform with AI-powered features. Full-stack app: 
 - ❌ NEVER run `gcloud builds submit` automatically
 - ❌ NEVER use `isBackground: true` for build commands
 
-### Production First
+### Production First - BUT Fix Root Cause, Don't Rollback
+**CRITICAL CONTEXT: Production is currently in TESTING PHASE - no general public users yet.**
+
+**Deployment Philosophy:**
+- ❌ **NEVER rollback just to "make it work"** - this hides problems
+- ✅ **ALWAYS fix the underlying problem** - even if it takes longer
+- ✅ **Production downtime is acceptable** during testing phase
+- ✅ **Use failures as learning opportunities** to improve the system
+
+**When production breaks:**
+1. **Investigate the root cause FIRST** - don't rush to rollback
+2. **Fix the actual problem** - not just the symptoms
+3. **Deploy the fix** - test in production (we're in testing phase)
+4. **Only rollback** if the fix will take hours/days AND there's a critical demo
+
+**Why this matters:**
+- Rolling back = same bug will happen again later
+- Rolling back = wastes time on the same problem twice
+- Rolling back = we don't learn what's actually broken
+- Testing phase = perfect time to find and fix these issues
+
 **All fixes and features MUST prioritize production environment.** Local dev is nice-to-have but production stability is non-negotiable. If a change helps both, great. If it's a choice, production wins every time.
 
 ### Branding: NEVER Use "Podcast++"
