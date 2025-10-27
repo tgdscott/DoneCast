@@ -219,6 +219,7 @@ class MediaItem(SQLModel, table=True):
     
     # Transcription status - True when transcript is available and file is ready for assembly
     transcript_ready: bool = Field(default=False, description="True when transcription is complete and file is ready for episode assembly")
+    transcription_error: Optional[str] = Field(default=None, description="Error message if transcription failed or detected instrumental/silence")
     
     # Auphonic integration fields (Pro tier only)
     auphonic_processed: bool = Field(default=False, description="True if Auphonic processed this file (Pro tier)")

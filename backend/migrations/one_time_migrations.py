@@ -43,6 +43,7 @@ def run_one_time_migrations() -> dict[str, bool]:
     results["audit_terms_acceptance"] = run_migration_once("audit_terms_acceptance", _audit_terms_acceptance)
     results["auto_migrate_terms_versions"] = run_migration_once("auto_migrate_terms_versions", _auto_migrate_terms_versions)
     results["add_ledgerreason_enum_values"] = run_migration_once("add_ledgerreason_enum_values", _add_ledgerreason_enum_values)
+    results["add_transcription_error_field"] = run_migration_once("add_transcription_error_field", _add_transcription_error_field)
     
     # Check for pending migrations
     pending = get_pending_migrations()
@@ -394,5 +395,29 @@ def _add_ledgerreason_enum_values() -> bool:
         return True
     except Exception as e:
         log.warning("[migrate] LedgerReason enum migration failed: %s", e)
+        return False
+
+
+def _add_transcription_error_field() -> bool:
+    """Add transcription_error field to MediaItem table (migration 031)."""
+    try:
+        inspector = inspect(engine)
+        cols = {col["name"] for col in inspector.get_columns("mediaitem")}
+    except Exception as e:
+        log.warning("[migrate] Could not inspect mediaitem table for transcription_error: %s", e)
+        return False
+
+    if "transcription_error" in cols:
+        log.debug("[migrate] mediaitem.transcription_error already exists, skipping")
+        return True
+
+    stmt = 'ALTER TABLE mediaitem ADD COLUMN transcription_error TEXT DEFAULT NULL'
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(stmt))
+        log.info("[migrate] ✅ Added mediaitem.transcription_error column")
+        return True
+    except Exception as e:
+        log.warning("[migrate] Could not add mediaitem.transcription_error column: %s", e)
         return False
 
