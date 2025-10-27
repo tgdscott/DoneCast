@@ -625,12 +625,22 @@ def download_gcs_bytes(bucket_name: str, key: str) -> Optional[bytes]:
             blob = bucket.blob(key)
             return blob.download_as_bytes()
         except Exception as exc:
-            logger.error(
-                "Failed to download gs://%s/%s: %s",
-                bucket_name,
-                key,
-                exc,
-            )
+            # 404 (NotFound) is expected when searching for transcripts - use DEBUG level
+            # to avoid log spam when trying multiple transcript variants
+            is_not_found = gcs_exceptions and isinstance(exc, gcs_exceptions.NotFound)
+            if is_not_found:
+                logger.debug(
+                    "File not found: gs://%s/%s",
+                    bucket_name,
+                    key,
+                )
+            else:
+                logger.error(
+                    "Failed to download gs://%s/%s: %s",
+                    bucket_name,
+                    key,
+                    exc,
+                )
             if not _should_fallback(bucket_name, exc):
                 return None
     elif not _should_fallback(bucket_name):

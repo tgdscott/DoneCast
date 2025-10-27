@@ -124,13 +124,16 @@ def _recover_raw_file_transcripts(limit: int | None = None) -> None:
     2. Checks if the local transcript file exists
     3. If not, downloads it from GCS using the stored metadata
     4. Restores files to local storage so they appear as "ready" to users
+    
+    PERFORMANCE: Uses small limit (50) by default to minimize startup time.
     """
     try:
         with session_scope() as session:
             from api.core.paths import TRANSCRIPTS_DIR
             from api.models.transcription import MediaTranscript
             
-            _limit = limit or _ROW_LIMIT
+            # Use smaller default limit (50) for faster startup - only recent transcripts need recovery
+            _limit = limit if limit is not None else min(_ROW_LIMIT, 50)
             
             # Query all MediaTranscript records that have GCS metadata
             q = select(MediaTranscript).where(
@@ -145,6 +148,7 @@ def _recover_raw_file_transcripts(limit: int | None = None) -> None:
             
             recovered = 0
             failed = 0
+            skipped = 0
             
             for transcript_record in transcripts:
                 try:
@@ -164,6 +168,7 @@ def _recover_raw_file_transcripts(limit: int | None = None) -> None:
                     
                     already_exists = any(p.exists() for p in local_candidates)
                     if already_exists:
+                        skipped += 1
                         continue  # Already recovered, skip
                     
                     # Parse metadata to get GCS location
@@ -219,10 +224,11 @@ def _recover_raw_file_transcripts(limit: int | None = None) -> None:
                     log.debug("[startup] Failed to process transcript record: %s", e)
                     continue
             
-            if recovered > 0:
-                log.info("[startup] Recovered %d raw file transcript(s) from GCS", recovered)
-            if failed > 0:
-                log.warning("[startup] Failed to recover %d transcript(s) from GCS", failed)
+            if recovered > 0 or skipped > 0 or failed > 0:
+                log.info("[startup] Transcript recovery: %d recovered, %d skipped (already exist), %d failed", 
+                        recovered, skipped, failed)
+            else:
+                log.debug("[startup] No transcripts needed recovery")
                 
     except Exception as e:
         log.warning("[startup] Raw file transcript recovery failed: %s", e)
@@ -237,12 +243,15 @@ def _recover_stuck_processing_episodes(limit: int | None = None) -> None:
     3. Episodes remain stuck in 'processing' forever
     
     We'll mark these as 'error' with a specific message so users can retry them.
+    
+    PERFORMANCE: Uses small limit (30) by default to minimize startup time.
     """
     try:
         with session_scope() as session:
             from api.core.paths import TRANSCRIPTS_DIR
             
-            _limit = limit or _ROW_LIMIT
+            # Use smaller default limit (30) for faster startup
+            _limit = limit if limit is not None else min(_ROW_LIMIT, 30)
             
             # Find episodes in processing status that are older than 30 minutes
             cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=30)

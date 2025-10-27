@@ -567,12 +567,14 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
                 else:
                     gcs_uri = None
             except Exception as upload_exc:
+                # CRITICAL FIX: Don't fail transcription if GCS upload fails
+                # Local transcript is already saved, and recovery logic can retry GCS upload later
                 logging.error(
-                    "[transcription] Failed to persist transcript to bucket: %s",
+                    "[transcription] ⚠️ Failed to upload transcript to GCS (will use local copy): %s",
                     upload_exc,
                     exc_info=True,
                 )
-                raise
+                # Don't raise - allow transcription to complete with local transcript
 
             try:
                 _store_media_transcript_metadata(
@@ -636,19 +638,18 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
             ).first()
             
             if media_item:
-                # Handle instrumental/empty transcripts
-                if not words or len(words) == 0:
-                    logging.warning("[transcription] ⚠️ Empty transcript (instrumental/no speech) for %s", filename)
-                    media_item.transcript_ready = True  # Mark ready anyway so user can use it
-                    media_item.transcription_error = "No speech detected (instrumental music or silence)"
-                else:
-                    media_item.transcript_ready = True
-                    media_item.transcription_error = None  # Clear any previous errors
+                # Mark as transcript_ready regardless of content (even empty/instrumental)
+                # This allows users to proceed with assembly and see what was transcribed
+                media_item.transcript_ready = True
                 
                 session.add(media_item)
                 session.commit()
-                logging.info("[transcription] ✅ Marked MediaItem %s as transcript_ready=%s (words=%d)", 
-                             media_item.id, media_item.transcript_ready, len(words))
+                
+                if not words or len(words) == 0:
+                    logging.warning("[transcription] ⚠️ Empty transcript (instrumental/no speech) for %s", filename)
+                else:
+                    logging.info("[transcription] ✅ Marked MediaItem %s as transcript_ready (words=%d)", 
+                                 media_item.id, len(words))
             else:
                 logging.warning("[transcription] ⚠️ Could not find MediaItem for filename=%s", filename)
         except Exception as mark_err:

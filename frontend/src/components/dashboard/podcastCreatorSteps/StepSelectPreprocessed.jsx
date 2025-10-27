@@ -4,7 +4,7 @@ import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
 import { formatDisplayName } from '@/lib/displayNames';
 
-import { AlertTriangle, FileAudio, Loader2, RefreshCcw, Sparkles, Trash2, Upload } from 'lucide-react';
+import { AlertTriangle, FileAudio, Loader2, RefreshCcw, Sparkles, Trash2 } from 'lucide-react';
 
 const formatDate = (iso, timezone = null) => {
   if (!iso) return '—';
@@ -40,7 +40,6 @@ export default function StepSelectPreprocessed({
   onBack,
   onNext,
   onRefresh,
-  onUpload = null,
   intents = {},
   pendingIntentLabels = [],
   onIntentSubmit,
@@ -172,12 +171,6 @@ export default function StepSelectPreprocessed({
     <div className="space-y-6">
       <CardHeader className="flex flex-col gap-3 text-center sm:text-left sm:flex-row sm:items-center sm:justify-between">
         <CardTitle style={{ color: '#2C3E50' }}>Step 2: Choose Your Processed Audio</CardTitle>
-        {typeof onUpload === 'function' && (
-          <Button variant="outline" size="sm" onClick={onUpload} className="self-center">
-            <Upload className="w-4 h-4 mr-2" />
-            Upload audio
-          </Button>
-        )}
       </CardHeader>
 
       <Card className="bg-slate-50 border border-slate-200">
