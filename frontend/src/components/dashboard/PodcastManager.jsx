@@ -9,6 +9,7 @@ import { useState, useEffect } from "react";
 import EditPodcastDialog from "./EditPodcastDialog";
 import NewUserWizard from "./NewUserWizard";
 import DistributionChecklistDialog from "./DistributionChecklistDialog";
+import SpeakerSettings from "./SpeakerSettings";
 import { useToast } from "@/hooks/use-toast";
 import { makeApi, buildApiUrl } from "@/lib/apiClient";
 
@@ -23,6 +24,8 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts, o
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [distributionOpen, setDistributionOpen] = useState(false);
   const [distributionPodcast, setDistributionPodcast] = useState(null);
+  const [speakerSettingsOpen, setSpeakerSettingsOpen] = useState(false);
+  const [speakerSettingsPodcast, setSpeakerSettingsPodcast] = useState(null);
   const { toast } = useToast();
   const [me, setMe] = useState(null);
   const [publishedEpisodeCount, setPublishedEpisodeCount] = useState(0);
@@ -153,6 +156,16 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts, o
     }
   };
 
+  const openSpeakerSettings = (podcast) => {
+    setSpeakerSettingsPodcast(podcast);
+    setSpeakerSettingsOpen(true);
+  };
+
+  const handleSpeakerSettingsClose = () => {
+    setSpeakerSettingsOpen(false);
+    setSpeakerSettingsPodcast(null);
+  };
+
   const ActionButton = ({ icon: IconEl, children, className = "", variant = "outline", ...props }) => (
     <Button variant={variant} className={`w-full justify-start ${className}`} {...props}>
       {IconEl ? <IconEl className="w-4 h-4 mr-2" /> : null}
@@ -240,6 +253,7 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts, o
                       <div className="flex-1 space-y-4">
                         <div className="grid sm:grid-cols-2 gap-3">
                           <ActionButton icon={Icons.Settings} onClick={() => openEditDialog(podcast)}>Edit show details</ActionButton>
+                          <ActionButton icon={Icons.Mic} onClick={() => openSpeakerSettings(podcast)}>Speaker settings</ActionButton>
                           {onViewAnalytics && (
                             <ActionButton icon={Icons.BarChart3} onClick={() => onViewAnalytics(podcast.id)}>
                               View Analytics
@@ -338,6 +352,23 @@ export default function PodcastManager({ onBack, token, podcasts, setPodcasts, o
         podcast={distributionPodcast}
         token={token}
       />
+
+      {/* Speaker Settings Dialog */}
+      {speakerSettingsPodcast && (
+        <SpeakerSettings
+          podcast={speakerSettingsPodcast}
+          token={token}
+          isOpen={speakerSettingsOpen}
+          onClose={handleSpeakerSettingsClose}
+          onSave={() => {
+            // Optionally refresh podcasts list
+            toast({
+              title: "Speakers updated",
+              description: "Speaker configuration saved successfully"
+            });
+          }}
+        />
+      )}
     </div>
   );
 }
