@@ -562,6 +562,11 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
             raise TranscriptionError("Transcription disabled by environment")
 
         words = get_word_timestamps(local_name)
+        
+        # CRITICAL: Store the ORIGINAL filename (GCS URI or local path) for database lookup
+        # Bug: We were using local_name (downloaded filename) which breaks GCS URI lookups
+        original_filename = filename
+        
         try:
             TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
             stem = Path(local_name).stem
@@ -602,9 +607,11 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
                 )
                 # Don't raise - allow transcription to complete with local transcript
 
+            # CRITICAL FIX: Use original_filename (GCS URI) not local_name (downloaded file)
+            # This ensures database lookups match the filename stored in MediaItem
             try:
                 _store_media_transcript_metadata(
-                    filename,
+                    original_filename,  # ← FIX: Was 'filename' before, use original GCS URI
                     stem=stem,
                     safe_stem=safe_stem,
                     bucket=bucket,
@@ -612,9 +619,37 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
                     gcs_uri=gcs_uri,
                     gcs_url=gcs_url,
                 )
-            except Exception:
-                logging.warning(
-                    "[transcription] Failed to record media transcript metadata for %s", filename, exc_info=True
+            except Exception as metadata_exc:
+                # LOUD FAILURE: This is CRITICAL - transcript is useless if metadata isn't saved
+                logging.error(
+                    "[transcription] 🚨 CRITICAL: Failed to save transcript metadata for %s: %s", 
+                    original_filename, 
+                    metadata_exc, 
+                    exc_info=True
+                )
+                
+                # Send Slack alert for critical failure
+                try:
+                    import os as _os
+                    import httpx
+                    slack_webhook = _os.getenv("SLACK_OPS_WEBHOOK_URL", "").strip()
+                    if slack_webhook:
+                        payload = {
+                            "text": f"🚨 *CRITICAL: Transcript Metadata Save Failed*\n"
+                                    f"Failed to save transcript metadata to database\n"
+                                    f"*File:* `{original_filename}`\n"
+                                    f"*Error:* {str(metadata_exc)[:500]}\n"
+                                    f"*Impact:* Episode assembly will fail - transcript not findable\n"
+                                    f"*Action:* Check database connectivity and MediaTranscript table"
+                        }
+                        httpx.post(slack_webhook, json=payload, timeout=5.0)
+                        logging.info("[transcription] Slack alert sent for metadata save failure")
+                except Exception as alert_exc:
+                    logging.error("[transcription] Failed to send Slack alert: %s", alert_exc)
+                
+                # Don't suppress this error - it's critical
+                raise TranscriptionError(
+                    f"Critical: Transcript generated but metadata save failed for {original_filename}: {metadata_exc}"
                 )
 
             # Record the GCS key on the episode for deterministic reuse during assembly
