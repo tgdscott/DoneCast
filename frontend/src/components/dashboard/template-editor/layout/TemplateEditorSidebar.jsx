@@ -15,7 +15,6 @@ const TemplateEditorSidebar = ({
   currentPage, 
   completedPages = new Set(), 
   onPageChange,
-  onStartTour,
   className = ""
 }) => {
   const requiredPages = PAGES.filter(p => p.required);
@@ -123,22 +122,6 @@ const TemplateEditorSidebar = ({
               );
             })}
           </div>
-        </div>
-      </Card>
-
-      {/* Quick Actions */}
-      <Card className="p-4">
-        <div className="space-y-2">
-          <Button 
-            variant="outline" 
-            size="sm" 
-            className="w-full justify-start" 
-            onClick={onStartTour}
-            data-tour-id="sidebar-tour-button"
-          >
-            <Compass className="w-4 h-4 mr-2" />
-            Start Guided Tour
-          </Button>
         </div>
       </Card>
     </aside>

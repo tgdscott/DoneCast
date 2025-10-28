@@ -4,7 +4,6 @@ import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/AuthContext.jsx";
 import { Loader2, ArrowLeft, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import Joyride, { EVENTS, STATUS } from "react-joyride";
 
 // Layout components
 import TemplateEditorSidebar, { PAGES } from "./layout/TemplateEditorSidebar";
@@ -46,9 +45,6 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
   const [baselineTemplate, setBaselineTemplate] = useState(null);
   const [scheduleDirty, setScheduleDirty] = useState(false);
   const skipExitPromptRef = useRef(false);
-  
-  // Tour state
-  const [runTemplateTour, setRunTemplateTour] = useState(false);
   
   const isNewTemplate = templateId === 'new';
 
@@ -265,47 +261,6 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
-  // Tour handler
-  const handleStartTour = useCallback(() => {
-    setRunTemplateTour(true);
-  }, []);
-
-  const handleTourCallback = useCallback((data) => {
-    const { status, type } = data;
-    
-    if ([STATUS.FINISHED, STATUS.SKIPPED].includes(status)) {
-      setRunTemplateTour(false);
-      return;
-    }
-    
-    if (type === EVENTS.TARGET_NOT_FOUND) {
-      console.warn('Tour target not found:', data.step?.target);
-      // Don't stop tour, just continue
-      return;
-    }
-  }, []);
-
-  // Tour steps
-  const tourSteps = useMemo(() => [
-    {
-      target: '[data-tour-id="sidebar-nav"]',
-      title: 'Navigate Your Template 📋',
-      content: 'Use this sidebar to jump between sections. Green checkmarks show what you\'ve completed. Required sections must be done before saving.',
-      disableBeacon: true,
-    },
-    {
-      target: '[data-tour-id="progress"]',
-      title: 'Track Your Progress 📊',
-      content: 'This shows how much you\'ve completed. The wizard created your template, so some sections are already done!',
-    },
-    {
-      target: 'body',
-      title: 'One Section at a Time ✨',
-      content: 'The sidebar keeps things simple - you work on one section at a time instead of scrolling through everything. Click any section in the sidebar to jump there.',
-      placement: 'center',
-    },
-  ], []);
-
   // Render current page
   const renderPage = () => {
     if (!template) return null;
@@ -369,18 +324,6 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Tour */}
-      <Joyride
-        steps={tourSteps}
-        run={runTemplateTour}
-        continuous
-        showSkipButton
-        disableOverlayClose
-        callback={handleTourCallback}
-        styles={{ options: { zIndex: 10000 } }}
-        spotlightClicks
-      />
-
       {/* Header */}
       <div className="bg-white border-b border-gray-200 sticky top-0 z-40">
         <div className="px-6 py-4 flex items-center justify-between">
@@ -426,7 +369,6 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
           completedPages={completedPages}
           onNavigate={handleNavigate}
           onSave={handleSave}
-          onStartTour={handleStartTour}
           isSaving={isSaving}
           isDirty={isDirty}
         />
