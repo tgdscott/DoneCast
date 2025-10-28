@@ -675,8 +675,16 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
                         update_episode(session, ep, {"meta_json": ep.meta_json})
             except Exception as e:
                 logging.warning(f"Failed to associate transcript with episode: {e}")
-        except Exception:  # pragma: no cover - best effort persistence
-            pass
+        except TranscriptionError:
+            # Re-raise critical errors (like metadata save failures) - don't suppress them
+            raise
+        except Exception as persistence_exc:
+            # Log non-critical persistence failures but don't fail the entire transcription
+            logging.error(
+                "[transcription] ⚠️ Non-critical persistence error (continuing): %s",
+                persistence_exc,
+                exc_info=True
+            )
 
         # CRITICAL: Mark MediaItem as transcript_ready BEFORE notifying watchers
         # This ensures files become available for assembly even without watchers
