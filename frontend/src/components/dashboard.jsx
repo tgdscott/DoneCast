@@ -857,6 +857,7 @@ export default function PodcastPlusDashboard() {
                             </Button>
                             {preuploadItems.some((item) => item?.transcript_ready) && (
                               <Button
+                                variant="green"
                                 className="flex-1 md:flex-none"
                                 title="Assemble episode from ready audio"
                                 data-tour-id="dashboard-assemble-episode"
