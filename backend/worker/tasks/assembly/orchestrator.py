@@ -896,21 +896,22 @@ def _finalize_episode(
                     media_context.cover_image_path = str(cover_path)
                 episode.cover_path = cover_name
                 
-                # Upload cover to GCS for 7-day retention
-                try:
-                    user_id = str(episode.user_id)
-                    episode_id = str(episode.id)
-                    gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
-                    gcs_cover_key = f"{user_id}/episodes/{episode_id}/cover/{cover_name}"
-                    
-                    with open(cover_path, "rb") as f:
-                        cover_ext = cover_name.lower().split(".")[-1]
-                        content_type = f"image/{cover_ext}" if cover_ext in ("jpg", "jpeg", "png", "gif") else "image/jpeg"
-                        gcs_cover_url = gcs.upload_fileobj(gcs_bucket, gcs_cover_key, f, content_type=content_type)  # type: ignore[attr-defined]
-                    episode.gcs_cover_path = gcs_cover_url
-                    logging.info("[assemble] Uploaded cover to %s", gcs_cover_url)
-                except Exception:
-                    logging.warning("[assemble] Failed to upload cover to GCS (will rely on local files)", exc_info=True)
+                # Upload cover to GCS (REQUIRED - ephemeral storage cannot rely on local files)
+                user_id = str(episode.user_id)
+                episode_id = str(episode.id)
+                gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+                gcs_cover_key = f"{user_id}/episodes/{episode_id}/cover/{cover_name}"
+                
+                with open(cover_path, "rb") as f:
+                    cover_ext = cover_name.lower().split(".")[-1]
+                    content_type = f"image/{cover_ext}" if cover_ext in ("jpg", "jpeg", "png", "gif") else "image/jpeg"
+                    gcs_cover_url = gcs.upload_fileobj(gcs_bucket, gcs_cover_key, f, content_type=content_type)  # type: ignore[attr-defined]
+                
+                if not gcs_cover_url or not str(gcs_cover_url).startswith("gs://"):
+                    raise RuntimeError(f"[assemble] CRITICAL: Cover GCS upload failed - returned invalid URL: {gcs_cover_url}")
+                
+                episode.gcs_cover_path = gcs_cover_url
+                logging.info("[assemble] ✅ Cover uploaded to GCS: %s", gcs_cover_url)
             except Exception:
                 logging.warning(
                     "[assemble] Failed to persist cover image locally", exc_info=True
