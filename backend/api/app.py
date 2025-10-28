@@ -32,6 +32,22 @@ from api.routing import attach_routers
 configure_logging()
 log = get_logger("api.app")
 
+# Log database connection pool configuration for debugging
+try:
+    pool = engine.pool
+    # Access pool configuration via the creation args stored during init
+    from api.core import database as db_module
+    pool_kwargs = db_module._POOL_KWARGS
+    log.info(
+        "[db-pool] Configuration: pool_size=%d, max_overflow=%d, pool_timeout=%ds, total_capacity=%d",
+        pool_kwargs.get("pool_size", 0),
+        pool_kwargs.get("max_overflow", 0),
+        pool_kwargs.get("pool_timeout", 30),
+        pool_kwargs.get("pool_size", 0) + pool_kwargs.get("max_overflow", 0),
+    )
+except Exception as _pool_err:  # pragma: no cover
+    log.debug("[db-pool] Could not log pool configuration: %s", _pool_err)
+
 # Suppress noisy passlib bcrypt version warning in dev (harmless but distracting)
 try:  # pragma: no cover - defensive logging tweak
     import logging as _logging
