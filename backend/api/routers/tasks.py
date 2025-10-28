@@ -506,12 +506,25 @@ def run_chunk_processing(payload_data: Dict[str, Any]) -> None:
             worker_log.info("event=chunk.upload path=%s", cleaned_gcs_path)
 
             cleaned_bytes = cleaned_audio_path.read_bytes()
-            cleaned_uri = gcs.upload_bytes(
-                "ppp-media-us-west1",
-                cleaned_gcs_path,
-                cleaned_bytes,
-                content_type="audio/mpeg",
-            )
+            worker_log.info("event=chunk.upload.bytes_read size=%d", len(cleaned_bytes))
+            
+            # Force GCS client re-init (Cloud Tasks runs in isolated context)
+            import infrastructure.gcs as gcs_module
+            try:
+                cleaned_uri = gcs_module.upload_bytes(
+                    "ppp-media-us-west1",
+                    cleaned_gcs_path,
+                    cleaned_bytes,
+                    content_type="audio/mpeg",
+                )
+                worker_log.info("event=chunk.upload.success uri=%s", cleaned_uri)
+            except Exception as upload_err:
+                worker_log.exception(
+                    "event=chunk.upload.failed path=%s err=%s",
+                    cleaned_gcs_path,
+                    upload_err,
+                )
+                raise
 
             worker_log.info(
                 "event=chunk.complete episode_id=%s chunk_id=%s cleaned_uri=%s",
