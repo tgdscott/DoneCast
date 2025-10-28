@@ -465,10 +465,30 @@ def list_episodes(
                         "transcript_json_url": transcript_info.get("json"),
                 })
 
+        # Commit any auto-publish changes made during listing
+        # CRITICAL: Must handle commit failures to prevent InFailedSqlTransaction errors
         try:
                 session.commit()
-        except Exception:
-                session.rollback()
+        except Exception as commit_exc:
+                logger.error(
+                        "[episodes.list] CRITICAL: Commit failed during listing - %s: %s",
+                        type(commit_exc).__name__,
+                        commit_exc,
+                        exc_info=True,
+                )
+                try:
+                        session.rollback()
+                except Exception as rollback_exc:
+                        logger.error(
+                                "[episodes.list] CRITICAL: Rollback also failed - %s: %s",
+                                type(rollback_exc).__name__,
+                                rollback_exc,
+                        )
+                # Re-raise to ensure the connection is properly cleaned up by SQLAlchemy
+                raise HTTPException(
+                        status_code=500,
+                        detail="Database transaction failed during episode listing",
+                )
         return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
