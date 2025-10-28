@@ -145,6 +145,11 @@ def _store_media_transcript_metadata(
     candidates = _candidate_filenames(cleaned)
     if cleaned not in candidates:
         candidates.insert(0, cleaned)
+    
+    logger.info(
+        "🔍 [transcript_save_candidates] filename='%s', candidates=%s",
+        cleaned, candidates[:5]  # Show first 5 to avoid log spam
+    )
 
     try:
         with Session(db.engine) as session:
@@ -588,6 +593,10 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
 
             # CRITICAL FIX: Use original_filename (GCS URI) not local_name (downloaded file)
             # This ensures database lookups match the filename stored in MediaItem
+            logging.info(
+                "🔵 [transcript_metadata_save_attempt] BEFORE save - original_filename='%s', stem='%s', gcs_uri='%s'",
+                original_filename, stem, gcs_uri
+            )
             try:
                 _store_media_transcript_metadata(
                     original_filename,  # ← FIX: Was 'filename' before, use original GCS URI
@@ -597,6 +606,10 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
                     key=key,
                     gcs_uri=gcs_uri,
                     gcs_url=gcs_url,
+                )
+                logging.info(
+                    "✅ [transcript_metadata_save_attempt] AFTER save SUCCESS - original_filename='%s'",
+                    original_filename
                 )
             except Exception as metadata_exc:
                 # LOUD FAILURE: This is CRITICAL - transcript is useless if metadata isn't saved
