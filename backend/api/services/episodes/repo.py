@@ -46,6 +46,39 @@ def update_episode(session: Session, ep: Episode, fields: Dict[str, Any]) -> Epi
 
 
 def delete_episode(session: Session, ep: Episode) -> None:
+    """Delete episode and all related child records.
+    
+    Manually cascades deletions to avoid foreign key constraint violations.
+    Child records: InternOverride, MediaItem.used_in_episode_id, UsageRecord.
+    """
+    from api.models.podcast import InternOverride, MediaItem
+    from api.models.usage import UsageRecord
+    
+    episode_id = ep.id
+    
+    # Delete InternOverride records for this episode
+    intern_overrides = session.exec(
+        select(InternOverride).where(InternOverride.episode_id == episode_id)
+    ).all()
+    for override in intern_overrides:
+        session.delete(override)
+    
+    # Clear MediaItem.used_in_episode_id references (don't delete the media itself)
+    media_items = session.exec(
+        select(MediaItem).where(MediaItem.used_in_episode_id == episode_id)
+    ).all()
+    for item in media_items:
+        item.used_in_episode_id = None
+        session.add(item)
+    
+    # Delete UsageRecord entries for this episode
+    usage_records = session.exec(
+        select(UsageRecord).where(UsageRecord.episode_id == episode_id)
+    ).all()
+    for record in usage_records:
+        session.delete(record)
+    
+    # Finally delete the episode itself
     session.delete(ep)
     session.commit()
 
