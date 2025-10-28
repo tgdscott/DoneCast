@@ -5,6 +5,11 @@ import { uploadMediaDirect } from '@/lib/directUpload';
 import { fetchVoices as fetchElevenVoices } from '@/api/elevenlabs';
 import { useAuth } from '@/AuthContext.jsx';
 
+// Phase 1 extracted hooks
+import useStepNavigation from './creator/useStepNavigation';
+import useFileUpload from './creator/useFileUpload';
+import useEpisodeAssembly from './creator/useEpisodeAssembly';
+
 export default function usePodcastCreator({
   token,
   templates,
@@ -17,20 +22,70 @@ export default function usePodcastCreator({
   preselectedStartStep,
 }) {
   const { user: authUser } = useAuth();
-  const [currentStep, setCurrentStep] = useState(initialStep || 1);
-  const [selectedTemplate, setSelectedTemplate] = useState(null);
-  const [uploadedFile, setUploadedFile] = useState(null);
-  const [uploadedFilename, setUploadedFilename] = useState(null);
-  const [selectedPreupload, setSelectedPreupload] = useState(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const uploadXhrRef = useRef(null);
-  const [isAssembling, setIsAssembling] = useState(false);
-  const [isPublishing, setIsPublishing] = useState(false);
-  const [assemblyComplete, setAssemblyComplete] = useState(false);
-  const [assembledEpisode, setAssembledEpisode] = useState(null);
-  const [expectedEpisodeId, setExpectedEpisodeId] = useState(null);
-  const [statusMessage, setStatusMessage] = useState('');
+  
+  // === PHASE 1: EXTRACTED HOOKS ===
+  
+  // Step navigation hook
+  const stepNav = useStepNavigation({
+    token,
+    initialStep,
+    creatorMode,
+  });
+  
+  // File upload hook (needs some state for integration)
   const [error, setError] = useState('');
+  const [statusMessage, setStatusMessage] = useState('');
+  
+  const fileUpload = useFileUpload({
+    token,
+    onUploadComplete: ({ filename, file }) => {
+      // Reset AI feature state when new file uploaded
+      setIntents({ flubber: null, intern: null, sfx: null, intern_overrides: [] });
+      setInternResponses([]);
+      setInternPendingContexts(null);
+      setInternReviewContexts([]);
+      setShowInternReview(false);
+      setIntentDetections({ flubber: null, intern: null, sfx: null });
+      setIntentDetectionReady(false);
+      setShowIntentQuestions(false);
+      intentsPromptedRef.current = false;
+    },
+    onPreuploadSelect: (item) => {
+      // Set AI feature state from preuploaded file metadata
+      setInternResponses([]);
+      setInternPendingContexts(null);
+      setInternReviewContexts([]);
+      setShowInternReview(false);
+      
+      if (item) {
+        const intentsData = item.intents || {};
+        setIntentDetections(intentsData);
+        setIntentDetectionReady(true);
+        setIntents(prev => {
+          const next = { ...prev };
+          const flubberCount = Number((intentsData?.flubber?.count) ?? 0);
+          const internCount = Number((intentsData?.intern?.count) ?? 0);
+          const sfxCount = Number((intentsData?.sfx?.count) ?? 0);
+          if (flubberCount === 0) next.flubber = 'no';
+          else if (next.flubber === null) next.flubber = 'yes';
+          if (internCount === 0) next.intern = 'no';
+          else if (next.intern === null) next.intern = 'yes';
+          if (sfxCount === 0) next.sfx = 'no';
+          else if (next.sfx === null) next.sfx = 'yes';
+          return next;
+        });
+      } else {
+        setIntentDetections({ flubber: null, intern: null, sfx: null });
+        setIntentDetectionReady(false);
+        setIntents({ flubber: null, intern: null, sfx: null, intern_overrides: [] });
+      }
+    },
+    setError,
+    setStatusMessage,
+  });
+  
+  // === NON-EXTRACTED STATE (remaining) ===
+  const [isPublishing, setIsPublishing] = useState(false);
   const [ttsValues, setTtsValues] = useState({});
   const [mediaLibrary, setMediaLibrary] = useState([]);
   const [showFlubberReview, setShowFlubberReview] = useState(false);
@@ -72,35 +127,88 @@ export default function usePodcastCreator({
   const aiCacheRef = useRef({ title: null, notes: null, tags: null });
   const autoFillKeyRef = useRef('');
   const autoRecurringRef = useRef({ templateId: null, date: null, time: null, manual: false });
-  const transcriptReadyRef = useRef(false);
-  const [jobId, setJobId] = useState(null);
+  const transcriptReadyRef = fileUpload.transcriptReadyRef; // From extracted hook
   const [publishMode, setPublishMode] = useState('draft');
   const [publishVisibility, setPublishVisibility] = useState('public');
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
-  const [autoPublishPending, setAutoPublishPending] = useState(false);
   const [lastAutoPublishedEpisodeId, setLastAutoPublishedEpisodeId] = useState(null);
   const publishingTriggeredRef = useRef(false); // Track if publishing already triggered for current episode
-  const [transcriptReady, setTranscriptReady] = useState(false);
-  const [transcriptPath, setTranscriptPath] = useState(null);
-  const resetTranscriptState = useCallback(() => {
-    setTranscriptReady(false);
-    setTranscriptPath(null);
-    transcriptReadyRef.current = false;
-  }, []);
+  
+  // Forward declarations for assembly hook (defined later)
+  let refreshUsage, handleUploadProcessedCover;
+  
+  // Episode assembly hook
+  const assembly = useEpisodeAssembly({
+    token,
+    selectedTemplate: stepNav.selectedTemplate,
+    uploadedFilename: fileUpload.uploadedFilename,
+    episodeDetails,
+    ttsValues,
+    flubberCutsMs,
+    intents,
+    setError,
+    setStatusMessage,
+    setCurrentStep: stepNav.setCurrentStep,
+    refreshUsage: async () => {
+      if (refreshUsage) return await refreshUsage();
+      return null;
+    },
+    audioDurationSec: fileUpload.audioDurationSec,
+    minutesPrecheck,
+    minutesPrecheckPending,
+    setMinutesDialog,
+    quotaExceeded: false, // Will be calculated later
+    publishMode,
+    scheduleDate,
+    scheduleTime,
+    handleUploadProcessedCoverAndPreview: async () => {
+      if (handleUploadProcessedCover) await handleUploadProcessedCover();
+    },
+  });
+  
   const [showVoicePicker, setShowVoicePicker] = useState(false);
   const [voicePickerTargetId, setVoicePickerTargetId] = useState(null);
   const [voiceNameById, setVoiceNameById] = useState({});
   const [voicesLoading, setVoicesLoading] = useState(false);
-  const fileInputRef = useRef(null);
   const coverArtInputRef = useRef(null);
   const coverCropperRef = useRef(null);
   const [coverNeedsUpload, setCoverNeedsUpload] = useState(false);
   const [coverMode, setCoverMode] = useState('crop');
   const [isUploadingCover, setIsUploadingCover] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(null);
-  const [uploadStats, setUploadStats] = useState(null); // Track upload speed, ETA, bytes
-  const [audioDurationSec, setAudioDurationSec] = useState(null);
+  
+  // === ALIASES FOR EXTRACTED HOOK VALUES ===
+  // These allow existing code to continue working without changing every reference
+  const { currentStep, setCurrentStep, selectedTemplate, setSelectedTemplate } = stepNav;
+  const { 
+    uploadedFile, 
+    uploadedFilename, 
+    selectedPreupload,
+    isUploading,
+    uploadProgress,
+    uploadStats,
+    transcriptReady,
+    setTranscriptReady,
+    transcriptPath,
+    setTranscriptPath,
+    resetTranscriptState,
+    uploadXhrRef,
+    fileInputRef,
+  } = fileUpload;
+  const {
+    isAssembling,
+    assemblyComplete,
+    assembledEpisode,
+    expectedEpisodeId,
+    jobId,
+    autoPublishPending,
+    setIsAssembling,
+    setAssemblyComplete,
+    setAssembledEpisode,
+    setExpectedEpisodeId,
+    setJobId,
+    setAutoPublishPending,
+  } = assembly;
 
   useEffect(() => {
     setInternPrefetch({ status: 'idle', filename: null, contexts: [], log: null, error: null });
@@ -2142,24 +2250,44 @@ export default function usePodcastCreator({
   }, []);
 
   return {
-    currentStep,
-    setCurrentStep,
-    steps,
-    progressPercentage,
-    selectedTemplate,
-    setSelectedTemplate,
-    uploadedFile,
-    uploadedFilename,
-    wasRecorded,
-    fileInputRef,
+    // From stepNav hook
+    currentStep: stepNav.currentStep,
+    setCurrentStep: stepNav.setCurrentStep,
+    steps: stepNav.steps,
+    progressPercentage: stepNav.progressPercentage,
+    selectedTemplate: stepNav.selectedTemplate,
+    setSelectedTemplate: stepNav.setSelectedTemplate,
+    handleTemplateSelect: stepNav.handleTemplateSelect,
+    
+    // From fileUpload hook
+    uploadedFile: fileUpload.uploadedFile,
+    uploadedFilename: fileUpload.uploadedFilename,
+    wasRecorded: fileUpload.wasRecorded,
+    fileInputRef: fileUpload.fileInputRef,
+    isUploading: fileUpload.isUploading,
+    uploadProgress: fileUpload.uploadProgress,
+    uploadStats: fileUpload.uploadStats,
+    transcriptReady: fileUpload.transcriptReady,
+    transcriptPath: fileUpload.transcriptPath,
+    audioDurationSec: fileUpload.audioDurationSec,
+    handleFileChange: fileUpload.handleFileChange,
+    handlePreuploadedSelect: fileUpload.handlePreuploadedSelect,
+    cancelBuild, // Still in main hook (TODO: refactor)
+    
+    // From assembly hook
+    isAssembling: assembly.isAssembling,
+    assemblyComplete: assembly.assemblyComplete,
+    assembledEpisode: assembly.assembledEpisode,
+    jobId: assembly.jobId,
+    autoPublishPending: assembly.autoPublishPending,
+    handleAssemble: assembly.handleAssemble,
+    
+    // Still in main hook (non-extracted)
+    selectedPreupload: fileUpload.selectedPreupload,
     coverArtInputRef,
     coverCropperRef,
-    isUploading,
     isUploadingCover,
-    isAssembling,
     isPublishing,
-    assemblyComplete,
-    assembledEpisode,
     statusMessage,
     error,
     ttsValues,
@@ -2185,21 +2313,16 @@ export default function usePodcastCreator({
     episodeDetails,
     isAiTitleBusy,
     isAiDescBusy,
-    jobId,
     publishMode,
     publishVisibility,
     scheduleDate,
     scheduleTime,
-    autoPublishPending,
-    transcriptReady,
-    transcriptPath,
     showVoicePicker,
     voicePickerTargetId,
     voiceNameById,
     voicesLoading,
     coverNeedsUpload,
     coverMode,
-    audioDurationSec,
     processingEstimate,
     quotaInfo,
     missingTitle,
@@ -2221,12 +2344,6 @@ export default function usePodcastCreator({
     refreshUsage,
     retryMinutesPrecheck,
     buildActive,
-    cancelBuild,
-    handleTemplateSelect,
-    handleFileChange,
-    handlePreuploadedSelect,
-    uploadProgress,
-    uploadStats,
     handleCoverFileSelected,
     handleUploadProcessedCover,
     handleTtsChange,
@@ -2235,7 +2352,6 @@ export default function usePodcastCreator({
     handleAIRefineTitle,
     handleAISuggestDescription,
     handleAIRefineDescription,
-    handleAssemble,
     handleFlubberConfirm,
     handleFlubberCancel,
     handleInternComplete,
@@ -2262,7 +2378,6 @@ export default function usePodcastCreator({
     setScheduleTime,
     setCoverNeedsUpload,
     setCoverMode,
-    selectedPreupload,
     setUsage,
     setError,
     clearCover,
