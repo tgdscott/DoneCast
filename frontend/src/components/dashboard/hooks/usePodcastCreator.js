@@ -10,6 +10,12 @@ import useStepNavigation from './creator/useStepNavigation';
 import useFileUpload from './creator/useFileUpload';
 import useEpisodeAssembly from './creator/useEpisodeAssembly';
 
+// Phase 2 & 3 extracted hooks
+import useVoiceConfiguration from './creator/useVoiceConfiguration';
+import useEpisodeMetadata from './creator/useEpisodeMetadata';
+import usePublishing from './creator/usePublishing';
+import useAIFeatures from './creator/useAIFeatures';
+
 export default function usePodcastCreator({
   token,
   templates,
@@ -32,78 +38,20 @@ export default function usePodcastCreator({
     creatorMode,
   });
   
-  // File upload hook (needs some state for integration)
+  // File upload hook
   const [error, setError] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   
   const fileUpload = useFileUpload({
     token,
-    onUploadComplete: ({ filename, file }) => {
-      // Reset AI feature state when new file uploaded
-      setIntents({ flubber: null, intern: null, sfx: null, intern_overrides: [] });
-      setInternResponses([]);
-      setInternPendingContexts(null);
-      setInternReviewContexts([]);
-      setShowInternReview(false);
-      setIntentDetections({ flubber: null, intern: null, sfx: null });
-      setIntentDetectionReady(false);
-      setShowIntentQuestions(false);
-      intentsPromptedRef.current = false;
-    },
-    onPreuploadSelect: (item) => {
-      // Set AI feature state from preuploaded file metadata
-      setInternResponses([]);
-      setInternPendingContexts(null);
-      setInternReviewContexts([]);
-      setShowInternReview(false);
-      
-      if (item) {
-        const intentsData = item.intents || {};
-        setIntentDetections(intentsData);
-        setIntentDetectionReady(true);
-        setIntents(prev => {
-          const next = { ...prev };
-          const flubberCount = Number((intentsData?.flubber?.count) ?? 0);
-          const internCount = Number((intentsData?.intern?.count) ?? 0);
-          const sfxCount = Number((intentsData?.sfx?.count) ?? 0);
-          if (flubberCount === 0) next.flubber = 'no';
-          else if (next.flubber === null) next.flubber = 'yes';
-          if (internCount === 0) next.intern = 'no';
-          else if (next.intern === null) next.intern = 'yes';
-          if (sfxCount === 0) next.sfx = 'no';
-          else if (next.sfx === null) next.sfx = 'yes';
-          return next;
-        });
-      } else {
-        setIntentDetections({ flubber: null, intern: null, sfx: null });
-        setIntentDetectionReady(false);
-        setIntents({ flubber: null, intern: null, sfx: null, intern_overrides: [] });
-      }
-    },
     setError,
     setStatusMessage,
   });
   
   // === NON-EXTRACTED STATE (remaining) ===
-  const [isPublishing, setIsPublishing] = useState(false);
-  const [ttsValues, setTtsValues] = useState({});
   const [mediaLibrary, setMediaLibrary] = useState([]);
-  const [showFlubberReview, setShowFlubberReview] = useState(false);
-  const [flubberContexts, setFlubberContexts] = useState(null);
-  const [flubberCutsMs, setFlubberCutsMs] = useState(null);
-  const [internPendingContexts, setInternPendingContexts] = useState(null);
-  const [internReviewContexts, setInternReviewContexts] = useState([]);
-  const [showInternReview, setShowInternReview] = useState(false);
-  const [internResponses, setInternResponses] = useState([]);
   const [internPrefetch, setInternPrefetch] = useState({ status: 'idle', filename: null, contexts: [], log: null, error: null });
-  const [showIntentQuestions, setShowIntentQuestions] = useState(false);
-  const intentsPromptedRef = useRef(false);
-  const [intents, setIntents] = useState({ flubber: null, intern: null, sfx: null, intern_overrides: [] });
-  const [intentDetections, setIntentDetections] = useState({ flubber: null, intern: null, sfx: null });
-  const [intentDetectionReady, setIntentDetectionReady] = useState(true);
-  const [showFlubberScan, setShowFlubberScan] = useState(false);
   const [capabilities, setCapabilities] = useState({ has_elevenlabs:false, has_google_tts:false, has_any_sfx_triggers:false });
-  const [flubberNotFound, setFlubberNotFound] = useState(false);
   const [fuzzyThreshold, setFuzzyThreshold] = useState(0.8);
   const [testMode, setTestMode] = useState(false);
   const [usage, setUsage] = useState(null);
@@ -112,33 +60,68 @@ export default function usePodcastCreator({
   const [minutesPrecheckPending, setMinutesPrecheckPending] = useState(false);
   const [minutesPrecheckError, setMinutesPrecheckError] = useState(null);
   const [precheckRetrigger, setPrecheckRetrigger] = useState(0);
-  const [episodeDetails, setEpisodeDetails] = useState({
-    season: '1',
-    episodeNumber: '',
-    title: '',
-    description: '',
-    coverArt: null,
-    coverArtPreview: null,
-    cover_image_path: null,
-    cover_crop: null,
-  });
-  const [isAiTitleBusy, setIsAiTitleBusy] = useState(false);
-  const [isAiDescBusy, setIsAiDescBusy] = useState(false);
-  const aiCacheRef = useRef({ title: null, notes: null, tags: null });
   const autoFillKeyRef = useRef('');
   const autoRecurringRef = useRef({ templateId: null, date: null, time: null, manual: false });
   const transcriptReadyRef = fileUpload.transcriptReadyRef; // From extracted hook
-  const [publishMode, setPublishMode] = useState('draft');
-  const [publishVisibility, setPublishVisibility] = useState('public');
-  const [scheduleDate, setScheduleDate] = useState('');
-  const [scheduleTime, setScheduleTime] = useState('');
-  const [lastAutoPublishedEpisodeId, setLastAutoPublishedEpisodeId] = useState(null);
-  const publishingTriggeredRef = useRef(false); // Track if publishing already triggered for current episode
+  
+  // === PHASE 2 & 3: EXTRACTED HOOKS ===
+  // These must be called BEFORE assembly hook since assembly depends on their values
+  
+  // Voice configuration hook
+  const voiceConfig = useVoiceConfiguration({
+    token,
+    selectedTemplate: stepNav.selectedTemplate,
+  });
+  
+  // Episode metadata hook
+  const metadata = useEpisodeMetadata({
+    token,
+    selectedTemplate: stepNav.selectedTemplate,
+    uploadedFilename: fileUpload.uploadedFilename,
+    expectedEpisodeId: null, // Will be set from assembly hook later
+    transcriptPath: fileUpload.transcriptPath,
+    resetTranscriptState: fileUpload.resetTranscriptState,
+  });
+  
+  // Publishing hook
+  const publishing = usePublishing({
+    token,
+    selectedTemplate: stepNav.selectedTemplate,
+    assembledEpisode: null, // Will be set from assembly hook later
+    assemblyComplete: false, // Will be set from assembly hook later
+    setStatusMessage,
+    setError,
+    setCurrentStep: stepNav.setCurrentStep,
+    testMode,
+  });
+  
+  // AI features hook (Flubber + Intern)
+  const aiFeatures = useAIFeatures({
+    token,
+    uploadedFilename: fileUpload.uploadedFilename,
+    selectedPreupload: fileUpload.selectedPreupload,
+    selectedTemplate: stepNav.selectedTemplate,
+    setStatusMessage,
+    setCurrentStep: stepNav.setCurrentStep,
+    resolveInternVoiceId: () => {
+      // This function will be defined later in the file
+      return resolveInternVoiceId ? resolveInternVoiceId() : null;
+    },
+    requireIntern: !!capabilities?.has_elevenlabs,
+    requireSfx: !!capabilities?.has_any_sfx_triggers,
+    internPrefetch,
+  });
+  
+  // Extract values from hooks (needed for assembly hook)
+  const { ttsValues } = voiceConfig;
+  const { episodeDetails } = metadata;
+  const { publishMode, scheduleDate, scheduleTime } = publishing;
+  const { flubberCutsMs, intents } = aiFeatures;
   
   // Forward declarations for assembly hook (defined later)
   let refreshUsage, handleUploadProcessedCover;
   
-  // Episode assembly hook
+  // Episode assembly hook (depends on values from Phase 2 & 3 hooks)
   const assembly = useEpisodeAssembly({
     token,
     selectedTemplate: stepNav.selectedTemplate,
@@ -209,6 +192,74 @@ export default function usePodcastCreator({
     setJobId,
     setAutoPublishPending,
   } = assembly;
+  
+  // Phase 2 & 3 hook aliases (add to existing values extracted above)
+  const {
+    setTtsValues,
+    handleVoiceChange,
+    handleTtsChange,
+  } = voiceConfig;
+  
+  const {
+    setEpisodeDetails,
+    isAiTitleBusy,
+    isAiDescBusy,
+    handleDetailsChange,
+    handleAISuggestTitle,
+    handleAIRefineTitle,
+    handleAISuggestDescription,
+    handleAIRefineDescription,
+    suggestTitle,
+    suggestNotes,
+    suggestTags,
+  } = metadata;
+  
+  const {
+    isPublishing,
+    setPublishMode,
+    publishVisibility,
+    setPublishVisibility,
+    setScheduleDate,
+    setScheduleTime,
+    lastAutoPublishedEpisodeId,
+    handlePublish,
+  } = publishing;
+  
+  const {
+    setFlubberContexts,
+    setFlubberCutsMs,
+    showFlubberReview,
+    setShowFlubberReview,
+    showFlubberScan,
+    setShowFlubberScan,
+    flubberNotFound,
+    setFlubberNotFound,
+    internResponses,
+    setInternResponses,
+    internPendingContexts,
+    setInternPendingContexts,
+    internReviewContexts,
+    setInternReviewContexts,
+    showInternReview,
+    setShowInternReview,
+    setIntents,
+    intentDetections,
+    setIntentDetections,
+    intentDetectionReady,
+    setIntentDetectionReady,
+    showIntentQuestions,
+    setShowIntentQuestions,
+    intentsPromptedRef,
+    handleFlubberConfirm,
+    handleFlubberCancel,
+    retryFlubberSearch,
+    skipFlubberRetry,
+    handleInternComplete,
+    handleInternCancel,
+    processInternCommand,
+    handleIntentSubmit,
+    normalizeIntentValue,
+  } = aiFeatures;
 
   useEffect(() => {
     setInternPrefetch({ status: 'idle', filename: null, contexts: [], log: null, error: null });
