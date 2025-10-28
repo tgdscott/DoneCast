@@ -199,6 +199,8 @@ def _store_media_transcript_metadata(
             db_exc, 
             exc_info=True
         )
+        # CRITICAL: Re-raise exception so caller knows metadata save failed
+        raise
 
 
 def load_media_transcript_metadata_for_filename(session, filename: str) -> Dict[str, Any] | None:
@@ -547,21 +549,32 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
 
         words = get_word_timestamps(local_name)
         
+        # DIAGNOSTIC: Confirm AssemblyAI returned data
+        logging.info("🟢 [STEP_2_COMPLETE] Got %d words from AssemblyAI for filename='%s'", len(words), filename)
+        
         # CRITICAL: Store the ORIGINAL filename (GCS URI or local path) for database lookup
         # Bug: We were using local_name (downloaded filename) which breaks GCS URI lookups
         original_filename = filename
         
         try:
+            logging.info("🟡 [STEP_4_START] Creating TRANSCRIPTS_DIR and preparing payload")
             TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
             stem = Path(local_name).stem
             payload = json.dumps(words, ensure_ascii=False, indent=2)
+            
+            # DIAGNOSTIC: Confirm we built the payload
+            logging.info("🟢 [STEP_5_COMPLETE] Built JSON payload - stem='%s', payload_size=%d bytes", stem, len(payload))
 
             safe_stem = sanitize_filename(stem) or stem or f"transcript-{uuid.uuid4().hex}"
             out_path = TRANSCRIPTS_DIR / f"{stem}.json"
             # Always persist locally (overwrite with freshest)
             out_path.write_text(payload, encoding="utf-8")
+            
+            # DIAGNOSTIC: Confirm local save worked
+            logging.info("🟢 [STEP_7_COMPLETE] Saved transcript locally to '%s'", out_path)
 
             # Upload permanently to GCS in a deterministic location: transcripts/{safe_stem}.json
+            logging.info("🟡 [STEP_8_START] Preparing GCS upload - safe_stem='%s'", safe_stem)
             gcs_url = None
             gcs_uri = None
             bucket = None
@@ -581,6 +594,9 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
                     gcs_url = f"https://storage.googleapis.com/{bucket}/{key}"
                 else:
                     gcs_uri = None
+                
+                # DIAGNOSTIC: Confirm GCS upload worked
+                logging.info("🟢 [STEP_9_COMPLETE] GCS upload SUCCESS - gcs_uri='%s', gcs_url='%s'", gcs_uri, gcs_url)
             except Exception as upload_exc:
                 # CRITICAL FIX: Don't fail transcription if GCS upload fails
                 # Local transcript is already saved, and recovery logic can retry GCS upload later
@@ -589,6 +605,8 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
                     upload_exc,
                     exc_info=True,
                 )
+                # DIAGNOSTIC: Log that GCS upload failed
+                logging.warning("🔴 [STEP_9_FAILED] GCS upload FAILED - continuing with bucket=None, key=None, gcs_uri=None")
                 # Don't raise - allow transcription to complete with local transcript
 
             # CRITICAL FIX: Use original_filename (GCS URI) not local_name (downloaded file)
