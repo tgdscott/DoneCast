@@ -385,39 +385,14 @@ export default function AudioCleanupSettings({ className }) {
               Example: "Oh, Jennifer, would you tell us about this cool thing we do not know, if you do not mind." Rename the
               trigger to "Jennifer" and set the stop phrase to "if you do not mind" for a natural handoff.
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1">
-                <Label className="text-xs text-slate-500">Trigger word</Label>
-                <Input
-                  value={settings.commands?.intern?.trigger_keyword ?? "intern"}
-                  onChange={(event) => updateCommand("intern", { trigger_keyword: event.target.value })}
-                  placeholder="intern, jennifer, helper"
-                />
-                <p className="text-xs text-muted-foreground">Use a name that feels natural in your show.</p>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs text-slate-500">Stop phrase(s)</Label>
-                <Input
-                  value={(settings.commands?.intern?.end_markers || ["stop", "stop intern"]).join(", ")}
-                  onChange={(event) =>
-                    updateCommand("intern", { end_markers: tokenizeVariants(event.target.value) })
-                  }
-                  placeholder="stop, thank you, if you do not mind"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Separate phrases with commas. We stop listening when we hear any of them.
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-xs text-slate-600 sm:max-w-sm">
-                Remove spoken stop phrase from the transcript. It is on by default so the exchange sounds tight, but turn it
-                off if you want listeners to hear the phrase.
-              </div>
-              <Switch
-                checked={!!(settings.commands?.intern?.remove_end_marker ?? true)}
-                onCheckedChange={(value) => updateCommand("intern", { remove_end_marker: value })}
+            <div className="space-y-1">
+              <Label className="text-xs text-slate-500">Trigger word</Label>
+              <Input
+                value={settings.commands?.intern?.trigger_keyword ?? "intern"}
+                onChange={(event) => updateCommand("intern", { trigger_keyword: event.target.value })}
+                placeholder="intern"
               />
+              <p className="text-xs text-muted-foreground">Use a name that feels natural in your show.</p>
             </div>
           </div>
         </SectionItem>
