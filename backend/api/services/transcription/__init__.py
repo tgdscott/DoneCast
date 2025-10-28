@@ -346,7 +346,6 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
             
             # Return cached transcript data
             try:
-                import json
                 transcript_meta = json.loads(existing_transcript.transcript_meta_json or "{}")
                 if transcript_meta.get("words"):
                     logging.info(
