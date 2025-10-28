@@ -545,7 +545,15 @@ def _finalize_episode(
             import time
             max_wait_seconds = 1800  # 30 minutes (matches Cloud Tasks deadline)
             poll_interval = 5  # 5 seconds
+            retry_after_seconds = 120  # Retry stuck chunks after 2 minutes
             start_time = time.time()
+            chunk_dispatch_times = {}  # Track when each chunk was dispatched
+            chunk_retry_counts = {}  # Track retry attempts per chunk
+            
+            # Record initial dispatch times
+            for chunk in chunks:
+                chunk_dispatch_times[chunk.chunk_id] = start_time
+                chunk_retry_counts[chunk.chunk_id] = 0
             
             logging.info("[assemble] Waiting for %d chunks to complete...", len(chunks))
             
@@ -574,6 +582,38 @@ def _finalize_episode(
                                 chunk.status = "completed"
                             else:
                                 all_complete = False
+                                
+                                # AUTOMATIC RETRY: If chunk hasn't completed after retry_after_seconds, re-dispatch
+                                elapsed = time.time() - chunk_dispatch_times.get(chunk.chunk_id, start_time)
+                                max_retries = 3
+                                
+                                if elapsed > retry_after_seconds and chunk_retry_counts.get(chunk.chunk_id, 0) < max_retries:
+                                    logging.warning(
+                                        "[assemble] Chunk %s not completed after %.0fs, re-dispatching (retry %d/%d)",
+                                        chunk.chunk_id, elapsed, chunk_retry_counts[chunk.chunk_id] + 1, max_retries
+                                    )
+                                    
+                                    # Re-dispatch the stuck chunk task
+                                    from infrastructure import tasks_client
+                                    task_payload = {
+                                        "episode_id": str(episode.id),
+                                        "chunk_index": chunk.chunk_index,
+                                        "chunk_id": chunk.chunk_id,
+                                    }
+                                    
+                                    try:
+                                        task_info = tasks_client.enqueue_http_task(
+                                            "/api/tasks/process-chunk",
+                                            task_payload,
+                                            deadline_seconds=1800,
+                                        )
+                                        logging.info("[assemble] Re-dispatched chunk %s: %s", chunk.chunk_id, task_info)
+                                        
+                                        # Reset dispatch time and increment retry counter
+                                        chunk_dispatch_times[chunk.chunk_id] = time.time()
+                                        chunk_retry_counts[chunk.chunk_id] += 1
+                                    except Exception as retry_err:
+                                        logging.error("[assemble] Failed to re-dispatch chunk %s: %s", chunk.chunk_id, retry_err)
                 
                 if all_complete:
                     logging.info("[assemble] All %d chunks completed in %.1f seconds",
@@ -583,7 +623,10 @@ def _finalize_episode(
                 time.sleep(poll_interval)
             
             if not all_complete:
-                raise RuntimeError(f"Chunk processing timed out after {max_wait_seconds}s")
+                # Log which chunks failed before raising
+                failed_chunks = [c.chunk_id for c in chunks if c.status != "completed"]
+                logging.error("[assemble] Chunk processing timed out after %ds. Failed chunks: %s", max_wait_seconds, failed_chunks)
+                raise RuntimeError(f"Chunk processing timed out after {max_wait_seconds}s. Failed: {failed_chunks}")
             
             # Download and reassemble chunks
             logging.info("[assemble] Reassembling %d chunks...", len(chunks))
