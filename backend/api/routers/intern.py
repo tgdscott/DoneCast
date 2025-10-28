@@ -234,7 +234,7 @@ def _load_transcript_words(filename: str) -> Tuple[List[Dict[str, Any]], Optiona
             user_id = str(media_item.user_id)
             # CRITICAL: Use TRANSCRIPTS_BUCKET not GCS_BUCKET (different buckets!)
             gcs_bucket = os.getenv("TRANSCRIPTS_BUCKET", "ppp-transcripts-us-west1")
-            gcs_key = f"transcripts/{user_id}/{stem}.json"
+            gcs_key = f"transcripts/{stem}.json"  # NO user_id folder - matches assembly upload path
             
             _LOG.info(f"[intern] Attempting GCS transcript download: gs://{gcs_bucket}/{gcs_key}")
             content = download_bytes(gcs_bucket, gcs_key)
