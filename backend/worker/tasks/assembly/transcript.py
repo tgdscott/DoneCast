@@ -385,7 +385,7 @@ def _build_engine_configs(cleanup_settings: dict):
         strict_filler_removal=bool((cleanup_settings or {}).get("strictFillerRemoval", True)),
     )
     ss = clean_engine.SilenceSettings(
-        detect_threshold_dbfs=int((cleanup_settings or {}).get("silenceThreshDb", -40)),
+        detect_threshold_dbfs=int((cleanup_settings or {}).get("silenceThreshDb", -50)),  # More forgiving (was -40)
         min_silence_ms=int(float((cleanup_settings or {}).get("maxPauseSeconds", 1.5)) * 1000),
         target_silence_ms=int(float((cleanup_settings or {}).get("targetPauseSeconds", 0.5)) * 1000),
         edge_keep_ratio=float((cleanup_settings or {}).get("pauseEdgeKeepRatio", 0.5)),

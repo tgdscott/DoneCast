@@ -27,8 +27,8 @@ log = logging.getLogger(__name__)
 CHUNK_TARGET_MS = 10 * 60 * 1000
 # Minimum silence duration to split on (in ms)
 MIN_SILENCE_MS = 500
-# Silence threshold in dBFS
-SILENCE_THRESH = -40
+# Silence threshold in dBFS (more forgiving = allows softer voices)
+SILENCE_THRESH = -50  # Changed from -40 to prevent cutting soft voices
 
 
 class ChunkMetadata:

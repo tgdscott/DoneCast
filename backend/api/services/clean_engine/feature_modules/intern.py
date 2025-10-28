@@ -23,7 +23,7 @@ def _find_break_after(audio: AudioSegment, from_ms: int, cfg: InternSettings) ->
     max_ms = to_ms(cfg.max_break_s)
     end_scan = min(len(audio), from_ms + scan_ms)
     window_seg: AudioSegment = audio[from_ms:end_scan]  # type: ignore[assignment]
-    silences = detect_silences_dbfs(window_seg, threshold_dbfs=-40, min_len_ms=min_ms)
+    silences = detect_silences_dbfs(window_seg, threshold_dbfs=-50, min_len_ms=min_ms)  # More forgiving (was -40)
     if not silences:
         return None
     for s0, s1 in silences:

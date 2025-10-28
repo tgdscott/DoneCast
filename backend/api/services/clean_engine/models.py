@@ -22,7 +22,7 @@ class UserSettings:
 
 @dataclass
 class SilenceSettings:
-    detect_threshold_dbfs: int = -40
+    detect_threshold_dbfs: int = -50  # More forgiving (was -40) - allows softer voices to not be detected as silence
     min_silence_ms: int = 1500
     target_silence_ms: int = 500
     edge_keep_ratio: float = 0.5
