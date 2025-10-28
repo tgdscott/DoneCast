@@ -84,8 +84,11 @@ _POOL_KWARGS = {
     # If connection is in INTRANS state, this raises ProgrammingError
     # Instead, rely on pool_reset_on_return and aggressive pool_recycle
     "pool_pre_ping": False,
-    "pool_size": int(os.getenv("DB_POOL_SIZE", 5)),
-    "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", 10)),
+    # REDUCED: Was 5+10=15 per instance, now 3+5=8 per instance
+    # With max_connections=100 and superuser_reserved=3 → 97 available
+    # This allows ~12 Cloud Run instances before hitting limit (vs 6 before)
+    "pool_size": int(os.getenv("DB_POOL_SIZE", 3)),
+    "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", 5)),
     # Aggressive recycle to avoid stale connections (3 minutes instead of 9)
     # Since we disabled pool_pre_ping, recycle connections more frequently
     "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", 180)),  # 3 minutes
