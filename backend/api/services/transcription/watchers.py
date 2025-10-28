@@ -72,9 +72,23 @@ def _candidate_filenames(filename: str) -> list[str]:
     _record(raw)
     _record(no_query)
 
-    # Drop empties and preserve insertion order roughly by sorting on length then value.
+    # CRITICAL FIX: Preserve exact original filename as FIRST candidate
+    # This ensures database lookups match what was saved (e.g., full GCS URI)
     cleaned = [v for v in variants if v]
-    cleaned.sort(key=lambda v: (len(v), v))
+    
+    # Put the exact original filename FIRST (before any transformations)
+    if raw in cleaned:
+        cleaned.remove(raw)
+        cleaned.insert(0, raw)
+    
+    # Sort remaining variants by length (shortest first) for fallback matching
+    # But keep the original at position 0
+    if len(cleaned) > 1:
+        first = cleaned[0]
+        rest = cleaned[1:]
+        rest.sort(key=lambda v: (len(v), v))
+        cleaned = [first] + rest
+    
     return cleaned
 
 
