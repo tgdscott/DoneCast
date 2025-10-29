@@ -114,7 +114,7 @@ export default function usePodcastCreator({
   
   // Extract values from hooks (needed for assembly hook)
   const { ttsValues } = voiceConfig;
-  const { episodeDetails } = metadata;
+  const { episodeDetails, aiCacheRef } = metadata;
   const { publishMode, scheduleDate, scheduleTime } = publishing;
   const { flubberCutsMs, flubberContexts, intents } = aiFeatures;
   

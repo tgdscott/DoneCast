@@ -334,6 +334,7 @@ export default function useEpisodeMetadata({
     setEpisodeDetails,
     isAiTitleBusy,
     isAiDescBusy,
+    aiCacheRef,
     
     // Handlers
     handleDetailsChange,
