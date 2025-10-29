@@ -557,9 +557,7 @@ def _finalize_episode(
             logging.info("[assemble] Waiting for %d chunks to complete...", len(chunks))
             
             while time.time() - start_time < max_wait_seconds:
-                # Check if all chunks have cleaned URIs in GCS
-                import infrastructure.gcs as gcs
-                
+                # Check if all chunks have cleaned URIs in storage backend
                 all_complete = True
                 for chunk in chunks:
                     if not chunk.gcs_audio_uri:
@@ -637,7 +635,7 @@ def _finalize_episode(
                         parts = gcs_uri[5:].split("/", 1)
                         if len(parts) == 2:
                             bucket_name, blob_path = parts
-                            cleaned_bytes = storage.download_gcs_bytes(bucket_name, blob_path)
+                            cleaned_bytes = storage.download_bytes(bucket_name, blob_path)
                             if cleaned_bytes:
                                 chunk_path = PathLib(f"/tmp/{chunk.chunk_id}_cleaned.mp3")
                                 chunk_path.write_bytes(cleaned_bytes)

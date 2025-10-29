@@ -16,7 +16,7 @@ from api.services.audio.cleanup import (
     compress_long_pauses_guarded,
     rebuild_audio_from_words,
 )
-import infrastructure.gcs as gcs
+import infrastructure.storage as storage
 
 log = logging.getLogger("tasks.process_chunk.worker")
 
@@ -97,7 +97,7 @@ def run_chunk_processing(payload_data: Mapping[str, Any] | ProcessChunkPayload) 
                 parts = gcs_uri[5:].split("/", 1)
                 if len(parts) == 2:
                     bucket_name, blob_path = parts
-                    audio_bytes = gcs.download_gcs_bytes(bucket_name, blob_path)
+                    audio_bytes = storage.download_bytes(bucket_name, blob_path)
                     if audio_bytes:
                         chunk_audio_path.write_bytes(audio_bytes)
                         worker_log.info(
@@ -122,7 +122,7 @@ def run_chunk_processing(payload_data: Mapping[str, Any] | ProcessChunkPayload) 
                     parts = gcs_uri[5:].split("/", 1)
                     if len(parts) == 2:
                         bucket_name, blob_path = parts
-                        transcript_bytes = gcs.download_gcs_bytes(
+                        transcript_bytes = storage.download_bytes(
                             bucket_name,
                             blob_path,
                         )
@@ -250,9 +250,9 @@ def run_chunk_processing(payload_data: Mapping[str, Any] | ProcessChunkPayload) 
                 cleaned_bytes = cleaned_audio_path.read_bytes()
                 worker_log.info("event=chunk.upload.bytes_read size=%d", len(cleaned_bytes))
                 
-                # Force GCS client re-init in multiprocessing child (not inherited from parent)
-                import infrastructure.gcs as gcs_module
-                cleaned_uri = gcs_module.upload_bytes(
+                # Force storage module re-init in multiprocessing child (not inherited from parent)
+                import infrastructure.storage as storage_module
+                cleaned_uri = storage_module.upload_bytes(
                     "ppp-media-us-west1",
                     cleaned_gcs_path,
                     cleaned_bytes,
