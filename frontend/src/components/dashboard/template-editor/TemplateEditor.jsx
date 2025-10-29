@@ -609,7 +609,11 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
         return (
           <TemplateAdvancedPage
             template={template}
-            setTemplate={setTemplate}
+            onTemplateChange={handleTemplateChange}
+            voiceName={voiceName}
+            onChooseVoice={handleChooseVoice}
+            internVoiceDisplay={internVoiceName || "Default"}
+            onChooseInternVoice={handleChooseInternVoice}
             {...commonProps}
           />
         );

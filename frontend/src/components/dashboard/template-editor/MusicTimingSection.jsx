@@ -415,8 +415,8 @@ const MusicTimingSection = ({
                 <li className="flex items-start gap-2">
                   <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
                   <span>
-                    <strong>Offsets</strong> slide music earlier or later. Negative values create crossfades with the neighboring
-                    segment.
+                    <strong>Offsets</strong> slide music earlier or later. Positive values create overlaps (crossfades) with the 
+                    neighboring segment. Zero means segments play back-to-back with no gaps.
                   </span>
                 </li>
                 <li className="flex items-start gap-2">
