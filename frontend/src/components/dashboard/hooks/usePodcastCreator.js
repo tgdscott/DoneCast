@@ -369,7 +369,7 @@ export default function usePodcastCreator({
     }
   }, [selectedTemplate?.id]);
 
-  const refreshUsage = useCallback(async () => {
+  refreshUsage = useCallback(async () => {
     try {
       const api = makeApi(token);
       const u = await api.get('/api/billing/usage');
@@ -1231,7 +1231,7 @@ export default function usePodcastCreator({
     setCoverNeedsUpload(true);
   };
 
-  const handleUploadProcessedCover = async () => {
+  handleUploadProcessedCover = async () => {
     if(!episodeDetails.coverArt || !coverCropperRef.current) return;
     try {
       setIsUploadingCover(true);
