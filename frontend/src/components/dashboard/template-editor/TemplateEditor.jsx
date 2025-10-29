@@ -191,6 +191,13 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     const loadVoiceNames = async () => {
       if (!template) return;
       
+      console.log('🎤 [TemplateEditor] Loading voice names from template:', {
+        default_elevenlabs_voice_id: template.default_elevenlabs_voice_id,
+        default_intern_voice_id: template.default_intern_voice_id,
+        ai_settings: template.ai_settings,
+        automation_settings: template.automation_settings,
+      });
+      
       const api = makeApi(token);
       
       // Load ElevenLabs voice
@@ -198,9 +205,11 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
         setVoiceId(template.default_elevenlabs_voice_id);
         try {
           const voiceData = await api.get(`/api/elevenlabs/voice/${template.default_elevenlabs_voice_id}/resolve`);
-          setVoiceName(voiceData.common_name || voiceData.name || null);
+          const name = voiceData.common_name || voiceData.name || null;
+          console.log('✅ [TemplateEditor] Loaded ElevenLabs voice:', name);
+          setVoiceName(name);
         } catch (err) {
-          console.warn('Failed to load voice name:', err);
+          console.warn('❌ [TemplateEditor] Failed to load voice name:', err);
           setVoiceName(null);
         }
       }
@@ -209,13 +218,16 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
       const internId = template.default_intern_voice_id || 
                       template.ai_settings?.intern_voice_id ||
                       template.automation_settings?.intern_voice_id;
+      console.log('🎤 [TemplateEditor] Intern voice ID resolved:', internId);
       if (internId) {
         setInternVoiceId(internId);
         try {
           const voiceData = await api.get(`/api/elevenlabs/voice/${internId}/resolve`);
-          setInternVoiceName(voiceData.common_name || voiceData.name || null);
+          const name = voiceData.common_name || voiceData.name || null;
+          console.log('✅ [TemplateEditor] Loaded Intern voice:', name);
+          setInternVoiceName(name);
         } catch (err) {
-          console.warn('Failed to load intern voice name:', err);
+          console.warn('❌ [TemplateEditor] Failed to load intern voice name:', err);
           setInternVoiceName(null);
         }
       }
