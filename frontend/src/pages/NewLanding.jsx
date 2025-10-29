@@ -178,7 +178,7 @@ export default function NewLanding() {
   useEffect(() => {
     let cancelled = false;
     const api = makeApi(null); // Public endpoint, no auth needed
-    api.get('/api/landing')
+    api.get('/public/landing')
       .then((data) => {
         if (!cancelled && data) {
           setLandingContent(mergeLandingContent(data));

@@ -93,6 +93,10 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
+      '/public': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
       // Proxy static asset requests (audio, covers) to backend FastAPI server
       '/static': {
         target: 'http://127.0.0.1:8000',
@@ -103,7 +107,7 @@ export default defineConfig({
     // This ensures that all non-API requests are served by index.html
     middleware: [
       (req, res, next) => {
-        if (!req.url.startsWith('/api') && !req.url.includes('.')) {
+        if (!req.url.startsWith('/api') && !req.url.startsWith('/public') && !req.url.includes('.')) {
           req.url = '/'; // Rewrite to root to serve index.html
         }
         next();
