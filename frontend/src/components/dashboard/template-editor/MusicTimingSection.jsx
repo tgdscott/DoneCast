@@ -222,17 +222,48 @@ const MusicTimingSection = ({
                             <div className="flex items-center gap-2">
                               <Select
                                 value={rule.music_filename}
-                                onValueChange={(v) => onBackgroundMusicChange(index, "music_filename", v)}
+                                onValueChange={(v) => {
+                                  // Check if this is a global music asset ID (starts with numbers/letters, not a filename)
+                                  const isGlobalAsset = globalMusicAssets.some(a => a.id === v);
+                                  if (isGlobalAsset) {
+                                    // User selected global music - set music_asset_id instead
+                                    onBackgroundMusicChange(index, "music_asset_id", v);
+                                    onBackgroundMusicChange(index, "music_filename", null);
+                                  } else {
+                                    // User selected uploaded file
+                                    onBackgroundMusicChange(index, "music_filename", v);
+                                  }
+                                }}
                               >
                                 <SelectTrigger>
                                   <SelectValue placeholder="Select music..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {musicFiles.map((f) => (
-                                    <SelectItem key={f.id} value={f.filename}>
-                                      {formatDisplayName(f, { fallback: f.friendly_name || 'Audio clip' }) || 'Audio clip'}
-                                    </SelectItem>
-                                  ))}
+                                  {/* Global music assets first */}
+                                  {globalMusicAssets.length > 0 && (
+                                    <>
+                                      <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">Global Music</div>
+                                      {globalMusicAssets.map((asset) => (
+                                        <SelectItem key={asset.id} value={asset.id}>
+                                          <div className="flex items-center gap-2">
+                                            <Globe className="w-3 h-3" />
+                                            {asset.display_name}
+                                          </div>
+                                        </SelectItem>
+                                      ))}
+                                    </>
+                                  )}
+                                  {/* Uploaded files */}
+                                  {musicFiles.length > 0 && (
+                                    <>
+                                      {globalMusicAssets.length > 0 && <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground border-t">Uploaded Files</div>}
+                                      {musicFiles.map((f) => (
+                                        <SelectItem key={f.id} value={f.filename}>
+                                          {formatDisplayName(f, { fallback: f.friendly_name || 'Audio clip' }) || 'Audio clip'}
+                                        </SelectItem>
+                                      ))}
+                                    </>
+                                  )}
                                 </SelectContent>
                               </Select>
                               <Button
