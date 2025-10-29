@@ -9,7 +9,7 @@ import VoicePicker from "@/components/VoicePicker";
 import { makeApi } from "@/lib/apiClient";
 import { formatDisplayName } from "@/lib/displayNames";
 import { toast } from "@/hooks/use-toast";
-import { GripVertical, HelpCircle, Loader2, Mic, Trash2, Upload } from "lucide-react";
+import { GripVertical, HelpCircle, Loader2, Mic, Play, Square, Trash2, Upload } from "lucide-react";
 import { segmentIcons, segmentIconColors, sourceIcons, sourceIconColors } from "./constants";
 
 const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDragging, onOpenTTS, justCreatedTs, templateVoiceId, token, onMediaUploaded }) => {
@@ -27,6 +27,28 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
     const [isUploading, setIsUploading] = useState(false);
     const [cooldown, setCooldown] = useState(0); // seconds remaining on 30s cooldown after creation
     const supportsPerEpisodeTts = segment.segment_type !== 'commercial';
+    
+    // Audio preview state
+    const [isPlaying, setIsPlaying] = useState(false);
+    const audioRef = useRef(null);
+
+    const handlePlayPause = (audioUrl) => {
+        if (isPlaying && audioRef.current) {
+            audioRef.current.pause();
+            audioRef.current = null;
+            setIsPlaying(false);
+        } else {
+            if (audioRef.current) audioRef.current.pause();
+            const audio = new Audio(audioUrl);
+            audio.addEventListener('ended', () => {
+                setIsPlaying(false);
+                audioRef.current = null;
+            });
+            audio.play();
+            audioRef.current = audio;
+            setIsPlaying(true);
+        }
+    };
 
     useEffect(() => {
         if (!supportsPerEpisodeTts && segment?.source?.source_type === 'tts') {
@@ -262,6 +284,21 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
                                         ))}
                                     </SelectContent>
                                 </Select>
+                                {/* Play/Stop toggle button */}
+                                {mediaMatch && (() => {
+                                    const audioUrl = `/api/media/${mediaMatch.id}/stream`;
+                                    return (
+                                        <Button
+                                            type="button"
+                                            variant={isPlaying ? "default" : "outline"}
+                                            size="icon"
+                                            onClick={() => handlePlayPause(audioUrl)}
+                                            title={isPlaying ? "Stop audio" : "Preview audio"}
+                                        >
+                                            {isPlaying ? <Square className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                                        </Button>
+                                    );
+                                })()}
                                 <Button variant="outline" size="icon" onClick={() => uploadInputRef.current?.click()} disabled={isUploading}>
                                     {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
                                 </Button>
