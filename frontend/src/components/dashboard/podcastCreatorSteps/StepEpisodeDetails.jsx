@@ -198,18 +198,8 @@ export default function StepEpisodeDetails({
                   onClick={onSuggestTitle}
                   disabled={!transcriptReady || isAssembling || isPublishing || isAiTitleBusy}
                 >
-                  <Wand2 className="w-4 h-4 mr-1" /> Suggest New Title
+                  <Wand2 className="w-4 h-4 mr-1" /> Suggest Title
                 </Button>
-                {episodeDetails.title && episodeDetails.title.trim() && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={onRefineTitle}
-                    disabled={!transcriptReady || isAssembling || isPublishing || isAiTitleBusy}
-                  >
-                    <RefreshCw className="w-4 h-4 mr-1" /> Refine Current
-                  </Button>
-                )}
                 {!transcriptReady && (
                   <span className="text-xs text-gray-500 flex items-center gap-1">
                     <Loader2 className="w-3 h-3 animate-spin" /> Waiting for transcript…

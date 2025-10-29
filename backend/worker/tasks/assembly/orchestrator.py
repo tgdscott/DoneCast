@@ -21,7 +21,7 @@ from api.models.user import User
 from api.services import audio as audio_processor
 from api.services.mailer import mailer
 from api.core.paths import WS_ROOT as PROJECT_ROOT, FINAL_DIR, MEDIA_DIR
-from infrastructure import gcs
+from infrastructure import storage
 from infrastructure.tasks_client import enqueue_http_task
 
 from . import billing, media, transcript
@@ -396,12 +396,11 @@ def _finalize_episode(
                     temp_audio_path = temp_dir / f"auphonic_cleaned_{episode.id}.mp3"
                     
                     try:
-                        from infrastructure import gcs
                         parts = gcs_url[5:].split("/", 1)
                         bucket_name = parts[0]
                         key = parts[1] if len(parts) > 1 else ""
                         
-                        file_bytes = gcs.download_bytes(bucket_name, key)
+                        file_bytes = storage.download_bytes(bucket_name, key)
                         temp_audio_path.write_bytes(file_bytes)
                         
                         auphonic_cleaned_audio_path = temp_audio_path
@@ -574,7 +573,7 @@ def _finalize_episode(
                         parts = cleaned_uri[5:].split("/", 1)
                         if len(parts) == 2:
                             bucket_name, blob_path = parts
-                            exists = gcs.blob_exists(bucket_name, blob_path)
+                            exists = storage.blob_exists(bucket_name, blob_path)
                             
                             if exists:
                                 chunk.cleaned_path = f"/tmp/{chunk.chunk_id}_cleaned.mp3"
@@ -639,7 +638,7 @@ def _finalize_episode(
                         parts = gcs_uri[5:].split("/", 1)
                         if len(parts) == 2:
                             bucket_name, blob_path = parts
-                            cleaned_bytes = gcs.download_gcs_bytes(bucket_name, blob_path)
+                            cleaned_bytes = storage.download_gcs_bytes(bucket_name, blob_path)
                             if cleaned_bytes:
                                 chunk_path = PathLib(f"/tmp/{chunk.chunk_id}_cleaned.mp3")
                                 chunk_path.write_bytes(cleaned_bytes)
@@ -902,13 +901,13 @@ def _finalize_episode(
     except Exception as dur_err:
         raise RuntimeError(f"[assemble] Could not get audio duration: {dur_err}") from dur_err
     
-    # Upload to GCS - if this fails, the entire assembly fails
+    # Upload to cloud storage (R2) - if this fails, the entire assembly fails
     gcs_audio_key = f"{user_id}/episodes/{episode_id}/audio/{final_basename}"
     try:
         with open(audio_src, "rb") as f:
-            gcs_audio_url = gcs.upload_fileobj(gcs_bucket, gcs_audio_key, f, content_type="audio/mpeg")  # type: ignore[attr-defined]
-    except Exception as gcs_err:
-        raise RuntimeError(f"[assemble] CRITICAL: Failed to upload audio to GCS. Episode assembly cannot complete. Error: {gcs_err}") from gcs_err
+            gcs_audio_url = storage.upload_fileobj(gcs_bucket, gcs_audio_key, f, content_type="audio/mpeg")  # type: ignore[attr-defined]
+    except Exception as storage_err:
+        raise RuntimeError(f"[assemble] CRITICAL: Failed to upload audio to cloud storage. Episode assembly cannot complete. Error: {storage_err}") from storage_err
     
     if not gcs_audio_url or not str(gcs_audio_url).startswith("gs://"):
         raise RuntimeError(f"[assemble] CRITICAL: GCS upload returned invalid URL: {gcs_audio_url}")
@@ -948,13 +947,13 @@ def _finalize_episode(
                 with open(cover_path, "rb") as f:
                     cover_ext = cover_name.lower().split(".")[-1]
                     content_type = f"image/{cover_ext}" if cover_ext in ("jpg", "jpeg", "png", "gif") else "image/jpeg"
-                    gcs_cover_url = gcs.upload_fileobj(gcs_bucket, gcs_cover_key, f, content_type=content_type)  # type: ignore[attr-defined]
+                    gcs_cover_url = storage.upload_fileobj(gcs_bucket, gcs_cover_key, f, content_type=content_type)  # type: ignore[attr-defined]
                 
                 if not gcs_cover_url or not str(gcs_cover_url).startswith("gs://"):
-                    raise RuntimeError(f"[assemble] CRITICAL: Cover GCS upload failed - returned invalid URL: {gcs_cover_url}")
+                    raise RuntimeError(f"[assemble] CRITICAL: Cover cloud storage upload failed - returned invalid URL: {gcs_cover_url}")
                 
                 episode.gcs_cover_path = gcs_cover_url
-                logging.info("[assemble] ✅ Cover uploaded to GCS: %s", gcs_cover_url)
+                logging.info("[assemble] ✅ Cover uploaded to cloud storage: %s", gcs_cover_url)
             except Exception:
                 logging.warning(
                     "[assemble] Failed to persist cover image locally", exc_info=True
