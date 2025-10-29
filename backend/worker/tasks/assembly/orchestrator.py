@@ -604,7 +604,6 @@ def _finalize_episode(
                                         task_info = tasks_client.enqueue_http_task(
                                             "/api/tasks/process-chunk",
                                             task_payload,
-                                            deadline_seconds=1800,
                                         )
                                         logging.info("[assemble] Re-dispatched chunk %s: %s", chunk.chunk_id, task_info)
                                         
