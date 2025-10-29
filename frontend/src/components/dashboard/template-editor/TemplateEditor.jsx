@@ -4,6 +4,7 @@ import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/AuthContext.jsx";
 import { Loader2, ArrowLeft, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { createTTS } from "@/api/media";
 
 // Layout components
 import TemplateEditorSidebar, { PAGES } from "./layout/TemplateEditorSidebar";
@@ -17,7 +18,7 @@ import TemplateMusicPage from "./pages/TemplateMusicPage";
 import TemplateAdvancedPage from "./pages/TemplateAdvancedPage";
 
 // Constants
-import { AI_DEFAULT } from "./constants";
+import { AI_DEFAULT, DEFAULT_VOLUME_LEVEL, volumeLevelToDb } from "./constants";
 
 /**
  * Template Editor with Sidebar Navigation
@@ -45,6 +46,29 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
   const [baselineTemplate, setBaselineTemplate] = useState(null);
   const [scheduleDirty, setScheduleDirty] = useState(false);
   const skipExitPromptRef = useRef(false);
+  
+  // Voice & TTS state
+  const [voiceId, setVoiceId] = useState(null);
+  const [showVoicePicker, setShowVoicePicker] = useState(false);
+  const [voiceName, setVoiceName] = useState(null);
+  const [internVoiceId, setInternVoiceId] = useState(null);
+  const [showInternVoicePicker, setShowInternVoicePicker] = useState(false);
+  const [internVoiceName, setInternVoiceName] = useState(null);
+  const [ttsOpen, setTtsOpen] = useState(false);
+  const [ttsTargetSegment, setTtsTargetSegment] = useState(null);
+  const [ttsScript, setTtsScript] = useState("");
+  const [ttsVoiceId, setTtsVoiceId] = useState(null);
+  const [ttsSpeakingRate, setTtsSpeakingRate] = useState(1.0);
+  const [ttsFriendlyName, setTtsFriendlyName] = useState("");
+  const [ttsVoices, setTtsVoices] = useState([]);
+  const [ttsLoading, setTtsLoading] = useState(false);
+  const [createdFromTTS, setCreatedFromTTS] = useState({});
+  
+  // Music upload state
+  const [musicUploadIndex, setMusicUploadIndex] = useState(null);
+  const [isUploadingMusic, setIsUploadingMusic] = useState(false);
+  const musicUploadInputRef = useRef(null);
+  const musicUploadIndexRef = useRef(null);
   
   const isNewTemplate = templateId === 'new';
 
@@ -139,6 +163,26 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
 
     fetchInitialData();
   }, [templateId, token, isNewTemplate]);
+
+  // Memoized filtered media lists
+  const introFiles = useMemo(() => mediaFiles.filter(mf => mf.category === 'intro'), [mediaFiles]);
+  const outroFiles = useMemo(() => mediaFiles.filter(mf => mf.category === 'outro'), [mediaFiles]);
+  const musicFiles = useMemo(() => mediaFiles.filter(mf => mf.category === 'music'), [mediaFiles]);
+  const commercialFiles = useMemo(() => mediaFiles.filter(mf => mf.category === 'commercial'), [mediaFiles]);
+  
+  // Check if there's a content segment
+  const hasContentSegment = useMemo(() => {
+    return template?.segments?.some(s => s.segment_type === 'content') || false;
+  }, [template?.segments]);
+
+  // Media uploaded callback
+  const onMediaUploaded = useCallback((newFile) => {
+    if (!newFile) return;
+    setMediaFiles(prev => {
+      const filtered = Array.isArray(prev) ? prev.filter(f => f?.filename !== newFile.filename) : [];
+      return [...filtered, newFile];
+    });
+  }, []);
 
   // Check page completion
   useEffect(() => {
@@ -266,6 +310,209 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     setTemplate(prev => prev ? { ...prev, [field]: value } : null);
   }, []);
 
+  // Timing handlers
+  const handleTimingChange = useCallback((field, valueInSeconds) => {
+    setTemplate(prev => {
+      if (!prev) return prev;
+      const newTiming = { ...prev.timing, [field]: valueInSeconds };
+      return { ...prev, timing: newTiming };
+    });
+  }, []);
+
+  // Background music handlers
+  const handleBackgroundMusicChange = useCallback((index, field, value) => {
+    setTemplate(prev => {
+      if (!prev) return prev;
+      const newRules = [...(prev.background_music_rules || [])];
+      if (newRules[index]) {
+        newRules[index] = { ...newRules[index], [field]: value };
+      }
+      return { ...prev, background_music_rules: newRules };
+    });
+  }, []);
+
+  const handleAddBackgroundMusicRule = useCallback(() => {
+    const newRule = {
+      id: crypto.randomUUID(),
+      apply_to_segments: ['content'],
+      music_filename: '',
+      start_offset_s: 0,
+      end_offset_s: 0,
+      fade_in_s: 2,
+      fade_out_s: 3,
+      volume_db: Number(volumeLevelToDb(DEFAULT_VOLUME_LEVEL).toFixed(1)),
+    };
+    setTemplate(prev => {
+      if (!prev) return prev;
+      return { ...prev, background_music_rules: [...(prev.background_music_rules || []), newRule] };
+    });
+  }, []);
+
+  const handleRemoveBackgroundMusicRule = useCallback((index) => {
+    setTemplate(prev => {
+      if (!prev) return prev;
+      const newRules = [...(prev.background_music_rules || [])];
+      newRules.splice(index, 1);
+      return { ...prev, background_music_rules: newRules };
+    });
+  }, []);
+
+  const handleSetMusicVolumeLevel = useCallback((index, level) => {
+    const numeric = typeof level === 'number' ? level : parseFloat(level);
+    const fallback = DEFAULT_VOLUME_LEVEL;
+    const clamped = Math.max(1, Math.min(11, Number.isFinite(numeric) ? numeric : fallback));
+    const dbValue = Number(volumeLevelToDb(clamped).toFixed(1));
+    handleBackgroundMusicChange(index, 'volume_db', dbValue);
+  }, [handleBackgroundMusicChange]);
+
+  // Music upload handlers
+  const handleStartMusicUpload = useCallback((index) => {
+    if (isUploadingMusic) return;
+    setMusicUploadIndex(index);
+    musicUploadIndexRef.current = index;
+    try {
+      if (musicUploadInputRef.current) {
+        musicUploadInputRef.current.click();
+      }
+    } catch (_) {
+      /* no-op */
+    }
+  }, [isUploadingMusic]);
+
+  const handleMusicFileSelected = async (event) => {
+    const file = event?.target?.files?.[0];
+    const targetIndex = musicUploadIndexRef.current;
+    if (!file || targetIndex == null) {
+      if (event?.target) event.target.value = '';
+      setMusicUploadIndex(null);
+      musicUploadIndexRef.current = null;
+      return;
+    }
+
+    setIsUploadingMusic(true);
+    try {
+      const api = makeApi(token);
+      const fd = new FormData();
+      fd.append('files', file);
+      const data = await api.raw('/api/media/upload/music', { method: 'POST', body: fd });
+      const uploadedItem = Array.isArray(data) ? data[0] : data;
+      if (!uploadedItem?.filename) {
+        throw new Error('Upload succeeded but no file was returned.');
+      }
+      const uploaded = {
+        id: uploadedItem.id || crypto.randomUUID(),
+        filename: uploadedItem.filename,
+        friendly_name: uploadedItem.friendly_name || undefined,
+        category: uploadedItem.category || 'music',
+        content_type: uploadedItem.content_type || 'audio/mpeg',
+      };
+      onMediaUploaded(uploaded);
+      handleBackgroundMusicChange(targetIndex, 'music_filename', uploaded.filename);
+      toast({ title: 'Music uploaded', description: 'Your track is now available in the template.' });
+    } catch (e) {
+      const message = e?.message || 'Could not upload music.';
+      toast({ variant: 'destructive', title: 'Upload failed', description: message });
+    } finally {
+      setIsUploadingMusic(false);
+      setMusicUploadIndex(null);
+      musicUploadIndexRef.current = null;
+      if (event?.target) {
+        try { event.target.value = ''; } catch (_) {}
+      }
+    }
+  };
+
+  // Segment handlers
+  const handleAddSegment = useCallback((type) => {
+    setTemplate(prev => {
+      if (!prev) return prev;
+      const newSegment = {
+        id: crypto.randomUUID(),
+        segment_type: type,
+        source: { source_type: 'static', filename: '' },
+      };
+      const segments = [...(prev.segments || [])];
+      const contentIndex = segments.findIndex(s => s.segment_type === 'content');
+      
+      if (type === 'intro') {
+        segments.splice(contentIndex !== -1 ? contentIndex : 0, 0, newSegment);
+      } else if (type === 'outro') {
+        segments.push(newSegment);
+      } else { // commercials
+        segments.splice(contentIndex !== -1 ? contentIndex + 1 : segments.length, 0, newSegment);
+      }
+      return { ...prev, segments };
+    });
+  }, []);
+
+  const handleDeleteSegment = useCallback((segmentId) => {
+    setTemplate(prev => {
+      if (!prev) return prev;
+      return { ...prev, segments: (prev.segments || []).filter(seg => seg.id !== segmentId) };
+    });
+  }, []);
+
+  const handleSourceChange = useCallback((segmentId, newSource) => {
+    setTemplate(prev => {
+      if (!prev) return prev;
+      const segments = (prev.segments || []).map(seg => {
+        if (seg.id === segmentId) {
+          return { ...seg, source: newSource };
+        }
+        return seg;
+      });
+      return { ...prev, segments };
+    });
+  }, []);
+
+  const handleDragEnd = useCallback((result) => {
+    if (!result.destination) return;
+
+    setTemplate(prev => {
+      if (!prev) return prev;
+      const items = Array.from(prev.segments || []);
+      const [reorderedItem] = items.splice(result.source.index, 1);
+      items.splice(result.destination.index, 0, reorderedItem);
+
+      // Enforce structure rules
+      const contentIndex = items.findIndex(item => item.segment_type === 'content');
+      const firstOutroIndex = items.findIndex(item => item.segment_type === 'outro');
+
+      if (contentIndex !== -1) {
+        // Rule: Intros must be before content
+        if (reorderedItem.segment_type === 'intro' && result.destination.index > contentIndex) return prev;
+        // Rule: Content cannot be dragged before an intro
+        if (reorderedItem.segment_type === 'content' && items.some((item, index) => item.segment_type === 'intro' && index > result.destination.index)) return prev;
+      }
+      if (firstOutroIndex !== -1) {
+        // Rule: Outros must be after content
+        if (reorderedItem.segment_type === 'outro' && contentIndex !== -1 && result.destination.index < contentIndex) return prev;
+        // Rule: Content cannot be dragged after an outro
+        if (reorderedItem.segment_type === 'content' && result.destination.index > firstOutroIndex) return prev;
+      }
+
+      return { ...prev, segments: items };
+    });
+  }, []);
+
+  // TTS/Voice handlers
+  const handleOpenTTS = useCallback((segment) => {
+    setTtsTargetSegment(segment);
+    setTtsScript(segment?.source?.script || "");
+    setTtsVoiceId(segment?.source?.voice_id || voiceId || null);
+    setTtsSpeakingRate(segment?.source?.speaking_rate || 1.0);
+    setTtsFriendlyName("");
+    setTtsOpen(true);
+  }, [voiceId]);
+
+  const handleChooseVoice = useCallback(() => {
+    setShowVoicePicker(true);
+  }, []);
+
+  const handleChooseInternVoice = useCallback(() => {
+    setShowInternVoicePicker(true);
+  }, []);
+
   // Render current page
   const renderPage = () => {
     if (!template) return null;
@@ -316,23 +563,47 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
         );
       case 'structure':
         return (
-          <div className="p-4 bg-yellow-50 border border-yellow-200 rounded">
-            <p className="text-yellow-800 font-medium">Structure page implementation incomplete</p>
-            <p className="text-sm text-yellow-700 mt-2">
-              The refactored template editor is missing segment management functionality.
-              Please use the legacy editor or wait for full implementation.
-            </p>
-          </div>
+          <TemplateStructurePage
+            segments={template.segments || []}
+            hasContentSegment={hasContentSegment}
+            addSegment={handleAddSegment}
+            onSourceChange={handleSourceChange}
+            deleteSegment={handleDeleteSegment}
+            introFiles={introFiles}
+            outroFiles={outroFiles}
+            commercialFiles={commercialFiles}
+            onDragEnd={handleDragEnd}
+            onOpenTTS={handleOpenTTS}
+            createdFromTTS={createdFromTTS}
+            templateVoiceId={voiceId}
+            token={token}
+            onMediaUploaded={onMediaUploaded}
+            {...commonProps}
+          />
         );
       case 'music':
         return (
-          <div className="p-4 bg-yellow-50 border border-yellow-200 rounded">
-            <p className="text-yellow-800 font-medium">Music & Timing page implementation incomplete</p>
-            <p className="text-sm text-yellow-700 mt-2">
-              The refactored template editor is missing music/timing handlers.
-              Please use the legacy editor or wait for full implementation.
-            </p>
-          </div>
+          <TemplateMusicPage
+            template={template}
+            onTimingChange={handleTimingChange}
+            backgroundMusicRules={template.background_music_rules || []}
+            onBackgroundMusicChange={handleBackgroundMusicChange}
+            onAddBackgroundMusicRule={handleAddBackgroundMusicRule}
+            onRemoveBackgroundMusicRule={handleRemoveBackgroundMusicRule}
+            musicFiles={musicFiles}
+            onStartMusicUpload={handleStartMusicUpload}
+            musicUploadIndex={musicUploadIndex}
+            isUploadingMusic={isUploadingMusic}
+            musicUploadInputRef={musicUploadInputRef}
+            onMusicFileSelected={handleMusicFileSelected}
+            onSetMusicVolumeLevel={handleSetMusicVolumeLevel}
+            voiceName={voiceName}
+            onChooseVoice={handleChooseVoice}
+            internVoiceDisplay={internVoiceName || "Default"}
+            onChooseInternVoice={handleChooseInternVoice}
+            globalMusicAssets={globalMusicAssets}
+            {...commonProps}
+          />
         );
       case 'advanced':
         return (
