@@ -49,7 +49,9 @@ const MusicTimingSection = ({
   globalMusicAssets = [],
 }) => {
   const [playingIndex, setPlayingIndex] = useState(null);
+  const [playingVoice, setPlayingVoice] = useState(null); // 'default' or 'intern'
   const audioRef = useRef(null);
+  const voiceAudioRef = useRef(null);
 
   const handlePlayPause = (index, audioUrl) => {
     if (playingIndex === index && audioRef.current) {
@@ -71,6 +73,30 @@ const MusicTimingSection = ({
       audio.play();
       audioRef.current = audio;
       setPlayingIndex(index);
+    }
+  };
+
+  const handleVoicePlayPause = (voiceType, voiceId) => {
+    if (playingVoice === voiceType && voiceAudioRef.current) {
+      // Stop current voice preview
+      voiceAudioRef.current.pause();
+      voiceAudioRef.current = null;
+      setPlayingVoice(null);
+    } else {
+      // Stop any currently playing voice
+      if (voiceAudioRef.current) {
+        voiceAudioRef.current.pause();
+      }
+      // Play new voice preview
+      const audioUrl = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?text=Hello%2C%20this%20is%20a%20preview%20of%20this%20voice.`;
+      const audio = new Audio(audioUrl);
+      audio.addEventListener('ended', () => {
+        setPlayingVoice(null);
+        voiceAudioRef.current = null;
+      });
+      audio.play();
+      voiceAudioRef.current = audio;
+      setPlayingVoice(voiceType);
     }
   };
 
@@ -392,7 +418,18 @@ const MusicTimingSection = ({
                   </Label>
                   <div className="text-sm text-gray-800 mt-1">{voiceName || "Not set"}</div>
                 </div>
-                <div className="mt-2 sm:mt-0">
+                <div className="mt-2 sm:mt-0 flex items-center gap-2">
+                  {template?.default_elevenlabs_voice_id && (
+                    <Button
+                      type="button"
+                      variant={playingVoice === 'default' ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => handleVoicePlayPause('default', template.default_elevenlabs_voice_id)}
+                      title={playingVoice === 'default' ? "Stop preview" : "Preview voice"}
+                    >
+                      {playingVoice === 'default' ? <Square className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                    </Button>
+                  )}
                   <Button variant="outline" onClick={onChooseVoice}>
                     Choose voice
                   </Button>
@@ -411,7 +448,18 @@ const MusicTimingSection = ({
                   </Label>
                   <div className="text-sm text-gray-800 mt-1">{internVoiceDisplay}</div>
                 </div>
-                <div className="mt-2 sm:mt-0">
+                <div className="mt-2 sm:mt-0 flex items-center gap-2">
+                  {template?.default_intern_voice_id && (
+                    <Button
+                      type="button"
+                      variant={playingVoice === 'intern' ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => handleVoicePlayPause('intern', template.default_intern_voice_id)}
+                      title={playingVoice === 'intern' ? "Stop preview" : "Preview voice"}
+                    >
+                      {playingVoice === 'intern' ? <Square className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                    </Button>
+                  )}
                   <Button variant="outline" onClick={onChooseInternVoice}>
                     Choose voice
                   </Button>
