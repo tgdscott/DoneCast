@@ -914,6 +914,16 @@ def _finalize_episode(
     
     episode.gcs_audio_path = gcs_audio_url
     logging.info("[assemble] ✅ Audio uploaded to GCS: %s", gcs_audio_url)
+    
+    # Mirror to local media directory for dev environment playback
+    try:
+        local_audio_mirror = MEDIA_DIR / gcs_audio_key
+        local_audio_mirror.parent.mkdir(parents=True, exist_ok=True)
+        if not local_audio_mirror.exists():
+            shutil.copy2(audio_src, local_audio_mirror)
+            logging.info("[assemble] 📋 Mirrored audio to local media for dev playback: %s", local_audio_mirror)
+    except Exception as mirror_err:
+        logging.warning("[assemble] Failed to mirror audio to local media (non-critical): %s", mirror_err)
 
     cover_value = media_context.cover_image_path
     if cover_value:
@@ -954,6 +964,16 @@ def _finalize_episode(
                 
                 episode.gcs_cover_path = gcs_cover_url
                 logging.info("[assemble] ✅ Cover uploaded to cloud storage: %s", gcs_cover_url)
+                
+                # Mirror to local media directory for dev environment playback
+                try:
+                    local_cover_mirror = MEDIA_DIR / gcs_cover_key
+                    local_cover_mirror.parent.mkdir(parents=True, exist_ok=True)
+                    if not local_cover_mirror.exists():
+                        shutil.copy2(cover_path, local_cover_mirror)
+                        logging.info("[assemble] 📋 Mirrored cover to local media for dev playback: %s", local_cover_mirror)
+                except Exception as mirror_err:
+                    logging.warning("[assemble] Failed to mirror cover to local media (non-critical): %s", mirror_err)
             except Exception:
                 logging.warning(
                     "[assemble] Failed to persist cover image locally", exc_info=True
