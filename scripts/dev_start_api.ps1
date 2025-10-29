@@ -90,6 +90,28 @@ try {
 
   Write-Host "Google Cloud credentials ready" -ForegroundColor Green
 
+  # Auto-whitelist current IP for Cloud SQL direct access (no proxy needed)
+  Write-Host ""
+  Write-Host "Auto-whitelisting IP for direct Cloud SQL access..." -ForegroundColor Cyan
+  try {
+    $myIP = (Invoke-WebRequest -Uri "https://ifconfig.me" -UseBasicParsing -TimeoutSec 3).Content.Trim()
+    if ($myIP -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') {
+      Write-Host "   Your public IP: $myIP" -ForegroundColor Gray
+      $patchResult = gcloud sql instances patch podcast-db --add-authorized-networks="$myIP/32" --project=podcast612 --quiet 2>&1
+      if ($LASTEXITCODE -eq 0) {
+        Write-Host "   IP whitelisted for database access" -ForegroundColor Green
+      } else {
+        Write-Host "   IP already whitelisted or patch failed (continuing anyway)" -ForegroundColor Yellow
+      }
+    } else {
+      Write-Host "   Could not detect valid public IP (continuing anyway)" -ForegroundColor Yellow
+    }
+  } catch {
+    Write-Host "   Could not auto-whitelist IP: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "   (Continuing - you may need to manually whitelist)" -ForegroundColor Gray
+  }
+  Write-Host ""
+
   # Check for AI credentials
   $aiStubMode = $env:AI_STUB_MODE
   if ([string]::IsNullOrWhiteSpace($aiStubMode)) {
