@@ -302,6 +302,11 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
       const payload = { ...template };
       
       // Save voice settings
+      console.log('💾 [TemplateEditor] Saving with voice IDs:', {
+        voiceId,
+        internVoiceId,
+        template_default_intern: template?.default_intern_voice_id
+      });
       payload.default_elevenlabs_voice_id = voiceId || null;
       payload.default_intern_voice_id = internVoiceId || null;
       // Also save in ai_settings for redundancy
@@ -794,10 +799,14 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
         <VoicePicker
           value={internVoiceId || null}
           onChange={(id) => {
+            console.log('🎙️ [TemplateEditor] Intern voice onChange called with ID:', id);
             setInternVoiceId(id);
             if (!id) setInternVoiceName(null);
           }}
-          onSelect={(item) => setInternVoiceName(item?.common_name || item?.name || null)}
+          onSelect={(item) => {
+            console.log('🎙️ [TemplateEditor] Intern voice onSelect called with item:', item);
+            setInternVoiceName(item?.common_name || item?.name || null);
+          }}
           onClose={() => setShowInternVoicePicker(false)}
           token={token}
         />

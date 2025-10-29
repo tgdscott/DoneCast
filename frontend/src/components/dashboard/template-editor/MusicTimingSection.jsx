@@ -216,6 +216,12 @@ const MusicTimingSection = ({
                               value={rule.music_asset_id || rule.music_filename || ""}
                               onValueChange={(v) => {
                                 if (!v) return;
+                                // Stop currently playing audio when switching
+                                if (playingIndex === index && audioRef.current) {
+                                  audioRef.current.pause();
+                                  audioRef.current = null;
+                                  setPlayingIndex(null);
+                                }
                                 // Check if this is a global music asset ID
                                 const isGlobalAsset = globalMusicAssets.some(a => a.id === v);
                                 if (isGlobalAsset) {
@@ -266,6 +272,12 @@ const MusicTimingSection = ({
                                 ? `/api/music/assets/${rule.music_asset_id}/preview`
                                 : (() => {
                                     const file = musicFiles.find(f => f.filename === rule.music_filename);
+                                    console.log('🎵 [MusicTimingSection] User music file lookup:', {
+                                      filename: rule.music_filename,
+                                      found: !!file,
+                                      fileId: file?.id,
+                                      url: file ? `/api/media/${file.id}/stream` : null
+                                    });
                                     return file ? `/api/media/${file.id}/stream` : null;
                                   })();
                               const isPlaying = playingIndex === index;
@@ -274,7 +286,10 @@ const MusicTimingSection = ({
                                   type="button"
                                   variant={isPlaying ? "default" : "outline"}
                                   size="sm"
-                                  onClick={() => handlePlayPause(index, audioUrl)}
+                                  onClick={() => {
+                                    console.log('🎵 [MusicTimingSection] Playing audio:', audioUrl);
+                                    handlePlayPause(index, audioUrl);
+                                  }}
                                   title={isPlaying ? "Stop audio" : "Preview audio"}
                                 >
                                   {isPlaying ? <Square className="w-4 h-4" /> : <Play className="w-4 h-4" />}
