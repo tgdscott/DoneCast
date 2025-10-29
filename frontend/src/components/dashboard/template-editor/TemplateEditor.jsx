@@ -547,9 +547,11 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
       case 'schedule':
         return (
           <TemplateSchedulePage
-            template={template}
-            setTemplate={setTemplate}
-            onScheduleDirtyChange={setScheduleDirty}
+            token={token}
+            templateId={templateId}
+            userTimezone={authUser?.timezone}
+            isNewTemplate={!template?.id}
+            onDirtyChange={setScheduleDirty}
             {...commonProps}
           />
         );
