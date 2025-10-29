@@ -271,9 +271,17 @@ const MusicTimingSection = ({
                               const audioUrl = rule.music_asset_id
                                 ? `/api/music/assets/${rule.music_asset_id}/preview`
                                 : (() => {
-                                    const file = musicFiles.find(f => f.filename === rule.music_filename);
+                                    // Strip GCS prefix if present (gs://bucket/path → path)
+                                    const cleanFilename = rule.music_filename?.replace(/^gs:\/\/[^\/]+\//, '') || rule.music_filename;
+                                    const file = musicFiles.find(f => {
+                                      const fClean = f.filename?.replace(/^gs:\/\/[^\/]+\//, '');
+                                      return f.filename === rule.music_filename || 
+                                             f.filename === cleanFilename ||
+                                             fClean === cleanFilename;
+                                    });
                                     console.log('🎵 [MusicTimingSection] User music file lookup:', {
                                       filename: rule.music_filename,
+                                      cleanFilename,
                                       found: !!file,
                                       fileId: file?.id,
                                       url: file ? `/api/media/${file.id}/stream` : null
