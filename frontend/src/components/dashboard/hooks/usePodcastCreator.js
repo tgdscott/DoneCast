@@ -163,6 +163,32 @@ export default function usePodcastCreator({
   const [voicePickerTargetId, setVoicePickerTargetId] = useState(null);
   const [voiceNameById, setVoiceNameById] = useState({});
   const [voicesLoading, setVoicesLoading] = useState(false);
+  
+  // Fetch ElevenLabs voices and build name lookup map
+  useEffect(() => {
+    if (!token) return;
+    let mounted = true;
+    setVoicesLoading(true);
+    fetchElevenVoices(token)
+      .then((voices) => {
+        if (!mounted) return;
+        const nameMap = {};
+        (voices || []).forEach((v) => {
+          if (v.voice_id) {
+            nameMap[v.voice_id] = v.common_name || v.name || v.voice_id;
+          }
+        });
+        setVoiceNameById(nameMap);
+      })
+      .catch((err) => {
+        console.warn('[usePodcastCreator] Failed to fetch voices:', err);
+      })
+      .finally(() => {
+        if (mounted) setVoicesLoading(false);
+      });
+    return () => { mounted = false; };
+  }, [token]);
+  
   const coverArtInputRef = useRef(null);
   const coverCropperRef = useRef(null);
   const [coverNeedsUpload, setCoverNeedsUpload] = useState(false);
