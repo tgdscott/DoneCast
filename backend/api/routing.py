@@ -105,7 +105,7 @@ website_sections_router = _safe_import("api.routers.website_sections")
 sites_router           = _safe_import("api.routers.sites")
 website_publish_router = _safe_import("api.routers.podcasts.publish")
 auphonic_router        = _safe_import("api.routers.episodes.auphonic")
-user_deletion_router   = _safe_import("api.routers.users.deletion")
+# user_deletion_router is in admin/users.py (loaded via admin module)
 speakers_router        = _safe_import("api.routers.speakers")
 
 def _maybe(app: FastAPI, r, prefix: str = "/api"):
@@ -202,8 +202,7 @@ def attach_routers(app: FastAPI) -> dict:
     availability['website_publish_router'] = website_publish_router is not None
     _maybe(app, auphonic_router)  # Auphonic outputs for episode assembly
     availability['auphonic_router'] = auphonic_router is not None
-    _maybe(app, user_deletion_router)  # User self-deletion with grace period
-    availability['user_deletion_router'] = user_deletion_router is not None
+    # user_deletion_router removed - deletion functionality is in admin/users.py
     _maybe(app, speakers_router)  # Speaker identification configuration
     availability['speakers_router'] = speakers_router is not None
 

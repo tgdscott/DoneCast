@@ -92,22 +92,34 @@ try {
 
   # Auto-whitelist current IP for Cloud SQL direct access (no proxy needed)
   Write-Host ""
-  Write-Host "Auto-whitelisting IP for direct Cloud SQL access..." -ForegroundColor Cyan
+  Write-Host "Checking Cloud SQL IP whitelist..." -ForegroundColor Cyan
   try {
-    $myIP = (Invoke-WebRequest -Uri "https://ifconfig.me" -UseBasicParsing -TimeoutSec 3).Content.Trim()
+    # Use /ip endpoint to get ONLY the IP address (not HTML)
+    $myIP = (Invoke-WebRequest -Uri "https://ifconfig.me/ip" -UseBasicParsing -TimeoutSec 3).Content.Trim()
     if ($myIP -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') {
       Write-Host "   Your public IP: $myIP" -ForegroundColor Gray
-      $patchResult = gcloud sql instances patch podcast-db --add-authorized-networks="$myIP/32" --project=podcast612 --quiet 2>&1
-      if ($LASTEXITCODE -eq 0) {
-        Write-Host "   IP whitelisted for database access" -ForegroundColor Green
+      
+      # Get current authorized networks
+      $currentNets = gcloud sql instances describe podcast-db --project=podcast612 --format="value(settings.ipConfiguration.authorizedNetworks[].value)" 2>&1
+      
+      if ($currentNets -match $myIP) {
+        Write-Host "   IP already whitelisted" -ForegroundColor Green
       } else {
-        Write-Host "   IP already whitelisted or patch failed (continuing anyway)" -ForegroundColor Yellow
+        Write-Host "   Adding IP to authorized networks..." -ForegroundColor Yellow
+        # Append to existing networks (comma-separated list)
+        $allNets = if ($currentNets) { "$currentNets,$myIP" } else { $myIP }
+        $patchResult = gcloud sql instances patch podcast-db --authorized-networks="$allNets" --project=podcast612 --quiet 2>&1
+        if ($LASTEXITCODE -eq 0) {
+          Write-Host "   IP whitelisted successfully" -ForegroundColor Green
+        } else {
+          Write-Host "   Failed to whitelist IP (continuing anyway)" -ForegroundColor Yellow
+        }
       }
     } else {
       Write-Host "   Could not detect valid public IP (continuing anyway)" -ForegroundColor Yellow
     }
   } catch {
-    Write-Host "   Could not auto-whitelist IP: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "   Could not check/whitelist IP: $($_.Exception.Message)" -ForegroundColor Yellow
     Write-Host "   (Continuing - you may need to manually whitelist)" -ForegroundColor Gray
   }
   Write-Host ""

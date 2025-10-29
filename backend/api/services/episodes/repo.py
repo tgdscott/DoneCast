@@ -49,10 +49,10 @@ def delete_episode(session: Session, ep: Episode) -> None:
     """Delete episode and all related child records.
     
     Manually cascades deletions to avoid foreign key constraint violations.
-    Child records: MediaItem.used_in_episode_id, UsageRecord.
+    Child records: MediaItem.used_in_episode_id, ProcessingMinutesLedger.
     """
     from api.models.podcast import MediaItem
-    from api.models.usage import UsageRecord
+    from api.models.usage import ProcessingMinutesLedger
     
     episode_id = ep.id
     
@@ -64,11 +64,11 @@ def delete_episode(session: Session, ep: Episode) -> None:
         item.used_in_episode_id = None
         session.add(item)
     
-    # Delete UsageRecord entries for this episode
-    usage_records = session.exec(
-        select(UsageRecord).where(UsageRecord.episode_id == episode_id)
+    # Delete ProcessingMinutesLedger entries for this episode
+    ledger_records = session.exec(
+        select(ProcessingMinutesLedger).where(ProcessingMinutesLedger.episode_id == episode_id)
     ).all()
-    for record in usage_records:
+    for record in ledger_records:
         session.delete(record)
     
     # Finally delete the episode itself
