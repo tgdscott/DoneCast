@@ -1133,8 +1133,8 @@ export default function usePodcastCreator({
   const cancelBuild = () => {
     // Abort in-flight audio upload, if any
     try {
-      if (uploadXhrRef.current && typeof uploadXhrRef.current.abort === 'function') {
-        uploadXhrRef.current.abort();
+      if (fileUpload.uploadXhrRef.current && typeof fileUpload.uploadXhrRef.current.abort === 'function') {
+        fileUpload.uploadXhrRef.current.abort();
       }
     } catch {}
     try {
@@ -1143,21 +1143,21 @@ export default function usePodcastCreator({
       localStorage.removeItem('ppp_start_step');
       localStorage.removeItem('ppp_transcript_ready');
     } catch {}
-    setUploadedFile(null);
-    setUploadedFilename(null);
-    setUploadProgress(null);
-    resetTranscriptState();
-    setIntents({ flubber: null, intern: null, sfx: null, intern_overrides: [] });
-    setIntentDetections({ flubber: null, intern: null, sfx: null });
-    setIntentDetectionReady(true);
-    setInternResponses([]);
-    setInternPendingContexts(null);
-    setInternReviewContexts([]);
-    setShowInternReview(false);
-    setShowIntentQuestions(false);
+    fileUpload.setUploadedFile(null);
+    fileUpload.setUploadedFilename(null);
+    fileUpload.setUploadProgress(null);
+    fileUpload.resetTranscriptState();
+    aiFeatures.setIntents({ flubber: null, intern: null, sfx: null, intern_overrides: [] });
+    aiFeatures.setIntentDetections({ flubber: null, intern: null, sfx: null });
+    aiFeatures.setIntentDetectionReady(true);
+    aiFeatures.setInternResponses([]);
+    aiFeatures.setInternPendingContexts(null);
+    aiFeatures.setInternReviewContexts([]);
+    aiFeatures.setShowInternReview(false);
+    aiFeatures.setShowIntentQuestions(false);
     setStatusMessage('');
     setError('');
-    setCurrentStep(1);
+    stepNav.setCurrentStep(1);
     // Navigate back to dashboard/home
     try {
       window.dispatchEvent(new Event('ppp:navigate-dashboard'));
