@@ -22,13 +22,14 @@ def convert_db_template_to_public(db_template: PodcastTemplate) -> PodcastTempla
         user_id=db_template.user_id,
         name=db_template.name,
         podcast_id=getattr(db_template, 'podcast_id', None),
-    # bubble default voice to clients
-    default_elevenlabs_voice_id=getattr(db_template, 'default_elevenlabs_voice_id', None),
+        # bubble default voices to clients
+        default_elevenlabs_voice_id=getattr(db_template, 'default_elevenlabs_voice_id', None),
+        default_intern_voice_id=getattr(db_template, 'default_intern_voice_id', None),
         segments=json.loads(db_template.segments_json),
         background_music_rules=json.loads(db_template.background_music_rules_json),
-    timing=json.loads(db_template.timing_json),
-    ai_settings=PodcastTemplateCreate.AITemplateSettings.model_validate_json(getattr(db_template, 'ai_settings_json', '{}')),
-    is_active=getattr(db_template, 'is_active', True)
+        timing=json.loads(db_template.timing_json),
+        ai_settings=PodcastTemplateCreate.AITemplateSettings.model_validate_json(getattr(db_template, 'ai_settings_json', '{}')),
+        is_active=getattr(db_template, 'is_active', True)
     )
 
 @router.get("/", response_model=List[PodcastTemplatePublic])
