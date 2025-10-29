@@ -116,7 +116,7 @@ export default function usePodcastCreator({
   const { ttsValues } = voiceConfig;
   const { episodeDetails } = metadata;
   const { publishMode, scheduleDate, scheduleTime } = publishing;
-  const { flubberCutsMs, intents } = aiFeatures;
+  const { flubberCutsMs, flubberContexts, intents } = aiFeatures;
   
   // Forward declarations for assembly hook (defined later)
   let refreshUsage, handleUploadProcessedCover;
