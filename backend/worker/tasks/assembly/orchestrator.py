@@ -596,7 +596,7 @@ def _finalize_episode(
                                     from infrastructure import tasks_client
                                     task_payload = {
                                         "episode_id": str(episode.id),
-                                        "chunk_index": chunk.chunk_index,
+                                        "chunk_index": chunk.index,  # FIXED: was chunk.chunk_index (attribute doesn't exist)
                                         "chunk_id": chunk.chunk_id,
                                     }
                                     
