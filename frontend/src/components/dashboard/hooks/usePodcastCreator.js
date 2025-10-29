@@ -213,14 +213,12 @@ export default function usePodcastCreator({
     setEpisodeDetails,
     isAiTitleBusy,
     isAiDescBusy,
-    handleDetailsChange,
+    // handleDetailsChange - already extracted at line 118
     handleAISuggestTitle,
     handleAIRefineTitle,
     handleAISuggestDescription,
     handleAIRefineDescription,
-    suggestTitle,
-    suggestNotes,
-    suggestTags,
+    // suggestTitle, suggestNotes, suggestTags - already extracted at line 118
   } = metadata;
   
   const {
