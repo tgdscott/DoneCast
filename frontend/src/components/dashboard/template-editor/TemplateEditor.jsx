@@ -121,7 +121,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
           api.get('/api/media/'),
           api.get('/api/podcasts/'),
           isNewTemplate ? Promise.resolve(null) : api.get(`/api/templates/${templateId}`),
-          api.get('/api/music-assets/global'),
+          api.get('/api/music/assets?scope=global'),
         ]);
 
         if (mediaData.status === 'fulfilled') {
@@ -133,7 +133,8 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
         }
         
         if (globalMusicData.status === 'fulfilled') {
-          setGlobalMusicAssets(Array.isArray(globalMusicData.value) ? globalMusicData.value : []);
+          const assets = globalMusicData.value?.assets || globalMusicData.value || [];
+          setGlobalMusicAssets(Array.isArray(assets) ? assets : []);
         }
 
         if (isNewTemplate) {
