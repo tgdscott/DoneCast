@@ -66,6 +66,10 @@ steps:
           STRIPE_SECRET_KEY
           STRIPE_WEBHOOK_SECRET
           AUPHONIC_API_KEY
+          r2-account-id
+          r2-access-key-id
+          r2-secret-access-key
+          r2-bucket
         )
         for s in "$${REQ_SECRETS[@]}"; do
           if ! gcloud secrets versions describe latest --secret="$$s" >/dev/null 2>&1; then
@@ -215,8 +219,8 @@ steps:
             --execution-environment=gen2 \
             --cpu-boost \
             --cpu-throttling \
-            --update-env-vars="CLOUDPOD_MAX_MIX_BUFFER_BYTES=536870912,DB_POOL_SIZE=2,DB_MAX_OVERFLOW=3,DB_POOL_RECYCLE=180,DB_POOL_TIMEOUT=30" \
-            --update-secrets="GCS_SIGNER_KEY_JSON=gcs-signer-key:latest,AUPHONIC_API_KEY=AUPHONIC_API_KEY:latest"
+            --update-env-vars="CLOUDPOD_MAX_MIX_BUFFER_BYTES=536870912,DB_POOL_SIZE=2,DB_MAX_OVERFLOW=3,DB_POOL_RECYCLE=180,DB_POOL_TIMEOUT=30,STORAGE_BACKEND=r2" \
+            --update-secrets="GCS_SIGNER_KEY_JSON=gcs-signer-key:latest,AUPHONIC_API_KEY=AUPHONIC_API_KEY:latest,R2_ACCOUNT_ID=r2-account-id:latest,R2_ACCESS_KEY_ID=r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=r2-secret-access-key:latest,R2_BUCKET=r2-bucket:latest"
         }
 
         # Retry deploy to handle transient API errors
@@ -281,8 +285,8 @@ steps:
             --concurrency=10 \
             --execution-environment=gen2 \
             --port=8080 \
-            --set-env-vars="CLOUDPOD_MAX_MIX_BUFFER_BYTES=536870912,MEDIA_ROOT=/tmp,INSTANCE_CONNECTION_NAME=podcast612:us-west1:podcast-db,GOOGLE_CLOUD_PROJECT=podcast612,TASKS_LOCATION=us-west1,TASKS_QUEUE=ppp-queue,APP_ENV=production,AI_PROVIDER=vertex,VERTEX_PROJECT=podcast612,VERTEX_LOCATION=us-central1,VERTEX_MODEL=gemini-2.5-flash-lite,USE_CLOUD_TASKS=1,DB_POOL_SIZE=5,DB_MAX_OVERFLOW=2,DB_POOL_RECYCLE=300,DB_POOL_TIMEOUT=15,GCS_CHUNK_MB=32,MEDIA_BUCKET=ppp-media-us-west1,TRANSCRIPTS_BUCKET=ppp-transcripts-us-west1" \
-            --set-secrets="DB_USER=DB_USER:latest,DB_PASS=DB_PASS:latest,DB_NAME=DB_NAME:latest,DATABASE_URL=DATABASE_URL:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,ELEVENLABS_API_KEY=ELEVENLABS_API_KEY:latest,ASSEMBLYAI_API_KEY=ASSEMBLYAI_API_KEY:latest,TASKS_AUTH=TASKS_AUTH:latest,GCS_SIGNER_KEY_JSON=gcs-signer-key:latest,AUPHONIC_API_KEY=AUPHONIC_API_KEY:latest"
+            --set-env-vars="CLOUDPOD_MAX_MIX_BUFFER_BYTES=536870912,MEDIA_ROOT=/tmp,INSTANCE_CONNECTION_NAME=podcast612:us-west1:podcast-db,GOOGLE_CLOUD_PROJECT=podcast612,TASKS_LOCATION=us-west1,TASKS_QUEUE=ppp-queue,APP_ENV=production,AI_PROVIDER=vertex,VERTEX_PROJECT=podcast612,VERTEX_LOCATION=us-central1,VERTEX_MODEL=gemini-2.5-flash-lite,USE_CLOUD_TASKS=1,DB_POOL_SIZE=5,DB_MAX_OVERFLOW=2,DB_POOL_RECYCLE=300,DB_POOL_TIMEOUT=15,GCS_CHUNK_MB=32,MEDIA_BUCKET=ppp-media-us-west1,TRANSCRIPTS_BUCKET=ppp-transcripts-us-west1,STORAGE_BACKEND=r2" \
+            --set-secrets="DB_USER=DB_USER:latest,DB_PASS=DB_PASS:latest,DB_NAME=DB_NAME:latest,DATABASE_URL=DATABASE_URL:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,ELEVENLABS_API_KEY=ELEVENLABS_API_KEY:latest,ASSEMBLYAI_API_KEY=ASSEMBLYAI_API_KEY:latest,TASKS_AUTH=TASKS_AUTH:latest,GCS_SIGNER_KEY_JSON=gcs-signer-key:latest,AUPHONIC_API_KEY=AUPHONIC_API_KEY:latest,R2_ACCOUNT_ID=r2-account-id:latest,R2_ACCESS_KEY_ID=r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=r2-secret-access-key:latest,R2_BUCKET=r2-bucket:latest"
         }
         
         # Retry deploy to handle transient API errors
