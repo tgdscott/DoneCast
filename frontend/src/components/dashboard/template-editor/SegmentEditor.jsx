@@ -286,7 +286,7 @@ const SegmentEditor = ({ segment, onDelete, onSourceChange, mediaFiles, isDraggi
                                 </Select>
                                 {/* Play/Stop toggle button */}
                                 {mediaMatch && (() => {
-                                    const audioUrl = `/api/media/${mediaMatch.id}/stream`;
+                                    const audioUrl = `/api/media/preview?id=${mediaMatch.id}`;
                                     return (
                                         <Button
                                             type="button"

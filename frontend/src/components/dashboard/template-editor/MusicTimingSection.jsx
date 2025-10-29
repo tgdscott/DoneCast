@@ -284,9 +284,9 @@ const MusicTimingSection = ({
                                       cleanFilename,
                                       found: !!file,
                                       fileId: file?.id,
-                                      url: file ? `/api/media/${file.id}/stream` : null
+                                      url: file ? `/api/media/preview?id=${file.id}` : null
                                     });
-                                    return file ? `/api/media/${file.id}/stream` : null;
+                                    return file ? `/api/media/preview?id=${file.id}` : null;
                                   })();
                               const isPlaying = playingIndex === index;
                               return audioUrl ? (
