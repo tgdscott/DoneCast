@@ -584,26 +584,26 @@ export default function usePodcastCreator({
   const intentsComplete = pendingIntentLabels.length === 0;
 
   useEffect(() => {
-    if (!uploadedFile) { setAudioDurationSec(null); return; }
+    if (!fileUpload.uploadedFile) { fileUpload.setAudioDurationSec(null); return; }
     let url = null;
     const audio = new Audio();
     const onLoaded = () => {
       const d = audio && isFinite(audio.duration) ? audio.duration : null;
-      setAudioDurationSec(d && d > 0 ? d : null);
+      fileUpload.setAudioDurationSec(d && d > 0 ? d : null);
       if (url) URL.revokeObjectURL(url);
     };
     const onError = () => {
-      setAudioDurationSec(null);
+      fileUpload.setAudioDurationSec(null);
       if (url) URL.revokeObjectURL(url);
     };
     audio.addEventListener('loadedmetadata', onLoaded);
     audio.addEventListener('error', onError);
     try {
-      url = URL.createObjectURL(uploadedFile);
+      url = URL.createObjectURL(fileUpload.uploadedFile);
       audio.src = url;
       audio.load();
     } catch (_) {
-      setAudioDurationSec(null);
+      fileUpload.setAudioDurationSec(null);
       if (url) try { URL.revokeObjectURL(url); } catch {}
     }
     return () => {
@@ -611,7 +611,7 @@ export default function usePodcastCreator({
       audio.removeEventListener('error', onError);
       if (url) try { URL.revokeObjectURL(url); } catch {}
     };
-  }, [uploadedFile]);
+  }, [fileUpload.uploadedFile, fileUpload.setAudioDurationSec]);
 
   const activeSegment = useMemo(() => {
     if (!showVoicePicker || !voicePickerTargetId || !selectedTemplate?.segments) return null;
@@ -626,12 +626,12 @@ export default function usePodcastCreator({
   // Voice name resolution useEffect is now in voiceConfig hook
 
   const processingEstimate = useMemo(() => {
-    if (!audioDurationSec || !isFinite(audioDurationSec) || audioDurationSec <= 0) return null;
-    const mins = audioDurationSec / 60;
+    if (!fileUpload.audioDurationSec || !isFinite(fileUpload.audioDurationSec) || fileUpload.audioDurationSec <= 0) return null;
+    const mins = fileUpload.audioDurationSec / 60;
     const low = Math.max(0, Math.floor(mins * 0.75));
     const high = Math.max(1, Math.ceil(mins * 1.25));
     return { low, high };
-  }, [audioDurationSec]);
+  }, [fileUpload.audioDurationSec]);
 
   // Publishing localStorage initialization and persistence now in publishing hook
 
@@ -1296,7 +1296,7 @@ export default function usePodcastCreator({
         if (Number.isFinite(total) && total > 0) return total;
         const main = Number(minutesPrecheck.main_seconds);
         if (Number.isFinite(main) && main > 0) return main;
-        return audioDurationSec && audioDurationSec > 0 ? audioDurationSec : null;
+        return fileUpload.audioDurationSec && fileUpload.audioDurationSec > 0 ? fileUpload.audioDurationSec : null;
       })();
       setMinutesDialog({
         requiredMinutes: required,
@@ -1375,8 +1375,8 @@ export default function usePodcastCreator({
             const required = Number(detail.minutes_required) || 0;
             const remaining = Number(detail.minutes_remaining);
             const renewal = detail.renewal_date || detail.renewalDate || null;
-            const secondsEstimate = (audioDurationSec && audioDurationSec > 0)
-              ? audioDurationSec
+            const secondsEstimate = (fileUpload.audioDurationSec && fileUpload.audioDurationSec > 0)
+              ? fileUpload.audioDurationSec
               : (required > 0 ? required * 60 : null);
             setMinutesDialog({
               requiredMinutes: required,
