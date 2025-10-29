@@ -186,6 +186,19 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     });
   }, []);
 
+  // Initialize voice IDs from template when loaded
+  useEffect(() => {
+    if (template) {
+      if (template.default_elevenlabs_voice_id) {
+        setVoiceId(template.default_elevenlabs_voice_id);
+      }
+      // Intern voice ID would be in ai_settings if it exists
+      if (template.ai_settings?.intern_voice_id) {
+        setInternVoiceId(template.ai_settings.intern_voice_id);
+      }
+    }
+  }, [template?.id]); // Only run when template ID changes (initial load or switching templates)
+
   // Check page completion
   useEffect(() => {
     if (!template) {
@@ -251,6 +264,13 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
       const api = makeApi(token);
       const payload = { ...template };
       
+      // Save voice settings
+      payload.default_elevenlabs_voice_id = voiceId || null;
+      if (!payload.ai_settings) {
+        payload.ai_settings = {};
+      }
+      payload.ai_settings.intern_voice_id = internVoiceId || null;
+      
       // Clean up segments
       if (Array.isArray(payload.segments)) {
         payload.segments = payload.segments.map(seg => {
@@ -301,7 +321,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     } finally {
       setIsSaving(false);
     }
-  }, [template, podcasts, token, isNewTemplate, templateId, onTemplateSaved]);
+  }, [template, podcasts, token, isNewTemplate, templateId, onTemplateSaved, voiceId, internVoiceId]);
 
   // Back handler with dirty check
   const handleBackClick = useCallback(() => {
