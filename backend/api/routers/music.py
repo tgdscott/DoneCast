@@ -121,7 +121,6 @@ def register_music_selection(asset_id: str,
 def preview_music_asset(
     asset_id: str,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
 ):
     asset = session.exec(select(MusicAsset).where(MusicAsset.id == asset_id)).first()
     if not asset:
