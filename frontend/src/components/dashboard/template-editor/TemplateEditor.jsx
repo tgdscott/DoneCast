@@ -367,7 +367,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
         <TemplateEditorSidebar
           currentPage={currentPage}
           completedPages={completedPages}
-          onNavigate={handleNavigate}
+          onPageChange={handleNavigate}
           onSave={handleSave}
           isSaving={isSaving}
           isDirty={isDirty}
