@@ -76,7 +76,7 @@ export default function StepCustomizeSegments({
       if (segment.source.source_type === 'tts') {
         const voiceId = segment?.source?.voice_id || '';
         const resolvedFriendly = voiceNameById[voiceId];
-        const providedLabel = segment?.source?.voice_name || segment?.source?.voice_label || segment?.source?.name;
+        const providedLabel = segment?.source?.voice_name || segment?.source?.voice_label;
         const baseVoiceLabel =
           (!voiceId || voiceId === 'default')
             ? 'Default voice'
