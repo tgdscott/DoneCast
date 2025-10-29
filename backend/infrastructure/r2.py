@@ -48,9 +48,10 @@ def _get_r2_client():
         return None
     
     # Get R2 credentials from environment
-    account_id = os.getenv("R2_ACCOUNT_ID")
-    access_key_id = os.getenv("R2_ACCESS_KEY_ID")
-    secret_access_key = os.getenv("R2_SECRET_ACCESS_KEY")
+    # CRITICAL: Strip whitespace - secrets from Google Secret Manager often have trailing newlines
+    account_id = os.getenv("R2_ACCOUNT_ID", "").strip()
+    access_key_id = os.getenv("R2_ACCESS_KEY_ID", "").strip()
+    secret_access_key = os.getenv("R2_SECRET_ACCESS_KEY", "").strip()
     
     if not all([account_id, access_key_id, secret_access_key]):
         logger.warning(
@@ -120,7 +121,7 @@ def upload_fileobj(
         
         # Return public R2 URL
         # Format: https://ppp-media.{account_id}.r2.cloudflarestorage.com/path/to/file.mp3
-        account_id = os.getenv("R2_ACCOUNT_ID")
+        account_id = os.getenv("R2_ACCOUNT_ID", "").strip()
         url = f"https://{bucket_name}.{account_id}.r2.cloudflarestorage.com/{key}"
         
         logger.info(f"[R2] Uploaded {key} to bucket {bucket_name}")
@@ -166,7 +167,7 @@ def upload_bytes(
         )
         
         # Return public R2 URL
-        account_id = os.getenv("R2_ACCOUNT_ID")
+        account_id = os.getenv("R2_ACCOUNT_ID", "").strip()
         url = f"https://{bucket_name}.{account_id}.r2.cloudflarestorage.com/{key}"
         
         logger.info(f"[R2] Uploaded {len(data)} bytes to {key}")
@@ -330,7 +331,7 @@ def get_public_url(bucket_name: str, key: str) -> str:
     Returns:
         Public R2 URL
     """
-    account_id = os.getenv("R2_ACCOUNT_ID", "UNKNOWN")
+    account_id = os.getenv("R2_ACCOUNT_ID", "UNKNOWN").strip()
     # URL-encode the key to handle special characters
     encoded_key = quote(key, safe="/")
     return f"https://{bucket_name}.{account_id}.r2.cloudflarestorage.com/{encoded_key}"

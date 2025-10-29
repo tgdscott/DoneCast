@@ -35,9 +35,9 @@ def _get_bucket_name() -> str:
     """Get bucket name for active storage backend."""
     backend = _get_backend()
     if backend == "r2":
-        return os.getenv("R2_BUCKET", "ppp-media")
+        return os.getenv("R2_BUCKET", "ppp-media").strip()
     else:
-        return os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+        return os.getenv("GCS_BUCKET", "ppp-media-us-west1").strip()
 
 
 def upload_fileobj(
@@ -228,7 +228,7 @@ def get_public_audio_url(
         return None
     
     # Auto-detect backend from path
-    if path.startswith("r2://") or os.getenv("R2_BUCKET", "") in path:
+    if path.startswith("r2://") or os.getenv("R2_BUCKET", "").strip() in path:
         logger.debug(f"[storage] Generating R2 audio URL for {path}")
         return r2.get_public_audio_url(path, expiration_days)
     else:

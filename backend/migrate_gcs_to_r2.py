@@ -61,7 +61,7 @@ def migrate_episode_audio(episode: Episode, session: Session, dry_run: bool = Fa
     gcs_bucket, gcs_key = parts
     
     # Build R2 path (keep same key structure)
-    r2_bucket = os.getenv("R2_BUCKET", "ppp-media")
+    r2_bucket = os.getenv("R2_BUCKET", "ppp-media").strip()
     r2_key = gcs_key  # Same key structure
     r2_path = f"r2://{r2_bucket}/{r2_key}"
     
