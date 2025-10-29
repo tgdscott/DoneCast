@@ -1526,14 +1526,14 @@ export default function usePodcastCreator({
     minutesPrecheckError,
   };
 
-  const clearCover = () => {
+  const clearCover = useCallback(() => {
     setEpisodeDetails(p=>({ ...p, coverArt:null, coverArtPreview:null, cover_image_path:null, cover_crop:null }));
     setCoverNeedsUpload(false);
-  };
+  }, []);
 
-  const updateCoverCrop = (val) => {
+  const updateCoverCrop = useCallback((val) => {
     setEpisodeDetails(p=>({ ...p, cover_crop: val }));
-  };
+  }, []);
 
   const computeNextLocalFromSlot = (slot) => {
     if (!slot) return null;
