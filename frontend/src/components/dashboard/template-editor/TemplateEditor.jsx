@@ -261,37 +261,87 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
+  // Template change handler
+  const handleTemplateChange = useCallback((field, value) => {
+    setTemplate(prev => prev ? { ...prev, [field]: value } : null);
+  }, []);
+
   // Render current page
   const renderPage = () => {
     if (!template) return null;
 
-    const pageProps = {
-      template,
-      setTemplate,
-      mediaFiles,
-      podcasts,
-      globalMusicAssets,
-      token,
-      onNavigate: handleNavigate,
-      currentPage,
-      isNewTemplate,
-      onScheduleDirtyChange: setScheduleDirty,
-      authUser,
+    // Common props for all pages
+    const commonProps = {
+      onNext: () => {
+        const currentIndex = PAGES.findIndex(p => p.id === currentPage);
+        if (currentIndex < PAGES.length - 1) {
+          handleNavigate(PAGES[currentIndex + 1].id);
+        }
+      },
+      onBack: () => {
+        const currentIndex = PAGES.findIndex(p => p.id === currentPage);
+        if (currentIndex > 0) {
+          handleNavigate(PAGES[currentIndex - 1].id);
+        }
+      },
     };
 
     switch (currentPage) {
       case 'basics':
-        return <TemplateBasicsPage {...pageProps} />;
+        return (
+          <TemplateBasicsPage
+            template={template}
+            podcasts={podcasts}
+            onTemplateChange={handleTemplateChange}
+            {...commonProps}
+          />
+        );
       case 'schedule':
-        return <TemplateSchedulePage {...pageProps} />;
+        return (
+          <TemplateSchedulePage
+            template={template}
+            setTemplate={setTemplate}
+            onScheduleDirtyChange={setScheduleDirty}
+            {...commonProps}
+          />
+        );
       case 'ai':
-        return <TemplateAIPage {...pageProps} />;
+        return (
+          <TemplateAIPage
+            aiSettings={template.ai_settings || AI_DEFAULT}
+            defaultSettings={AI_DEFAULT}
+            onChange={(newSettings) => handleTemplateChange('ai_settings', newSettings)}
+            {...commonProps}
+          />
+        );
       case 'structure':
-        return <TemplateStructurePage {...pageProps} />;
+        return (
+          <div className="p-4 bg-yellow-50 border border-yellow-200 rounded">
+            <p className="text-yellow-800 font-medium">Structure page implementation incomplete</p>
+            <p className="text-sm text-yellow-700 mt-2">
+              The refactored template editor is missing segment management functionality.
+              Please use the legacy editor or wait for full implementation.
+            </p>
+          </div>
+        );
       case 'music':
-        return <TemplateMusicPage {...pageProps} />;
+        return (
+          <div className="p-4 bg-yellow-50 border border-yellow-200 rounded">
+            <p className="text-yellow-800 font-medium">Music & Timing page implementation incomplete</p>
+            <p className="text-sm text-yellow-700 mt-2">
+              The refactored template editor is missing music/timing handlers.
+              Please use the legacy editor or wait for full implementation.
+            </p>
+          </div>
+        );
       case 'advanced':
-        return <TemplateAdvancedPage {...pageProps} />;
+        return (
+          <TemplateAdvancedPage
+            template={template}
+            setTemplate={setTemplate}
+            {...commonProps}
+          />
+        );
       default:
         return <div>Unknown page: {currentPage}</div>;
     }
