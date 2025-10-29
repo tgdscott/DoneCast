@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from pydub import AudioSegment
 
@@ -62,8 +62,6 @@ def primary_cleanup_and_rebuild(
             reason.append("no_filler_words")
         if not remove_fillers_flag:
             reason.append("flag_off")
-        if mix_only:
-            reason.append("mix_only")
         log.append(
             f"[FILLERS_CFG] remove_fillers={remove_fillers} "
             f"filler_count={len(filler_words)} reasons={','.join(reason) if reason else 'ok'}"
@@ -177,7 +175,6 @@ def apply_flubber_cuts_to_audio(
     for word in mutable_words:
         word_text = str(word.get("word", "")).strip()
         start_s = float(word.get("start", 0.0))
-        end_s = float(word.get("end", start_s))
 
         if word_text == "":
             if not in_delete:

@@ -190,9 +190,7 @@ def detect_and_prepare_ai_commands(
         raw_flubber_spans = compute_flubber_spans(
             mutable_words, flubber_contexts, flubber_cfg, log
         )
-        flubber_spans = normalize_and_merge_spans(
-            raw_flubber_spans, flubber_cfg, log
-        )
+        # Note: flubber_spans was removed as unused - handle_flubber modifies mutable_words directly
         if "flubber" in (commands_cfg or {}):
             handle_flubber(mutable_words, flubber_cfg, log)
         else:
