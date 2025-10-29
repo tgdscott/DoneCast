@@ -167,6 +167,8 @@ class PodcastTemplateCreate(SQLModel):
     podcast_id: Optional[UUID] = None  # Associate template with a specific podcast/show
     # Optional: default ElevenLabs voice to seed per-episode TTS segments
     default_elevenlabs_voice_id: Optional[str] = None
+    # Optional: default Intern voice for spoken command detection
+    default_intern_voice_id: Optional[str] = None
     # AI settings for auto-suggestions in UI
     class AITemplateSettings(SQLModel):
         auto_fill_ai: bool = True
@@ -196,6 +198,8 @@ class PodcastTemplate(SQLModel, table=True):
     is_active: bool = Field(default=True)
     # New: default voice id for per-episode TTS segments
     default_elevenlabs_voice_id: Optional[str] = Field(default=None)
+    # New: default voice id for Intern command detection
+    default_intern_voice_id: Optional[str] = Field(default=None)
 
     episodes: List["Episode"] = Relationship(back_populates="template")
 
