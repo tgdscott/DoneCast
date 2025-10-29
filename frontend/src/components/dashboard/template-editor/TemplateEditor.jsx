@@ -187,7 +187,10 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
 
   // Check page completion
   useEffect(() => {
-    if (!template) return;
+    if (!template) {
+      setCompletedPages(new Set());
+      return;
+    }
     
     const completed = new Set();
     
@@ -196,25 +199,35 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
       completed.add('basics');
     }
     
-    // Schedule page: always optional, mark complete if visited
-    // (We'll track this via user interaction)
+    // Schedule page: always optional, considered complete if template is saved
+    if (template.id) {
+      completed.add('schedule');
+    }
     
-    // AI page: always optional, mark complete if has settings
-    if (template.ai_settings && Object.keys(template.ai_settings).length > 0) {
+    // AI page: always optional, mark complete if has settings or is saved
+    if (template.id || (template.ai_settings && Object.keys(template.ai_settings).length > 0)) {
       completed.add('ai');
     }
     
     // Structure page: has at least intro, content, outro
     if (template.segments && template.segments.length >= 3) {
-      completed.add('structure');
+      const hasIntro = template.segments.some(s => s.segment_type === 'intro');
+      const hasContent = template.segments.some(s => s.segment_type === 'content');
+      const hasOutro = template.segments.some(s => s.segment_type === 'outro');
+      if (hasIntro && hasContent && hasOutro) {
+        completed.add('structure');
+      }
     }
     
-    // Music page: always optional
-    if (template.background_music_rules && template.background_music_rules.length > 0) {
+    // Music page: always optional, complete if template saved or has music
+    if (template.id || (template.background_music_rules && template.background_music_rules.length > 0)) {
       completed.add('music');
     }
     
-    // Advanced page: always optional
+    // Advanced page: always optional, complete if template saved
+    if (template.id) {
+      completed.add('advanced');
+    }
     
     setCompletedPages(completed);
   }, [template]);
