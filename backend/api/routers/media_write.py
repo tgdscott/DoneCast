@@ -141,26 +141,26 @@ async def upload_media_files(
 			MediaCategory.commercial,
 		):
 			try:
-				from infrastructure import gcs
-				gcs_key = f"{current_user.id.hex}/media/{category.value}/{safe_filename}"
-				log.info("[upload.gcs] Uploading %s to gs://%s/%s", category.value, gcs_bucket, gcs_key)
+				from infrastructure import storage
+				storage_key = f"{current_user.id.hex}/media/{category.value}/{safe_filename}"
+				log.info("[upload.storage] Uploading %s to bucket (backend: %s), key: %s", category.value, os.getenv("STORAGE_BACKEND", "gcs"), storage_key)
 				with open(file_path, "rb") as f:
-					# Disable fallback - these categories MUST be in GCS (no local files)
-					gcs_url = gcs.upload_fileobj(
-						gcs_bucket, 
-						gcs_key, 
+					# Upload to configured storage backend (R2 or GCS)
+					storage_url = storage.upload_fileobj(
+						gcs_bucket,  # Bucket name (abstraction layer uses correct backend)
+						storage_key, 
 						f, 
-						content_type=file.content_type or "audio/mpeg",
-						allow_fallback=False
+						content_type=file.content_type or "audio/mpeg"
 					)
 				
-				# Store GCS URL instead of local filename for persistence
-				if gcs_url and gcs_url.startswith("gs://"):
-					safe_filename = gcs_url
-					log.info("[upload.gcs] SUCCESS: %s uploaded: %s", category.value, gcs_url)
+				# Store storage URL instead of local filename for persistence
+				# URL format depends on backend: gs://bucket/key (GCS) or https://bucket.r2.cloudflarestorage.com/key (R2)
+				if storage_url and (storage_url.startswith("gs://") or storage_url.startswith("http")):
+					safe_filename = storage_url
+					log.info("[upload.storage] SUCCESS: %s uploaded: %s", category.value, storage_url)
 				else:
-					# This should never happen with allow_fallback=False, but belt-and-suspenders
-					log.error("[upload.gcs] Upload returned non-GCS URL: %s", gcs_url)
+					# This should never happen, but belt-and-suspenders
+					log.error("[upload.storage] Upload returned invalid URL: %s", storage_url)
 					# Clean up local file
 					try:
 						if file_path.exists():
@@ -174,7 +174,7 @@ async def upload_media_files(
 			except HTTPException:
 				raise
 			except Exception as e:
-				log.error("[upload.gcs] CRITICAL: Failed to upload %s to GCS: %s", category.value, e, exc_info=True)
+				log.error("[upload.storage] CRITICAL: Failed to upload %s to storage backend: %s", category.value, e, exc_info=True)
 				# Clean up local file
 				try:
 					if file_path.exists():
