@@ -128,43 +128,56 @@ def _local_final_candidates(path: Optional[str]) -> list[Path]:
 
 
 def compute_playback_info(episode: Any, *, now: Optional[datetime] = None) -> dict[str, Any]:
-    """Determine playback URL from GCS or legacy Spreaker stream.
+    """Determine playback URL from R2/GCS or Spreaker.
 
     Priority order for audio URLs:
-    1. GCS URL (gcs_audio_path) - REQUIRED for all new episodes
-    2. Spreaker stream URL - LEGACY ONLY for old imported episodes
+    1. R2/GCS URL (gcs_audio_path) - Primary storage for YOUR episodes
+    2. Spreaker stream URL - For Spreaker-hosted episodes
 
-    GCS is the sole source of truth. Local files are NO LONGER SUPPORTED.
-    If GCS upload fails, episode assembly fails - no fallbacks.
+    NO LOCAL FILES - cloud storage or Spreaker only.
     
     Returns keys compatible with existing episode serializers.
     """
 
     now_utc = _as_utc(now) or datetime.now(timezone.utc)
     
-    # Priority 1: GCS URL - THE ONLY SOURCE FOR NEW EPISODES
+    # Priority 1: Cloud storage (R2 or GCS)
     gcs_audio_path = getattr(episode, "gcs_audio_path", None)
     final_audio_url = None
-    gcs_exists = False
+    cloud_exists = False
     
-    if gcs_audio_path and str(gcs_audio_path).startswith("gs://"):
+    if gcs_audio_path:
+        storage_url = str(gcs_audio_path)
         try:
-            from infrastructure.gcs import get_signed_url
-            # Parse gs://bucket/key format
-            gcs_str = str(gcs_audio_path)[5:]  # Remove "gs://"
-            parts = gcs_str.split("/", 1)
-            if len(parts) == 2:
-                bucket, key = parts
-                final_audio_url = get_signed_url(bucket, key, expiration=3600)
-                gcs_exists = True
-        except Exception as gcs_err:
-            # GCS failure is CRITICAL - log as error, not warning
+            # R2 paths: r2://bucket/key or https://... (public URL)
+            if storage_url.startswith("https://"):
+                # R2 public URL - use directly
+                final_audio_url = storage_url
+                cloud_exists = True
+            elif storage_url.startswith("r2://"):
+                # R2 signed URL needed
+                from infrastructure.r2 import get_signed_url
+                r2_str = storage_url[5:]  # Remove "r2://"
+                parts = r2_str.split("/", 1)
+                if len(parts) == 2:
+                    bucket, key = parts
+                    final_audio_url = get_signed_url(bucket, key, expiration=86400)  # 24hr expiry
+                    cloud_exists = True
+            elif storage_url.startswith("gs://"):
+                # Legacy GCS - will migrate to R2
+                from infrastructure.gcs import get_signed_url
+                gcs_str = storage_url[5:]  # Remove "gs://"
+                parts = gcs_str.split("/", 1)
+                if len(parts) == 2:
+                    bucket, key = parts
+                    final_audio_url = get_signed_url(bucket, key, expiration=3600)
+                    cloud_exists = True
+        except Exception as err:
             from api.core.logging import get_logger
             logger = get_logger("api.episodes.common")
-            logger.error("CRITICAL: GCS signed URL generation failed for %s: %s", gcs_audio_path, gcs_err)
-            # Don't fall back - if GCS fails, the episode is broken
+            logger.error("Cloud storage URL generation failed for %s: %s", gcs_audio_path, err)
 
-    # Priority 2: Spreaker stream URL - LEGACY ONLY (for old imported episodes)
+    # Priority 2: Spreaker stream URL (for Spreaker-hosted episodes)
     stream_url = None
     try:
         spk_id = getattr(episode, "spreaker_episode_id", None)
@@ -174,19 +187,18 @@ def compute_playback_info(episode: Any, *, now: Optional[datetime] = None) -> di
         stream_url = None
 
     # Determine final playback URL
-    # Prefer GCS (always), fall back to Spreaker ONLY for legacy episodes
     playback_url = final_audio_url if final_audio_url else stream_url
-    playback_type = "gcs" if final_audio_url else ("stream" if stream_url else "none")
-    audio_available = bool(gcs_exists or stream_url)
+    playback_type = "cloud" if final_audio_url else ("spreaker" if stream_url else "none")
+    audio_available = bool(cloud_exists or stream_url)
 
     return {
-        "final_audio_url": final_audio_url,  # GCS signed URL or None
-        "stream_url": stream_url,  # Spreaker stream (legacy only) or None
+        "final_audio_url": final_audio_url,  # Cloud storage URL or None
+        "stream_url": stream_url,  # Spreaker stream or None
         "playback_url": playback_url,  # The actual URL to use
-        "playback_type": playback_type,  # "gcs", "stream", or "none"
+        "playback_type": playback_type,  # "cloud", "spreaker", or "none"
         "final_audio_exists": audio_available,  # True if any audio source exists
-        "gcs_exists": gcs_exists,  # True if GCS file exists (replaces local_final_exists)
-        "prefer_remote_audio": False,  # Deprecated - always prefer GCS
+        "gcs_exists": cloud_exists,  # True if cloud file exists (legacy key name)
+        "prefer_remote_audio": False,  # Deprecated
     }
 
 
