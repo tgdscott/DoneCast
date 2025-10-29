@@ -234,7 +234,7 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     };
     
     loadVoiceNames();
-  }, [template?.id, token]); // Only run when template ID changes (initial load or switching templates)
+  }, [template?.id, template?.default_elevenlabs_voice_id, template?.default_intern_voice_id, token]); // Re-run when voice IDs change
 
   // Check page completion
   useEffect(() => {
