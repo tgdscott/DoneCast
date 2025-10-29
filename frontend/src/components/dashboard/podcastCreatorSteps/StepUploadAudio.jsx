@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
+import { Switch } from '../../ui/switch';
 import { FileAudio, Loader2, Mic, Upload, ArrowLeft, Lightbulb, AlertTriangle } from 'lucide-react';
 import { formatDisplayName } from '@/lib/displayNames';
 import { formatBytes, formatSpeed, formatEta, formatProgressDetail } from '@/lib/uploadProgress';
@@ -34,6 +35,8 @@ export default function StepUploadAudio({
   audioDurationSec: audioDurationSecProp = null,
   episodeStatus = null,
   wasRecorded = false,
+  useAuphonic = false,
+  onAuphonicToggle = () => {},
 }) {
   const audioDurationSec = audioDurationSecProp;
   const handleFileInput = (event) => {
@@ -219,6 +222,33 @@ export default function StepUploadAudio({
           )}
         </CardContent>
       </Card>
+
+      {(uploadedFile || uploadedFilename) && (
+        <Card className="border border-slate-200 bg-white">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg text-slate-900">Audio Processing Options</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <label htmlFor="auphonic-toggle" className="text-sm font-medium text-slate-900">
+                    Use Auphonic Processing
+                  </label>
+                </div>
+                <p className="text-xs text-slate-600">
+                  Enable professional audio enhancement with Auphonic (leveling, noise reduction, and more)
+                </p>
+              </div>
+              <Switch
+                id="auphonic-toggle"
+                checked={useAuphonic}
+                onCheckedChange={onAuphonicToggle}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {(uploadedFile || uploadedFilename) && (
         <Card className="border border-slate-200 bg-slate-50">

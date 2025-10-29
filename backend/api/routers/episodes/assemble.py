@@ -26,6 +26,7 @@ async def assemble_episode(
     output_filename = payload.get("output_filename")
     tts_values = payload.get("tts_values") or {}
     episode_details = payload.get("episode_details") or {}
+    use_auphonic = payload.get("use_auphonic", False)
     
     # Include flubber_cuts_ms in episode_details so the assembler can apply them
     if payload.get("flubber_cuts_ms"):
@@ -43,6 +44,7 @@ async def assemble_episode(
         tts_values=tts_values,
         episode_details=episode_details,
         intents=payload.get('intents') or None,
+        use_auphonic=use_auphonic,
     )
 
     if svc_result.get("mode") == "eager-inline":

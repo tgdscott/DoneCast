@@ -60,6 +60,7 @@ export default function usePodcastCreator({
   const [minutesPrecheckPending, setMinutesPrecheckPending] = useState(false);
   const [minutesPrecheckError, setMinutesPrecheckError] = useState(null);
   const [precheckRetrigger, setPrecheckRetrigger] = useState(0);
+  const [useAuphonic, setUseAuphonic] = useState(false);
   const autoFillKeyRef = useRef('');
   const autoRecurringRef = useRef({ templateId: null, date: null, time: null, manual: false });
   const transcriptReadyRef = fileUpload.transcriptReadyRef; // From extracted hook
@@ -157,6 +158,7 @@ export default function usePodcastCreator({
     handleUploadProcessedCoverAndPreview: async () => {
       if (handleUploadProcessedCover) await handleUploadProcessedCover();
     },
+    useAuphonic,
   });
   
   const [showVoicePicker, setShowVoicePicker] = useState(false);
@@ -1736,6 +1738,8 @@ export default function usePodcastCreator({
     minutesRemainingPrecheck,
     minutesDialog,
     setMinutesDialog,
+    useAuphonic,
+    setUseAuphonic,
     refreshUsage,
     retryMinutesPrecheck,
     buildActive,

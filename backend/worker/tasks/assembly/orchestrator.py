@@ -1062,6 +1062,7 @@ def orchestrate_create_podcast_episode(
     podcast_id: str,
     intents: dict | None = None,
     skip_charge: bool = False,
+    use_auphonic: bool = False,
 ):
     logging.info("[assemble] CWD = %s", os.getcwd())
     
@@ -1094,40 +1095,48 @@ def orchestrate_create_podcast_episode(
 
             assert media_context is not None  # for type checkers
 
-            # ========== CHECK IF AUDIO WAS AUPHONIC-PROCESSED DURING UPLOAD (BEFORE transcript prep) ==========
-            # CRITICAL: Must check BEFORE prepare_transcript_context() to prevent double-processing
-            # If Auphonic processed the audio, we skip silence/filler removal
-            auphonic_processed = False
-            try:
-                from api.models.podcast import MediaItem, MediaCategory
-                from sqlmodel import select
-                
-                # Use main_content_filename (original upload), NOT episode.working_audio_name (cleaned)
-                filename_search = main_content_filename.split("/")[-1]
-                
-                logging.info("[assemble] 🔍 PRE-CHECK: Searching for MediaItem: user=%s, filename='%s'", user_id, filename_search)
-                
-                media_item = session.exec(
-                    select(MediaItem)
-                    .where(MediaItem.user_id == user_id)
-                    .where(MediaItem.category == MediaCategory.main_content)
-                    .where(MediaItem.filename.contains(filename_search))
-                    .order_by(MediaItem.created_at.desc())
-                ).first()
-                
-                if media_item:
-                    logging.info(
-                        "[assemble] 🔍 PRE-CHECK: Found MediaItem id=%s, auphonic_processed=%s",
-                        media_item.id,
-                        media_item.auphonic_processed
-                    )
-                    if media_item.auphonic_processed:
-                        auphonic_processed = True
-                        logging.info("[assemble] ⚠️ Auphonic-processed audio detected - will skip redundant processing")
-                else:
-                    logging.info("[assemble] 🔍 PRE-CHECK: No MediaItem found")
-            except Exception as e:
-                logging.error("[assemble] Failed Auphonic pre-check: %s", e, exc_info=True)
+            # ========== DETERMINE AUPHONIC USAGE ==========
+            # Priority:
+            # 1. User's explicit toggle (use_auphonic parameter from frontend)
+            # 2. Fallback to checking if audio was already Auphonic-processed during upload
+            
+            # Start with user's explicit choice
+            auphonic_processed = use_auphonic
+            
+            # If user didn't explicitly request Auphonic, check if it was processed during upload
+            if not auphonic_processed:
+                try:
+                    from api.models.podcast import MediaItem, MediaCategory
+                    from sqlmodel import select
+                    
+                    # Use main_content_filename (original upload), NOT episode.working_audio_name (cleaned)
+                    filename_search = main_content_filename.split("/")[-1]
+                    
+                    logging.info("[assemble] 🔍 PRE-CHECK: Searching for MediaItem: user=%s, filename='%s'", user_id, filename_search)
+                    
+                    media_item = session.exec(
+                        select(MediaItem)
+                        .where(MediaItem.user_id == user_id)
+                        .where(MediaItem.category == MediaCategory.main_content)
+                        .where(MediaItem.filename.contains(filename_search))
+                        .order_by(MediaItem.created_at.desc())
+                    ).first()
+                    
+                    if media_item:
+                        logging.info(
+                            "[assemble] 🔍 PRE-CHECK: Found MediaItem id=%s, auphonic_processed=%s",
+                            media_item.id,
+                            media_item.auphonic_processed
+                        )
+                        if media_item.auphonic_processed:
+                            auphonic_processed = True
+                            logging.info("[assemble] ⚠️ Auphonic-processed audio detected - will skip redundant processing")
+                    else:
+                        logging.info("[assemble] 🔍 PRE-CHECK: No MediaItem found")
+                except Exception as e:
+                    logging.error("[assemble] Failed Auphonic pre-check: %s", e, exc_info=True)
+            else:
+                logging.info("[assemble] ✅ User explicitly requested Auphonic processing via toggle")
 
             transcript_context = transcript.prepare_transcript_context(
                 session=session,

@@ -26,6 +26,7 @@ import { makeApi } from '@/lib/apiClient';
  * @param {string} options.scheduleDate - Scheduled publish date
  * @param {string} options.scheduleTime - Scheduled publish time
  * @param {Function} options.handleUploadProcessedCoverAndPreview - Cover upload handler
+ * @param {boolean} options.useAuphonic - Whether to use Auphonic for processing
  * @returns {Object} Assembly state and handlers
  */
 export default function useEpisodeAssembly({
@@ -49,6 +50,7 @@ export default function useEpisodeAssembly({
   scheduleDate,
   scheduleTime,
   handleUploadProcessedCoverAndPreview,
+  useAuphonic = false,
 }) {
   // Assembly state
   const [isAssembling, setIsAssembling] = useState(false);
@@ -196,6 +198,7 @@ export default function useEpisodeAssembly({
             episode_details: sanitizedDetails,
             flubber_cuts_ms: Array.isArray(flubberCutsMs) && flubberCutsMs.length ? flubberCutsMs : null,
             intents: intents,
+            use_auphonic: useAuphonic,
           });
         } catch (e) {
           // Handle 402 (quota/minutes exceeded) specially

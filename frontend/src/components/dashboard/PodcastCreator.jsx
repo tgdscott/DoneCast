@@ -375,6 +375,8 @@ export default function PodcastCreator({
             audioDurationSec={audioDurationSec}
             episodeStatus={assembledEpisode?.status}
             wasRecorded={wasRecordedFromHook}
+            useAuphonic={useAuphonic}
+            onAuphonicToggle={setUseAuphonic}
           />
         );
       case 3:

@@ -106,6 +106,7 @@ def _run_inline_fallback(
     user_id: Any,
     podcast_id: Any,
     intents: Optional[Dict[str, Any]],
+    use_auphonic: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Attempt to execute episode assembly inline when workers are unavailable."""
 
@@ -125,6 +126,7 @@ def _run_inline_fallback(
             podcast_id=str(podcast_id or ""),
             intents=intents or None,
             skip_charge=True,
+            use_auphonic=use_auphonic,
         )
         return {
             "mode": "fallback-inline",
@@ -446,6 +448,7 @@ def assemble_or_queue(
     tts_values: Dict[str, Any],
     episode_details: Dict[str, Any],
     intents: Optional[Dict[str, Any]] = None,
+    use_auphonic: bool = False,
 ) -> Dict[str, Any]:
     # FIRST: Check if user has existing numbering conflicts that need resolution
     # Block NEW episode creation until conflicts are resolved
@@ -752,6 +755,7 @@ def assemble_or_queue(
             user_id=getattr(current_user, "id", None),
             podcast_id=getattr(ep, "podcast_id", None),
             intents=intents,
+            use_auphonic=use_auphonic,
         )
         if inline_result:
             inline_result["mode"] = "eager-inline"
@@ -782,6 +786,7 @@ def assemble_or_queue(
                         "user_id": str(current_user.id),
                         "podcast_id": str(getattr(ep, 'podcast_id', '') or ''),
                         "intents": cast(Dict[str, Any], intents or {}),
+                        "use_auphonic": bool(use_auphonic),
                     }
                     task_info = enqueue_http_task("/api/tasks/assemble", payload)
                     # Store pseudo job id for visibility
@@ -821,6 +826,7 @@ def assemble_or_queue(
                 user_id=getattr(current_user, "id", None),
                 podcast_id=getattr(ep, "podcast_id", None),
                 intents=intents,
+                use_auphonic=use_auphonic,
             )
             if inline_result:
                 return inline_result
