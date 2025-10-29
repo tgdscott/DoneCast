@@ -77,15 +77,11 @@ export default function StepCustomizeSegments({
         const voiceId = segment?.source?.voice_id || '';
         const resolvedFriendly = voiceNameById[voiceId];
         const providedLabel = segment?.source?.voice_name || segment?.source?.voice_label || segment?.source?.name;
-        // Check for known ElevenLabs voices
-        const knownVoiceName = voiceId === '19B4gjtpL5m876wS3Dfg' ? 'George (ElevenLabs)' : null;
         const baseVoiceLabel =
           (!voiceId || voiceId === 'default')
             ? 'Default voice'
             : resolvedFriendly && !isUuidLike(resolvedFriendly)
             ? resolvedFriendly
-            : knownVoiceName
-            ? knownVoiceName
             : providedLabel && !isUuidLike(providedLabel)
             ? providedLabel
             : formatDisplayName(voiceId, { fallback: 'AI Voice' }) || 'AI Voice';

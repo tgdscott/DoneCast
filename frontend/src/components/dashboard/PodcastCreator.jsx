@@ -593,6 +593,7 @@ export default function PodcastCreator({
         <VoicePicker
           value={activeSegment?.source?.voice_id || null}
           onChange={(id) => handleVoiceChange(id)}
+          onSelect={(voiceItem) => handleVoiceChange(voiceItem.voice_id, voiceItem)}
           onClose={() => {
             setShowVoicePicker(false);
             setVoicePickerTargetId(null);

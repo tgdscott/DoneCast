@@ -40,7 +40,7 @@ export default function useVoiceConfiguration({
 
   // Voice selection handler
   const handleVoiceChange = useCallback(
-    (voice_id) => {
+    (voice_id, voiceItem = null) => {
       if (!voicePickerTargetId) return;
       
       setSelectedTemplate(prev => {
@@ -48,7 +48,15 @@ export default function useVoiceConfiguration({
         
         const nextSegs = prev.segments.map(s => {
           if (s.id === voicePickerTargetId && s?.source?.source_type === 'tts') {
-            return { ...s, source: { ...s.source, voice_id } };
+            const updatedSource = { ...s.source, voice_id };
+            // If full voice object provided, store the display name
+            if (voiceItem) {
+              const displayName = voiceItem.common_name || voiceItem.name || null;
+              if (displayName) {
+                updatedSource.voice_name = displayName;
+              }
+            }
+            return { ...s, source: updatedSource };
           }
           return s;
         });
