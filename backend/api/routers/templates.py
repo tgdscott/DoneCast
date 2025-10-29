@@ -155,12 +155,19 @@ async def update_template(
             db_template.is_active = True
     # Persist default voice IDs if provided
     try:
-        db_template.default_elevenlabs_voice_id = getattr(template_in, 'default_elevenlabs_voice_id', None)
-        db_template.default_intern_voice_id = getattr(template_in, 'default_intern_voice_id', None)
-    except Exception:
-        pass
+        elevenlabs_id = getattr(template_in, 'default_elevenlabs_voice_id', None)
+        intern_id = getattr(template_in, 'default_intern_voice_id', None)
+        print(f"🎤 [templates.py] Setting voice IDs - ElevenLabs: {elevenlabs_id}, Intern: {intern_id}")
+        db_template.default_elevenlabs_voice_id = elevenlabs_id
+        db_template.default_intern_voice_id = intern_id
+        print(f"🎤 [templates.py] Successfully set voice IDs on db_template")
+    except Exception as e:
+        print(f"❌ [templates.py] FAILED to set voice IDs: {e}")
+        import traceback
+        traceback.print_exc()
     
     session.add(db_template)
     session.commit()
     session.refresh(db_template)
+    print(f"🎤 [templates.py] After commit - DB has ElevenLabs: {db_template.default_elevenlabs_voice_id}, Intern: {db_template.default_intern_voice_id}")
     return convert_db_template_to_public(db_template)
