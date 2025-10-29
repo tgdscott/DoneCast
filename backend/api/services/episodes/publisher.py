@@ -118,15 +118,21 @@ def publish(session: Session, current_user, episode_id: UUID, derived_show_id: O
             derived_show_id,
             episode_id
         )
-        # Just update episode status and publish to RSS feed
+        # Update episode status - leave as processed if scheduled, publish if immediate
         from api.models.podcast import EpisodeStatus
-        ep.status = EpisodeStatus.published
-        session.add(ep)
+        if auto_publish_iso:
+            # Scheduled for future - keep current status (processed), publish_at is already set
+            message = f"Episode scheduled for {auto_publish_iso} (RSS-only, Spreaker not configured)"
+        else:
+            # Publish immediately
+            ep.status = EpisodeStatus.published
+            message = "Episode published to RSS feed only (Spreaker not configured)"
+            session.add(ep)
         session.commit()
         session.refresh(ep)
         return {
             "job_id": "rss-only",
-            "message": "Episode published to RSS feed only (Spreaker not configured)"
+            "message": message
         }
 
     task_kwargs = {
