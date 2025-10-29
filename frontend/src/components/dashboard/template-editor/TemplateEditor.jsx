@@ -5,6 +5,7 @@ import { useAuth } from "@/AuthContext.jsx";
 import { Loader2, ArrowLeft, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { createTTS } from "@/api/media";
+import VoicePicker from "@/components/VoicePicker";
 
 // Layout components
 import TemplateEditorSidebar, { PAGES } from "./layout/TemplateEditorSidebar";
@@ -703,6 +704,29 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
           {renderPage()}
         </main>
       </div>
+
+      {/* Voice Picker Dialogs */}
+      {showVoicePicker && (
+        <VoicePicker
+          value={voiceId || null}
+          onChange={(id) => setVoiceId(id)}
+          onSelect={(item) => setVoiceName(item?.common_name || item?.name || null)}
+          onClose={() => setShowVoicePicker(false)}
+          token={token}
+        />
+      )}
+      {showInternVoicePicker && (
+        <VoicePicker
+          value={internVoiceId || null}
+          onChange={(id) => {
+            setInternVoiceId(id);
+            if (!id) setInternVoiceName(null);
+          }}
+          onSelect={(item) => setInternVoiceName(item?.common_name || item?.name || null)}
+          onClose={() => setShowInternVoicePicker(false)}
+          token={token}
+        />
+      )}
     </div>
   );
 }
