@@ -127,6 +127,11 @@ def _recover_raw_file_transcripts(limit: int | None = None) -> None:
     
     PERFORMANCE: Uses small limit (50) by default to minimize startup time.
     """
+    # SKIP IN LOCAL DEV: Local dev uses persistent storage, no need to recover
+    if _APP_ENV in {"dev", "development", "local"}:
+        log.debug("[startup] Skipping transcript recovery in local dev environment")
+        return
+    
     # FAST PATH: Skip if TRANSCRIPTS_DIR already has files (container reuse, not fresh start)
     try:
         from api.core.paths import TRANSCRIPTS_DIR
@@ -267,6 +272,11 @@ def _recover_stuck_processing_episodes(limit: int | None = None) -> None:
     
     PERFORMANCE: Uses small limit (30) by default to minimize startup time.
     """
+    # SKIP IN LOCAL DEV: This recovery is for production Cloud Run ephemeral containers only
+    if _APP_ENV in {"dev", "development", "local"}:
+        log.debug("[startup] Skipping stuck episode recovery in local dev environment")
+        return
+    
     try:
         with session_scope() as session:
             from api.core.paths import TRANSCRIPTS_DIR
