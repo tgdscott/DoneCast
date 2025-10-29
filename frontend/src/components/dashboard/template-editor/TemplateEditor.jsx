@@ -133,8 +133,12 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
         }
         
         if (globalMusicData.status === 'fulfilled') {
+          console.log('[TemplateEditor] Global music data received:', globalMusicData.value);
           const assets = globalMusicData.value?.assets || globalMusicData.value || [];
+          console.log('[TemplateEditor] Parsed assets:', assets, 'isArray:', Array.isArray(assets));
           setGlobalMusicAssets(Array.isArray(assets) ? assets : []);
+        } else if (globalMusicData.status === 'rejected') {
+          console.error('[TemplateEditor] Failed to load global music:', globalMusicData.reason);
         }
 
         if (isNewTemplate) {
@@ -186,18 +190,40 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
     });
   }, []);
 
-  // Initialize voice IDs from template when loaded
+  // Initialize voice IDs and names from template when loaded
   useEffect(() => {
-    if (template) {
+    const loadVoiceNames = async () => {
+      if (!template) return;
+      
+      const api = makeApi(token);
+      
+      // Load ElevenLabs voice
       if (template.default_elevenlabs_voice_id) {
         setVoiceId(template.default_elevenlabs_voice_id);
+        try {
+          const voiceData = await api.get(`/api/elevenlabs/voice/${template.default_elevenlabs_voice_id}/resolve`);
+          setVoiceName(voiceData.common_name || voiceData.name || null);
+        } catch (err) {
+          console.warn('Failed to load voice name:', err);
+          setVoiceName(null);
+        }
       }
-      // Intern voice ID would be in ai_settings if it exists
+      
+      // Load Intern voice
       if (template.ai_settings?.intern_voice_id) {
         setInternVoiceId(template.ai_settings.intern_voice_id);
+        try {
+          const voiceData = await api.get(`/api/elevenlabs/voice/${template.ai_settings.intern_voice_id}/resolve`);
+          setInternVoiceName(voiceData.common_name || voiceData.name || null);
+        } catch (err) {
+          console.warn('Failed to load intern voice name:', err);
+          setInternVoiceName(null);
+        }
       }
-    }
-  }, [template?.id]); // Only run when template ID changes (initial load or switching templates)
+    };
+    
+    loadVoiceNames();
+  }, [template?.id, token]); // Only run when template ID changes (initial load or switching templates)
 
   // Check page completion
   useEffect(() => {
