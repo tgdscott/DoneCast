@@ -223,6 +223,13 @@ export function useAdminDashboardData({ token, toast }) {
   }, []);
 
   const deleteUser = useCallback(async (userId, userEmail, showPrep = true) => {
+    if (showPrep) {
+      // Call prepareUserForDeletion first to show prep dialog
+      prepareUserForDeletion(userId, userEmail);
+      return;
+    }
+
+    // Actual deletion logic (called from prepareUserForDeletion with showPrep=false)
     const confirmation = window.prompt(
       "\u26a0\ufe0f WARNING: This will PERMANENTLY delete this user and ALL their data!\n\n" +
       `User: ${userEmail}\n\n` +

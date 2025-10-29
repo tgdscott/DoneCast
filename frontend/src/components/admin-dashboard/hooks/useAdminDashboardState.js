@@ -68,7 +68,10 @@ export function useAdminDashboardState({ users, adminSettings }) {
     [filteredUsers, indexOfFirstUser, indexOfLastUser]
   );
 
-  const totalPages = useMemo(() => Math.ceil(filteredUsers.length / usersPerPage) || 1, [filteredUsers.length, usersPerPage]);
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(filteredUsers.length / Math.max(1, usersPerPage))),
+    [filteredUsers.length, usersPerPage]
+  );
 
   const maintenanceMessageChanged = maintenanceDraft !== (adminSettings?.maintenance_message ?? "");
 

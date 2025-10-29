@@ -79,6 +79,17 @@ const addYears = (date, years) => {
   return nextDate;
 };
 
+// Auto-format date input (MM/DD/YYYY)
+const formatDateInput = (value) => {
+  const raw = value.replace(/[^0-9/]/g, "");
+  let formatted = raw;
+  if (/^\d{3,}$/.test(raw) && raw.indexOf("/") === -1) {
+    if (raw.length >= 2) formatted = `${raw.slice(0, 2)}/${raw.slice(2)}`;
+    if (raw.length >= 4) formatted = `${formatted.slice(0, 5)}/${formatted.slice(5)}`;
+  }
+  return formatted.slice(0, 10);
+};
+
 export default function UsersTab({
   usersLoading,
   currentUsers,
@@ -108,7 +119,7 @@ export default function UsersTab({
   isSuperAdmin,
   isAdmin,
 }) {
-  const deriveBaseISO = useMemo(() => (user) => {
+  const deriveBaseISO = useCallback((user) => {
     const pending = editingDates[user.id];
     if (pending) {
       const iso = usToISO(pending);
@@ -313,13 +324,7 @@ export default function UsersTab({
                             }`}
                             value={editingDates[user.id] ?? isoToUS(user.subscription_expires_at)}
                             onChange={(event) => {
-                              const raw = event.target.value.replace(/[^0-9/]/g, "");
-                              let nextValue = raw;
-                              if (/^\d{3,}$/.test(raw) && raw.indexOf("/") === -1) {
-                                if (raw.length >= 2) nextValue = `${raw.slice(0, 2)}/${raw.slice(2)}`;
-                                if (raw.length >= 4) nextValue = `${nextValue.slice(0, 5)}/${nextValue.slice(5)}`;
-                              }
-                              nextValue = nextValue.slice(0, 10);
+                              const nextValue = formatDateInput(event.target.value);
                               setEditingDates((prev) => ({ ...prev, [user.id]: nextValue }));
                             }}
                             onBlur={() => handleDateBlur(user.id)}

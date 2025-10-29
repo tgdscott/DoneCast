@@ -28,8 +28,9 @@ from sqlalchemy.orm import Session
 from api.models.podcast import Episode
 from infrastructure import gcs, r2
 
-# Load environment
-load_dotenv(".env.local")
+# Load environment from backend directory
+backend_dir = Path(__file__).parent
+load_dotenv(backend_dir / ".env.local")
 
 logger = logging.getLogger(__name__)
 
