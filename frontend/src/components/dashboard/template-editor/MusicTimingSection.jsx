@@ -20,9 +20,11 @@ import {
   Play,
   Plus,
   Settings2,
+  Square,
   Trash2,
   Upload,
 } from "lucide-react";
+import { useState, useRef } from "react";
 
 const MusicTimingSection = ({
   isOpen,
@@ -45,7 +47,34 @@ const MusicTimingSection = ({
   internVoiceDisplay,
   onChooseInternVoice,
   globalMusicAssets = [],
-}) => (
+}) => {
+  const [playingIndex, setPlayingIndex] = useState(null);
+  const audioRef = useRef(null);
+
+  const handlePlayPause = (index, audioUrl) => {
+    if (playingIndex === index && audioRef.current) {
+      // Stop current audio
+      audioRef.current.pause();
+      audioRef.current = null;
+      setPlayingIndex(null);
+    } else {
+      // Stop any currently playing audio
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+      // Play new audio
+      const audio = new Audio(audioUrl);
+      audio.addEventListener('ended', () => {
+        setPlayingIndex(null);
+        audioRef.current = null;
+      });
+      audio.play();
+      audioRef.current = audio;
+      setPlayingIndex(index);
+    }
+  };
+
+  return (
   <div data-tour="template-advanced" data-tour-id="template-music-timing">
     <div className="mt-10 flex items-center justify-between">
       <h2 className="text-lg font-semibold">Music &amp; Timing Options</h2>
@@ -136,7 +165,7 @@ const MusicTimingSection = ({
                           Remove
                         </Button>
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4">
                         <div>
                           <Label>Apply to Section</Label>
                           <Select
@@ -205,29 +234,27 @@ const MusicTimingSection = ({
                                 )}
                               </SelectContent>
                             </Select>
-                            {/* Simple play button for preview */}
-                            {(rule.music_asset_id || rule.music_filename) && (
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  const audioUrl = rule.music_asset_id
-                                    ? `/api/music/assets/${rule.music_asset_id}/preview`
-                                    : (() => {
-                                        const file = musicFiles.find(f => f.filename === rule.music_filename);
-                                        return file ? `/api/media/${file.id}/stream` : null;
-                                      })();
-                                  if (audioUrl) {
-                                    const audio = new Audio(audioUrl);
-                                    audio.play();
-                                  }
-                                }}
-                                title="Preview audio"
-                              >
-                                <Play className="w-4 h-4" />
-                              </Button>
-                            )}
+                            {/* Play/Stop toggle button */}
+                            {(rule.music_asset_id || rule.music_filename) && (() => {
+                              const audioUrl = rule.music_asset_id
+                                ? `/api/music/assets/${rule.music_asset_id}/preview`
+                                : (() => {
+                                    const file = musicFiles.find(f => f.filename === rule.music_filename);
+                                    return file ? `/api/media/${file.id}/stream` : null;
+                                  })();
+                              const isPlaying = playingIndex === index;
+                              return audioUrl ? (
+                                <Button
+                                  type="button"
+                                  variant={isPlaying ? "default" : "outline"}
+                                  size="sm"
+                                  onClick={() => handlePlayPause(index, audioUrl)}
+                                  title={isPlaying ? "Stop audio" : "Preview audio"}
+                                >
+                                  {isPlaying ? <Square className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                                </Button>
+                              ) : null;
+                            })()}
                             {/* Upload button */}
                             <Button
                               type="button"
@@ -435,6 +462,7 @@ const MusicTimingSection = ({
       </div>
     )}
   </div>
-);
+  );
+};
 
 export default MusicTimingSection;
