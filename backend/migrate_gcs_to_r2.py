@@ -25,13 +25,11 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from api.core.logging import setup_logging
 from api.models.podcast import Episode
 from infrastructure import gcs, r2
 
 # Load environment
 load_dotenv(".env.local")
-setup_logging()
 
 logger = logging.getLogger(__name__)
 
