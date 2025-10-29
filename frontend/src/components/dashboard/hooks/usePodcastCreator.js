@@ -380,17 +380,20 @@ export default function usePodcastCreator({
     }
   }, [token]);
 
+  const refreshMediaLibrary = useCallback(async () => {
+    try {
+      const api = makeApi(token);
+      const data = await api.get('/api/media/');
+      setMediaLibrary(coerceArray(data));
+      return data;
+    } catch (err) {
+      setError(err.message);
+      return null;
+    }
+  }, [token]);
+
   useEffect(() => {
-    const api = makeApi(token);
-    const fetchMedia = async () => {
-      try {
-        const data = await api.get('/api/media/');
-        setMediaLibrary(coerceArray(data));
-      } catch (err) {
-        setError(err.message);
-      }
-    };
-    fetchMedia();
+    refreshMediaLibrary();
     (async () => {
       try {
         const isAdmin = !!(authUser && (authUser.is_admin || authUser.role === 'admin'));
