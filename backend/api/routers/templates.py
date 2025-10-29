@@ -153,9 +153,10 @@ async def update_template(
             db_template.is_active = bool(getattr(template_in, 'is_active'))
         except Exception:
             db_template.is_active = True
-    # Persist default voice id if provided
+    # Persist default voice IDs if provided
     try:
         db_template.default_elevenlabs_voice_id = getattr(template_in, 'default_elevenlabs_voice_id', None)
+        db_template.default_intern_voice_id = getattr(template_in, 'default_intern_voice_id', None)
     except Exception:
         pass
     
