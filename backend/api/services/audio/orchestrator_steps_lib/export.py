@@ -505,7 +505,7 @@ def build_template_and_final_mix_step(
         try:
             fi = max(0, int(fade_in_ms or 0))
             fo = max(0, int(fade_out_ms or 0))
-            if fi + fo >= dur and dur > 0:
+            if fi + fo >= dur:
                 if fi > 0 and fo > 0:
                     total = fi + fo
                     fi = int((fi / total) * (dur - 1))

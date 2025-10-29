@@ -24,7 +24,6 @@ from .transcripts import (
     write_nopunct_sidecar,
 )
 
-OUTPUT_DIR = _FINAL_DIR
 CLEANED_DIR = _CLEANED_DIR
 TRANSCRIPTS_DIR = _TRANSCRIPTS_DIR
 WS_ROOT = _WS_ROOT
