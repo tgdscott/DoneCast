@@ -133,12 +133,8 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
         }
         
         if (globalMusicData.status === 'fulfilled') {
-          console.log('[TemplateEditor] Global music data received:', globalMusicData.value);
           const assets = globalMusicData.value?.assets || globalMusicData.value || [];
-          console.log('[TemplateEditor] Parsed assets:', assets, 'isArray:', Array.isArray(assets));
           setGlobalMusicAssets(Array.isArray(assets) ? assets : []);
-        } else if (globalMusicData.status === 'rejected') {
-          console.error('[TemplateEditor] Failed to load global music:', globalMusicData.reason);
         }
 
         if (isNewTemplate) {
@@ -209,11 +205,14 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
         }
       }
       
-      // Load Intern voice
-      if (template.ai_settings?.intern_voice_id) {
-        setInternVoiceId(template.ai_settings.intern_voice_id);
+      // Load Intern voice - check multiple possible locations
+      const internId = template.default_intern_voice_id || 
+                      template.ai_settings?.intern_voice_id ||
+                      template.automation_settings?.intern_voice_id;
+      if (internId) {
+        setInternVoiceId(internId);
         try {
-          const voiceData = await api.get(`/api/elevenlabs/voice/${template.ai_settings.intern_voice_id}/resolve`);
+          const voiceData = await api.get(`/api/elevenlabs/voice/${internId}/resolve`);
           setInternVoiceName(voiceData.common_name || voiceData.name || null);
         } catch (err) {
           console.warn('Failed to load intern voice name:', err);
@@ -292,6 +291,8 @@ export default function TemplateEditor({ templateId, onBack, token, onTemplateSa
       
       // Save voice settings
       payload.default_elevenlabs_voice_id = voiceId || null;
+      payload.default_intern_voice_id = internVoiceId || null;
+      // Also save in ai_settings for redundancy
       if (!payload.ai_settings) {
         payload.ai_settings = {};
       }
