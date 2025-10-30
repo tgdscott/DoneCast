@@ -114,15 +114,11 @@ export default function IntroOutroStep({ wizard }) {
             >
               {introOptions.map((item) => {
                 const key = String(item?.id || item?.filename || "unknown");
-                const base =
-                  item?.friendly_name ||
-                  item?.display_name ||
-                  item?.original_name ||
-                  item?.filename ||
-                  "Intro";
+                // Pass the entire item object to formatMediaDisplayName for proper name extraction
+                const displayName = formatMediaDisplayName(item, true) || "Intro";
                 return (
                   <option key={key} value={key}>
-                    {formatMediaDisplayName(base, true)}
+                    {displayName}
                   </option>
                 );
               })}
@@ -222,15 +218,11 @@ export default function IntroOutroStep({ wizard }) {
             >
               {outroOptions.map((item) => {
                 const key = String(item?.id || item?.filename || "unknown");
-                const base =
-                  item?.friendly_name ||
-                  item?.display_name ||
-                  item?.original_name ||
-                  item?.filename ||
-                  "Outro";
+                // Pass the entire item object to formatMediaDisplayName for proper name extraction
+                const displayName = formatMediaDisplayName(item, true) || "Outro";
                 return (
                   <option key={key} value={key}>
-                    {formatMediaDisplayName(base, true)}
+                    {displayName}
                   </option>
                 );
               })}

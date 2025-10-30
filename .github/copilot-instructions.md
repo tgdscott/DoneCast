@@ -25,6 +25,45 @@ Self-hosted podcast creation platform with AI-powered features. Full-stack app: 
 
 **When in doubt:** Ask, don't assume. Getting it wrong wastes time and creates bugs.
 
+### NEVER Show Unfriendly Names to Users (CRITICAL UX RULE)
+**ABSOLUTE PROHIBITION: NEVER EVER EVER EVER display UUIDs, filenames with UUIDs, or any technical identifiers to end users.**
+
+**This means:**
+- ❌ NEVER show `abc123-456def-789ghi_Spoiler Alert.mp3` to users
+- ❌ NEVER show database IDs or UUIDs in UI text
+- ❌ NEVER show technical filenames with prefixes
+- ❌ NEVER show raw `filename` field values without processing
+- ✅ ALWAYS use `friendly_name`, `display_name`, or `original_name` fields first
+- ✅ ALWAYS strip UUIDs/hashes from filenames before display (use helper functions)
+- ✅ Show "Untitled" or generic fallback instead of UUID if no friendly name exists
+
+**Helper Functions:**
+- Frontend: `formatDisplayName()` in `frontend/src/lib/displayNames.js`
+- Frontend: `formatMediaDisplayName()` in `frontend/src/pages/onboarding/utils/mediaDisplay.js`
+- Always pass the **full object** to these functions, not pre-extracted strings
+- These functions handle UUID stripping, extension removal, and proper fallbacks
+
+**Examples of CORRECT usage:**
+```jsx
+// ✅ GOOD - Pass full object
+const displayName = formatDisplayName(item, { fallback: 'Audio clip' }) || 'Audio clip';
+
+// ✅ GOOD - Use friendly_name first, then process filename
+const name = item.friendly_name || formatDisplayName(item) || 'Untitled';
+
+// ❌ BAD - Shows raw filename with UUID
+<option>{item.filename}</option>
+
+// ❌ BAD - Pre-extracting loses UUID stripping capability
+const base = item.friendly_name || item.filename;
+const displayName = formatDisplayName(base); // Won't strip UUID properly
+```
+
+**When in doubt:**
+- Show NOTHING rather than an unfriendly name
+- Use generic fallbacks: "Audio clip", "Intro", "Outro", "Episode"
+- NEVER let a UUID or technical filename reach the user's eyes
+
 ### NEVER Start Builds or Push to Git Without Permission
 **ALWAYS ASK before running `gcloud builds submit` or `git push`.** User manages these operations in **separate, isolated windows** to prevent interruptions. This is a critical workflow requirement.
 
