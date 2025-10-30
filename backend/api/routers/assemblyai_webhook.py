@@ -13,7 +13,7 @@ router = APIRouter(prefix="/assemblyai", tags=["assemblyai"])
 _HEADER_NAME = (settings.ASSEMBLYAI_WEBHOOK_HEADER or "X-AssemblyAI-Signature").strip() or "X-AssemblyAI-Signature"
 
 
-@router.post("/webhook", status_code=204)
+@router.post("/webhook", status_code=200)
 async def assemblyai_webhook(
     request: Request,
     signature: str | None = Header(None, alias=_HEADER_NAME),
