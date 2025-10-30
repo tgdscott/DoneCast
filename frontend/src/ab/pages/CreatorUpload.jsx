@@ -6,6 +6,7 @@ import { makeApi, buildApiUrl } from "@/lib/apiClient.js";
 import { uploadMediaDirect } from "@/lib/directUpload";
 import { fetchVoices as fetchElevenVoices } from "@/api/elevenlabs";
 import VoicePicker from "@/components/VoicePicker";
+import { formatDisplayName } from "@/lib/displayNames";
 
 const formatBytes = (bytes) => {
   if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return null;
@@ -1016,7 +1017,7 @@ export default function CreatorUpload({ token, shows, uploads, setUploads, draft
                                 .filter(m => (s.segment_type === 'intro' ? (m.category === 'intro') : (m.category === 'outro')))
                                 .map(m => (
                                   <option key={m.id} value={m.filename}>
-                                    {m.friendly_name || m.filename}
+                                    {formatDisplayName(m, { fallback: s.segment_type === 'intro' ? 'Intro' : 'Outro' }) || (s.segment_type === 'intro' ? 'Intro' : 'Outro')}
                                   </option>
                                 ))}
                             </select>

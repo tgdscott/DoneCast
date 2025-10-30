@@ -5,6 +5,7 @@ import { abApi } from "../lib/abApi";
 import { makeApi, buildApiUrl } from "@/lib/apiClient.js";
 import { fetchVoices as fetchElevenVoices } from "@/api/elevenlabs";
 import VoicePicker from "@/components/VoicePicker";
+import { formatDisplayName } from "@/lib/displayNames";
 
 export default function CreatorFinalize({ token, drafts, uploads, uploadById, goUpload }) {
   const [visibility, setVisibility] = useState("draft");
@@ -441,7 +442,7 @@ export default function CreatorFinalize({ token, drafts, uploads, uploadById, go
                           <select className="border rounded px-2 py-1 text-sm" value={ioEdits?.[s.id]?.source?.filename || s?.source?.filename || ''} onChange={(e)=>setIoEdits(prev=>({ ...prev, [s.id]: { source: { ...prev?.[s.id]?.source, filename: e.target.value } } }))}>
                             <option value="">{s.segment_type === 'intro' ? 'Choose an intro file…' : 'Choose an outro file…'}</option>
                             {mediaFiles.filter(m => (s.segment_type === 'intro' ? (m.category === 'intro') : (m.category === 'outro'))).map(m => (
-                              <option key={m.id} value={m.filename}>{m.friendly_name || m.filename}</option>
+                              <option key={m.id} value={m.filename}>{formatDisplayName(m, { fallback: s.segment_type === 'intro' ? 'Intro' : 'Outro' }) || (s.segment_type === 'intro' ? 'Intro' : 'Outro')}</option>
                             ))}
                           </select>
                         </div>

@@ -1,6 +1,7 @@
 
 import React, { useRef, useState, useEffect } from "react";
 import { abApi } from "../lib/abApi";
+import { formatDisplayName } from "@/lib/displayNames";
 
 export default function AudioCleanup({ token }) {
   const [fillerOn, setFillerOn] = useState(true);
@@ -112,7 +113,7 @@ export default function AudioCleanup({ token }) {
               <label className="text-sm">Sound</label>
               <select className="rounded-lg border px-2 py-1 text-sm" disabled={beepType!== 'custom'} value={selectedSfx} onChange={(e)=>setSelectedSfx(e.target.value)}>
                 <option value="">Select sound effects...</option>
-                {sfxList.map(s => <option key={s.id} value={s.id}>{s.friendly_name || s.filename}</option>)}
+                {sfxList.map(s => <option key={s.id} value={s.id}>{formatDisplayName(s, { fallback: 'Sound effect' }) || 'Sound effect'}</option>)}
                 <option value="__upload">Upload new sound effects…</option>
               </select>
               {selectedSfx && selectedSfx !== '__upload' && (
