@@ -544,7 +544,7 @@ def _finalize_episode(
             import time
             max_wait_seconds = 1800  # 30 minutes (matches Cloud Tasks deadline)
             poll_interval = 5  # 5 seconds
-            retry_after_seconds = 600  # Retry stuck chunks after 10 minutes
+            retry_after_seconds = 120  # Retry stuck chunks after 2 minutes
             start_time = time.time()
             chunk_dispatch_times = {}  # Track when each chunk was dispatched
             chunk_retry_counts = {}  # Track retry attempts per chunk

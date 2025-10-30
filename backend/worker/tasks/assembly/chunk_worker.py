@@ -54,13 +54,6 @@ def validate_process_chunk_payload(data: Mapping[str, Any]) -> ProcessChunkPaylo
 def run_chunk_processing(payload_data: Mapping[str, Any] | ProcessChunkPayload) -> None:
     """Execute the chunk-processing worker logic synchronously."""
 
-    # Force re-initialization of GCS client in each worker process.
-    # https://github.com/googleapis/google-cloud-python/issues/2813
-    import importlib
-    import infrastructure.storage
-    importlib.reload(infrastructure.storage)
-    log.info("Reloaded storage module to re-initialize GCS client.")
-
     try:
         if isinstance(payload_data, ProcessChunkPayload):
             payload = payload_data
