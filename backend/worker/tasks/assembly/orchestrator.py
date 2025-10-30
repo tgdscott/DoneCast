@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -697,21 +698,50 @@ def _finalize_episode(
         }
     
     # Standard audio processing (for short files or chunking fallback)
-    final_path, log_data, ai_note_additions = audio_processor.process_and_assemble_episode(
-        template=media_context.template,
-        main_content_filename=audio_input_path,
-        output_filename=output_filename,
-        cleanup_options=cleanup_opts,
-        tts_overrides=tts_values or {},
-        cover_image_path=media_context.cover_image_path,
-        elevenlabs_api_key=media_context.elevenlabs_api_key,
-        tts_provider=media_context.preferred_tts_provider,
-        mix_only=True,  # Always mix_only since cleaning is done
-        words_json_path=str(transcript_context.words_json_path)
-        if transcript_context.words_json_path
-        else None,
-        log_path=stream_log_path,
-    )
+    # CRITICAL SECTION: This is where exit code -9 crashes have been occurring
+    try:
+        logging.info("[assemble] Starting audio processor with audio_input_path=%s, mix_only=True", audio_input_path)
+        logging.info("[assemble] Template has %d segments, %d music rules", 
+                    len(json.loads(getattr(media_context.template, "segments_json", "[]")) or []) if media_context.template else 0,
+                    len(json.loads(getattr(media_context.template, "background_music_rules_json", "[]")) or []) if media_context.template else 0)
+        
+        final_path, log_data, ai_note_additions = audio_processor.process_and_assemble_episode(
+            template=media_context.template,
+            main_content_filename=audio_input_path,
+            output_filename=output_filename,
+            cleanup_options=cleanup_opts,
+            tts_overrides=tts_values or {},
+            cover_image_path=media_context.cover_image_path,
+            elevenlabs_api_key=media_context.elevenlabs_api_key,
+            tts_provider=media_context.preferred_tts_provider,
+            mix_only=True,  # Always mix_only since cleaning is done
+            words_json_path=str(transcript_context.words_json_path)
+            if transcript_context.words_json_path
+            else None,
+            log_path=stream_log_path,
+        )
+        
+        logging.info("[assemble] Audio processor completed successfully")
+        
+    except MemoryError as mem_err:
+        logging.error("[assemble] MEMORY EXHAUSTION during audio processing: %s", mem_err, exc_info=True)
+        _mark_episode_error(
+            session,
+            episode,
+            reason=f"Episode assembly failed due to memory exhaustion: {mem_err}",
+        )
+        raise RuntimeError(f"Audio processing failed due to memory exhaustion: {mem_err}")
+    except Exception as proc_err:
+        logging.error("[assemble] AUDIO PROCESSOR CRASHED: %s", proc_err, exc_info=True)
+        logging.error("[assemble] This may indicate FFmpeg crash, memory spike, or audio format incompatibility")
+        logging.error("[assemble] audio_input_path=%s, use_auphonic=%s, use_chunking=%s", 
+                     audio_input_path, use_auphonic, use_chunking)
+        _mark_episode_error(
+            session,
+            episode,
+            reason=f"Episode assembly crashed during audio processing: {type(proc_err).__name__}: {proc_err}",
+        )
+        raise RuntimeError(f"Audio processor crashed: {type(proc_err).__name__}: {proc_err}")
 
     logging.info(
         "[assemble] processor invoked: mix_only=True words_json=%s",

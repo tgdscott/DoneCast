@@ -577,7 +577,9 @@ def build_template_and_final_mix_step(
             pass
 
     try:
-        for rule in (template_background_music_rules or []):
+        log.append(f"[MUSIC_RULES_START] Processing {len(template_background_music_rules or [])} background music rules...")
+        for rule_idx, rule in enumerate(template_background_music_rules or []):
+            log.append(f"[MUSIC_RULE_{rule_idx}] Starting rule {rule_idx + 1}/{len(template_background_music_rules)}")
             req_name = (rule.get("music_filename") or rule.get("music") or "")
             if req_name.startswith("gs://"):
                 import tempfile
@@ -621,7 +623,12 @@ def build_template_and_final_mix_step(
                     else:
                         log.append(f"[MUSIC_RULE_SKIP] missing_file={req_name}")
                         continue
-                bg = AudioSegment.from_file(music_path)
+                try:
+                    bg = AudioSegment.from_file(music_path)
+                    log.append(f"[MUSIC_RULE_LOADED] file={req_name} len_ms={len(bg)}")
+                except Exception as e:
+                    log.append(f"[MUSIC_RULE_LOAD_ERROR] file={req_name} error={type(e).__name__}: {e}")
+                    continue
 
             apply_to = [str(t).lower() for t in (rule.get("apply_to_segments") or [])]
             vol_db = float(
@@ -677,16 +684,46 @@ def build_template_and_final_mix_step(
                 )
                 off_start = int(start_off_s * 1000)
                 off_end = int(end_off_s * 1000)
-                for s, e in merged:
+                for interval_idx, (s, e) in enumerate(merged):
                     s2 = s + off_start
                     e2 = e - off_end
                     if e2 <= s2:
                         continue
-                    _apply(bg, s2, e2, vol_db=vol_db, fade_in_ms=fade_in_ms, fade_out_ms=fade_out_ms, label=label)
+                    try:
+                        log.append(f"[MUSIC_APPLY_{rule_idx}_{interval_idx}] Applying music to interval {s2}-{e2}ms (duration={e2-s2}ms)")
+                        _apply(bg, s2, e2, vol_db=vol_db, fade_in_ms=fade_in_ms, fade_out_ms=fade_out_ms, label=label)
+                        log.append(f"[MUSIC_APPLY_{rule_idx}_{interval_idx}_OK] Successfully applied music")
+                    except MemoryError as mem_err:
+                        log.append(f"[MUSIC_APPLY_MEMORY_ERROR] Out of memory applying music: {mem_err}")
+                        raise RuntimeError(f"Music mixing failed due to memory exhaustion at rule {rule_idx}, interval {interval_idx}: {mem_err}")
+                    except Exception as apply_err:
+                        log.append(f"[MUSIC_APPLY_ERROR] Failed to apply music rule {rule_idx} interval {interval_idx}: {type(apply_err).__name__}: {apply_err}")
+                        # Continue with other intervals instead of failing completely
+                        continue
+    except MemoryError as e:
+        log.append(f"[MUSIC_RULES_MEMORY_ERROR] Out of memory during music rule processing: {e}")
+        raise RuntimeError(f"Music rules processing failed due to memory exhaustion: {e}")
     except Exception as e:
         log.append(f"[MUSIC_RULES_WARN] {type(e).__name__}: {e}")
 
-    final_mix = mix_buffer.to_segment()
+    # CRITICAL MIXING SECTION - Add defensive error handling for exit code -9 crashes
+    try:
+        log.append("[MIX_START] Beginning final mix buffer rendering...")
+        log.append(f"[MIX_DEBUG] mix_buffer stats: frame_rate={cleaned_audio.frame_rate}, "
+                   f"channels={cleaned_audio.channels}, sample_width={cleaned_audio.sample_width}")
+        log.append(f"[MIX_DEBUG] total_duration_ms={total_duration_ms}, estimated_bytes={estimated_bytes}")
+        
+        final_mix = mix_buffer.to_segment()
+        log.append(f"[MIX_SUCCESS] Mix buffer rendered successfully, duration_ms={len(final_mix)}")
+    except MemoryError as e:
+        log.append(f"[MIX_MEMORY_ERROR] Out of memory during mixing: {e}")
+        log.append(f"[MIX_MEMORY_ERROR] total_duration_ms={total_duration_ms}, estimated_bytes={estimated_bytes}")
+        raise RuntimeError(f"Mixing failed due to memory exhaustion: {e}")
+    except Exception as e:
+        log.append(f"[MIX_ERROR] Failed to render mix buffer: {type(e).__name__}: {e}")
+        log.append(f"[MIX_ERROR] This may indicate FFmpeg crash or audio format incompatibility")
+        raise RuntimeError(f"Mixing failed: {type(e).__name__}: {e}")
+    
     try:
         log.append(f"[FINAL_MIX] duration_ms={len(final_mix)}")
     except Exception:
@@ -697,20 +734,43 @@ def build_template_and_final_mix_step(
     export_cfg: Dict[str, Any] = {}
     tmp_master_in = OUTPUT_DIR / f"._tmp_{sanitize_filename(output_filename)}_final.wav"
     try:
+        log.append("[EXPORT_START] Beginning WAV export...")
         tmp_master_in.parent.mkdir(parents=True, exist_ok=True)
         final_mix.export(tmp_master_in, format="wav")
+        log.append(f"[EXPORT_WAV_OK] Exported to {tmp_master_in.name}")
+        
+        log.append("[NORMALIZE_START] Normalizing master...")
         normalize_master(tmp_master_in, final_path, export_cfg, log)
+        log.append("[NORMALIZE_OK] Master normalized successfully")
+        
+        log.append("[MUX_START] Muxing tracks...")
         mux_tracks(final_path, None, final_path, export_cfg, log)
+        log.append("[MUX_OK] Tracks muxed successfully")
+        
+        log.append("[DERIVATIVES_START] Writing derivatives...")
         outputs_cfg = {"mp3": final_path}
         write_derivatives(final_path, outputs_cfg, export_cfg, log)
+        log.append("[DERIVATIVES_OK] Derivatives written successfully")
+        
+        log.append("[METADATA_START] Embedding metadata...")
         cover_art_path = Path(cover_image_path) if cover_image_path else None
         for _fmt, _p in outputs_cfg.items():
             try:
                 embed_metadata(_p, {}, cover_art_path, [], log)
-            except Exception:
-                pass
+            except Exception as meta_err:
+                log.append(f"[METADATA_WARN] Failed to embed metadata: {meta_err}")
         log.append(f"Saved final content to {final_path.name}")
+    except MemoryError as e:
+        log.append(f"[EXPORT_MEMORY_ERROR] Out of memory during export: {e}")
+        log.append(f"[EXPORT_MEMORY_ERROR] final_mix duration_ms={len(final_mix) if 'final_mix' in locals() else 'N/A'}")
+        log.append(f"[FINAL_EXPORT_ERROR] {e}; falling back to cleaned content export")
+        final_path = OUTPUT_DIR / cleaned_filename
+        try:
+            cleaned_audio.export(final_path, format="mp3")
+        except Exception:
+            final_path = cleaned_path
     except Exception as e:
+        log.append(f"[EXPORT_ERROR] {type(e).__name__}: {e}")
         log.append(f"[FINAL_EXPORT_ERROR] {e}; falling back to cleaned content export")
         final_path = OUTPUT_DIR / cleaned_filename
         try:
