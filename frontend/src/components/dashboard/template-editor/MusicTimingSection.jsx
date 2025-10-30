@@ -76,7 +76,7 @@ const MusicTimingSection = ({
     }
   };
 
-  const handleVoicePlayPause = (voiceType, voiceId) => {
+  const handleVoicePlayPause = async (voiceType, voiceId) => {
     if (playingVoice === voiceType && voiceAudioRef.current) {
       // Stop current voice preview
       voiceAudioRef.current.pause();
@@ -87,16 +87,36 @@ const MusicTimingSection = ({
       if (voiceAudioRef.current) {
         voiceAudioRef.current.pause();
       }
-      // Play new voice preview
-      const audioUrl = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?text=Hello%2C%20this%20is%20a%20preview%20of%20this%20voice.`;
-      const audio = new Audio(audioUrl);
-      audio.addEventListener('ended', () => {
-        setPlayingVoice(null);
-        voiceAudioRef.current = null;
-      });
-      audio.play();
-      voiceAudioRef.current = audio;
-      setPlayingVoice(voiceType);
+      
+      try {
+        // Fetch the voice details to get the preview_url (same as VoicePicker.jsx)
+        const response = await fetch(`/api/elevenlabs/voice/${voiceId}/resolve`, {
+          credentials: 'include'
+        });
+        if (!response.ok) {
+          console.error('Failed to resolve voice:', await response.text());
+          return;
+        }
+        const voiceData = await response.json();
+        const previewUrl = voiceData.preview_url;
+        
+        if (!previewUrl) {
+          console.error('No preview URL available for voice:', voiceId);
+          return;
+        }
+        
+        // Play voice preview using CDN URL (no auth required)
+        const audio = new Audio(previewUrl);
+        audio.addEventListener('ended', () => {
+          setPlayingVoice(null);
+          voiceAudioRef.current = null;
+        });
+        audio.play();
+        voiceAudioRef.current = audio;
+        setPlayingVoice(voiceType);
+      } catch (error) {
+        console.error('Error playing voice preview:', error);
+      }
     }
   };
 

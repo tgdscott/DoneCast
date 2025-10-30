@@ -43,6 +43,54 @@ Self-hosted podcast creation platform with AI-powered features. Full-stack app: 
 - ❌ NEVER run `gcloud builds submit` automatically
 - ❌ NEVER use `isBackground: true` for build commands
 
+### NO LOCAL FILE FALLBACKS - EVER (CRITICAL)
+**CRITICAL RULE: Local file fallbacks mask production bugs and waste countless hours.**
+
+**Absolute Prohibitions:**
+- ❌ **NEVER add "development fallback" logic** that uses local files when GCS/R2 fails
+- ❌ **NEVER add "if in dev environment, try local file"** conditional logic
+- ❌ **NEVER add "check local filesystem if cloud storage unavailable"** fallback paths
+- ❌ **NEVER return local file paths when cloud storage paths fail**
+
+**Why This Rule Exists:**
+- Local fallbacks make dev think everything works when production is broken
+- User has lost "countless hours" debugging production issues that worked in dev due to fallbacks
+- Fallbacks hide real problems instead of surfacing them during development
+- Production has NO local files - fallback logic creates false confidence
+
+**What To Do Instead:**
+- ✅ **Fail loudly** if GCS/R2 upload fails - raise exception, log error, return 500
+- ✅ **Make dev environment match production** - use real cloud storage even in dev
+- ✅ **Surface errors immediately** - don't mask with fallback behavior
+- ✅ **Force fixes to be production-ready** - no shortcuts that only work locally
+
+**Exception (RARE):**
+- Only acceptable if feature is literally impossible to make work in dev but proven to work in production
+- Must be explicitly approved by user with clear documentation of why exception is needed
+- Even then, prefer making dev environment match production capabilities
+
+**Example of WRONG approach:**
+```python
+# ❌ BAD - Local fallback hides GCS issues
+if path.startswith("gs://"):
+    try:
+        return gcs.make_signed_url(bucket, key)
+    except Exception:
+        # "Development fallback" - WRONG!
+        return serve_local_file(path)
+```
+
+**Example of CORRECT approach:**
+```python
+# ✅ GOOD - Fail loudly to surface real issues
+if path.startswith("gs://"):
+    try:
+        return gcs.make_signed_url(bucket, key)
+    except Exception as e:
+        log.error(f"GCS signed URL failed: {e}")
+        raise HTTPException(500, f"Failed to generate signed URL: {e}")
+```
+
 ### Production First - BUT Fix Root Cause, Don't Rollback
 **CRITICAL CONTEXT: Production is currently in TESTING PHASE - no general public users yet.**
 
@@ -64,7 +112,7 @@ Self-hosted podcast creation platform with AI-powered features. Full-stack app: 
 - Rolling back = we don't learn what's actually broken
 - Testing phase = perfect time to find and fix these issues
 
-**All fixes and features MUST prioritize production environment.** Local dev is nice-to-have but production stability is non-negotiable. If a change helps both, great. If it's a choice, production wins every time.
+**All fixes and features MUST prioritize production environment.** Local dev is production-like (GCS/R2 required) and production stability is non-negotiable. If a change helps both, great. If it's a choice, production wins every time.
 
 ### Branding: NEVER Use "Podcast++"
 **CRITICAL: Brand name must ALWAYS be "Podcast Plus Plus" or "Plus Plus" - NEVER "Podcast++"**

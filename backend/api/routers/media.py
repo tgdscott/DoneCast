@@ -416,7 +416,7 @@ async def preview_media(
     if not path:
         raise HTTPException(status_code=400, detail="Missing id or path")
     
-    # Handle GCS URLs
+    # Handle GCS URLs - ONLY CLOUD STORAGE, NO LOCAL FALLBACKS
     if path.startswith("gs://"):
         p = path[5:]
         bucket, _, key = p.partition("/")
@@ -436,32 +436,12 @@ async def preview_media(
             return JSONResponse({"url": url})
         return RedirectResponse(url=url)
     
-    # Handle local files (development fallback)
-    filename = path.lstrip("/\\")
-    log.info(f"Checking local file: {filename}")
-    try:
-        media_root = MEDIA_DIR.resolve()
-    except Exception:
-        media_root = MEDIA_DIR
-    
-    try:
-        candidate = (MEDIA_DIR / filename).resolve(strict=False)
-        if not candidate.is_relative_to(media_root):
-            log.error(f"Path traversal attempt: {filename}")
-            raise HTTPException(status_code=403, detail="Path traversal not allowed")
-        if not candidate.exists():
-            log.error(f"File not found: {candidate}")
-            raise HTTPException(status_code=404, detail=f"File not found: {filename}")
-    except Exception as ex:
-        log.error(f"Error resolving local file: {ex}")
-        raise HTTPException(status_code=404, detail=str(ex))
-    
-    # For local files, return a relative API path
-    rel = f"/api/media/files/{filename}"
-    log.info(f"Returning local file path: {rel}")
-    if resolve:
-        return JSONResponse({"url": rel})
-    return RedirectResponse(url=rel)
+    # NO LOCAL FILE FALLBACK - if path doesn't start with gs://, it's an error
+    log.error(f"Invalid media path (not GCS): {path}")
+    raise HTTPException(
+        status_code=400, 
+        detail=f"Media file must be in cloud storage (gs://). Local files not supported. Path: {path}"
+    )
 
 # Schemas for main content endpoints
 class MainContentItem(BaseModel):
