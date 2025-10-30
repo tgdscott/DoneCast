@@ -21,10 +21,86 @@ class ElevenLabsService:
 
     - Caches list of voices in-memory for 10 minutes.
     - Provides simple search (name, labels) and pagination.
+    - Includes supplemental female voices for gender balance.
     """
 
     BASE_URL = "https://api.elevenlabs.io/v1"
     _CACHE_TTL_SEC = 10 * 60
+    
+    # Supplemental female voices from ElevenLabs pre-made library
+    # These are always available to ensure gender balance (16 male + 11 female → 16 male + 16 female)
+    _SUPPLEMENTAL_FEMALE_VOICES = [
+        {
+            "voice_id": "EXAVITQu4vr4xnSDxMaL",
+            "name": "Bella",
+            "labels": {
+                "gender": "female",
+                "accent": "american",
+                "description": "soft",
+                "age": "young",
+                "use_case": "narration",
+            },
+            "description": "Soft, young American female voice",
+            "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/EXAVITQu4vr4xnSDxMaL/5e5c4dbb-c494-4f60-90e9-a00c52b8d456.mp3",
+            "category": "premade",
+        },
+        {
+            "voice_id": "MF3mGyEYCl7XYWbV9V6O",
+            "name": "Elli",
+            "labels": {
+                "gender": "female",
+                "accent": "american",
+                "description": "emotional",
+                "age": "young",
+                "use_case": "narration",
+            },
+            "description": "Emotional, young American female voice",
+            "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/MF3mGyEYCl7XYWbV9V6O/87a2ded4-18ca-4f9a-a6ac-d0914d528196.mp3",
+            "category": "premade",
+        },
+        {
+            "voice_id": "XB0fDUnXU5powFXDhCwa",
+            "name": "Charlotte",
+            "labels": {
+                "gender": "female",
+                "accent": "english-swedish",
+                "description": "seductive",
+                "age": "middle_aged",
+                "use_case": "characters",
+            },
+            "description": "Seductive, middle-aged English-Swedish female voice",
+            "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/XB0fDUnXU5powFXDhCwa/942356dc-f10d-4d89-bda5-4f8505ee038b.mp3",
+            "category": "premade",
+        },
+        {
+            "voice_id": "pNInz6obpgDQGcFmaJgB",
+            "name": "Grace",
+            "labels": {
+                "gender": "female",
+                "accent": "american-southern",
+                "description": "warm",
+                "age": "young",
+                "use_case": "audiobook",
+            },
+            "description": "Warm, young American Southern female voice",
+            "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/pNInz6obpgDQGcFmaJgB/73a63e27-c14c-4c2f-bcfc-a1c3e4cf9e6c.mp3",
+            "category": "premade",
+        },
+        {
+            "voice_id": "jsCqWAovK2LkecY7zXl4",
+            "name": "Freya",
+            "labels": {
+                "gender": "female",
+                "accent": "american",
+                "description": "expressive",
+                "age": "young",
+                "use_case": "video_games",
+            },
+            "description": "Expressive, young American female voice",
+            "preview_url": "https://storage.googleapis.com/eleven-public-prod/premade/voices/jsCqWAovK2LkecY7zXl4/0cc3c0c1-b2e0-4dea-8a96-95c6a5c7b50a.mp3",
+            "category": "premade",
+        },
+    ]
 
     def __init__(self, platform_key: str) -> None:
         if not platform_key or not isinstance(platform_key, str):
@@ -88,7 +164,14 @@ class ElevenLabsService:
         data = self._voices_cache or {}
         voices = data.get("voices")
         if not isinstance(voices, list):
-            return []
+            voices = []
+        
+        # Merge supplemental female voices (avoid duplicates by voice_id)
+        existing_ids = {v.get("voice_id") for v in voices if v.get("voice_id")}
+        for supp_voice in self._SUPPLEMENTAL_FEMALE_VOICES:
+            if supp_voice["voice_id"] not in existing_ids:
+                voices.append(supp_voice)
+        
         return voices  # type: ignore[return-value]
 
     @staticmethod
@@ -188,6 +271,19 @@ class ElevenLabsService:
 
     def get_voice(self, voice_id: str) -> Optional[Dict[str, Any]]:
         """Return a normalized VoiceItem-like dict for a single id, or None if not found."""
+        # Check supplemental voices first
+        for supp_voice in self._SUPPLEMENTAL_FEMALE_VOICES:
+            if supp_voice["voice_id"] == voice_id:
+                return {
+                    "voice_id": supp_voice["voice_id"],
+                    "name": supp_voice["name"],
+                    "common_name": supp_voice.get("name"),
+                    "description": supp_voice.get("description"),
+                    "preview_url": supp_voice.get("preview_url"),
+                    "labels": supp_voice.get("labels"),
+                }
+        
+        # Fall back to API fetch
         v = self._fetch_voice(str(voice_id))
         if not v:
             return None
