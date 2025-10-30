@@ -50,12 +50,15 @@ def test_prepare_transcript_context_mirrors_cleaned_audio(tmp_path, _isolate_dir
     episode = _Episode()
 
     class _User:
-        elevenlabs_api_key = None
+        pass
 
     media_context = MediaContext(
         template=None,
         episode=episode,
         user=_User(),
+        user_id="user-1",
+        episode_id=None,
+        audio_cleanup_settings_json=None,
         cover_image_path=None,
         cleanup_settings={},
         preferred_tts_provider="elevenlabs",
@@ -134,12 +137,15 @@ def test_prepare_transcript_context_uploads_cleaned_audio(monkeypatch, tmp_path,
     episode = _Episode()
 
     class _User:
-        elevenlabs_api_key = None
+        pass
 
     media_context = MediaContext(
         template=None,
         episode=episode,
         user=_User(),
+        user_id="user-2",
+        episode_id=None,
+        audio_cleanup_settings_json=None,
         cover_image_path=None,
         cleanup_settings={},
         preferred_tts_provider="elevenlabs",

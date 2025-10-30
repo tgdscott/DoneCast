@@ -697,7 +697,7 @@ def _finalize_episode(
         cleanup_options=cleanup_opts,
         tts_overrides=tts_values or {},
         cover_image_path=media_context.cover_image_path,
-        elevenlabs_api_key=media_context.elevenlabs_api_key,
+        elevenlabs_api_key=None,  # No BYOK - platform key used by default
         tts_provider=media_context.preferred_tts_provider,
         mix_only=True,  # Always mix_only since cleaning is done
         words_json_path=str(transcript_context.words_json_path)

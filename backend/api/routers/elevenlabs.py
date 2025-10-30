@@ -44,11 +44,9 @@ def resolve_voice(voice_id: str) -> Dict[str, Any]:
     """Resolve a single voice by ID.
     
     NO AUTHENTICATION REQUIRED - Returns public preview_url for HTML5 <audio> playback.
-
-    Tries platform key first; if not found, tries the user's BYOK if present.
+    Uses platform ElevenLabs API key.
     Returns a normalized VoiceItem shape.
     """
-    # Platform key only (no BYOK for unauthenticated endpoint)
     platform_key = getattr(settings, "ELEVENLABS_API_KEY", None)
     if not platform_key:
         raise HTTPException(status_code=500, detail="ELEVENLABS_API_KEY not configured")

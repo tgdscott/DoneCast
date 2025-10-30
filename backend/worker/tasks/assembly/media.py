@@ -30,7 +30,6 @@ class MediaContext:
     # Extracted scalar values to avoid DetachedInstanceError
     user_id: Optional[str]
     episode_id: Optional[str]
-    elevenlabs_api_key: Optional[str]
     audio_cleanup_settings_json: Optional[str]
     cover_image_path: Optional[str]
     cleanup_settings: dict
@@ -409,7 +408,6 @@ def resolve_media_context(
     # This prevents DetachedInstanceError when accessing attributes after session closes
     if user_obj:
         try:
-            _ = user_obj.elevenlabs_api_key  # Force load
             _ = user_obj.email  # Force load
             _ = user_obj.id  # Force load
         except Exception:
@@ -428,9 +426,8 @@ def resolve_media_context(
         preferred_tts_provider = None
 
     if preferred_tts_provider not in {"elevenlabs", "google"}:
-        has_user_key = bool(getattr(user_obj, "elevenlabs_api_key", None))
         has_env_key = bool(getattr(settings, "ELEVENLABS_API_KEY", None))
-        preferred_tts_provider = "elevenlabs" if (has_user_key or has_env_key) else "google"
+        preferred_tts_provider = "elevenlabs" if has_env_key else "google"
 
     logging.info(
         "[assemble] start: output=%s, template=%s, user=%s",
@@ -877,7 +874,6 @@ def resolve_media_context(
     # Extract scalar values to avoid DetachedInstanceError when session closes
     user_id_val = str(getattr(episode, "user_id", "") or "").strip() if episode else None
     episode_id_val = str(getattr(episode, "id", "") or "").strip() if episode else None
-    elevenlabs_key = getattr(user_obj, "elevenlabs_api_key", None) if user_obj else None
     audio_settings_json = getattr(user_obj, "audio_cleanup_settings_json", None) if user_obj else None
 
     return (
@@ -887,7 +883,6 @@ def resolve_media_context(
             user=user_obj,
             user_id=user_id_val,
             episode_id=episode_id_val,
-            elevenlabs_api_key=elevenlabs_key,
             audio_cleanup_settings_json=audio_settings_json,
             cover_image_path=cover_image_path,
             cleanup_settings=cleanup_settings,

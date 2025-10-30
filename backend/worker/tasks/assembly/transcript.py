@@ -594,7 +594,7 @@ def prepare_transcript_context(
             return ai_enhancer.generate_speech_from_text(
                 text,
                 voice_id=str((tts_values or {}).get("intern_voice_id") or ""),
-                api_key=media_context.elevenlabs_api_key,
+                api_key=None,  # No BYOK - platform key used by default
                 provider=media_context.preferred_tts_provider,
             )
         except Exception:

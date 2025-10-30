@@ -14,7 +14,6 @@ const INITIAL_FORM = {
   podcastName: '',
   podcastDescription: '',
   coverArt: null,
-  elevenlabsApiKey: '',
 };
 
 const NewUserWizard = ({ open, onOpenChange, token, onPodcastCreated }) => {
@@ -32,23 +31,13 @@ const NewUserWizard = ({ open, onOpenChange, token, onPodcastCreated }) => {
   const hasUnsaved = useMemo(() => {
     const nameFilled = formData.podcastName.trim().length > 0;
     const descFilled = formData.podcastDescription.trim().length > 0;
-    const keyFilled = (formData.elevenlabsApiKey || '').trim().length > 0;
-    return step > 1 || nameFilled || descFilled || !!formData.coverArt || keyFilled;
+    return step > 1 || nameFilled || descFilled || !!formData.coverArt;
   }, [formData, step]);
-
-  // Feature flag: hide BYOK (Bring Your Own Key) for ElevenLabs for now.
-  // Toggle with VITE_ENABLE_BYOK=true if we want to re-enable the step.
-  const ENABLE_BYOK = (import.meta.env?.VITE_ENABLE_BYOK === 'true');
 
   const wizardSteps = [
     { id: 'welcome', title: 'Welcome' },
     { id: 'showDetails', title: 'About your show' },
     { id: 'coverArt', title: 'Podcast Cover Art (optional)' },
-    ...(
-      ENABLE_BYOK
-        ? [{ id: 'elevenlabs', title: 'AI voices (optional)' }]
-        : []
-    ),
     { id: 'finish', title: 'All set' },
   ];
   const totalSteps = wizardSteps.length;
@@ -96,10 +85,6 @@ const NewUserWizard = ({ open, onOpenChange, token, onPodcastCreated }) => {
 
   const handleFinish = async () => {
     try {
-      if (formData.elevenlabsApiKey) {
-        try { await makeApi(token).put('/api/users/me/elevenlabs-key', { api_key: formData.elevenlabsApiKey }); } catch { try { toast({ variant: 'destructive', title: 'ElevenLabs key not saved', description: 'You can add it later in Settings.' }); } catch {} }
-      }
-
       const podcastPayload = new FormData();
       podcastPayload.append('name', formData.podcastName);
       podcastPayload.append('description', formData.podcastDescription);
@@ -194,19 +179,7 @@ const NewUserWizard = ({ open, onOpenChange, token, onPodcastCreated }) => {
           </WizardStep>
         )}
 
-  {stepId === 'elevenlabs' && (
-          <WizardStep>
-            <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">AI voices (optional)<HelpCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" title="Provide an ElevenLabs API key if you want to use AI narration." /></h3>
-            <DialogDescription className="mb-2">
-              Want AI voices? You can always turn this on later.
-            </DialogDescription>
-            <p className="text-xs text-gray-500 mb-4">This is for advanced users—skip if you're not sure.</p>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="elevenlabsApiKey" className="text-right">ElevenLabs API Key</Label>
-              <Input id="elevenlabsApiKey" type="password" value={formData.elevenlabsApiKey} onChange={handleChange} className="col-span-3" placeholder="(Optional) Paste your key here" />
-            </div>
-          </WizardStep>
-        )}
+
 
   {stepId === 'finish' && (
           <WizardStep>

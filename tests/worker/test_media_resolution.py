@@ -117,7 +117,7 @@ def test_resolve_media_downloads_sanitized_transcript(monkeypatch, caplog):
     episode = _Episode()
 
     class _User:
-        elevenlabs_api_key = None
+        pass
 
     def _get_template(session, template_uuid):
         assert str(template_uuid) == str(template_id)
