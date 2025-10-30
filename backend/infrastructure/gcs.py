@@ -475,6 +475,16 @@ def make_signed_url(
     if url:
         return url
 
+    # Try public GCS URL (works if bucket is publicly readable)
+    if method.upper() == "GET":
+        public_url = f"https://storage.googleapis.com/{bucket}/{key}"
+        logger.info(
+            "No private key available; trying public GCS URL for GET: %s",
+            public_url
+        )
+        return public_url
+
+    # Last resort: local media fallback (only for dev/test)
     fallback = _local_media_url(key)
     if fallback:
         if _is_dev_env():
