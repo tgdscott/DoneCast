@@ -387,9 +387,10 @@ async def preview_media(
     path: Optional[str] = None,
     resolve: bool = False,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user)
 ):
     """Return a temporary URL (or redirect) to preview a media item.
+    
+    NO AUTHENTICATION REQUIRED - Allows HTML5 <audio> element to play files.
     
     Args:
         id: MediaItem UUID to preview
@@ -408,8 +409,8 @@ async def preview_media(
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid id")
         item = session.get(MediaItem, uid)
-        if not item or item.user_id != current_user.id:
-            raise HTTPException(status_code=404, detail="Not found")
+        if not item:
+            raise HTTPException(status_code=404, detail="Media item not found")
         path = item.filename
         log.info(f"Preview request for media_id={id}, filename={path}")
     
