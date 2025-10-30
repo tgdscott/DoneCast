@@ -417,7 +417,7 @@ async def preview_media(
     if not path:
         raise HTTPException(status_code=400, detail="Missing id or path")
     
-    # Handle GCS URLs - ONLY CLOUD STORAGE, NO LOCAL FALLBACKS
+    # Handle GCS URLs (build components, raw uploads, media library)
     if path.startswith("gs://"):
         p = path[5:]
         bucket, _, key = p.partition("/")
@@ -437,11 +437,19 @@ async def preview_media(
             return JSONResponse({"url": url})
         return RedirectResponse(url=url)
     
-    # NO LOCAL FILE FALLBACK - if path doesn't start with gs://, it's an error
-    log.error(f"Invalid media path (not GCS): {path}")
+    # Handle R2 URLs (finished episode audio, images, transcripts)
+    # R2 URLs are already public/signed, return directly
+    elif path.startswith("https://") or path.startswith("http://"):
+        log.info(f"[media/preview] R2 URL detected (finished product), returning directly: {path[:80]}...")
+        if resolve:
+            return JSONResponse({"url": path})
+        return RedirectResponse(url=path)
+    
+    # Invalid path format - must be cloud storage
+    log.error(f"Invalid media path (not cloud storage): {path}")
     raise HTTPException(
         status_code=400, 
-        detail=f"Media file must be in cloud storage (gs://). Local files not supported. Path: {path}"
+        detail=f"Media file must be in cloud storage (gs:// or https://). Local files not supported. Path: {path[:50]}"
     )
 
 # Schemas for main content endpoints
