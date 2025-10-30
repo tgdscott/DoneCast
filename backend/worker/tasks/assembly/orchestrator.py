@@ -590,12 +590,17 @@ def _finalize_episode(
                                         chunk.chunk_id, elapsed, chunk_retry_counts[chunk.chunk_id] + 1, max_retries
                                     )
                                     
-                                    # Re-dispatch the stuck chunk task
+                                    # Re-dispatch the stuck chunk task with FULL payload (same as initial dispatch)
                                     from infrastructure import tasks_client
                                     task_payload = {
                                         "episode_id": str(episode.id),
-                                        "chunk_index": chunk.index,  # FIXED: was chunk.chunk_index (attribute doesn't exist)
                                         "chunk_id": chunk.chunk_id,
+                                        "chunk_index": chunk.index,
+                                        "total_chunks": len(chunks),
+                                        "gcs_audio_uri": chunk.gcs_audio_uri,
+                                        "gcs_transcript_uri": chunk.gcs_transcript_uri,
+                                        "cleanup_options": cleanup_options,
+                                        "user_id": str(media_context.user_id),
                                     }
                                     
                                     try:
@@ -697,7 +702,7 @@ def _finalize_episode(
         cleanup_options=cleanup_opts,
         tts_overrides=tts_values or {},
         cover_image_path=media_context.cover_image_path,
-        elevenlabs_api_key=None,  # No BYOK - platform key used by default
+        elevenlabs_api_key=media_context.elevenlabs_api_key,
         tts_provider=media_context.preferred_tts_provider,
         mix_only=True,  # Always mix_only since cleaning is done
         words_json_path=str(transcript_context.words_json_path)
@@ -871,12 +876,11 @@ def _finalize_episode(
         # User still gets their episode, we just lose the billing record
     # ========== END CREDIT CHARGING ==========
 
-    # Upload final audio to R2 (finished products) - REQUIRED, NO FALLBACK
-    # Finished episode audio goes to R2 for zero-egress distribution
-    # Build components and raw uploads stay in GCS
+    # Upload final audio to GCS - REQUIRED, NO FALLBACK
+    # GCS is the sole source of truth for all media files
     user_id = str(episode.user_id)
     episode_id = str(episode.id)
-    r2_bucket = os.getenv("R2_BUCKET", "ppp-media")
+    gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
     
     # Upload audio file
     audio_src = fallback_candidate if fallback_candidate and fallback_candidate.is_file() else None
@@ -899,24 +903,23 @@ def _finalize_episode(
     except Exception as dur_err:
         raise RuntimeError(f"[assemble] Could not get audio duration: {dur_err}") from dur_err
     
-    # Upload to R2 (finished products go to R2, not GCS)
-    r2_audio_key = f"{user_id}/episodes/{episode_id}/audio/{final_basename}"
+    # Upload to cloud storage (R2) - if this fails, the entire assembly fails
+    gcs_audio_key = f"{user_id}/episodes/{episode_id}/audio/{final_basename}"
     try:
-        from infrastructure import r2
         with open(audio_src, "rb") as f:
-            r2_audio_url = r2.upload_fileobj(r2_bucket, r2_audio_key, f, content_type="audio/mpeg")
+            gcs_audio_url = storage.upload_fileobj(gcs_bucket, gcs_audio_key, f, content_type="audio/mpeg")  # type: ignore[attr-defined]
     except Exception as storage_err:
-        raise RuntimeError(f"[assemble] CRITICAL: Failed to upload audio to R2. Episode assembly cannot complete. Error: {storage_err}") from storage_err
+        raise RuntimeError(f"[assemble] CRITICAL: Failed to upload audio to cloud storage. Episode assembly cannot complete. Error: {storage_err}") from storage_err
     
-    if not r2_audio_url or not str(r2_audio_url).startswith("http"):
-        raise RuntimeError(f"[assemble] CRITICAL: R2 upload returned invalid URL: {r2_audio_url}")
+    if not gcs_audio_url or not str(gcs_audio_url).startswith("gs://"):
+        raise RuntimeError(f"[assemble] CRITICAL: GCS upload returned invalid URL: {gcs_audio_url}")
     
-    episode.gcs_audio_path = r2_audio_url  # Field name is legacy, but stores R2 URL for finished episodes
-    logging.info("[assemble] ✅ Finished audio uploaded to R2: %s", r2_audio_url)
+    episode.gcs_audio_path = gcs_audio_url
+    logging.info("[assemble] ✅ Audio uploaded to GCS: %s", gcs_audio_url)
     
     # Mirror to local media directory for dev environment playback
     try:
-        local_audio_mirror = MEDIA_DIR / r2_audio_key
+        local_audio_mirror = MEDIA_DIR / gcs_audio_key
         local_audio_mirror.parent.mkdir(parents=True, exist_ok=True)
         if not local_audio_mirror.exists():
             shutil.copy2(audio_src, local_audio_mirror)
@@ -947,27 +950,26 @@ def _finalize_episode(
                     media_context.cover_image_path = str(cover_path)
                 episode.cover_path = cover_name
                 
-                # Upload cover to R2 (finished products go to R2)
+                # Upload cover to GCS (REQUIRED - ephemeral storage cannot rely on local files)
                 user_id = str(episode.user_id)
                 episode_id = str(episode.id)
-                r2_bucket = os.getenv("R2_BUCKET", "ppp-media")
-                r2_cover_key = f"{user_id}/episodes/{episode_id}/cover/{cover_name}"
+                gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+                gcs_cover_key = f"{user_id}/episodes/{episode_id}/cover/{cover_name}"
                 
-                from infrastructure import r2
                 with open(cover_path, "rb") as f:
                     cover_ext = cover_name.lower().split(".")[-1]
                     content_type = f"image/{cover_ext}" if cover_ext in ("jpg", "jpeg", "png", "gif") else "image/jpeg"
-                    r2_cover_url = r2.upload_fileobj(r2_bucket, r2_cover_key, f, content_type=content_type)
+                    gcs_cover_url = storage.upload_fileobj(gcs_bucket, gcs_cover_key, f, content_type=content_type)  # type: ignore[attr-defined]
                 
-                if not r2_cover_url or not str(r2_cover_url).startswith("http"):
-                    raise RuntimeError(f"[assemble] CRITICAL: Cover R2 upload failed - returned invalid URL: {r2_cover_url}")
+                if not gcs_cover_url or not str(gcs_cover_url).startswith("gs://"):
+                    raise RuntimeError(f"[assemble] CRITICAL: Cover cloud storage upload failed - returned invalid URL: {gcs_cover_url}")
                 
-                episode.gcs_cover_path = r2_cover_url  # Field name is legacy, but stores R2 URL
-                logging.info("[assemble] ✅ Cover uploaded to R2: %s", r2_cover_url)
+                episode.gcs_cover_path = gcs_cover_url
+                logging.info("[assemble] ✅ Cover uploaded to cloud storage: %s", gcs_cover_url)
                 
                 # Mirror to local media directory for dev environment playback
                 try:
-                    local_cover_mirror = MEDIA_DIR / r2_cover_key
+                    local_cover_mirror = MEDIA_DIR / gcs_cover_key
                     local_cover_mirror.parent.mkdir(parents=True, exist_ok=True)
                     if not local_cover_mirror.exists():
                         shutil.copy2(cover_path, local_cover_mirror)
