@@ -11,6 +11,7 @@ from api.routers.auth import get_current_user
 from api.models.user import User
 from api.models.podcast import Episode
 from api.services.episodes import repo as _repo
+from api.services.episodes import assembler as _svc_assembler
 
 log = logging.getLogger("ppp.episodes.retry")
 
@@ -90,65 +91,48 @@ def retry_episode(
     if not template_id or not main_content_filename:
         raise HTTPException(status_code=400, detail="Episode missing required metadata to retry")
 
-    # Build payload for tasks
-    payload = {
-        "episode_id": str(ep.id),
-        "template_id": str(template_id),
-        "main_content_filename": str(main_content_filename),
-        "output_filename": str(output_filename or ""),
-        "tts_values": tts_values,
-        "episode_details": episode_details,
-        "user_id": str(current_user.id),
-        "podcast_id": str(getattr(ep, 'podcast_id', '') or ''),
-        "intents": intents,
-    }
-
-    # Prefer Cloud Tasks HTTP path for consistency
-    use_cloud = (os.getenv("USE_CLOUD_TASKS", "").strip().lower() in {"1","true","yes","on"})
-    job_name = None
-    if use_cloud:
-        try:
-            from infrastructure.tasks_client import enqueue_http_task  # type: ignore
-            info = enqueue_http_task("/api/tasks/assemble", payload)
-            job_name = info.get('name') or 'cloud-task'
-        except Exception:
-            job_name = None
-
-    if job_name is None:
-        # Fallback to Celery direct call or inline
-        try:
-            from worker.tasks import create_podcast_episode
-            create_podcast_episode(
-                episode_id=str(ep.id),
-                template_id=str(template_id),
-                main_content_filename=str(main_content_filename),
-                output_filename=str(output_filename or ""),
-                tts_values=tts_values or {},
-                episode_details=episode_details or {},
-                user_id=str(current_user.id),
-                podcast_id=str(getattr(ep, 'podcast_id', '') or ''),
-                intents=intents or None,
-            )
-            job_name = "inline"
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"retry-failed: {exc}")
-
-    # Update episode status back to processing and store assembly_job_id
+    # Use the same assembler service as normal episode assembly
+    # This ensures consistent behavior with the main assembly endpoint
+    log.info("Retrying episode %s with template_id=%s, main_content=%s", 
+             ep.id, template_id, main_content_filename)
+    
     try:
-        try:
-            from api.models.podcast import EpisodeStatus as _EpStatus
-            ep.status = _EpStatus.processing  # type: ignore
-        except Exception:
-            setattr(ep, 'status', 'processing')
-        if hasattr(ep, 'processed_at'):
-            from datetime import datetime as _dt
-            ep.processed_at = _dt.utcnow()
-        meta = meta or {}
-        meta['assembly_job_id'] = job_name
-        ep.meta_json = json.dumps(meta)
-        session.add(ep)
-        session.commit()
-    except Exception:
-        session.rollback()
-
-    return {"job_id": job_name, "status": "queued", "episode_id": str(ep.id)}
+        # Extract use_auphonic from metadata if present
+        use_auphonic = meta.get('use_auphonic', False)
+        
+        svc_result = _svc_assembler.assemble_or_queue(
+            session=session,
+            current_user=current_user,
+            template_id=str(template_id),
+            main_content_filename=str(main_content_filename),
+            output_filename=str(output_filename or ""),
+            tts_values=tts_values or {},
+            episode_details=episode_details or {},
+            intents=intents,
+            use_auphonic=use_auphonic,
+        )
+        
+        job_id = svc_result.get("job_id", "unknown")
+        mode = svc_result.get("mode", "queued")
+        
+        log.info("Episode %s retry dispatched: mode=%s, job_id=%s", ep.id, mode, job_id)
+        
+        if mode == "eager-inline":
+            return {
+                "message": "Episode retry completed synchronously",
+                "episode_id": str(ep.id),
+                "job_id": job_id,
+                "status": "processed",
+                "result": svc_result.get("result"),
+            }
+        else:
+            return {
+                "message": "Episode retry enqueued",
+                "episode_id": str(ep.id),
+                "job_id": job_id,
+                "status": "queued",
+            }
+    
+    except Exception as exc:
+        log.exception("retry-failed for episode %s", ep.id)
+        raise HTTPException(status_code=500, detail=f"retry-failed: {exc}")
