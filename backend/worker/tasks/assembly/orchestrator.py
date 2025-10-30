@@ -701,9 +701,6 @@ def _finalize_episode(
     # CRITICAL SECTION: This is where exit code -9 crashes have been occurring
     try:
         logging.info("[assemble] Starting audio processor with audio_input_path=%s, mix_only=True", audio_input_path)
-        logging.info("[assemble] Template has %d segments, %d music rules", 
-                    len(json.loads(getattr(media_context.template, "segments_json", "[]")) or []) if media_context.template else 0,
-                    len(json.loads(getattr(media_context.template, "background_music_rules_json", "[]")) or []) if media_context.template else 0)
         
         final_path, log_data, ai_note_additions = audio_processor.process_and_assemble_episode(
             template=media_context.template,
