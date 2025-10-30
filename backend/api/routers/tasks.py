@@ -227,7 +227,7 @@ async def assemble_episode_task(request: Request, x_tasks_auth: str | None = Hea
             # Re-import in child process (multiprocessing requires this)
             import sys
             import logging
-            from worker.tasks import create_podcast_episode
+            from worker.tasks.assembly.orchestrator import orchestrate_create_podcast_episode
             
             # Configure logging in child process
             logging.basicConfig(
@@ -238,7 +238,11 @@ async def assemble_episode_task(request: Request, x_tasks_auth: str | None = Hea
             log = logging.getLogger("tasks.assemble.worker")
             
             log.info("event=tasks.assemble.start episode_id=%s pid=%s", payload.episode_id, os.getpid())
-            result = create_podcast_episode(
+            
+            # Extract use_auphonic flag from episode_details if present
+            use_auphonic = (payload.episode_details or {}).get('use_auphonic', False)
+            
+            result = orchestrate_create_podcast_episode(
                 episode_id=payload.episode_id,
                 template_id=payload.template_id,
                 main_content_filename=payload.main_content_filename,
@@ -248,6 +252,8 @@ async def assemble_episode_task(request: Request, x_tasks_auth: str | None = Hea
                 user_id=payload.user_id,
                 podcast_id=payload.podcast_id or "",
                 intents=payload.intents or None,
+                skip_charge=False,
+                use_auphonic=use_auphonic,
             )
             log.info("event=tasks.assemble.done episode_id=%s result=%s", payload.episode_id, result)
         except Exception as exc:  # pragma: no cover - defensive
