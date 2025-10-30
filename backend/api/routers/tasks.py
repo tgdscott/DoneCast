@@ -272,8 +272,9 @@ async def assemble_episode_task(request: Request, x_tasks_auth: str | None = Hea
     
     # CRITICAL: Wait for assembly to complete before returning
     # If we return immediately, Cloud Run scales down and kills the child process
-    # This prevents episodes from getting stuck in "processing" status
-    process.join(timeout=3600)  # 1 hour max (same as Cloud Run timeout)
+    # IMPORTANT: Timeout MUST be less than Cloud Tasks dispatchDeadline (1800s)
+    # to allow proper retry behavior. Using 1700s to give 100s buffer.
+    process.join(timeout=1700)  # 28m20s max (less than 30min Cloud Tasks deadline)
     
     if process.is_alive():
         log.error("event=tasks.assemble.timeout episode_id=%s", payload.episode_id)
