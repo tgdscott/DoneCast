@@ -544,7 +544,7 @@ def _finalize_episode(
             import time
             max_wait_seconds = 1800  # 30 minutes (matches Cloud Tasks deadline)
             poll_interval = 5  # 5 seconds
-            retry_after_seconds = 120  # Retry stuck chunks after 2 minutes
+            retry_after_seconds = 600  # Retry stuck chunks after 10 minutes
             start_time = time.time()
             chunk_dispatch_times = {}  # Track when each chunk was dispatched
             chunk_retry_counts = {}  # Track retry attempts per chunk
@@ -570,8 +570,9 @@ def _finalize_episode(
                     if cleaned_uri.startswith("gs://"):
                         parts = cleaned_uri[5:].split("/", 1)
                         if len(parts) == 2:
+                            from infrastructure import gcs
                             bucket_name, blob_path = parts
-                            exists = storage.blob_exists(bucket_name, blob_path)
+                            exists = gcs.blob_exists(bucket_name, blob_path)
                             
                             if exists:
                                 chunk.cleaned_path = f"/tmp/{chunk.chunk_id}_cleaned.mp3"
@@ -639,8 +640,9 @@ def _finalize_episode(
                     if gcs_uri.startswith("gs://"):
                         parts = gcs_uri[5:].split("/", 1)
                         if len(parts) == 2:
+                            from infrastructure import gcs
                             bucket_name, blob_path = parts
-                            cleaned_bytes = storage.download_bytes(bucket_name, blob_path)
+                            cleaned_bytes = gcs.download_gcs_bytes(bucket_name, blob_path)
                             if cleaned_bytes:
                                 chunk_path = PathLib(f"/tmp/{chunk.chunk_id}_cleaned.mp3")
                                 chunk_path.write_bytes(cleaned_bytes)
