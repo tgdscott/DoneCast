@@ -570,8 +570,9 @@ def _finalize_episode(
                     if cleaned_uri.startswith("gs://"):
                         parts = cleaned_uri[5:].split("/", 1)
                         if len(parts) == 2:
+                            from infrastructure import gcs
                             bucket_name, blob_path = parts
-                            exists = storage.blob_exists(bucket_name, blob_path)
+                            exists = gcs.blob_exists(bucket_name, blob_path)
                             
                             if exists:
                                 chunk.cleaned_path = f"/tmp/{chunk.chunk_id}_cleaned.mp3"
@@ -639,8 +640,9 @@ def _finalize_episode(
                     if gcs_uri.startswith("gs://"):
                         parts = gcs_uri[5:].split("/", 1)
                         if len(parts) == 2:
+                            from infrastructure import gcs
                             bucket_name, blob_path = parts
-                            cleaned_bytes = storage.download_bytes(bucket_name, blob_path)
+                            cleaned_bytes = gcs.download_gcs_bytes(bucket_name, blob_path)
                             if cleaned_bytes:
                                 chunk_path = PathLib(f"/tmp/{chunk.chunk_id}_cleaned.mp3")
                                 chunk_path.write_bytes(cleaned_bytes)

@@ -31,6 +31,7 @@ class MediaContext:
     user_id: Optional[str]
     episode_id: Optional[str]
     audio_cleanup_settings_json: Optional[str]
+    elevenlabs_api_key: Optional[str]
     cover_image_path: Optional[str]
     cleanup_settings: dict
     preferred_tts_provider: str
@@ -875,6 +876,7 @@ def resolve_media_context(
     user_id_val = str(getattr(episode, "user_id", "") or "").strip() if episode else None
     episode_id_val = str(getattr(episode, "id", "") or "").strip() if episode else None
     audio_settings_json = getattr(user_obj, "audio_cleanup_settings_json", None) if user_obj else None
+    elevenlabs_api_key = getattr(user_obj, "elevenlabs_api_key", None) if user_obj else None
 
     return (
         MediaContext(
@@ -884,6 +886,7 @@ def resolve_media_context(
             user_id=user_id_val,
             episode_id=episode_id_val,
             audio_cleanup_settings_json=audio_settings_json,
+            elevenlabs_api_key=elevenlabs_api_key,
             cover_image_path=cover_image_path,
             cleanup_settings=cleanup_settings,
             preferred_tts_provider=preferred_tts_provider,

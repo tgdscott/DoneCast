@@ -18,6 +18,8 @@ class UserBase(SQLModel):
     spreaker_access_token: Optional[str] = Field(default=None)
     spreaker_refresh_token: Optional[str] = Field(default=None)
     stripe_customer_id: Optional[str] = Field(default=None, index=True)
+    # Per-user ElevenLabs API key
+    elevenlabs_api_key: Optional[str] = Field(default=None, description="User-provided ElevenLabs API key for TTS")
     # JSON-encoded user-level audio cleanup & command settings (serialized externally)
     audio_cleanup_settings_json: Optional[str] = Field(default=None, description="User-level settings for silence/filler removal and command keywords")
     # Optional profile personalization fields
