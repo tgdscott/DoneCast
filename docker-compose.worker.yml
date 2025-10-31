@@ -68,7 +68,8 @@ services:
       - worker_media:/app/local_media
       - worker_tmp:/app/local_tmp
     restart: unless-stopped
-    command: celery -A worker.tasks.app worker --loglevel=info --concurrency=2
+    # Use python -m celery so the module is invoked from the installed site-packages
+    command: python -m celery -A worker.tasks.app worker --loglevel=info --concurrency=2
     
   # Optional: Celery Beat for scheduled tasks
   beat:
@@ -87,7 +88,7 @@ services:
       - ./backend:/app/backend
       - ./gcp-key.json:/app/gcp-key.json:ro
     restart: unless-stopped
-    command: celery -A worker.tasks.app beat --loglevel=info
+    command: python -m celery -A worker.tasks.app beat --loglevel=info
 
 volumes:
   rabbitmq_data:
