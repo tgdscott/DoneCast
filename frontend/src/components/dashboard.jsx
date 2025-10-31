@@ -37,7 +37,7 @@ import {
   Library,
   Shield,
 } from "lucide-react";
-import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
 
 import { makeApi, coerceArray } from "@/lib/apiClient";
 import { useAuth } from "@/AuthContext";

@@ -601,3 +601,242 @@ async def process_chunk_task(request: Request, x_tasks_auth: str | None = Header
     
     return {"ok": True, "status": "completed", "chunk_id": payload.chunk_id}
 
+
+# ============================================================================
+# MAINTENANCE TASKS (Cloud Scheduler endpoints)
+# ============================================================================
+
+@router.post("/maintenance/purge-expired-uploads")
+async def maintenance_purge_expired_uploads(
+    request: Request,
+    x_tasks_auth: str | None = Header(default=None)
+):
+    """Delete expired raw uploads that are no longer referenced.
+    
+    Triggered by Cloud Scheduler daily at 2:00 AM PT.
+    
+    For recordings (main_content), enforces 24-hour minimum retention period
+    even if used in an episode, giving users time to download a backup.
+    """
+    if not _IS_DEV:
+        # Accept either Cloud Scheduler OIDC token OR legacy TASKS_AUTH header
+        auth_header = request.headers.get("Authorization", "")
+        has_oidc = auth_header.startswith("Bearer ")
+        has_tasks_auth = x_tasks_auth and x_tasks_auth == _TASKS_AUTH
+        
+        if not (has_oidc or has_tasks_auth):
+            raise HTTPException(status_code=401, detail="unauthorized")
+
+    from datetime import datetime, timedelta
+    from pathlib import Path
+    from sqlmodel import select
+    from api.core.database import get_session
+    from api.core.paths import MEDIA_DIR
+    from api.models.podcast import Episode, MediaCategory, MediaItem, EpisodeStatus
+    
+    session = next(get_session())
+    now = datetime.utcnow()
+    removed = 0
+    skipped_in_use = 0
+    skipped_too_young = 0
+    checked = 0
+
+    try:
+        query = (
+            select(MediaItem)
+            .where(MediaItem.category == MediaCategory.main_content)  # type: ignore
+            .where(MediaItem.expires_at != None)  # type: ignore
+            .where(MediaItem.expires_at <= now)  # type: ignore
+            .limit(10_000)
+        )
+        items = session.exec(query).all()
+
+        episode_query = select(Episode)
+        episodes = session.exec(episode_query).all()
+        in_use: set[str] = set()
+        
+        # Only mark files as "in use" if they're referenced by incomplete episodes
+        incomplete_statuses = {
+            EpisodeStatus.pending,
+            EpisodeStatus.processing,
+            EpisodeStatus.error,
+        }
+        
+        for ep in episodes:
+            ep_status = getattr(ep, "status", None)
+            if ep_status not in incomplete_statuses:
+                continue
+                
+            # Episode is incomplete, keep its files
+            for name in (
+                getattr(ep, "working_audio_name", None),
+                getattr(ep, "final_audio_path", None),
+            ):
+                if not name:
+                    continue
+                try:
+                    in_use.add(Path(str(name)).name)
+                except Exception:
+                    in_use.add(str(name))
+            
+            # Check meta_json for main_content_filename
+            try:
+                meta_str = getattr(ep, "meta_json", None)
+                if meta_str:
+                    meta = json.loads(meta_str)
+                    if isinstance(meta, dict):
+                        main_content = meta.get("main_content_filename")
+                        if main_content:
+                            try:
+                                in_use.add(Path(str(main_content)).name)
+                            except Exception:
+                                in_use.add(str(main_content))
+            except Exception:
+                pass
+
+        for media_item in items:
+            checked += 1
+            filename = getattr(media_item, "filename", None)
+            if not filename:
+                continue
+            
+            # Enforce 24-hour minimum retention
+            created_at = getattr(media_item, "created_at", None)
+            if created_at:
+                age_hours = (now - created_at).total_seconds() / 3600
+                if age_hours < 24:
+                    skipped_too_young += 1
+                    continue
+            
+            if filename in in_use:
+                skipped_in_use += 1
+                continue
+
+            try:
+                path = MEDIA_DIR / filename
+                if path.exists():
+                    try:
+                        path.unlink()
+                    except Exception:
+                        log.warning("[purge] Failed to unlink %s", path, exc_info=True)
+                session.delete(media_item)
+                removed += 1
+            except Exception:
+                log.warning("[purge] Failed to delete MediaItem %s", 
+                           getattr(media_item, "id", None), exc_info=True)
+
+        if removed:
+            session.commit()
+    except Exception:
+        session.rollback()
+        log.warning("[purge] purge_expired_uploads failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="maintenance task failed")
+    finally:
+        session.close()
+
+    log.info("[purge] expired uploads: checked=%s removed=%s skipped_in_use=%s skipped_too_young=%s",
+             checked, removed, skipped_in_use, skipped_too_young)
+    
+    return {
+        "ok": True,
+        "checked": checked,
+        "removed": removed,
+        "skipped_in_use": skipped_in_use,
+        "skipped_too_young": skipped_too_young
+    }
+
+
+@router.post("/maintenance/purge-episode-mirrors")
+async def maintenance_purge_episode_mirrors(
+    request: Request,
+    x_tasks_auth: str | None = Header(default=None)
+):
+    """Remove mirrored audio for Spreaker episodes published more than 7 days ago.
+    
+    Triggered by Cloud Scheduler daily at 2:00 AM PT.
+    
+    Legacy cleanup for episodes published to Spreaker (before GCS-only architecture).
+    """
+    if not _IS_DEV:
+        # Accept either Cloud Scheduler OIDC token OR legacy TASKS_AUTH header
+        auth_header = request.headers.get("Authorization", "")
+        has_oidc = auth_header.startswith("Bearer ")
+        has_tasks_auth = x_tasks_auth and x_tasks_auth == _TASKS_AUTH
+        
+        if not (has_oidc or has_tasks_auth):
+            raise HTTPException(status_code=401, detail="unauthorized")
+
+    from datetime import datetime, timedelta
+    from pathlib import Path
+    from sqlmodel import select
+    from api.core.database import get_session
+    from api.core.paths import FINAL_DIR
+    from api.models.podcast import Episode
+    from infrastructure.gcs import delete_gcs_blob
+    
+    session = next(get_session())
+    cutoff = datetime.utcnow() - timedelta(days=7)
+    checked = 0
+    removed_local = 0
+    removed_remote = 0
+
+    try:
+        episodes = session.exec(
+            select(Episode).where(Episode.spreaker_episode_id != None)  # type: ignore
+        ).all()
+
+        for episode in episodes:
+            try:
+                meta = json.loads(getattr(episode, "meta_json", "{}") or "{}")
+                if not isinstance(meta, dict):
+                    meta = {}
+            except Exception:
+                meta = {}
+
+            local_basename = meta.get("mirrored_local_basename")
+            if not local_basename:
+                continue
+
+            publish_at = getattr(episode, "publish_at", None) or getattr(episode, "processed_at", None)
+            if not publish_at or publish_at > cutoff:
+                continue
+
+            checked += 1
+            local_path = (FINAL_DIR / Path(str(local_basename)).name).resolve()
+            if local_path.exists():
+                try:
+                    local_path.unlink()
+                    removed_local += 1
+                except Exception:
+                    log.warning("[purge] failed to delete mirrored audio %s", local_path, exc_info=True)
+
+            # Handle both old format (mirrored_gcs_key) and new format (mirrored_gcs_uri)
+            gcs_uri = meta.get("mirrored_gcs_uri")
+            if isinstance(gcs_uri, str) and gcs_uri.startswith("gs://"):
+                try:
+                    bucket_key = gcs_uri[5:]
+                    bucket, _, key = bucket_key.partition("/")
+                    if bucket and key:
+                        delete_gcs_blob(bucket, key)
+                        removed_remote += 1
+                except Exception:
+                    log.warning("[purge] failed to delete mirrored blob %s", gcs_uri, exc_info=True)
+
+        session.commit()
+    except Exception:
+        session.rollback()
+        log.warning("[purge] purge_published_episode_mirrors failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="maintenance task failed")
+    finally:
+        session.close()
+
+    log.info("[purge] episode mirrors: checked=%s removed_local=%s removed_remote=%s",
+             checked, removed_local, removed_remote)
+    
+    return {
+        "ok": True,
+        "checked": checked,
+        "removed_local": removed_local,
+        "removed_remote": removed_remote
+    }
+
