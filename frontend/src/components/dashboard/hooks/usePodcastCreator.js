@@ -88,9 +88,12 @@ export default function usePodcastCreator({
   const scheduling = useScheduling({
     token,
     selectedTemplate: stepNav.selectedTemplate,
-    setPublishMode: () => {},
-    setScheduleDate: () => {},
-    setScheduleTime: () => {},
+    templates,
+    setSelectedTemplate: stepNav.setSelectedTemplate,
+    setCurrentStep: stepNav.setCurrentStep,
+    setPublishMode: publishing.setPublishMode,
+    setScheduleDate: publishing.setScheduleDate,
+    setScheduleTime: publishing.setScheduleTime,
   });
 
   const quota = useQuota({

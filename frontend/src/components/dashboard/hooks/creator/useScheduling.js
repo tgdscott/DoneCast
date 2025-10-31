@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { makeApi } from '@/lib/apiClient';
 
-export default function useScheduling({ token, selectedTemplate, setPublishMode, setScheduleDate, setScheduleTime }) {
+export default function useScheduling({ token, selectedTemplate, setPublishMode, setScheduleDate, setScheduleTime, templates, setSelectedTemplate, setCurrentStep }) {
   const [autoRecurringRef, setAutoRecurringRef] = useState({ templateId: null, date: null, time: null, manual: false });
 
   useEffect(() => {
