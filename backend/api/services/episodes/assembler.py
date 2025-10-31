@@ -19,16 +19,10 @@ from api.models.settings import AppSetting
 from api.services.billing import usage as usage_svc
 from api.services.transcription import load_media_transcript_metadata_for_filename
 
-try:  # Optional dependency: Celery worker package is not always installed
-    from worker.tasks import create_podcast_episode, celery_app  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover - dev/staging environments without Celery
-    create_podcast_episode = None  # type: ignore
-    celery_app = None  # type: ignore
-except Exception:  # pragma: no cover - guard against indirect import errors inside worker.tasks
-    # If worker.tasks exists but raises during import (e.g., due to a submodule error),
-    # avoid failing this service import so the API can still start and surface a 503 at runtime.
-    create_podcast_episode = None  # type: ignore
-    celery_app = None  # type: ignore
+from backend.worker.tasks.assembly.orchestrator import orchestrate_create_podcast_episode as create_podcast_episode
+
+# Celery is no longer used; this is a placeholder for legacy code paths.
+celery_app = None
 
 from . import dto, repo
 

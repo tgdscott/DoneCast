@@ -69,11 +69,11 @@ def db_engine(tmp_path: Path):
 
     This fixture is retained for backward compatibility but should NOT be used for new tests.
     All tests should connect to a real PostgreSQL database (use DATABASE_URL environment variable).
-    
+
     TODO: Migrate all tests to use real PostgreSQL and remove this fixture entirely.
     """
     pytest.skip("SQLite-based testing is deprecated - use PostgreSQL test database instead")
-    
+
     # This code is unreachable but kept for reference during migration
     from sqlmodel import create_engine
     db_path = tmp_path / "test.db"
@@ -188,47 +188,6 @@ def requests_mocker(request):
 
 
 @pytest.fixture(scope="function")
-def celery_eager():
-    """Put Celery into eager mode for the duration of the test.
-
-    - Forces tasks to run synchronously in-process (no broker needed).
-    - Configures a memory result backend to avoid external dependencies.
-    - Restores previous configuration when the test ends.
-
-    Example:
-        def test_enqueue_triggers_workflow(celery_eager):
-            from worker.tasks.audio import assemble_episode
-            result = assemble_episode.delay(episode_id="...")
-            assert result is not None  # already executed
-    """
-    # Import Celery app and capture current configuration
-    app_mod = import_module("worker.tasks.app")
-    celery_app = getattr(app_mod, "celery_app")
-    prev_conf = dict(celery_app.conf)
-
-    # Apply eager settings
-    celery_app.conf.update(
-        task_always_eager=True,
-        task_eager_propagates=True,
-        broker_url="memory://",
-        result_backend="cache+memory://",
-    )
-    # Also set env flag for code branches that look at CELERY_EAGER
-    old_env = os.environ.get("CELERY_EAGER")
-    os.environ["CELERY_EAGER"] = "1"
-
-    try:
-        yield celery_app
-    finally:
-        # Restore env and conf
-        if old_env is None:
-            os.environ.pop("CELERY_EAGER", None)
-        else:
-            os.environ["CELERY_EAGER"] = old_env
-        celery_app.conf.update(prev_conf)
-
-
-@pytest.fixture(scope="function")
 def sample_audio_wav(tmp_path: Path) -> Path:
     """Create a tiny synthetic WAV file using pydub's Sine generator.
 
@@ -295,4 +254,3 @@ def allow_http(request):
         return compiled
 
     return _allow
-

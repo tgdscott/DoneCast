@@ -48,7 +48,7 @@ _IS_DEV = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") o
 
 log.info("event=worker.init.config_loaded is_dev=%s", _IS_DEV)
 
-from worker.tasks import create_podcast_episode
+from backend.worker.tasks.assembly.orchestrator import orchestrate_create_podcast_episode as create_podcast_episode
 from worker.tasks.assembly.chunk_worker import (
     ProcessChunkPayload,
     run_chunk_processing,

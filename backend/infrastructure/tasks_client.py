@@ -107,7 +107,7 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
     def _dispatch_assemble(payload: dict) -> None:
             # Expect the same payload as /api/tasks/assemble
             try:
-                from worker.tasks import create_podcast_episode  # type: ignore
+                from backend.worker.tasks.assembly.orchestrator import orchestrate_create_podcast_episode as create_podcast_episode
             except Exception as import_err:  # pragma: no cover
                 print(f"DEV MODE assemble import failed: {import_err}")
                 return
