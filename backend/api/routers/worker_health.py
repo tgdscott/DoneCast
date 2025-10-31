@@ -46,6 +46,7 @@ async def test_slack_alerts() -> Dict[str, str]:
     if success:
         return {
             "status": "success",
+            "message": "Test alert sent to Slack successfully! Check your channel."
         }
     else:
         return {
