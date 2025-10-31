@@ -240,11 +240,15 @@ async def upload_media_files(
                         )
 
                 try:
-                        if category == MediaCategory.main_content:
-				from worker.tasks import transcribe_media_file  # type: ignore
-				transcribe_media_file.delay(safe_filename, str(current_user.id))
-		except Exception:
-			pass
+                    if category == MediaCategory.main_content:
+                        from infrastructure.tasks_client import enqueue_http_task
+                        payload = {
+                            "filename": safe_filename,
+                            "user_id": str(current_user.id),
+                        }
+                        enqueue_http_task("/api/tasks/transcribe", payload)
+                except Exception:
+                    pass
 
 	# Commit and cleanup on failure
 	try:

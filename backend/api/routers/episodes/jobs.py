@@ -180,27 +180,3 @@ def get_job_status(job_id: str, session: Session = Depends(get_session)):
     if not err_text:
         err_text = str(result)
     return {"job_id": job_id, "status": "error", "error": err_text}
-
-@router.get("/dev/job-debug/{job_id:path}")
-def job_debug(job_id: str):
-    """Return raw celery state for debugging (dev only)."""
-    if os.getenv("APP_ENV","dev").lower() not in {"dev","development","local","test"}:
-        raise HTTPException(status_code=403, detail="Not available in prod")
-    from worker.tasks import celery_app
-    r = celery_app.AsyncResult(job_id)
-    info = {
-        "id": job_id,
-        "state": r.state,
-        "ready": r.ready(),
-        "successful": r.successful() if hasattr(r, 'successful') else None,
-        "failed": r.failed() if hasattr(r, 'failed') else None,
-        "result_type": type(getattr(r, 'result', None)).__name__,
-    }
-    # Attempt to detect broker/worker heartbeat by calling inspect
-    try:
-        insp = celery_app.control.inspect(timeout=1)
-        active = insp.active() if insp else None
-        info['workers_seen'] = list(active.keys()) if isinstance(active, dict) else None
-    except Exception:
-        info['workers_seen'] = None
-    return info

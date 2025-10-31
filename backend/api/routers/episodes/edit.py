@@ -125,7 +125,7 @@ async def manual_edit_commit(episode_id: str, payload: Dict[str, Any], session: 
 
     # Kick off background job to apply cuts
     try:
-        from worker.tasks.audio import manual_cut_episode
+        from worker.tasks.manual_cut import manual_cut_episode
         async_mode = False
         try:
             # If Celery runs eagerly in dev, this returns result immediately
