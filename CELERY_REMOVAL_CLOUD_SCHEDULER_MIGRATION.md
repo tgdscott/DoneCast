@@ -59,19 +59,31 @@ import React, { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspens
 
 ## Files That Can Be Safely Deleted
 
-**DO NOT delete these yet - user will handle via git after testing:**
+**Safe to delete after deployment (user will handle via git):**
 
 ```
-backend/worker/tasks/app.py              # Celery app configuration
-backend/worker/tasks/maintenance.py      # Old Celery maintenance tasks (replaced by HTTP endpoints)
-backend/worker/tasks/publish.py          # Unused Spreaker publish task (legacy)
+backend/worker/tasks/app.py              # Celery app configuration - NO LONGER USED
+backend/worker/tasks/maintenance.py      # Old Celery maintenance tasks - REPLACED by HTTP endpoints  
+backend/worker/tasks/publish.py          # Spreaker Celery task - LEGACY only
+backend/worker/tasks/transcription.py    # Celery transcription task - NOT USED (Cloud Tasks used instead)
+backend/worker/tasks/manual_cut.py       # Celery manual cut task - NOT USED
 ```
 
 **Keep these files (still used by production):**
 ```
-backend/worker/tasks/__init__.py         # Has inline assembly fallback
-backend/worker/tasks/transcription.py    # Referenced by some routes (not called)
-backend/worker/tasks/assembly/           # Contains inline orchestrator (still used)
+backend/worker/tasks/__init__.py         # Updated to remove Celery, exports inline functions
+backend/worker/tasks.py                  # Updated compatibility shim (Celery imports removed)
+backend/worker/tasks/assembly/           # Contains inline orchestrator (still used for fallback)
+```
+
+**Files Updated (Celery imports removed):**
+```
+backend/api/services/episodes/jobs.py        # Celery status checks → stub responses
+backend/api/services/episodes/assembler.py   # Removed Celery imports, kept inline execution
+backend/api/services/episodes/publisher.py   # Spreaker/Celery → inline fallback only
+backend/api/routers/episodes/jobs.py         # Debug endpoint → returns "Celery removed" message
+backend/worker/tasks/__init__.py             # Removed celery_app import
+backend/worker/tasks.py                      # Removed celery_app export
 ```
 
 ## Deployment Steps

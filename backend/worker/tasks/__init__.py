@@ -1,21 +1,13 @@
 """Bootstrap for the modular ``worker.tasks`` package.
 
-The legacy monolithic ``worker.tasks`` module exposed a handful of task
-functions directly.  This package keeps that import surface stable by
-re-exporting the implementations that now live in dedicated modules.  If
-something goes wrong when importing the new modules we make a best-effort
-attempt to fall back to the legacy ``tasks.py`` implementation so existing
-deployments keep working.
+Celery has been removed. This package now only exports inline execution functions
+for episode assembly and related tasks. Background processing uses Cloud Tasks, not Celery.
 """
 
 from __future__ import annotations
 
-try:
-    from .app import celery_app  # backwards-compatible import path
-except ModuleNotFoundError:
-    celery_app = None  # type: ignore[assignment]
-except Exception:
-    celery_app = None  # type: ignore[assignment]
+# Celery has been removed - celery_app no longer exists
+celery_app = None  # type: ignore[assignment]
 
 # Prefer re-exporting from the new modular implementations
 try:  # pragma: no cover - defensive import shim
@@ -81,7 +73,6 @@ if not all(globals().get(name) for name in _required_exports):
 
 
 __all__ = [
-    "celery_app",
     "transcribe_media_file",
     "create_podcast_episode",
     "publish_episode_to_spreaker_task",

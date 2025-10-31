@@ -14,72 +14,16 @@ from api.services.publisher import SpreakerClient
 
 logger = logging.getLogger("ppp.episodes.publisher.service")
 
+# Celery has been removed - Spreaker publishing is LEGACY only (kept for backward compatibility)
+# All new episodes publish directly to GCS/RSS, not Spreaker
 publish_episode_to_spreaker_task: Optional[Any] = None
-celery_app: Optional[Any] = None
 _worker_import_attempted = False
 _worker_import_error: Optional[BaseException] = None
 
-
-def _load_worker_publish_exports() -> Tuple[Optional[Any], Optional[Any]]:
-    """Attempt to load publish task + celery app from worker.tasks."""
-
-    global _worker_import_attempted, _worker_import_error
-
-    if _worker_import_attempted:
-        return publish_episode_to_spreaker_task, celery_app
-
-    _worker_import_attempted = True
-
-    spec = find_spec("worker.tasks")
-    if spec is None:
-        logger.debug("[publish] worker.tasks spec not found; publish task unavailable")
-        return None, None
-
-    try:
-        module = import_module("worker.tasks")
-    except Exception as exc:  # pragma: no cover - defensive logging for optional dependency
-        _worker_import_error = exc
-        logger.warning("[publish] Failed to import worker.tasks", exc_info=True)
-        return None, None
-
-    task = getattr(module, "publish_episode_to_spreaker_task", None)
-    celery = getattr(module, "celery_app", None)
-
-    if task is None:
-        _worker_import_error = ImportError("publish_episode_to_spreaker_task missing from worker.tasks")
-        logger.warning(
-            "[publish] worker.tasks missing publish_episode_to_spreaker_task; treating worker as unavailable"
-        )
-        return None, None
-
-    _worker_import_error = None
-    return task, celery
-
-
-def _ensure_worker_dependencies_loaded() -> None:
-    global publish_episode_to_spreaker_task, celery_app
-
-    if publish_episode_to_spreaker_task is not None:
-        return
-
-    task, celery = _load_worker_publish_exports()
-    if task is not None:
-        publish_episode_to_spreaker_task = task
-        celery_app = celery
-        
-try:  # Celery worker package is optional in some environments
-    from worker.tasks import publish_episode_to_spreaker_task, celery_app  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover - dev/staging without worker package
-    publish_episode_to_spreaker_task = None  # type: ignore[assignment]
-    celery_app = None  # type: ignore[assignment]
-except Exception:  # pragma: no cover - guard against indirect import errors inside worker.tasks
-    publish_episode_to_spreaker_task = None  # type: ignore[assignment]
-    celery_app = None  # type: ignore[assignment]
-
 def _ensure_publish_task_available() -> None:
-    """Raise a HTTP 503 if the publish task is unavailable."""
+    """Raise a HTTP 503 if the publish task is unavailable (Spreaker is legacy/disabled)."""
 
-    _ensure_worker_dependencies_loaded()
+    # Celery and Spreaker publishing are disabled
     if publish_episode_to_spreaker_task is not None:
         return
 
@@ -150,40 +94,13 @@ def publish(session: Session, current_user, episode_id: UUID, derived_show_id: O
         payload = getattr(result, 'result', None)
         return {"job_id": "inline", "result": payload}
 
-    eager = False
-    _celery = celery_app
-    if _celery is not None:
-        try:
-            eager = bool(getattr(_celery.conf, 'task_always_eager', False))
-        except Exception:
-            eager = False
-    if eager:
-        # Execute synchronously for dev reliability
-        from typing import cast as _cast, Any as _Any
-        _task = _cast(_Any, publish_episode_to_spreaker_task)
-        result = _task.apply(args=(), kwargs=task_kwargs)
-        return {"job_id": "eager", "result": getattr(result, 'result', None)}
-
-    auto_fallback = os.getenv("CELERY_AUTO_FALLBACK", "").strip().lower() in {"1", "true", "yes", "on"}
-    env = os.getenv("APP_ENV", "dev").strip().lower()
-    should_probe_workers = _celery is not None and (auto_fallback or env in {"dev", "development", "local"})
-    worker_diag: Optional[str] = None
-    if should_probe_workers:
-        try:
-            ping = _celery.control.ping(timeout=1)
-            if not ping:
-                worker_diag = "control.ping returned no replies"
-        except Exception as exc:
-            worker_diag = f"control.ping raised {exc.__class__.__name__}: {exc}"
-
-    if worker_diag is not None:
-        logger.warning(
-            "[publish] No Celery workers detected; executing inline fallback (%s)",
-            worker_diag,
-        )
-        inline_result = _run_inline_publish()
-        inline_result["worker_status"] = {"available": False, "detail": worker_diag}
-        return inline_result
+    # Celery removed - no worker probing needed
+    # Spreaker publishing is legacy only, should not be called for new episodes
+    # Always use inline fallback if this code path is reached
+    logger.warning("[publish] Spreaker publishing called (legacy) - using inline execution")
+    inline_result = _run_inline_publish()
+    inline_result["worker_status"] = {"available": False, "detail": "celery_removed"}
+    return inline_result
 
     try:
         from typing import cast as _cast, Any as _Any

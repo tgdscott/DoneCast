@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 __all__ = [
-    "celery_app",
     "transcribe_media_file",
     "create_podcast_episode",
     "publish_episode_to_spreaker_task",
@@ -43,7 +42,7 @@ def _require(module_name: str, attr_name: str) -> Any:
         ) from exc
 
 
-celery_app = _require("worker.tasks.app", "celery_app")
+# Celery has been removed - celery_app no longer exists
 transcribe_media_file = _require("worker.tasks.transcription", "transcribe_media_file")
 create_podcast_episode = _require("worker.tasks.assembly", "create_podcast_episode")
 publish_episode_to_spreaker_task = _require("worker.tasks.publish", "publish_episode_to_spreaker_task")

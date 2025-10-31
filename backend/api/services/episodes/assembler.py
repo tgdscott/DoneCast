@@ -19,16 +19,8 @@ from api.models.settings import AppSetting
 from api.services.billing import usage as usage_svc
 from api.services.transcription import load_media_transcript_metadata_for_filename
 
-try:  # Optional dependency: Celery worker package is not always installed
-    from worker.tasks import create_podcast_episode, celery_app  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover - dev/staging environments without Celery
-    create_podcast_episode = None  # type: ignore
-    celery_app = None  # type: ignore
-except Exception:  # pragma: no cover - guard against indirect import errors inside worker.tasks
-    # If worker.tasks exists but raises during import (e.g., due to a submodule error),
-    # avoid failing this service import so the API can still start and surface a 503 at runtime.
-    create_podcast_episode = None  # type: ignore
-    celery_app = None  # type: ignore
+# Celery has been removed - all assembly uses Cloud Tasks or inline execution
+# No longer need to import create_podcast_episode or celery_app
 
 from . import dto, repo
 
@@ -88,10 +80,7 @@ def _load_inline_executor():
             _INLINE_EXECUTOR = candidate
             return _INLINE_EXECUTOR
 
-    if create_podcast_episode is not None:
-        _INLINE_EXECUTOR = cast(Any, create_podcast_episode)
-        return _INLINE_EXECUTOR
-
+    # Celery has been removed - only use inline orchestrator
     return None
 
 
@@ -515,8 +504,8 @@ def assemble_or_queue(
             from fastapi import HTTPException
             raise HTTPException(status_code=402, detail="Monthly episode quota reached for your tier")
 
-    # Ensure the worker task module (or inline fallback) is available before performing DB writes.
-    if create_podcast_episode is None and not inline_available:
+    # Ensure the inline fallback is available before performing DB writes.
+    if not inline_available:
         _raise_worker_unavailable()
 
     # Prepare metadata and admin test-mode overrides
