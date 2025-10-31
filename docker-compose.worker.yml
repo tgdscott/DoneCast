@@ -1,0 +1,95 @@
+# Docker Compose for Local Celery Worker + RabbitMQ
+# Run on your office server to handle heavy processing tasks
+
+version: '3.8'
+
+services:
+  # RabbitMQ message broker
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: podcast_rabbitmq
+    ports:
+      - "5672:5672"      # AMQP protocol
+      - "15672:15672"    # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: podcast
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-changeme123}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Celery worker for processing tasks
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: podcast_worker
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      # RabbitMQ connection
+      RABBITMQ_URL: amqp://podcast:${RABBITMQ_PASSWORD:-changeme123}@rabbitmq:5672//
+      
+      # Database connection (Cloud SQL)
+      DATABASE_URL: ${DATABASE_URL}
+      
+      # Cloud storage credentials
+      GOOGLE_APPLICATION_CREDENTIALS: /app/gcp-key.json
+      GCS_BUCKET: ${GCS_BUCKET}
+      
+      # R2 credentials
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
+      R2_BUCKET: ${R2_BUCKET}
+      
+      # API keys
+      ASSEMBLYAI_API_KEY: ${ASSEMBLYAI_API_KEY}
+      AUPHONIC_API_TOKEN: ${AUPHONIC_API_TOKEN}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      
+      # Worker config
+      CELERY_EAGER: 0
+      PYTHON_ENV: production
+      
+      # Local storage for processing
+      LOCAL_MEDIA_DIR: /app/local_media
+      LOCAL_TMP_DIR: /app/local_tmp
+      
+    volumes:
+      - ./backend:/app/backend
+      - ./gcp-key.json:/app/gcp-key.json:ro
+      - worker_media:/app/local_media
+      - worker_tmp:/app/local_tmp
+    restart: unless-stopped
+    command: celery -A worker.tasks.app worker --loglevel=info --concurrency=2
+    
+  # Optional: Celery Beat for scheduled tasks
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: podcast_beat
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      RABBITMQ_URL: amqp://podcast:${RABBITMQ_PASSWORD:-changeme123}@rabbitmq:5672//
+      DATABASE_URL: ${DATABASE_URL}
+      CELERY_EAGER: 0
+    volumes:
+      - ./backend:/app/backend
+      - ./gcp-key.json:/app/gcp-key.json:ro
+    restart: unless-stopped
+    command: celery -A worker.tasks.app beat --loglevel=info
+
+volumes:
+  rabbitmq_data:
+  worker_media:
+  worker_tmp:

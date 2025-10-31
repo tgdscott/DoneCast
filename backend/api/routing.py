@@ -105,6 +105,7 @@ website_publish_router = _safe_import("api.routers.podcasts.publish")
 auphonic_router        = _safe_import("api.routers.episodes.auphonic")
 # user_deletion_router is in admin/users.py (loaded via admin module)
 speakers_router        = _safe_import("api.routers.speakers")
+worker_health_router   = _safe_import("api.routers.worker_health")
 
 def _maybe(app: FastAPI, r, prefix: str = "/api"):
     if r is not None:
@@ -198,6 +199,9 @@ def attach_routers(app: FastAPI) -> dict:
     availability['auphonic_router'] = auphonic_router is not None
     # user_deletion_router removed - deletion functionality is in admin/users.py
     _maybe(app, speakers_router)  # Speaker identification configuration
+    availability['speakers_router'] = speakers_router is not None
+    _maybe(app, worker_health_router)  # Local worker health check and fallback status
+    availability['worker_health_router'] = worker_health_router is not None
     availability['speakers_router'] = speakers_router is not None
 
     # Cloud Tasks internal hook (no prefix: it already has /api/tasks)

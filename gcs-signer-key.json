@@ -1,13 +1,2 @@
-{
-  "type": "service_account",
-  "project_id": "podcast612",
-  "private_key_id": "c81c93b2596aa26c6b09bc18bf342a7d43280ae7",
-  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCyVqjpnAR+0Io2\n/T/ArD/gLL1bC0uFwHSyfBtGDPgnLT2gF7tMe9IVhe9AoJYjaD4Kaas2CC9xD4wd\nWF1321+cKLJBB1VPih57Sy1TmtfMW7rhYKaxVg4EiUyiXB0OKt/na6WxRVM6uFdW\nN9g8Pctq4wQULb7NgDrUyFKPk8RjLtEssl4sezdKRP5VJIEZuueiU15TMytrVLSp\nYJcABdvJLBmu4LR6lcJrLv0+Z31REchdH8l9CmQ54ZDbgFJWc6a/3YILpYvYGGl5\n585GiWQ9XlXRZRFTm4VPsaqWBQCvk3UMOuTxhd2cM8pb6mrBtp+y00wnKm++VC6y\nXfYx6TUBAgMBAAECggEAB0gM3IDvbrgYCe0RfHiWoRINPIQ7tf8oz0ghmvIY8wyL\nVBfeoLL7iGpwCCz7rwATbGcVGP8rj2EJoQHEdd+B9K/KsLyvvzAjVM250OHlHBBw\nvcFYUlbyT+gai2nZu9mEoSp0LkaSLTcX8HVrlvC/offD6QkByIU1objOJNOX307E\nF+0L1quNfIX6aQ+Y5P+vDaizzy8gCw3b3X3d3ZrFo8mMeRNW+Z9DibGeRPNsJ+4o\nQh4IEZ2fRnUo3Bv305t1mRYYNOgltxx/33KFuFc/NoMSQvnpWFu++q4JFSbweGsY\naj81KRMQYsCpsSvIVU0A60bijhtIP5liOWLyqGSseQKBgQDa2nQdQassSW+edUNh\n/221PHfMXh0hG/TJrNo4eaU/UULEdVPrvlk6HajpMXllDAUv6qSMUAklvUfDzJOM\nbFDcGG/RArZnnvUtK2X+69tv0H12ZqBK26cJmxW28n96cyYcNE+Kcg8euUpvQYx1\nmd9XZgORus0+kV4ZZMX9tQaF3QKBgQDQm8TelBjhrpdzIfCHYAW5vV9P9ISxr3xX\nB4VUnBj2SC93gtHu/c/mBEnbW9cjs1gP3cfeo33BKnUYwZtxXbH5yJuiLIGBs3bq\n3R1rQ29Az1QlbYbMJrCKVZckntDOSj7Nk8ouMO2jBAp+ycxkw5PIBqveHAQOcUH/\nzJCNSZ8zdQKBgBaq8cPl/VjE8m6zLpuD3VUcQjxEszeusZgB80hOMTNxszyt+lc8\ni/ldARXGLhCtQgxIfWqbD5d9F2XMVqwAvA9P6KT5ZvMsn7BiAlp5C211ZslQr+GR\nBqgUDBe63kFMk/Hv6R0p2y8Pegoz+9xiZ6OhyVTayE9mtxxiN6+jhF1xAoGBAMsc\nf4i/5aIHXkqpZwpIQgrhCaZNy809sfECz5zcB6n0CtNwOntaAUxSLJ86QrTt7/Yy\n2GI8CTtE3ZJnH7Q3qAwueOpkLwxb8pMnC3fexrnxpFp00+R+XzGxuGHdiCzzOUbs\neNSUqywnyRg935bUnlUJudmeqYxuVfZ79Nq8LhfpAoGBALCswOrdE5+Uir+KB1Yy\nyWfrdmvVRKjPNSYWW5byqM0k1tFLJxCj4hThNn18joFVONaLllW1VIb9Nz9houQZ\nLj6pWiS9+Kqp7twQSJp3vmMdULrVw9zcXIRjrT8Nl96huYERQure38PBCSJuZUTk\n4lS1MRHrvsrU6Epqk+BA7yfe\n-----END PRIVATE KEY-----\n",
-  "client_email": "gcs-media-signer@podcast612.iam.gserviceaccount.com",
-  "client_id": "109233268331616495937",
-  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-  "token_uri": "https://oauth2.googleapis.com/token",
-  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/gcs-media-signer%40podcast612.iam.gserviceaccount.com",
-  "universe_domain": "googleapis.com"
-}
+cd /root/CloudPod
+nano docker-compose.worker.yml
