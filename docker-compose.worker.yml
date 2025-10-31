@@ -51,7 +51,7 @@ services:
       
       # API keys
       ASSEMBLYAI_API_KEY: ${ASSEMBLYAI_API_KEY}
-      AUPHONIC_API_TOKEN: ${AUPHONIC_API_TOKEN}
+      AUPHONIC_API_KEY: ${AUPHONIC_API_KEY}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       
       # Worker config

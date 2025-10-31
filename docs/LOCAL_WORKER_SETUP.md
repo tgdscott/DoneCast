@@ -29,7 +29,7 @@ notepad .env.worker
 - `GCS_BUCKET` - Your GCS bucket name
 - `R2_*` - Your R2 credentials
 - `ASSEMBLYAI_API_KEY` - From AssemblyAI dashboard
-- `AUPHONIC_API_TOKEN` - From Auphonic settings (Pro tier only)
+- `AUPHONIC_API_KEY` - From Auphonic settings (Pro tier only)
 - `GEMINI_API_KEY` - From Google AI Studio
 
 ### 3. Add GCP Service Account Key
