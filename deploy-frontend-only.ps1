@@ -15,7 +15,7 @@ $WEB_SERVICE = "podcast-web"
 $WEB_DIR = "frontend"
 
 # Build arguments
-$VITE_API_BASE = "https://api.podcastplusplus.com"
+$VITE_API_BASE = "https://api.podcastplusplus.com/api"
 
 Write-Host "==> Configuration:" -ForegroundColor Yellow
 Write-Host "    Project: $PROJECT_ID"

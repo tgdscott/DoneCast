@@ -177,8 +177,10 @@ export default function NewLanding() {
   // Fetch landing page content from API (all sections)
   useEffect(() => {
     let cancelled = false;
-    const api = makeApi(null); // Public endpoint, no auth needed
-    api.get('/public/landing')
+  const api = makeApi(null); // Public endpoint, no auth needed
+  // API routes are mounted under /api on the backend. Use the full /api prefix
+  // so buildApiUrl produces the correct production URL (e.g. https://api.podcastplusplus.com/api/public/landing).
+  api.get('/api/public/landing')
       .then((data) => {
         if (!cancelled && data) {
           setLandingContent(mergeLandingContent(data));

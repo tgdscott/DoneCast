@@ -85,6 +85,20 @@ export default function usePodcastCreator({
     capabilities,
   });
 
+  // Publishing must be initialized before scheduling because scheduling
+  // references publishing setters (setPublishMode, setScheduleDate, setScheduleTime).
+  // Defining `publishing` earlier avoids the "Cannot access 'publishing' before initialization" TDZ error.
+  const publishing = usePublishing({
+    token,
+    selectedTemplate: stepNav.selectedTemplate,
+    assembledEpisode: null,
+    assemblyComplete: false,
+    setStatusMessage,
+    setError,
+    setCurrentStep: stepNav.setCurrentStep,
+    testMode,
+  });
+
   const scheduling = useScheduling({
     token,
     selectedTemplate: stepNav.selectedTemplate,
@@ -103,16 +117,6 @@ export default function usePodcastCreator({
     audioDurationSec: fileUpload.audioDurationSec,
   });
 
-  const publishing = usePublishing({
-    token,
-    selectedTemplate: stepNav.selectedTemplate,
-    assembledEpisode: null,
-    assemblyComplete: false,
-    setStatusMessage,
-    setError,
-    setCurrentStep: stepNav.setCurrentStep,
-    testMode,
-  });
 
   const aiFeatures = useAIFeatures({
     token,

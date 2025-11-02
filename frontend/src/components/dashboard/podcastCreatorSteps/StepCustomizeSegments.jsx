@@ -35,8 +35,10 @@ export default function StepCustomizeSegments({
   }, []);
 
   const ttsSegmentsWithKey = React.useMemo(() => {
-    if (!Array.isArray(selectedTemplate?.segments)) return [];
-    return selectedTemplate.segments
+    const segments = Array.isArray(selectedTemplate?.segments) && selectedTemplate.segments.length
+      ? selectedTemplate.segments
+      : [{ segment_type: 'content', source: { source_type: 'content' } }];
+    return segments
       .map((segment, index) => ({ segment, index, key: computeSegmentKey(segment, index) }))
       .filter(({ segment }) => segment?.source?.source_type === 'tts');
   }, [selectedTemplate?.segments, computeSegmentKey]);
@@ -252,8 +254,9 @@ export default function StepCustomizeSegments({
 
       <Card className="border-0 shadow-lg bg-white">
         <CardContent className="p-6 space-y-4">
-          {selectedTemplate && selectedTemplate.segments ? (
-            selectedTemplate.segments.map((segment, index) => {
+          {selectedTemplate ? (
+            // Use a defensive fallback when templates are missing segments (server-side bug or migration)
+            (Array.isArray(selectedTemplate.segments) && selectedTemplate.segments.length ? selectedTemplate.segments : [{ segment_type: 'content', source: { source_type: 'content' } }]).map((segment, index) => {
               const promptKey = computeSegmentKey(segment, index);
               const fieldId = segment?.id !== undefined && segment?.id !== null ? String(segment.id) : String(promptKey);
               const isMissing = showValidation && missingKeysSet.has(promptKey);
