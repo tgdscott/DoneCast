@@ -10,10 +10,14 @@ const resetEnvAndModules = () => {
 describe('apiClient assetUrl', () => {
   beforeEach(() => {
     resetEnvAndModules();
+    delete globalThis.localStorage;
+    delete globalThis.window;
   });
 
   afterEach(() => {
     resetEnvAndModules();
+    delete globalThis.localStorage;
+    delete globalThis.window;
   });
 
   it('strips trailing /api for asset paths when base is absolute', async () => {
@@ -27,5 +31,18 @@ describe('apiClient assetUrl', () => {
     const { assetUrl } = await import('../apiClient.js');
     expect(assetUrl('/static/foo.jpg')).toBe('/api/static/foo.jpg');
     expect(assetUrl('static/foo.jpg')).toBe('/api/static/foo.jpg');
+  });
+
+  it('appends auth token to playback URLs when available', async () => {
+    const storage = {
+      getItem: vi.fn((key) => (key === 'authToken' ? 'abc123' : null)),
+    };
+    globalThis.localStorage = storage;
+    vi.stubEnv('VITE_API_BASE', '/api');
+
+    const { assetUrl } = await import('../apiClient.js');
+    expect(assetUrl('/api/episodes/123/playback')).toBe('/api/episodes/123/playback?token=abc123');
+    expect(assetUrl('/api/episodes/123/playback?foo=bar')).toBe('/api/episodes/123/playback?foo=bar&token=abc123');
+    expect(assetUrl('/static/foo.jpg')).toBe('/api/static/foo.jpg');
   });
 });
