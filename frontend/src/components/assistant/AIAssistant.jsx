@@ -67,6 +67,19 @@ export default function AIAssistant({
       }
     };
   }, [popupWindow]);
+
+  // Clear proactive help reminder when user navigates to a different page
+  useEffect(() => {
+    // Reset page tracking when currentPage changes
+    pageStartTime.current = Date.now();
+    actionsAttempted.current = [];
+    errorsEncountered.current = [];
+    
+    // Clear any active reminder bubble since user is now on a new screen
+    if (proactiveHelp) {
+      setProactiveHelp(null);
+    }
+  }, [currentPage]); // Re-run whenever the user navigates to a different page
   
   // Scroll to bottom when messages change
   useEffect(() => {

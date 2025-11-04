@@ -572,40 +572,48 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
             # DIAGNOSTIC: Confirm local save worked
             logging.info("🟢 [STEP_7_COMPLETE] Saved transcript locally to '%s'", out_path)
 
-            # Upload permanently to GCS in a deterministic location: transcripts/{safe_stem}.json
-            logging.info("🟡 [STEP_8_START] Preparing GCS upload - safe_stem='%s'", safe_stem)
+            # Upload permanently to cloud storage in a deterministic location: transcripts/{safe_stem}.json
+            logging.info("🟡 [STEP_8_START] Preparing cloud storage upload - safe_stem='%s'", safe_stem)
             gcs_url = None
             gcs_uri = None
             bucket = None
             key = None
             try:
                 bucket = _resolve_transcripts_bucket()
-                from ...infrastructure.gcs import upload_bytes  # type: ignore
+                from ...infrastructure import storage  # type: ignore
 
                 key = f"transcripts/{safe_stem}.json"
-                gcs_uri = upload_bytes(
+                storage_url = storage.upload_bytes(
                     bucket,
                     key,
                     payload.encode("utf-8"),
                     content_type="application/json; charset=utf-8",
                 )
-                if gcs_uri and gcs_uri.startswith("gs://"):
-                    gcs_url = f"https://storage.googleapis.com/{bucket}/{key}"
+                
+                # Handle both GCS (gs://) and R2 (https://) URLs
+                if storage_url:
+                    if storage_url.startswith("gs://"):
+                        gcs_uri = storage_url
+                        gcs_url = f"https://storage.googleapis.com/{bucket}/{key}"
+                    else:
+                        # R2 returns https:// URL directly
+                        gcs_url = storage_url
+                        gcs_uri = f"r2://{bucket}/{key}"
                 else:
                     gcs_uri = None
                 
-                # DIAGNOSTIC: Confirm GCS upload worked
-                logging.info("🟢 [STEP_9_COMPLETE] GCS upload SUCCESS - gcs_uri='%s', gcs_url='%s'", gcs_uri, gcs_url)
+                # DIAGNOSTIC: Confirm cloud storage upload worked
+                logging.info("🟢 [STEP_9_COMPLETE] Cloud storage upload SUCCESS - gcs_uri='%s', gcs_url='%s'", gcs_uri, gcs_url)
             except Exception as upload_exc:
-                # CRITICAL FIX: Don't fail transcription if GCS upload fails
-                # Local transcript is already saved, and recovery logic can retry GCS upload later
+                # CRITICAL FIX: Don't fail transcription if cloud storage upload fails
+                # Local transcript is already saved, and recovery logic can retry upload later
                 logging.error(
-                    "[transcription] ⚠️ Failed to upload transcript to GCS (will use local copy): %s",
+                    "[transcription] ⚠️ Failed to upload transcript to cloud storage (will use local copy): %s",
                     upload_exc,
                     exc_info=True,
                 )
-                # DIAGNOSTIC: Log that GCS upload failed
-                logging.warning("🔴 [STEP_9_FAILED] GCS upload FAILED - continuing with bucket=None, key=None, gcs_uri=None")
+                # DIAGNOSTIC: Log that cloud storage upload failed
+                logging.warning("🔴 [STEP_9_FAILED] Cloud storage upload FAILED - continuing with bucket=None, key=None, gcs_uri=None")
                 # Don't raise - allow transcription to complete with local transcript
 
             # CRITICAL FIX: Use original_filename (GCS URI) not local_name (downloaded file)

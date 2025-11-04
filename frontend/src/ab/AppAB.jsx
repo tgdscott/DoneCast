@@ -388,7 +388,7 @@ export default function AppAB({ token }) {
       </div>
       
       {/* AI Assistant - Always available in bottom-right corner */}
-      <AIAssistant token={token} user={user} />
+      <AIAssistant token={token} user={user} currentPage={active} />
     </div>
   );
 }
