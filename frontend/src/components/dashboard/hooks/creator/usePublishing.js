@@ -14,6 +14,7 @@ import { makeApi } from '@/lib/apiClient';
  * @param {Function} options.setStatusMessage - Callback to set status message
  * @param {Function} options.setError - Callback to set error message
  * @param {Function} options.setCurrentStep - Callback to set current wizard step
+ * @param {Function} options.setAutoPublishPending - Setter passed from assembly hook
  * @param {boolean} options.testMode - Whether in test mode (auto-sets draft)
  * @returns {Object} Publishing state and handlers
  */
@@ -23,6 +24,7 @@ export default function usePublishing({
   assembledEpisode,
   assemblyComplete,
   autoPublishPending,
+  setAutoPublishPending = () => {},
   setStatusMessage,
   setError,
   setCurrentStep,
@@ -398,7 +400,7 @@ export default function usePublishing({
     scheduleTime,
     setScheduleTime,
     // Note: autoPublishPending is now a prop, not returned state
-    // Note: setAutoPublishPending removed - managed by assembly hook
+    // setAutoPublishPending is provided via props (bridged from assembly hook)
     lastAutoPublishedEpisodeId,
     
     // Handlers
