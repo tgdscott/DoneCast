@@ -20,8 +20,50 @@ publish_episode_to_spreaker_task: Optional[Any] = None
 _worker_import_attempted = False
 _worker_import_error: Optional[BaseException] = None
 
+
+def _load_publish_task() -> None:
+    """Attempt to import the legacy Spreaker publish task exactly once."""
+
+    global publish_episode_to_spreaker_task, _worker_import_attempted, _worker_import_error
+
+    if publish_episode_to_spreaker_task is not None or _worker_import_attempted:
+        return
+
+    _worker_import_attempted = True
+    module_candidates = ("worker.tasks", "backend.worker.tasks")
+    last_error: Optional[BaseException] = None
+
+    for module_name in module_candidates:
+        try:
+            spec = find_spec(module_name)
+        except Exception as exc:  # pragma: no cover - defensive guard
+            last_error = exc
+            continue
+
+        if spec is None:
+            continue
+
+        try:
+            module = import_module(module_name)
+            task = getattr(module, "publish_episode_to_spreaker_task", None)
+            if task is None:
+                raise AttributeError(f"publish_episode_to_spreaker_task missing from {module_name}")
+            publish_episode_to_spreaker_task = task
+            _worker_import_error = None
+            return
+        except Exception as exc:  # pragma: no cover - defensive guard
+            last_error = exc
+            continue
+
+    _worker_import_error = last_error or ImportError(
+        "publish_episode_to_spreaker_task not found in worker tasks"
+    )
+
+
 def _ensure_publish_task_available() -> None:
     """Raise a HTTP 503 if the publish task is unavailable (Spreaker is legacy/disabled)."""
+
+    _load_publish_task()
 
     # Celery and Spreaker publishing are disabled
     if publish_episode_to_spreaker_task is not None:

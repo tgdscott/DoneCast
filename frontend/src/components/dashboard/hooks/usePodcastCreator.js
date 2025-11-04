@@ -95,13 +95,21 @@ export default function usePodcastCreator({
   const [assemblyAutoPublishPending, setAssemblyAutoPublishPending] = useState(false);
   const [assemblyComplete, setAssemblyComplete] = useState(false);
   const [assembledEpisode, setAssembledEpisode] = useState(null);
-  
+
+  const setAutoPublishPendingBridgeRef = useRef((value) => {
+    setAssemblyAutoPublishPending(value);
+  });
+  const setAutoPublishPendingBridge = useCallback((value) => {
+    setAutoPublishPendingBridgeRef.current(value);
+  }, []);
+
   const publishing = usePublishing({
     token,
     selectedTemplate: stepNav.selectedTemplate,
     assembledEpisode, // Wired from assembly hook below
     assemblyComplete, // Wired from assembly hook below
     autoPublishPending: assemblyAutoPublishPending, // Wired from assembly hook below
+    setAutoPublishPending: setAutoPublishPendingBridge,
     setStatusMessage,
     setError,
     setCurrentStep: stepNav.setCurrentStep,
@@ -162,6 +170,22 @@ export default function usePodcastCreator({
     handleUploadProcessedCoverAndPreview: mediaManagement.handleUploadProcessedCover,
     useAuphonic,
   });
+
+  useEffect(() => {
+    const assemblySetter = assembly.setAutoPublishPending;
+    setAutoPublishPendingBridgeRef.current = (value) => {
+      if (typeof assemblySetter === 'function') {
+        assemblySetter(value);
+      }
+      setAssemblyAutoPublishPending(value);
+    };
+
+    return () => {
+      setAutoPublishPendingBridgeRef.current = (value) => {
+        setAssemblyAutoPublishPending(value);
+      };
+    };
+  }, [assembly.setAutoPublishPending]);
 
   // Wire assembly values to publishing hook (since assembly is initialized after publishing)
   useEffect(() => {
