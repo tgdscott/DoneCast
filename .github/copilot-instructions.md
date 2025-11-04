@@ -25,6 +25,52 @@ Self-hosted podcast creation platform with AI-powered features. Full-stack app: 
 
 **When in doubt:** Ask, don't assume. Getting it wrong wastes time and creates bugs.
 
+### NEVER HARDCODE VARIABLE DATA (CRITICAL)
+**ABSOLUTE PROHIBITION: NEVER EVER hardcode values that should come from APIs, databases, or user input.**
+
+**This means:**
+- ❌ **NEVER hardcode names, labels, or IDs** (e.g., "George (ElevenLabs)" for voice ID)
+- ❌ **NEVER hardcode lookup tables for data that exists in APIs** (e.g., voice ID → name mappings)
+- ❌ **NEVER hardcode configuration that should be fetched dynamically**
+- ❌ **NEVER make up placeholder data and ship it as "temporary" solutions**
+- ✅ **ALWAYS fetch data from its authoritative source** (API, database, config file)
+- ✅ **ALWAYS fix broken data flows instead of masking with hardcoded values**
+- ✅ **Show generic fallbacks ONLY while loading** ("Loading...", "AI Voice", "Resolving...")
+
+**Why This Rule Exists:**
+- Hardcoded data becomes stale immediately (voices renamed, new voices added, etc.)
+- Hardcoded mappings mask broken API calls or data flow issues
+- "Temporary" hardcoded values NEVER get removed and cause bugs months later
+- Hardcoding = hallucinating data = violating the "NEVER hallucinate" rule above
+
+**What To Do Instead:**
+```javascript
+// ❌ BAD - Hardcoded mapping
+const voiceNames = {
+  '19B4gjtpL5m876wS3Dfg': 'George (ElevenLabs)',  // This is hallucination!
+};
+const displayName = voiceNames[voiceId] || 'AI Voice';
+
+// ✅ GOOD - Fetch from API
+const [voiceNameById, setVoiceNameById] = useState({});
+useEffect(() => {
+  fetchVoicesFromElevenLabs().then(voices => {
+    const map = {};
+    voices.forEach(v => map[v.voice_id] = v.name);
+    setVoiceNameById(map);
+  });
+}, []);
+const displayName = voiceNameById[voiceId] || 'AI Voice'; // Generic fallback while loading
+```
+
+**When data is missing:**
+1. ✅ **Trace why the data flow is broken** (missing prop, API not called, etc.)
+2. ✅ **Fix the root cause** (pass the prop, call the API, etc.)
+3. ✅ **Use generic fallbacks ONLY** ("Loading...", "AI Voice") - NEVER make up specific values
+4. ❌ **NEVER hardcode the "correct" value as a shortcut**
+
+**When in doubt:** If you're typing a hardcoded string that looks like real data (a name, a URL, a config value), STOP and ask: "Should this come from an API/database/config instead?"
+
 ### NEVER Show Unfriendly Names to Users (CRITICAL UX RULE)
 **ABSOLUTE PROHIBITION: NEVER EVER EVER EVER display UUIDs, filenames with UUIDs, or any technical identifiers to end users.**
 

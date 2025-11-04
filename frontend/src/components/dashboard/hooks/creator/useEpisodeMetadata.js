@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { toast } from '@/hooks/use-toast';
 import { makeApi } from '@/lib/apiClient';
 
@@ -39,8 +39,47 @@ export default function useEpisodeMetadata({
   const [isAiTitleBusy, setIsAiTitleBusy] = useState(false);
   const [isAiDescBusy, setIsAiDescBusy] = useState(false);
 
-  // AI cache (avoid re-generating same content)
-  const aiCacheRef = useRef({ title: null, notes: null, tags: null });
+  // AI cache (avoid re-generating same content) - using useState instead of useRef to prevent hooks order violations
+  const [aiCache, setAiCache] = useState({ title: null, notes: null, tags: null });
+
+  // Auto-fill season and episode number from podcast's latest episode
+  // NOTE: Using useState instead of useRef to avoid hooks order violation
+  const [autoFillTriggered, setAutoFillTriggered] = useState(false);
+  useEffect(() => {
+    if (!selectedTemplate?.podcast_id || !token || autoFillTriggered) return;
+    
+    setAutoFillTriggered(true);
+    
+    (async () => {
+      try {
+        const api = makeApi(token);
+        const response = await api.get(`/api/episodes/last/numbering?podcast_id=${selectedTemplate.podcast_id}`);
+        
+        if (!response || (response.season_number === null && response.episode_number === null)) {
+          // No episodes found - default to season 1, episode 1
+          setEpisodeDetails(prev => ({
+            ...prev,
+            season: '1',
+            episodeNumber: '1',
+          }));
+          return;
+        }
+        
+        const latestSeason = response.season_number || 1;
+        const latestEpisode = response.episode_number || 0;
+        
+        // Keep same season, increment episode number
+        setEpisodeDetails(prev => ({
+          ...prev,
+          season: String(latestSeason),
+          episodeNumber: String(latestEpisode + 1),
+        }));
+      } catch (err) {
+        console.warn('[useEpisodeMetadata] Failed to auto-fill episode number:', err);
+        // Silently fail - user can manually enter numbers
+      }
+    })();
+  }, [selectedTemplate?.podcast_id, token, autoFillTriggered]);
 
   // Details change handler
   const handleDetailsChange = useCallback(
@@ -56,8 +95,8 @@ export default function useEpisodeMetadata({
       const force = !!opts.force;
       const currentText = opts.currentText || null;
       
-      if (!force && !currentText && aiCacheRef.current.title) {
-        return aiCacheRef.current.title;
+      if (!force && !currentText && aiCache.title) {
+        return aiCache.title;
       }
 
       const api = makeApi(token);
@@ -77,6 +116,7 @@ export default function useEpisodeMetadata({
 
       let title = '';
       try {
+        try { console.debug('[useEpisodeMetadata] suggestTitle payload', { transcript_path: payload.transcript_path, hint: payload.hint, podcast_id: payload.podcast_id }); } catch(_) {}
         const res = await api.post('/api/ai/title', payload);
         title = res?.title || '';
       } catch (e) {
@@ -111,10 +151,10 @@ export default function useEpisodeMetadata({
       }
 
       // Only cache new generations, not refinements
-      if (!currentText) aiCacheRef.current.title = title;
+      if (!currentText) setAiCache(prev => ({ ...prev, title }));
       return title;
     },
-    [token, expectedEpisodeId, selectedTemplate, transcriptPath, uploadedFilename, resetTranscriptState]
+    [token, expectedEpisodeId, selectedTemplate, transcriptPath, uploadedFilename, resetTranscriptState, aiCache]
   );
 
   // AI Description Suggestion
@@ -123,8 +163,8 @@ export default function useEpisodeMetadata({
       const force = !!opts.force;
       const currentText = opts.currentText || null;
       
-      if (!force && !currentText && aiCacheRef.current.notes) {
-        return aiCacheRef.current.notes;
+      if (!force && !currentText && aiCache.notes) {
+        return aiCache.notes;
       }
 
       const api = makeApi(token);
@@ -143,10 +183,11 @@ export default function useEpisodeMetadata({
       }
 
       let desc = '';
-      try {
-        const res = await api.post('/api/ai/notes', payload);
-        desc = res?.description || '';
-      } catch (e) {
+        try { console.debug('[useEpisodeMetadata] suggestNotes payload', { transcript_path: payload.transcript_path, hint: payload.hint, podcast_id: payload.podcast_id }); } catch(_) {}
+        try {
+          const res = await api.post('/api/ai/notes', payload);
+          desc = res?.description || '';
+        } catch (e) {
         if (e && e.status === 409) {
           resetTranscriptState();
           try {
@@ -178,16 +219,16 @@ export default function useEpisodeMetadata({
       }
 
       // Only cache new generations, not refinements
-      if (!currentText) aiCacheRef.current.notes = desc;
+      if (!currentText) setAiCache(prev => ({ ...prev, notes: desc }));
       return desc;
     },
-    [token, expectedEpisodeId, selectedTemplate, transcriptPath, uploadedFilename, resetTranscriptState]
+    [token, expectedEpisodeId, selectedTemplate, transcriptPath, uploadedFilename, resetTranscriptState, aiCache]
   );
 
   // AI Tags Suggestion
   const suggestTags = useCallback(
     async () => {
-      if (aiCacheRef.current.tags) return aiCacheRef.current.tags;
+      if (aiCache.tags) return aiCache.tags;
 
       const api = makeApi(token);
       const payload = {
@@ -201,7 +242,7 @@ export default function useEpisodeMetadata({
       try {
         const res = await api.post('/api/ai/tags', payload);
         const tags = Array.isArray(res?.tags) ? res.tags : [];
-        aiCacheRef.current.tags = tags;
+        setAiCache(prev => ({ ...prev, tags }));
         return tags;
       } catch (e) {
         if (e && e.status === 409) {
@@ -234,7 +275,7 @@ export default function useEpisodeMetadata({
         return [];
       }
     },
-    [token, expectedEpisodeId, selectedTemplate, transcriptPath, uploadedFilename, resetTranscriptState]
+    [token, expectedEpisodeId, selectedTemplate, transcriptPath, uploadedFilename, resetTranscriptState, aiCache]
   );
 
   // User-facing AI handlers
@@ -336,7 +377,6 @@ export default function useEpisodeMetadata({
     setIsAiTitleBusy,
     isAiDescBusy,
     setIsAiDescBusy,
-    aiCacheRef,
     
     // Handlers
     handleDetailsChange,

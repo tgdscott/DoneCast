@@ -932,7 +932,7 @@ def _finalize_episode(
     except Exception as dur_err:
         raise RuntimeError(f"[assemble] Could not get audio duration: {dur_err}") from dur_err
     
-    # Upload to cloud storage (R2) - if this fails, the entire assembly fails
+    # Upload to cloud storage (GCS or R2) - if this fails, the entire assembly fails
     gcs_audio_key = f"{user_id}/episodes/{episode_id}/audio/{final_basename}"
     try:
         with open(audio_src, "rb") as f:
@@ -940,11 +940,13 @@ def _finalize_episode(
     except Exception as storage_err:
         raise RuntimeError(f"[assemble] CRITICAL: Failed to upload audio to cloud storage. Episode assembly cannot complete. Error: {storage_err}") from storage_err
     
-    if not gcs_audio_url or not str(gcs_audio_url).startswith("gs://"):
-        raise RuntimeError(f"[assemble] CRITICAL: GCS upload returned invalid URL: {gcs_audio_url}")
+    # Validate URL format (GCS: gs://, R2: https://)
+    url_str = str(gcs_audio_url) if gcs_audio_url else ""
+    if not url_str or not (url_str.startswith("gs://") or url_str.startswith("https://")):
+        raise RuntimeError(f"[assemble] CRITICAL: Cloud storage upload returned invalid URL: {gcs_audio_url}")
     
     episode.gcs_audio_path = gcs_audio_url
-    logging.info("[assemble] ✅ Audio uploaded to GCS: %s", gcs_audio_url)
+    logging.info("[assemble] ✅ Audio uploaded to cloud storage: %s", gcs_audio_url)
     
     # Mirror to local media directory for dev environment playback
     try:
@@ -990,7 +992,9 @@ def _finalize_episode(
                     content_type = f"image/{cover_ext}" if cover_ext in ("jpg", "jpeg", "png", "gif") else "image/jpeg"
                     gcs_cover_url = storage.upload_fileobj(gcs_bucket, gcs_cover_key, f, content_type=content_type)  # type: ignore[attr-defined]
                 
-                if not gcs_cover_url or not str(gcs_cover_url).startswith("gs://"):
+                # Validate URL format (GCS: gs://, R2: https://)
+                cover_url_str = str(gcs_cover_url) if gcs_cover_url else ""
+                if not cover_url_str or not (cover_url_str.startswith("gs://") or cover_url_str.startswith("https://")):
                     raise RuntimeError(f"[assemble] CRITICAL: Cover cloud storage upload failed - returned invalid URL: {gcs_cover_url}")
                 
                 episode.gcs_cover_path = gcs_cover_url

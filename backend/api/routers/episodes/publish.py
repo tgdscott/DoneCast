@@ -37,12 +37,20 @@ def publish_episode_endpoint(
     if not ep:
         raise HTTPException(status_code=404, detail="Episode not found")
 
-    # REQUIRE GCS audio path - no fallbacks, no local files
-    # GCS is the sole source of truth for all media
-    if not ep.gcs_audio_path or not str(ep.gcs_audio_path).startswith("gs://"):
+    # REQUIRE cloud storage audio path (GCS or R2)
+    # Cloud storage is the sole source of truth for all media
+    if not ep.gcs_audio_path:
         raise HTTPException(
             status_code=400, 
-            detail="Episode has no GCS audio file. Episode must be properly assembled with audio uploaded to GCS before publishing. Local files and Spreaker-only episodes are no longer supported."
+            detail="Episode has no cloud storage audio file. Episode must be properly assembled with audio uploaded to cloud storage before publishing."
+        )
+    
+    # Accept both gs:// (GCS) and https:// (R2) URLs
+    audio_path_str = str(ep.gcs_audio_path)
+    if not (audio_path_str.startswith("gs://") or audio_path_str.startswith("https://")):
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Episode audio path has unexpected format: {audio_path_str[:50]}... (expected gs:// or https:// URL)"
         )
 
     # Spreaker integration is now OPTIONAL (legacy support only)

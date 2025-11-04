@@ -76,6 +76,8 @@ export default function useEpisodeAssembly({
   // Main assembly handler
   const handleAssemble = useCallback(
     async () => {
+      console.log('[ASSEMBLE] handleAssemble called with publishMode:', publishMode);
+      
       // Guard: Minutes precheck pending
       if (minutesPrecheckPending) {
         setError('Checking processing minutes… please wait.');
@@ -328,6 +330,12 @@ export default function useEpisodeAssembly({
     return () => clearInterval(interval);
   }, [jobId, token, expectedEpisodeId, publishMode, setError, setStatusMessage]);
 
+  // Validation for Step 5 (Episode Details)
+  const missingTitle = !episodeDetails?.title || episodeDetails.title.trim() === '';
+  const missingEpisodeNumber = !episodeDetails?.episodeNumber || episodeDetails.episodeNumber.toString().trim() === '';
+  const blockingQuota = quotaExceeded;
+  const canProceedToStep5 = !missingTitle && !missingEpisodeNumber && !blockingQuota;
+
   return {
     // State
     isAssembling,
@@ -336,6 +344,12 @@ export default function useEpisodeAssembly({
     expectedEpisodeId,
     jobId,
     autoPublishPending,
+
+    // Validation
+    canProceedToStep5,
+    blockingQuota,
+    missingTitle,
+    missingEpisodeNumber,
 
     // Setters (for external control)
     setIsAssembling,

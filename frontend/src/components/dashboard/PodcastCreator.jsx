@@ -163,19 +163,60 @@ export default function PodcastCreator({
     resolveInternVoiceId,
   } = controller;
 
+  // Auto-fill title/description/tags when user reaches Step 5 and conditions met
+  const autoFillTriggeredRef = React.useRef({ templateId: null, transcriptPath: null });
+  React.useEffect(() => {
+    // Only trigger on Step 5 entry
+    if (currentStep !== 5) return;
+    if (!selectedTemplate) return;
+    // Respect template AI opt-out
+    const shouldAuto = selectedTemplate?.ai_settings?.auto_fill_ai !== false;
+    if (!shouldAuto) return;
+    // Must have a ready transcript to auto-fill
+    if (!transcriptReady) return;
+
+    const tplId = selectedTemplate?.id || null;
+    const transcriptPath = controller?.transcriptPath || null;
+    // Only run once per template + transcript combination
+    if (autoFillTriggeredRef.current.templateId === tplId && autoFillTriggeredRef.current.transcriptPath === transcriptPath) return;
+    autoFillTriggeredRef.current = { templateId: tplId, transcriptPath };
+
+    (async () => {
+      try {
+        if (typeof controller.handleAISuggestTitle === 'function') {
+          await controller.handleAISuggestTitle();
+        }
+        if (typeof controller.handleAISuggestDescription === 'function') {
+          await controller.handleAISuggestDescription();
+        }
+        if (typeof controller.suggestTags === 'function') {
+          try {
+            const tags = await controller.suggestTags();
+            if (Array.isArray(tags) && tags.length && typeof handleDetailsChange === 'function') {
+              handleDetailsChange('tags', tags.join(', '));
+            }
+          } catch (_) {}
+        }
+      } catch (e) {
+        console.warn('[PodcastCreator] autofill failed', e);
+      }
+    })();
+  }, [currentStep, selectedTemplate, transcriptReady, controller, handleDetailsChange]);
+
   const { toast } = useToast();
 
+  // Auto-select and advance if there's only ONE valid active template
   const autoAdvanceRef = React.useRef(false);
   React.useEffect(() => {
-    if (creatorMode === 'preuploaded') {
-      if (!autoAdvanceRef.current && currentStep === 1) {
-        setCurrentStep(2);
+    if (creatorMode === 'preuploaded' && !autoAdvanceRef.current && currentStep === 1) {
+      const activeTemplates = templates.filter(t => t.is_active !== false);
+      if (activeTemplates.length === 1 && !selectedTemplate) {
+        // Automatically select the only template and advance
+        handleTemplateSelect(activeTemplates[0]);
         autoAdvanceRef.current = true;
       }
-    } else {
-      autoAdvanceRef.current = false;
     }
-  }, [creatorMode, currentStep, setCurrentStep]);
+  }, [creatorMode, currentStep, templates, selectedTemplate, handleTemplateSelect]);
 
   const selectedPreuploadItem = React.useMemo(
     () => {

@@ -60,11 +60,16 @@ export default function useScheduling({ token, selectedTemplate, setPublishMode,
 
   const handleRecurringApply = async (slot) => {
     try {
-      const template = templates.find(t => t.id === slot.template_id);
-      if (template) {
-        setSelectedTemplate(template);
+      const templateId = slot.template_id;
+      if (templateId) {
+        // Fetch full template instead of using lightweight list item
+        const api = makeApi(token);
+        const fullTemplate = await api.get(`/api/templates/${templateId}`);
+        setSelectedTemplate(fullTemplate);
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to fetch full template for recurring slot', err);
+    }
 
     let nextDate = slot?.next_scheduled_date;
     let nextTime = slot?.next_scheduled_time;

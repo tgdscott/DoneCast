@@ -54,7 +54,9 @@ export default function usePodcastCreator({
 
   const voiceConfig = useVoiceConfiguration({
     token,
+    currentStep: stepNav.currentStep,
     selectedTemplate: stepNav.selectedTemplate,
+    setSelectedTemplate: stepNav.setSelectedTemplate,
   });
 
   const metadata = useEpisodeMetadata({
@@ -88,22 +90,28 @@ export default function usePodcastCreator({
   // Publishing must be initialized before scheduling because scheduling
   // references publishing setters (setPublishMode, setScheduleDate, setScheduleTime).
   // Defining `publishing` earlier avoids the "Cannot access 'publishing' before initialization" TDZ error.
+  // Note: We'll wire up assembly values (autoPublishPending, assemblyComplete, assembledEpisode) 
+  // after assembly is initialized (see useEffect below)
+  const [assemblyAutoPublishPending, setAssemblyAutoPublishPending] = useState(false);
+  const [assemblyComplete, setAssemblyComplete] = useState(false);
+  const [assembledEpisode, setAssembledEpisode] = useState(null);
+  
   const publishing = usePublishing({
     token,
     selectedTemplate: stepNav.selectedTemplate,
-    assembledEpisode: null,
-    assemblyComplete: false,
+    assembledEpisode, // Wired from assembly hook below
+    assemblyComplete, // Wired from assembly hook below
+    autoPublishPending: assemblyAutoPublishPending, // Wired from assembly hook below
     setStatusMessage,
     setError,
     setCurrentStep: stepNav.setCurrentStep,
-    testMode,
   });
 
   const scheduling = useScheduling({
     token,
     selectedTemplate: stepNav.selectedTemplate,
     templates,
-    setSelectedTemplate: stepNav.setSelectedTemplate,
+    setSelectedTemplate: stepNav.setSelectedTemplate, // Already the normalized setter from stepNav
     setCurrentStep: stepNav.setCurrentStep,
     setPublishMode: publishing.setPublishMode,
     setScheduleDate: publishing.setScheduleDate,
@@ -155,6 +163,18 @@ export default function usePodcastCreator({
     useAuphonic,
   });
 
+  // Wire assembly values to publishing hook (since assembly is initialized after publishing)
+  useEffect(() => {
+    console.log('[CREATOR] Syncing assembly values to publishing:', {
+      autoPublishPending: assembly.autoPublishPending,
+      assemblyComplete: assembly.assemblyComplete,
+      assembledEpisode: assembly.assembledEpisode?.id || null,
+    });
+    setAssemblyAutoPublishPending(assembly.autoPublishPending);
+    setAssemblyComplete(assembly.assemblyComplete);
+    setAssembledEpisode(assembly.assembledEpisode);
+  }, [assembly.autoPublishPending, assembly.assemblyComplete, assembly.assembledEpisode]);
+
   useEffect(() => {
     (async () => {
       try {
@@ -169,6 +189,41 @@ export default function usePodcastCreator({
       } catch (_) {}
     })();
   }, [token]);
+
+  // Defensive: if selectedTemplate ever appears without segments (for example
+  // because a lightweight template object from a list was written into state),
+  // fetch the full template and normalize it. This prevents the UI from being
+  // left in a state with no segments (which previously manifested as
+  // "This template has no segments to display"). We use the stepNav setter
+  // which is already the normalized setter.
+  useEffect(() => {
+    // Re-run whenever the selectedTemplate object changes (not just its id).
+    // This catches cases where some code overwrites the template with a
+    // lightweight object that has the same id but lacks `segments`.
+    const tpl = stepNav.selectedTemplate;
+    if (!tpl || !tpl.id) return;
+    const hasSegments = Array.isArray(tpl.segments) && tpl.segments.length > 0;
+    if (hasSegments) return;
+
+    console.warn('[usePodcastCreator] DEFENSIVE REFETCH: template missing segments, fetching full template', { templateId: tpl.id, currentSegments: tpl.segments });
+    let cancelled = false;
+    (async () => {
+      try {
+        const api = makeApi(token);
+        const full = await api.get(`/api/templates/${tpl.id}`);
+        if (cancelled) return;
+        console.debug('[usePodcastCreator] DEFENSIVE REFETCH: fetched full template, restoring segments', { templateId: tpl.id, fetchedSegments: full.segments });
+        // Merge existing lightweight template with full payload - the
+        // stepNav setter will normalize/seed segments.
+        stepNav.setSelectedTemplate({ ...tpl, ...full });
+      } catch (err) {
+        // Non-fatal: if fetch fails, leave the template as-is and rely on
+        // existing UI fallbacks in StepCustomizeSegments.
+        console.error('[usePodcastCreator] DEFENSIVE REFETCH FAILED:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [stepNav.selectedTemplate, token]);
 
   return {
     ...stepNav,

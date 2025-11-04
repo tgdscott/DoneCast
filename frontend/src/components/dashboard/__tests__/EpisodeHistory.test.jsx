@@ -29,6 +29,7 @@ vi.mock('@/lib/apiClient', () => {
       },
     }),
     isApiError: () => false,
+    assetUrl: (p) => p,
   };
 });
 

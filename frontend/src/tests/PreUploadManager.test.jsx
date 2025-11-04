@@ -7,7 +7,7 @@ import { loadPublicConfig, resetPublicConfigCache } from '@/hooks/usePublicConfi
 
 const { rawMock, makeApiMock } = vi.hoisted(() => {
   const raw = vi.fn().mockResolvedValue({});
-  const makeApi = vi.fn(() => ({ raw }));
+  const makeApi = vi.fn(() => ({ raw, post: async (p, body) => raw(p, { method: 'POST', body }) }));
   return { rawMock: raw, makeApiMock: makeApi };
 });
 
@@ -26,6 +26,7 @@ const { resizeObserverMock } = vi.hoisted(() => ({
 vi.mock('@/lib/apiClient', () => ({
   makeApi: makeApiMock,
   buildApiUrl: (path) => path,
+  assetUrl: (path) => path,
 }));
 
 vi.mock('@/hooks/use-toast', () => ({

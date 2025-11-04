@@ -22,6 +22,7 @@ export default function usePublishing({
   selectedTemplate,
   assembledEpisode,
   assemblyComplete,
+  autoPublishPending,
   setStatusMessage,
   setError,
   setCurrentStep,
@@ -33,7 +34,7 @@ export default function usePublishing({
   const [publishVisibility, setPublishVisibility] = useState('public'); // 'public', 'unpublished'
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
-  const [autoPublishPending, setAutoPublishPending] = useState(false);
+  // Note: autoPublishPending comes from props (set by assembly hook), not local state
   
   // Track last auto-published episode to prevent duplicate publishing
   const [lastAutoPublishedEpisodeId, setLastAutoPublishedEpisodeId] = useState(null);
@@ -175,10 +176,15 @@ export default function usePublishing({
   // Manual publish handler (user clicks "Publish" button)
   const handlePublish = useCallback(
     async () => {
+      console.log('[PUBLISH] handlePublish called (manual button click)');
+      
       if (!assembledEpisode) {
+        console.error('[PUBLISH] No assembled episode!');
         setError('Assembled episode required.');
         return;
       }
+      
+      console.log('[PUBLISH] Episode ready:', assembledEpisode.id);
       
       let showId = null;
       if (selectedTemplate && selectedTemplate.podcast_id) {
@@ -238,8 +244,12 @@ export default function usePublishing({
           if (publish_at_local) payload.publish_at_local = publish_at_local;
         }
         
+        console.log('[PUBLISH] Sending POST /api/episodes/{id}/publish with payload:', payload);
+        
         const api = makeApi(token);
         let result = await api.post(`/api/episodes/${assembledEpisode.id}/publish`, payload);
+        
+        console.log('[PUBLISH] API response:', result);
         if (!result || typeof result !== 'object') result = {};
         
         const scheduled = !!publish_at;
@@ -285,26 +295,47 @@ export default function usePublishing({
   const assembledEpisodeId = assembledEpisode?.id;
   
   useEffect(() => {
-    if (!assemblyComplete || !autoPublishPending || !assembledEpisode) return;
+    console.log('[AUTOPUBLISH] useEffect triggered:', {
+      assemblyComplete,
+      autoPublishPending,
+      hasAssembledEpisode: !!assembledEpisode,
+      assembledEpisodeId: assembledEpisode?.id,
+      publishMode,
+    });
+    
+    if (!assemblyComplete || !autoPublishPending || !assembledEpisode) {
+      console.log('[AUTOPUBLISH] Early return - conditions not met');
+      return;
+    }
     
     // Guard 1: Check if publishing already triggered for this episode
     if (publishingTriggeredRef.current && assembledEpisode?.id === lastAutoPublishedEpisodeId) {
+      console.log('[AUTOPUBLISH] Guard 1: Already triggered for this episode');
       setAutoPublishPending(false);
       return;
     }
     
     // Guard 2: Legacy check
     if (lastAutoPublishedEpisodeId && assembledEpisode.id === lastAutoPublishedEpisodeId) {
+      console.log('[AUTOPUBLISH] Guard 2: Legacy check - already published');
       setAutoPublishPending(false);
       return;
     }
     
     if (publishMode === 'draft') {
+      console.log('[AUTOPUBLISH] Draft mode - skipping publish');
       setAutoPublishPending(false);
       setStatusMessage('Draft created (processing complete).');
       publishingTriggeredRef.current = false; // Reset for next episode
       return;
     }
+    
+    console.log('[AUTOPUBLISH] All guards passed - triggering publish!', {
+      publishMode,
+      scheduleDate,
+      scheduleTime,
+      episodeId: assembledEpisode.id,
+    });
     
     // Set flag IMMEDIATELY before async operation to prevent race conditions
     publishingTriggeredRef.current = true;
@@ -335,12 +366,18 @@ export default function usePublishing({
     }
     
     (async () => {
+      console.log('[AUTOPUBLISH] Starting publish async function');
       setIsPublishing(true);
       try {
+        console.log('[AUTOPUBLISH] Calling handlePublishInternal with:', { scheduleEnabled, publish_at, publish_at_local });
         await handlePublishInternal({ scheduleEnabled, publish_at, publish_at_local });
+        console.log('[AUTOPUBLISH] handlePublishInternal completed successfully');
+      } catch (err) {
+        console.error('[AUTOPUBLISH] handlePublishInternal failed:', err);
       } finally {
         setIsPublishing(false);
         setAutoPublishPending(false);
+        console.log('[AUTOPUBLISH] Async function complete');
       }
     })();
     // CRITICAL: Only trigger when assembly completes and autopublish flag is set
@@ -360,8 +397,8 @@ export default function usePublishing({
     setScheduleDate,
     scheduleTime,
     setScheduleTime,
-    autoPublishPending,
-    setAutoPublishPending,
+    // Note: autoPublishPending is now a prop, not returned state
+    // Note: setAutoPublishPending removed - managed by assembly hook
     lastAutoPublishedEpisodeId,
     
     // Handlers

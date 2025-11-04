@@ -307,8 +307,24 @@ export default function EpisodeHistory({ token, onBack }) {
       setEpisodes(prev => prev.map(e => e.id===scheduleEp.id ? { ...e, status:'scheduled', publish_at: iso, publish_at_local: `${scheduleDate} ${scheduleTime}`, _scheduling:false } : e));
       setScheduleEp(null);
     } catch(e){
-  const msg = isApiError(e) ? (e.detail || e.error || e.message) : String(e);
-  setScheduleError(msg || 'Failed to schedule');
+      // Extract string message from error object (never render object directly)
+      let msg = 'Failed to schedule';
+      if (isApiError(e)) {
+        // API error object: extract detail/error/message string
+        msg = e.detail || e.error || e.message || JSON.stringify(e);
+      } else if (e instanceof Error) {
+        msg = e.message;
+      } else if (typeof e === 'string') {
+        msg = e;
+      } else {
+        // Last resort: stringify the error
+        try {
+          msg = JSON.stringify(e);
+        } catch {
+          msg = String(e);
+        }
+      }
+      setScheduleError(msg);
       setEpisodes(prev => prev.map(p => p.id===scheduleEp.id ? { ...p, _scheduling:false } : p));
     } finally { setScheduleSubmitting(false); }
   };

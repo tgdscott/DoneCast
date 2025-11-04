@@ -171,7 +171,9 @@ export default function useFileUpload({
       const ready = !!item.transcript_ready;
       setTranscriptReady(ready);
       transcriptReadyRef.current = ready;
-      setTranscriptPath(ready ? item.transcript_path || null : null);
+  const path = ready ? item.transcript_path || null : null;
+  try { console.debug('[useFileUpload] set transcript state', { filename, ready, transcript_path: path }); } catch(_) {}
+  setTranscriptPath(path);
 
       // Notify parent of selection
       if (onPreuploadSelect) {

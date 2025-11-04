@@ -21,6 +21,17 @@ export default function StepCustomizeSegments({
   voiceNameById,
   voicesLoading,
 }) {
+  React.useEffect(() => {
+    try {
+      console.debug('[StepCustomizeSegments] selectedTemplate at render:', {
+        id: selectedTemplate?.id,
+        name: selectedTemplate?.name,
+        segmentsLength: Array.isArray(selectedTemplate?.segments) ? selectedTemplate.segments.length : 0,
+        rawSegments: selectedTemplate?.segments,
+      });
+    } catch (_) {}
+  }, [selectedTemplate]);
+
   const [isGuideOpen, setIsGuideOpen] = React.useState(false);
   const [showValidation, setShowValidation] = React.useState(false);
 
@@ -79,6 +90,7 @@ export default function StepCustomizeSegments({
         const voiceId = segment?.source?.voice_id || '';
         const resolvedFriendly = voiceNameById[voiceId];
         const providedLabel = segment?.source?.voice_name || segment?.source?.voice_label;
+        
         const baseVoiceLabel =
           (!voiceId || voiceId === 'default')
             ? 'Default voice'
@@ -86,7 +98,7 @@ export default function StepCustomizeSegments({
             ? resolvedFriendly
             : providedLabel && !isUuidLike(providedLabel)
             ? providedLabel
-            : formatDisplayName(voiceId, { fallback: 'AI Voice' }) || 'AI Voice';
+            : 'AI Voice'; // Generic fallback while resolving - NEVER show raw UUID
         const isResolvingVoice = Boolean(
           voicesLoading &&
             voiceId &&
@@ -254,9 +266,14 @@ export default function StepCustomizeSegments({
 
       <Card className="border-0 shadow-lg bg-white">
         <CardContent className="p-6 space-y-4">
-          {selectedTemplate ? (
-            // Use a defensive fallback when templates are missing segments (server-side bug or migration)
-            (Array.isArray(selectedTemplate.segments) && selectedTemplate.segments.length ? selectedTemplate.segments : [{ segment_type: 'content', source: { source_type: 'content' } }]).map((segment, index) => {
+          {/* Always render an effective segments list. If selectedTemplate is missing
+              or its segments array is empty (server-side issue), fall back to a
+              single content segment so the UI remains usable. */}
+          {
+            (Array.isArray(selectedTemplate?.segments) && selectedTemplate.segments.length
+              ? selectedTemplate.segments
+              : [{ segment_type: 'content', source: { source_type: 'content' } }]
+            ).map((segment, index) => {
               const promptKey = computeSegmentKey(segment, index);
               const fieldId = segment?.id !== undefined && segment?.id !== null ? String(segment.id) : String(promptKey);
               const isMissing = showValidation && missingKeysSet.has(promptKey);
@@ -271,11 +288,7 @@ export default function StepCustomizeSegments({
                 </div>
               );
             })
-          ) : (
-            <div className="text-center py-12">
-              <p className="text-lg text-gray-600">This template has no segments to display.</p>
-            </div>
-          )}
+          }
         </CardContent>
       </Card>
 

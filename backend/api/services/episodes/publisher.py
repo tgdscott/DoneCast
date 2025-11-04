@@ -40,7 +40,8 @@ def _ensure_publish_task_available() -> None:
 
 
 def publish(session: Session, current_user, episode_id: UUID, derived_show_id: Optional[str], publish_state: Optional[str], auto_publish_iso: Optional[str]) -> Dict[str, Any]:
-    _ensure_publish_task_available()
+    # DON'T check worker availability until we know we need Spreaker
+    # Many users don't have Spreaker and should publish RSS-only without errors
 
     ep = repo.get_episode_by_id(session, episode_id, user_id=current_user.id)
     if not ep:
@@ -57,21 +58,35 @@ def publish(session: Session, current_user, episode_id: UUID, derived_show_id: O
     # Skip Spreaker task if no token or no show ID (RSS-only mode)
     if not spreaker_access_token or not derived_show_id:
         logger.info(
-            "publish: RSS-only mode (spreaker_token=%s show_id=%s) episode_id=%s",
+            "publish: RSS-only mode (spreaker_token=%s show_id=%s auto_publish=%s) episode_id=%s",
             bool(spreaker_access_token),
             derived_show_id,
+            auto_publish_iso,
             episode_id
         )
-        # Just update episode status and publish to RSS feed
+        # Update episode status based on whether it's scheduled or immediate
         from api.models.podcast import EpisodeStatus
-        ep.status = EpisodeStatus.published
+        
+        if auto_publish_iso:
+            # Scheduled publish - keep status as "processed" until scheduled time
+            # (Frontend determines "scheduled" by checking processed + future publish_at)
+            ep.status = EpisodeStatus.processed
+            message = f"Episode scheduled for {auto_publish_iso} (RSS feed only)"
+        else:
+            # Immediate publish - set to published
+            ep.status = EpisodeStatus.published
+            message = "Episode published to RSS feed (Spreaker not configured)"
+        
         session.add(ep)
         session.commit()
         session.refresh(ep)
         return {
             "job_id": "rss-only",
-            "message": "Episode published to RSS feed only (Spreaker not configured)"
+            "message": message
         }
+
+    # Only check Spreaker worker availability if we actually need it
+    _ensure_publish_task_available()
 
     task_kwargs = {
         'episode_id': str(ep.id),

@@ -87,7 +87,13 @@ def should_use_chunking(audio_path: Path) -> bool:
     """Determine if an audio file should use chunked processing.
     
     Files longer than 10 minutes benefit from chunking.
+    Can be disabled via DISABLE_CHUNKING=true env var for testing.
     """
+    # Allow disabling chunking for testing/debugging
+    if os.getenv("DISABLE_CHUNKING", "").lower() in ("true", "1", "yes"):
+        log.info("[chunking] Chunking disabled via DISABLE_CHUNKING env var")
+        return False
+    
     try:
         audio = AudioSegment.from_file(str(audio_path))
         duration_ms = len(audio)
