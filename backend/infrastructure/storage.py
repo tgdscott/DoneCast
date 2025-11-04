@@ -210,6 +210,7 @@ def generate_signed_url(
 def get_public_audio_url(
     path: Optional[str],
     expiration_days: int = 7,
+    **kwargs,
 ) -> Optional[str]:
     """Generate signed URL for audio playback.
     
@@ -230,10 +231,10 @@ def get_public_audio_url(
     # Auto-detect backend from path
     if path.startswith("r2://") or os.getenv("R2_BUCKET", "").strip() in path:
         logger.debug(f"[storage] Generating R2 audio URL for {path}")
-        return r2.get_public_audio_url(path, expiration_days)
+        return r2.get_public_audio_url(path, expiration_days, **kwargs)
     else:
         logger.debug(f"[storage] Generating GCS audio URL for {path}")
-        return gcs.get_public_audio_url(path, expiration_days)
+        return gcs.get_public_audio_url(path, expiration_days, **kwargs)
 
 
 # Backward compatibility aliases

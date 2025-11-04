@@ -775,7 +775,12 @@ def delete_gcs_blob(bucket_name: str, blob_name: str) -> None:
         )
 
 
-def get_public_audio_url(gcs_path: Optional[str], expiration_days: int = 7) -> Optional[str]:
+def get_public_audio_url(
+    gcs_path: Optional[str],
+    expiration_days: int = 7,
+    *,
+    use_cdn: bool = True,
+) -> Optional[str]:
     """
     Generate a public-accessible URL for podcast audio in GCS.
     
@@ -813,12 +818,24 @@ def get_public_audio_url(gcs_path: Optional[str], expiration_days: int = 7) -> O
             expires=timedelta(days=expiration_days),
             method="GET",
         )
-        
+
         if signed_url:
-            # Convert to CDN URL for faster delivery and lower costs
-            cdn_url = _convert_to_cdn_url(signed_url)
-            logger.debug("Generated public audio URL for %s (expires in %d days, CDN-enabled)", gcs_path, expiration_days)
-            return cdn_url
+            if use_cdn:
+                # Convert to CDN URL for faster delivery and lower costs
+                cdn_url = _convert_to_cdn_url(signed_url)
+                logger.debug(
+                    "Generated public audio URL for %s (expires in %d days, CDN-enabled)",
+                    gcs_path,
+                    expiration_days,
+                )
+                return cdn_url
+
+            logger.debug(
+                "Generated public audio URL for %s (expires in %d days, direct HTTPS)",
+                gcs_path,
+                expiration_days,
+            )
+            return signed_url
         
         # Fallback: Return public GCS URL (will only work if bucket is publicly readable)
         public_url = f"https://storage.googleapis.com/{bucket_name}/{object_path}"

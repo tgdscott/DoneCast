@@ -340,6 +340,8 @@ def get_public_url(bucket_name: str, key: str) -> str:
 def get_public_audio_url(
     r2_path: Optional[str],
     expiration_days: int = 7,
+    *,
+    use_cdn: bool = True,
 ) -> Optional[str]:
     """Generate signed URL for audio playback from R2 path.
     
@@ -375,6 +377,9 @@ def get_public_audio_url(
     
     # Generate signed URL with expiration
     expiration_seconds = expiration_days * 24 * 60 * 60
+    # R2 public URLs are already HTTPS; CDN behavior is managed at bucket level.
+    # Keep signature consistent with GCS helper even though we ignore ``use_cdn``.
+    _ = use_cdn
     return generate_signed_url(bucket_name, key, expiration=expiration_seconds)
 
 
