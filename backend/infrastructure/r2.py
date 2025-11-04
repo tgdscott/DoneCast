@@ -318,6 +318,27 @@ def generate_signed_url(
         return None
 
 
+def get_signed_url(
+    bucket_name: str,
+    key: str,
+    expiration: int = 3600,
+) -> Optional[str]:
+    """Alias for generate_signed_url() to match GCS interface.
+    
+    This provides API compatibility with the GCS module, allowing
+    code to work with both storage backends without changes.
+    
+    Args:
+        bucket_name: R2 bucket name
+        key: Object key/path
+        expiration: URL expiration in seconds (default 1 hour)
+    
+    Returns:
+        Presigned URL string, or None if failed
+    """
+    return generate_signed_url(bucket_name, key, expiration=expiration, method="GET")
+
+
 def get_public_url(bucket_name: str, key: str) -> str:
     """Get public R2 URL (for objects in public buckets).
     
