@@ -12,6 +12,7 @@ from sqlalchemy import func
 
 from api.core.database import get_session
 from api.routers.auth import get_current_user
+from api.core.auth import get_current_user as _core_get_current_user
 from api.models.user import User
 from api.models.podcast import Episode, Podcast, EpisodeStatus
 
@@ -78,6 +79,28 @@ def _set_status(ep: Episode, status_str: str) -> None:
                         setattr(ep, 'status', status_str)
                 except Exception:
                         pass
+
+
+async def _resolve_current_user_for_media(
+        request: Request,
+        session: Session = Depends(get_session),
+) -> User:
+        token = request.query_params.get("token")
+        if not token:
+                auth_header = request.headers.get("authorization")
+                if auth_header and isinstance(auth_header, str):
+                        parts = auth_header.split(" ", 1)
+                        if len(parts) == 2 and parts[0].lower() == "bearer":
+                                candidate = parts[1].strip()
+                                if candidate:
+                                        token = candidate
+        if not token:
+                cookie_token = request.cookies.get("token") or request.cookies.get("authToken")
+                if cookie_token:
+                        token = cookie_token
+        if not token:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+        return await _core_get_current_user(request=request, session=session, token=token)
 
 
 def _proxy_episode_audio(ep: Episode, request: Request, method: str) -> Response:
@@ -269,7 +292,7 @@ def get_episode_playback_stream(
         episode_id: str,
         request: Request,
         session: Session = Depends(get_session),
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(_resolve_current_user_for_media),
 ):
         try:
                 eid = _UUID(str(episode_id))
@@ -286,7 +309,7 @@ def head_episode_playback_stream(
         episode_id: str,
         request: Request,
         session: Session = Depends(get_session),
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(_resolve_current_user_for_media),
 ):
         try:
                 eid = _UUID(str(episode_id))

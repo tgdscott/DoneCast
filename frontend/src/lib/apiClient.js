@@ -4,6 +4,74 @@ export function isApiError(e) {
 
 const LOCAL_LIKE_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]']);
 
+const ABSOLUTE_URL_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
+const PLAYBACK_TOKEN_PATTERN = /\/api\/episodes\/[^/?#]+\/playback(?:[/?#]|$)/i;
+
+function getGlobalLocalStorage() {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return window.localStorage;
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (typeof localStorage !== 'undefined') {
+      return localStorage;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+export function getStoredAuthToken() {
+  const storage = getGlobalLocalStorage();
+  if (!storage) return null;
+  try {
+    const token = storage.getItem('authToken');
+    return token || null;
+  } catch {
+    return null;
+  }
+}
+
+function shouldAttachToken(path) {
+  if (!path || typeof path !== 'string') return false;
+  return PLAYBACK_TOKEN_PATTERN.test(path);
+}
+
+function appendTokenIfNeeded(url) {
+  if (!shouldAttachToken(url)) return url;
+  const token = getStoredAuthToken();
+  if (!token) return url;
+
+  try {
+    const isAbsolute = ABSOLUTE_URL_PATTERN.test(url) || url.startsWith('//');
+    const base = isAbsolute ? undefined : 'http://placeholder.local';
+    const urlObj = new URL(url, base);
+    urlObj.searchParams.set('token', token);
+
+    if (isAbsolute) {
+      return urlObj.toString();
+    }
+    const pathname = urlObj.pathname || '';
+    const search = urlObj.search || '';
+    const hash = urlObj.hash || '';
+    return `${pathname}${search}${hash}` || pathname;
+  } catch {
+    const hashIndex = url.indexOf('#');
+    let baseUrl = url;
+    let hash = '';
+    if (hashIndex >= 0) {
+      baseUrl = url.slice(0, hashIndex);
+      hash = url.slice(hashIndex);
+    }
+    const separator = baseUrl.includes('?') ? '&' : '?';
+    return `${baseUrl}${separator}token=${encodeURIComponent(token)}${hash}`;
+  }
+}
+
 function deriveApiOriginFromWindowOrigin() {
   if (typeof window === 'undefined' || typeof window.location === 'undefined') {
     return '';
@@ -127,7 +195,7 @@ export function makeApi(token) {
   // localStorage (e.g., after OAuth redirect). This avoids races where
   // components call makeApi before AuthProvider has set its token state.
   const authFor = (optsHeaders = {}) => {
-    const provided = token || (() => { try { return localStorage.getItem('authToken'); } catch { return null; } })();
+    const provided = token || getStoredAuthToken();
     return provided ? { Authorization: `Bearer ${provided}`, ...(optsHeaders || {}) } : { ...(optsHeaders || {}) };
   };
 
@@ -143,7 +211,8 @@ export function makeApi(token) {
 
 export function assetUrl(path) {
   // Build a full URL for static assets that come from the API origin (e.g., /static or cover paths)
-  return buildApiUrl(path);
+  const built = buildApiUrl(path);
+  return appendTokenIfNeeded(built);
 }
 
 // Backward-compatible simple API without auth
