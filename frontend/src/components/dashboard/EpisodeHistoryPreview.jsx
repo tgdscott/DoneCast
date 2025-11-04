@@ -83,7 +83,7 @@ export default function EpisodeHistoryPreview({ episodes, onEdit, onDelete, form
                   </div>
                   <audio
                     ref={el => { if (el) audioRefs.current[ep.id] = el; }}
-                    src={resolveAssetUrl(ep.playback_url || ep.stream_url || ep.final_audio_url || '') || ''}
+                  src={resolveAssetUrl(ep.proxy_playback_url || ep.playback_url || ep.stream_url || ep.final_audio_url || '') || ''}
                     preload="none"
                     onEnded={()=> setPlayingId(id => id===ep.id ? null : id)}
                     className="hidden"
@@ -124,7 +124,7 @@ export default function EpisodeHistoryPreview({ episodes, onEdit, onDelete, form
                   </div>
                   <audio
                     ref={el => { if (el) audioRefs.current[ep.id] = el; }}
-                    src={resolveAssetUrl(ep.playback_url || ep.stream_url || ep.final_audio_url || '') || ''}
+                  src={resolveAssetUrl(ep.proxy_playback_url || ep.playback_url || ep.stream_url || ep.final_audio_url || '') || ''}
                     preload="none"
                     onEnded={()=> setPlayingId(id => id===ep.id ? null : id)}
                     className="hidden"

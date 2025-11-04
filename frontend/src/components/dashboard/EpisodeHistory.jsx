@@ -776,9 +776,10 @@ export default function EpisodeHistory({ token, onBack }) {
         const coverUrl = resolveAssetUrl(ep.cover_url) || resolveAssetUrl(`/api/episodes/${ep.id}/cover`);
         // Prioritize a direct public URL if the backend provides it.
         // Otherwise, fall back to existing stream/final URLs.
-        let audioUrl = ep.public_url || ep.playback_url || ep.stream_url || ep.final_audio_url || '';
+        let audioUrl = ep.proxy_playback_url || ep.public_url || ep.playback_url || ep.stream_url || ep.final_audio_url || '';
         audioUrl = resolveAssetUrl(audioUrl) || '';
-  const missingAudio = audioUrl && ep.final_audio_exists === false && ep.playback_type !== 'stream';
+        const hasProxyAudio = !!ep.proxy_playback_url;
+        const missingAudio = audioUrl && ep.final_audio_exists === false && ep.playback_type !== 'stream' && !hasProxyAudio;
   // Allow unpublish for all scheduled/published episodes (force option available after 24h)
   const showUnpublish = statusLabel(ep.status) === 'scheduled' || statusLabel(ep.status) === 'published';
         // Heuristic: show Retry when status is error, or processing exceeds 1.25x duration (fallback 15min)
@@ -971,7 +972,7 @@ export default function EpisodeHistory({ token, onBack }) {
         <div className="col-span-1 text-right">Actions</div>
       </div>
       {displayEpisodes.map(ep => {
-  let audioUrl = ep.playback_url || ep.stream_url || ep.final_audio_url || '';
+      let audioUrl = ep.proxy_playback_url || ep.playback_url || ep.stream_url || ep.final_audio_url || '';
         audioUrl = resolveAssetUrl(audioUrl) || '';
   const showUnpublish = statusLabel(ep.status) === 'scheduled' || (statusLabel(ep.status) === 'published' && isWithin24h(ep.publish_at));
         let showRetry = false;

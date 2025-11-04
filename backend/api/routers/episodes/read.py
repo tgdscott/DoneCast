@@ -4,7 +4,8 @@ import json
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Body, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Body, status, Query, Request, Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlmodel import select
 from sqlalchemy import func
@@ -18,6 +19,7 @@ from api.services.episodes import jobs as _svc_jobs
 from .common import _cover_url_for, _final_url_for, _status_value, compute_playback_info, compute_cover_info
 from api.services.episodes import repo as _svc_repo
 from api.services.episodes.transcripts import transcript_endpoints_for_episode
+import httpx
 from uuid import UUID as _UUID
 from pathlib import Path
 from api.core.paths import FINAL_DIR, MEDIA_DIR, APP_ROOT, TRANSCRIPTS_DIR
@@ -29,6 +31,20 @@ router = APIRouter(tags=["episodes"])  # parent provides prefix '/episodes'
 
 # Avoid importing app main (would cause circular import). Derive project root relative to this file.
 PROJECT_ROOT = APP_ROOT
+
+_AUDIO_PASSTHROUGH_HEADERS = (
+        "content-type",
+        "content-length",
+        "content-range",
+        "accept-ranges",
+        "content-encoding",
+        "etag",
+        "last-modified",
+        "cache-control",
+        "expires",
+)
+
+_AUDIO_PROXY_TIMEOUT = 60.0
 
 
 def _is_flubber_token(word: str) -> bool:
@@ -62,6 +78,85 @@ def _set_status(ep: Episode, status_str: str) -> None:
                         setattr(ep, 'status', status_str)
                 except Exception:
                         pass
+
+
+def _proxy_episode_audio(ep: Episode, request: Request, method: str) -> Response:
+        playback = compute_playback_info(ep)
+        url = playback.get("playback_url")
+        if not url:
+                raise HTTPException(status_code=404, detail="Episode audio not available")
+        url_str = str(url)
+        if not url_str.lower().startswith(("http://", "https://")):
+                raise HTTPException(status_code=400, detail="Episode audio source unsupported")
+
+        headers: Dict[str, str] = {}
+        range_header = request.headers.get("range")
+        if range_header:
+                headers["Range"] = range_header
+        accept_header = request.headers.get("accept")
+        if accept_header:
+                headers["Accept"] = accept_header
+        conditional_headers = {
+                "If-Range": request.headers.get("if-range"),
+                "If-None-Match": request.headers.get("if-none-match"),
+                "If-Modified-Since": request.headers.get("if-modified-since"),
+        }
+        for key, value in conditional_headers.items():
+                if value:
+                        headers[key] = value
+
+        client = httpx.Client(follow_redirects=True, timeout=_AUDIO_PROXY_TIMEOUT)
+        try:
+                upstream = client.send(
+                        client.build_request(method.upper(), url_str, headers=headers),
+                        stream=method.upper() == "GET",
+                )
+        except httpx.RequestError as exc:
+                client.close()
+                raise HTTPException(status_code=502, detail=f"Failed to fetch episode audio: {exc}") from exc
+
+        status_code = upstream.status_code
+        if status_code >= 400:
+                detail = f"Audio source returned {status_code}"
+                try:
+                        snippet = upstream.text[:160]
+                        if snippet:
+                                detail = f"{detail}: {snippet}"
+                except Exception:
+                        pass
+                upstream.close()
+                client.close()
+                raise HTTPException(status_code=502, detail=detail)
+
+        response_headers: Dict[str, str] = {}
+        for name in _AUDIO_PASSTHROUGH_HEADERS:
+                value = upstream.headers.get(name)
+                if value:
+                        response_headers[name] = value
+        response_headers.setdefault("accept-ranges", "bytes")
+        response_headers.setdefault("cache-control", "private, max-age=60")
+
+        if method.upper() == "HEAD":
+                upstream.close()
+                client.close()
+                return Response(status_code=status_code, headers=response_headers)
+
+        def _iter_content():
+                try:
+                        for chunk in upstream.iter_bytes():
+                                if chunk:
+                                        yield chunk
+                finally:
+                        upstream.close()
+                        client.close()
+
+        media_type = upstream.headers.get("content-type", "audio/mpeg")
+        return StreamingResponse(
+                _iter_content(),
+                status_code=status_code,
+                headers=response_headers,
+                media_type=media_type,
+        )
 
 
 # --- read endpoints ---------------------------------------------------------
@@ -167,6 +262,40 @@ def get_last_numbering(
                 return {"season_number": None, "episode_number": None}
         except Exception:
                 return {"season_number": None, "episode_number": None}
+
+
+@router.get("/{episode_id}/playback", status_code=200)
+def get_episode_playback_stream(
+        episode_id: str,
+        request: Request,
+        session: Session = Depends(get_session),
+        current_user: User = Depends(get_current_user),
+):
+        try:
+                eid = _UUID(str(episode_id))
+        except Exception:
+                raise HTTPException(status_code=404, detail="Episode not found")
+        ep = _svc_repo.get_episode_by_id(session, eid, user_id=current_user.id)
+        if not ep:
+                raise HTTPException(status_code=404, detail="Episode not found")
+        return _proxy_episode_audio(ep, request, "GET")
+
+
+@router.head("/{episode_id}/playback", status_code=200)
+def head_episode_playback_stream(
+        episode_id: str,
+        request: Request,
+        session: Session = Depends(get_session),
+        current_user: User = Depends(get_current_user),
+):
+        try:
+                eid = _UUID(str(episode_id))
+        except Exception:
+                raise HTTPException(status_code=404, detail="Episode not found")
+        ep = _svc_repo.get_episode_by_id(session, eid, user_id=current_user.id)
+        if not ep:
+                raise HTTPException(status_code=404, detail="Episode not found")
+        return _proxy_episode_audio(ep, request, "HEAD")
 
 
 @router.get("/{episode_id}/spreaker/raw", status_code=200)
@@ -454,6 +583,7 @@ def list_episodes(
                         "plays_total": None,
                         "stream_url": stream_url,
                         "playback_url": playback_url,
+                        "proxy_playback_url": (f"/api/episodes/{e.id}/playback" if playback_url else None),
                         "playback_type": playback_type,
                         "using_spreaker_audio": bool(playback.get("prefer_remote_audio")),
                         "has_transcript": bool(transcript_info.get("available", False)),
