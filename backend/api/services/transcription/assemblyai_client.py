@@ -108,7 +108,7 @@ def start_transcription(
         "speaker_labels": True,
         "punctuate": True,
         "format_text": False,
-        "disfluencies": True,
+        "disfluencies": False,  # False = remove filler words (um, uh, etc.)
         "filter_profanity": False,
         "language_detection": False,
         "custom_spelling": [],

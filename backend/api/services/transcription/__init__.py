@@ -53,7 +53,7 @@ def get_word_timestamps(filename: str) -> List[Dict[str, Any]]:
     # Prefer AssemblyAI. Import lazily to avoid optional deps during package import.
     try:
         from ..transcription_assemblyai import assemblyai_transcribe_with_speakers  # local import
-        logging.info("[transcription/pkg] Using AssemblyAI with disfluencies=True")
+        logging.info("[transcription/pkg] Using AssemblyAI with disfluencies=False (removes filler words)")
         return assemblyai_transcribe_with_speakers(filename)
     except Exception:
         logging.warning("[transcription/pkg] AssemblyAI failed; falling back to Google", exc_info=True)
