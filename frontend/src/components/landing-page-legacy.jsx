@@ -365,24 +365,27 @@ export default function PodcastPlusLanding() {
                 Recently Published with Plus Plus
               </h2>
               <div className="grid md:grid-cols-3 gap-6">
-                {publicEpisodes.map((ep) => (
-                  <Card key={ep.id} className="overflow-hidden">
-                    <div className="h-40 bg-gray-100">
-                      {ep.cover_url ? (
-                        <img src={resolveAssetUrl(ep.cover_url)} alt={ep.title} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="h-full flex items-center justify-center text-gray-400">No Cover</div>
-                      )}
-                    </div>
-                    <CardHeader>
-                      <CardTitle className="text-lg line-clamp-1">{ep.title}</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-sm text-gray-600 line-clamp-3 mb-2">{ep.description}</p>
-                      {ep.final_audio_url && <audio controls src={resolveAssetUrl(ep.final_audio_url)} className="w-full" />}
-                    </CardContent>
-                  </Card>
-                ))}
+                {publicEpisodes.map((ep) => {
+                  const playbackUrl = resolveAssetUrl(ep.proxy_playback_url || ep.final_audio_url || '');
+                  return (
+                    <Card key={ep.id} className="overflow-hidden">
+                      <div className="h-40 bg-gray-100">
+                        {ep.cover_url ? (
+                          <img src={resolveAssetUrl(ep.cover_url)} alt={ep.title} className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="h-full flex items-center justify-center text-gray-400">No Cover</div>
+                        )}
+                      </div>
+                      <CardHeader>
+                        <CardTitle className="text-lg line-clamp-1">{ep.title}</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="text-sm text-gray-600 line-clamp-3 mb-2">{ep.description}</p>
+                        {playbackUrl && <audio controls src={playbackUrl} className="w-full" />}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
             </div>
           )}

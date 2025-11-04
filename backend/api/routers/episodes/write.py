@@ -240,6 +240,7 @@ def update_episode_metadata(
             "plays_total": None,
             "stream_url": stream_url,
             "playback_url": playback_url,
+            "proxy_playback_url": (f"/api/episodes/{ep_obj.id}/playback" if playback_url else None),
             "playback_type": playback_type,
             "using_spreaker_audio": bool(playback.get("prefer_remote_audio")),
         }

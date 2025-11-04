@@ -52,6 +52,10 @@ export default function StepAssemble({
     );
   }
 
+  const playbackUrl = assembledEpisode
+    ? resolveAssetUrl(assembledEpisode.proxy_playback_url || assembledEpisode.final_audio_url || '')
+    : '';
+
   return (
     <div className="space-y-8">
       <CardHeader className="text-center">
@@ -63,10 +67,10 @@ export default function StepAssemble({
         <CardContent className="p-6 space-y-6">
           <h3 className="text-2xl font-bold">{assembledEpisode.title}</h3>
           <p className="text-gray-600">{assembledEpisode.description}</p>
-          {assembledEpisode.final_audio_url && (
+          {playbackUrl && (
             <div className="mt-4">
               <Label>Listen to the final episode:</Label>
-              <audio controls src={resolveAssetUrl(assembledEpisode.final_audio_url)} className="w-full mt-2">
+              <audio controls src={playbackUrl} className="w-full mt-2">
                 Your browser does not support the audio element.
               </audio>
             </div>
