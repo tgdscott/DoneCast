@@ -149,13 +149,36 @@ def compute_playback_info(episode: Any, *, now: Optional[datetime] = None) -> di
     if gcs_audio_path:
         storage_url = str(gcs_audio_path)
         try:
-            # R2 paths: r2://bucket/key or https://... (public URL)
-            if storage_url.startswith("https://"):
-                # R2 public URL - use directly
+            # R2 paths: r2://bucket/key or https://bucket.account.r2.cloudflarestorage.com/key
+            if storage_url.startswith("https://") and ".r2.cloudflarestorage.com/" in storage_url:
+                # R2 storage URL - needs signed URL for playback
+                # Parse: https://ppp-media.{account}.r2.cloudflarestorage.com/user/episodes/123/audio/file.mp3
+                from infrastructure.r2 import get_signed_url
+                import os
+                
+                # Extract bucket and key from URL
+                account_id = os.getenv("R2_ACCOUNT_ID", "").strip()
+                if account_id and f".{account_id}.r2.cloudflarestorage.com/" in storage_url:
+                    # Find bucket name (between https:// and first dot)
+                    url_parts = storage_url.replace("https://", "").split("/", 1)
+                    if len(url_parts) == 2:
+                        bucket_part = url_parts[0]  # e.g., "ppp-media.{account}.r2.cloudflarestorage.com"
+                        key = url_parts[1]  # e.g., "user/episodes/123/audio/file.mp3"
+                        bucket = bucket_part.split(".")[0]  # Extract "ppp-media"
+                        
+                        final_audio_url = get_signed_url(bucket, key, expiration=86400)  # 24hr expiry
+                        cloud_exists = True
+                else:
+                    # Account ID mismatch or missing - log warning but don't fail
+                    from api.core.logging import get_logger
+                    logger = get_logger("api.episodes.common")
+                    logger.warning("R2 URL detected but cannot parse: %s (account_id=%s)", storage_url, account_id)
+            elif storage_url.startswith("https://"):
+                # Other HTTPS URL (legacy Spreaker or other) - use directly
                 final_audio_url = storage_url
                 cloud_exists = True
             elif storage_url.startswith("r2://"):
-                # R2 signed URL needed
+                # R2 URI format - needs signed URL
                 from infrastructure.r2 import get_signed_url
                 r2_str = storage_url[5:]  # Remove "r2://"
                 parts = r2_str.split("/", 1)
