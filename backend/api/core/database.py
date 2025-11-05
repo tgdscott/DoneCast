@@ -84,16 +84,17 @@ _POOL_KWARGS = {
     # If connection is in INTRANS state, this raises ProgrammingError
     # Instead, rely on pool_reset_on_return and aggressive pool_recycle
     "pool_pre_ping": False,
-    # OPTIMIZED FOR AUTOSCALING: Small pool per instance (2+3=5 total)
+    # BALANCED FOR PERFORMANCE: Moderate pool per instance (10+10=20 total)
     # With max_connections=200 and superuser_reserved=3 → 197 available
-    # Strategy: Many small pools > few large pools for Cloud Run autoscaling
-    # This allows ~39 Cloud Run instances (197/5) vs 12 instances with old config
+    # Strategy: Balance between connection availability and instance count
+    # This allows ~10 Cloud Run instances (197/20) with sufficient connections per instance
+    # Previous config (2+3=5) was too aggressive and caused connection starvation
     # Benefits:
-    #   - More instances can run simultaneously during traffic spikes
-    #   - Faster cold starts (fewer connections to establish)
-    #   - Better connection distribution across instances
-    "pool_size": int(os.getenv("DB_POOL_SIZE", 2)),  # Reduced from 3
-    "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", 3)),  # Reduced from 5
+    #   - Sufficient connections for concurrent requests within instance
+    #   - Reduced connection timeout errors
+    #   - Better request throughput per instance
+    "pool_size": int(os.getenv("DB_POOL_SIZE", 10)),  # Increased from 2 to fix connection timeouts
+    "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", 10)),  # Increased from 3 to fix connection timeouts
     # Aggressive recycle to avoid stale connections (3 minutes)
     # Since we disabled pool_pre_ping, recycle connections more frequently
     "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", 180)),  # 3 minutes
