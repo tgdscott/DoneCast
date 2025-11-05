@@ -338,6 +338,29 @@ export default function PodcastCreator({
     : null;
 
   const closeMinutesDialog = () => setMinutesDialog(null);
+  
+  // Wrap onBack with confirmation if user has made progress past step 3
+  const handleBackToDashboard = () => {
+    // Check if user has progressed past step 3 (after uploading/selecting audio)
+    // AND has entered any metadata (title, description, tags)
+    const hasMetadata = !!(
+      episodeDetails?.title?.trim() ||
+      episodeDetails?.description?.trim() ||
+      episodeDetails?.tags?.trim()
+    );
+    
+    if (currentStep > 3 && hasMetadata) {
+      const confirmed = window.confirm(
+        'Your episode details will be saved and restored if you return to edit this audio file. Continue to dashboard?'
+      );
+      if (!confirmed) return;
+    }
+    
+    // Call original onBack
+    if (typeof onBack === 'function') {
+      onBack();
+    }
+  };
   const goToUpgrade = () => {
     try { localStorage.setItem('ppp_billing_intent', 'upgrade'); } catch {}
     window.dispatchEvent(new Event('ppp:navigate-billing'));
@@ -525,7 +548,7 @@ export default function PodcastCreator({
   return (
     <>
       <PodcastCreatorScaffold
-        onBack={onBack}
+        onBack={handleBackToDashboard}
         selectedTemplate={selectedTemplate}
         steps={steps}
         currentStep={currentStep}

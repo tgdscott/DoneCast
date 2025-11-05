@@ -17,6 +17,7 @@ class SuggestTitleIn(BaseModel):
     extra_instructions: Optional[str] = None
     history_count: int = 10
     current_text: Optional[str] = None  # If provided, refine this instead of generating new
+    template_variables: Optional[dict] = None  # Variables to replace in instructions (e.g., {friendly_name})
 
 
 class SuggestNotesIn(BaseModel):
@@ -28,6 +29,7 @@ class SuggestNotesIn(BaseModel):
     extra_instructions: Optional[str] = None
     history_count: int = 10
     current_text: Optional[str] = None  # If provided, refine this instead of generating new
+    template_variables: Optional[dict] = None  # Variables to replace in instructions (e.g., {friendly_name})
 
 
 class SuggestTagsIn(BaseModel):
@@ -39,6 +41,7 @@ class SuggestTagsIn(BaseModel):
     extra_instructions: Optional[str] = None
     history_count: int = 10
     tags_always_include: List[str] = []
+    template_variables: Optional[dict] = None  # Variables to replace in instructions (e.g., {friendly_name})
 
 
 class SuggestTitleOut(BaseModel):

@@ -40,7 +40,8 @@ def get_recent_titles(podcast_id, n: int = 10) -> List[str]:
 def get_recent_notes(podcast_id, n: int = 10) -> List[str]:
     """Latest episode notes/descriptions for a podcast, newest first.
 
-    Ordered by publish_at DESC then created_at DESC. Truncated.
+    Ordered by publish_at DESC then created_at DESC. 
+    Returns fuller descriptions (up to 500 chars) to provide better style examples.
     """
     if podcast_id is None or (isinstance(podcast_id, str) and not podcast_id.strip()):
         return []
@@ -53,7 +54,8 @@ def get_recent_notes(podcast_id, n: int = 10) -> List[str]:
                 .limit(n)
             )
             rows = list(session.exec(stmt))
-            return [_clip((r or "")) for r in rows if (r or "").strip()]
+            # Use 500 char limit instead of 160 to show fuller descriptions as style examples
+            return [_clip((r or ""), 500) for r in rows if (r or "").strip()]
     except Exception:
         return []
 

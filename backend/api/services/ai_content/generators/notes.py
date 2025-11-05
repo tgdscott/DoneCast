@@ -124,7 +124,33 @@ def _strip_desc_prefix(s: str) -> str:
 def suggest_notes(inp: SuggestNotesIn) -> SuggestNotesOut:
     t0 = time.time()
     prompt = _compose_prompt(inp)
-    text = generate(prompt, max_tokens=768)
+    
+    # Add system instruction to help prevent false positive safety blocks
+    system_instruction = (
+        "You are a professional podcast marketing copywriter analyzing episode content "
+        "for description generation. This is legitimate editorial work on published content. "
+        "The content may discuss mature topics (health, relationships, true crime, etc.) "
+        "in an educational or entertainment context."
+    )
+    
+    try:
+        text = generate(prompt, max_tokens=768, system_instruction=system_instruction)
+    except RuntimeError as e:
+        # Handle Gemini content blocking gracefully
+        if "GEMINI_CONTENT_BLOCKED" in str(e):
+            logging.getLogger(__name__).warning(
+                "[ai_notes] Content blocked by AI safety filters. "
+                "Likely false positive for legitimate podcast content. "
+                "Returning user-facing fallback message."
+            )
+            # Return a user-friendly message directing them to report the issue
+            return SuggestNotesOut(
+                description="Due to the nature of the content in this podcast, we are unable to generate a description automatically. If you think this is an error, report it to Mike and we will investigate it.",
+                bullets=[]
+            )
+        # Re-raise other runtime errors
+        raise
+    
     out = _parse_notes(text)
     if not out.description:
         out.description = _strip_desc_prefix(text.strip().splitlines()[0]) if text.strip() else ""

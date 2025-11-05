@@ -76,9 +76,7 @@ export default function AIAssistant({
     errorsEncountered.current = [];
     
     // Clear any active reminder bubble since user is now on a new screen
-    if (proactiveHelp) {
-      setProactiveHelp(null);
-    }
+    setProactiveHelp(null);
   }, [currentPage]); // Re-run whenever the user navigates to a different page
   
   // Scroll to bottom when messages change

@@ -305,6 +305,17 @@ export default function useEpisodeAssembly({
             setAssemblyComplete(true);
             setAssembledEpisode(data.episode);
 
+            // Clear persisted draft data on successful assembly
+            if (uploadedFilename) {
+              try {
+                const draftKey = `ppp_episode_draft_${uploadedFilename}`;
+                localStorage.removeItem(draftKey);
+                console.log('[Assembly] Cleared draft data for:', uploadedFilename);
+              } catch (err) {
+                console.warn('[Assembly] Failed to clear draft data:', err);
+              }
+            }
+
             // Show success toast
             if (publishMode === 'schedule') {
               toast({ title: 'Scheduled', description: 'Episode assembled & ready to schedule.' });

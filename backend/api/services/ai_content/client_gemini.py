@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import logging
+import time
 from typing import Any, Dict, Optional, Callable
 _log = logging.getLogger(__name__)
 
@@ -98,6 +99,8 @@ def generate(content: str, **kwargs) -> str:
     Other optional kwargs:
       - system_instruction (str)
       - safety_settings (passed through to SDK)
+    
+    Implements exponential backoff retry for 429 (rate limit) errors.
     """
     # Stub path short-circuit: if missing SDK/key and STUB_MODE set
     if _stub_mode() and (genai is None or _configure is None or _GenerativeModel is None or not getattr(__import__('api.core.config', fromlist=['settings']), 'settings', None).GEMINI_API_KEY):  # type: ignore
@@ -123,6 +126,33 @@ def generate(content: str, **kwargs) -> str:
     for k in ("temperature", "top_p", "top_k"):
         if k in kwargs and kwargs[k] is not None:
             gen_conf[k] = kwargs.pop(k)
+    
+    # Default MOST PERMISSIVE safety settings for podcast content
+    # Podcasts often discuss mature topics (sex education, crime, violence, medical content)
+    # that are 100% legitimate but Gemini's filters block them as "harmful"
+    # BLOCK_NONE = disable safety filters entirely (appropriate for professional content analysis)
+    # If caller explicitly passes safety_settings, respect that; otherwise use maximally permissive.
+    default_safety_settings = None
+    if genai:
+        try:
+            # Import the safety enums
+            from google.generativeai.types import HarmCategory, HarmBlockThreshold  # type: ignore
+            # BLOCK_NONE = Completely disable safety filtering for all categories
+            # This is appropriate for:
+            # - Educational content (sex ed, health topics)
+            # - Entertainment (true crime, horror, mature comedy)
+            # - News/documentary content (violence, tragedy, sensitive topics)
+            default_safety_settings = {
+                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+            }
+            _log.debug("[gemini] Created BLOCK_NONE safety settings for podcast content analysis")
+        except Exception as e:
+            # If import fails, log warning and continue without safety settings
+            _log.warning("[gemini] Failed to create relaxed safety settings: %s", e)
+            pass
 
     provider = (os.getenv("AI_PROVIDER") or getattr(settings, "AI_PROVIDER", "gemini")).lower()
     if provider not in ("gemini", "vertex"):
@@ -159,22 +189,79 @@ def generate(content: str, **kwargs) -> str:
             if _stub_mode():
                 return f"Stub output (model init error: {type(e).__name__})"
             raise
-        # Call SDK
-        try:
-            resp = model.generate_content(
-                content,
-                generation_config=gen_conf or None,  # type: ignore[arg-type]
-                safety_settings=kwargs.pop("safety_settings", None),
-            )
-            return getattr(resp, "text", "") or ""
-        except Exception as e:
-            # Only downgrade to stub when explicit stub mode is enabled
-            if _stub_mode():
-                return f"Stub output (exception: {type(e).__name__})"
-            name = type(e).__name__
-            if "NotFound" in name or "404" in str(e):
-                raise RuntimeError("AI_MODEL_NOT_FOUND") from e
-            raise
+        # Call SDK with retry logic for rate limits
+        max_retries = 3
+        base_delay = 2.0  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                # Use caller's safety_settings if provided, otherwise use relaxed defaults
+                # Check once before the loop starts (don't pop multiple times in retry loop!)
+                if attempt == 0:
+                    caller_safety = kwargs.pop("safety_settings", None)
+                    safety_settings_to_use = caller_safety if caller_safety is not None else default_safety_settings
+                    
+                    _log.info(
+                        "[gemini] generate_content: model=%s safety_settings=%s content_len=%d",
+                        model_name,
+                        "CALLER_PROVIDED" if caller_safety is not None else "BLOCK_NONE (default)",
+                        len(content)
+                    )
+                
+                resp = model.generate_content(
+                    content,
+                    generation_config=gen_conf or None,  # type: ignore[arg-type]
+                    safety_settings=safety_settings_to_use,
+                )
+                
+                # Check if content was blocked by safety filters
+                # This happens when resp.candidates is empty due to PROHIBITED_CONTENT
+                if not hasattr(resp, 'candidates') or not resp.candidates:
+                    block_reason = None
+                    safety_ratings = None
+                    if hasattr(resp, 'prompt_feedback'):
+                        block_reason = getattr(resp.prompt_feedback, 'block_reason', None)
+                        safety_ratings = getattr(resp.prompt_feedback, 'safety_ratings', None)
+                    
+                    if block_reason:
+                        _log.error(
+                            "[gemini] Content BLOCKED by safety filters! block_reason=%s safety_ratings=%s. "
+                            "This is a FALSE POSITIVE for legitimate podcast content. "
+                            "Using BLOCK_NONE settings should prevent this. "
+                            "Prompt preview: %s",
+                            block_reason,
+                            safety_ratings,
+                            content[:500] if content else "(empty)"
+                        )
+                        raise RuntimeError(f"GEMINI_CONTENT_BLOCKED:{block_reason}")
+                
+                return getattr(resp, "text", "") or ""
+            except Exception as e:
+                # Only downgrade to stub when explicit stub mode is enabled
+                if _stub_mode():
+                    return f"Stub output (exception: {type(e).__name__})"
+                
+                name = type(e).__name__
+                error_str = str(e)
+                
+                # Handle 429 rate limit errors with exponential backoff
+                if "429" in error_str or "ResourceExhausted" in name or "quota" in error_str.lower():
+                    if attempt < max_retries - 1:  # Don't sleep on last attempt
+                        delay = base_delay * (2 ** attempt)  # Exponential backoff: 2s, 4s, 8s
+                        _log.warning(
+                            "[gemini] Rate limit hit (429), retrying in %.1fs (attempt %d/%d)",
+                            delay, attempt + 1, max_retries
+                        )
+                        time.sleep(delay)
+                        continue
+                    else:
+                        _log.error("[gemini] Rate limit exceeded after %d retries", max_retries)
+                        raise RuntimeError("GEMINI_RATE_LIMIT_EXCEEDED") from e
+                
+                # Non-retryable errors
+                if "NotFound" in name or "404" in error_str:
+                    raise RuntimeError("AI_MODEL_NOT_FOUND") from e
+                raise
     # Vertex path
     else:
         # Lazy import vertex AI only when needed

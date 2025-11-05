@@ -24,6 +24,7 @@ export default function CreatorFinalize({ token, drafts, uploads, uploadById, go
   const [tags, setTags] = useState(meta.tags || "");
   const transcriptReady = !!(meta?.transcript === 'ready');
   const [scheduleAt, setScheduleAt] = useState(meta?.schedule_at || "");
+  const [aiError, setAiError] = useState({ title: null, description: null, tags: null });
 
   // Keep local state in sync if meta changes (e.g., when switching drafts later)
   useEffect(()=>{
@@ -74,40 +75,64 @@ export default function CreatorFinalize({ token, drafts, uploads, uploadById, go
   const onAISuggestTitle = async () => {
     if (!fileId) return;
     const file = uploadById[fileId];
+    setAiError(prev => ({ ...prev, title: null }));
     try {
       const res = await abApi(token).aiMetadata({ current_title: title, current_description: description, filename: file?.serverFilename || file?.fileName });
       if (res?.title) setTitle(res.title);
       // Persist immediately
       if (showId && fileId && res?.title) setDraftMeta(showId, fileId, { title: res.title });
-    } catch {}
+    } catch (err) {
+      if (err?.status === 429 || err?.status === 503) {
+        const msg = err.status === 429 ? 'Too many requests. Please wait and retry.' : 'Service temporarily unavailable. Please retry.';
+        setAiError(prev => ({ ...prev, title: msg }));
+      }
+    }
   };
   const onAIExpandDesc = async () => {
     if (!fileId) return;
     const file = uploadById[fileId];
+    setAiError(prev => ({ ...prev, description: null }));
     try {
       const res = await abApi(token).aiMetadata({ current_title: title, current_description: description, filename: file?.serverFilename || file?.fileName, prompt: 'expand' });
       if (res?.description) setDescription(res.description);
       if (showId && fileId && res?.description) setDraftMeta(showId, fileId, { description: res.description });
-    } catch {}
+    } catch (err) {
+      if (err?.status === 429 || err?.status === 503) {
+        const msg = err.status === 429 ? 'Too many requests. Please wait and retry.' : 'Service temporarily unavailable. Please retry.';
+        setAiError(prev => ({ ...prev, description: msg }));
+      }
+    }
   };
   const onAIShortenDesc = async () => {
     if (!fileId) return;
     const file = uploadById[fileId];
+    setAiError(prev => ({ ...prev, description: null }));
     try {
       const res = await abApi(token).aiMetadata({ current_title: title, current_description: description, filename: file?.serverFilename || file?.fileName, prompt: 'shorten' });
       if (res?.description) setDescription(res.description);
       if (showId && fileId && res?.description) setDraftMeta(showId, fileId, { description: res.description });
-    } catch {}
+    } catch (err) {
+      if (err?.status === 429 || err?.status === 503) {
+        const msg = err.status === 429 ? 'Too many requests. Please wait and retry.' : 'Service temporarily unavailable. Please retry.';
+        setAiError(prev => ({ ...prev, description: msg }));
+      }
+    }
   };
   const onAISuggestTags = async () => {
     if (!fileId) return;
     const file = uploadById[fileId];
+    setAiError(prev => ({ ...prev, tags: null }));
     try {
       const res = await abApi(token).aiMetadata({ current_title: title, current_description: description, filename: file?.serverFilename || file?.fileName, prompt: 'tags' });
       const nextTags = Array.isArray(res?.tags) ? res.tags.join(", ") : (typeof res?.tags === 'string' ? res.tags : null);
       if (nextTags) setTags(nextTags);
       if (showId && fileId && nextTags) setDraftMeta(showId, fileId, { tags: nextTags });
-    } catch {}
+    } catch (err) {
+      if (err?.status === 429 || err?.status === 503) {
+        const msg = err.status === 429 ? 'Too many requests. Please wait and retry.' : 'Service temporarily unavailable. Please retry.';
+        setAiError(prev => ({ ...prev, tags: msg }));
+      }
+    }
   };
 
   // Intro/Outro modal state (reuse from Upload page)
@@ -218,7 +243,11 @@ export default function CreatorFinalize({ token, drafts, uploads, uploadById, go
             <div className="flex gap-2">
               <input className="flex-1 rounded-lg border px-3 py-2 focus:outline-none focus-visible:ring" value={title} onChange={e=>setTitle(e.target.value)} />
               <button className="px-3 py-2 rounded-lg border hover:bg-muted" onClick={onAISuggestTitle}>AI suggest</button>
+              {aiError.title && (
+                <button className="px-3 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 text-xs" onClick={onAISuggestTitle} title={aiError.title}>Retry</button>
+              )}
             </div>
+            {aiError.title && <p className="text-xs text-red-600">{aiError.title}</p>}
           </div>
           <div className="grid gap-3">
             <label className="text-sm font-medium">Description</label>
@@ -226,14 +255,22 @@ export default function CreatorFinalize({ token, drafts, uploads, uploadById, go
             <div className="flex gap-2">
               <button className="px-3 py-2 rounded-lg border hover:bg-muted" onClick={onAIExpandDesc}>AI expand</button>
               <button className="px-3 py-2 rounded-lg border hover:bg-muted" onClick={onAIShortenDesc}>AI shorten</button>
+              {aiError.description && (
+                <button className="px-3 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 text-xs" onClick={onAIExpandDesc} title={aiError.description}>Retry</button>
+              )}
             </div>
+            {aiError.description && <p className="text-xs text-red-600">{aiError.description}</p>}
           </div>
           <div className="grid gap-3">
             <label className="text-sm font-medium">Tags</label>
             <div className="flex gap-2">
               <input className="flex-1 rounded-lg border px-3 py-2" value={tags} onChange={e=>setTags(e.target.value)} placeholder="comma, separated, tags" />
               <button className="px-3 py-2 rounded-lg border hover:bg-muted" onClick={onAISuggestTags}>AI tags</button>
+              {aiError.tags && (
+                <button className="px-3 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 text-xs" onClick={onAISuggestTags} title={aiError.tags}>Retry</button>
+              )}
             </div>
+            {aiError.tags && <p className="text-xs text-red-600">{aiError.tags}</p>}
           </div>
         </section>
 

@@ -35,6 +35,27 @@ export default function TemplateAIContent({ value, onChange, className = "" }) {
 
   return (
     <div className={`space-y-4 ${className}`}>
+      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+        <h4 className="text-sm font-semibold text-blue-900 mb-2">📝 Template Variables</h4>
+        <p className="text-sm text-blue-800 mb-3">
+          <strong>AI already has base prompts</strong> - only add podcast-specific instructions here. 
+          Use these variables in your instructions to personalize AI output:
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-blue-800 font-mono">
+          <div><code className="bg-blue-100 px-1 py-0.5 rounded">{"{friendly_name}"}</code> - Audio file name</div>
+          <div><code className="bg-blue-100 px-1 py-0.5 rounded">{"{season_number}"}</code> - Episode season</div>
+          <div><code className="bg-blue-100 px-1 py-0.5 rounded">{"{episode_number}"}</code> - Episode number</div>
+          <div><code className="bg-blue-100 px-1 py-0.5 rounded">{"{podcast_name}"}</code> - Show name</div>
+          <div><code className="bg-blue-100 px-1 py-0.5 rounded">{"{duration_minutes}"}</code> - Audio length</div>
+          <div><code className="bg-blue-100 px-1 py-0.5 rounded">{"{filename}"}</code> - Original filename</div>
+          <div><code className="bg-blue-100 px-1 py-0.5 rounded">{"{date}"}</code> - Date (YYYY-MM-DD)</div>
+          <div><code className="bg-blue-100 px-1 py-0.5 rounded">{"{year}"}</code> - Year</div>
+        </div>
+        <p className="text-sm text-blue-800 mt-3">
+          <strong>Example:</strong> "The movie title is {"{friendly_name}"}. Format title as: S{"{season_number}"}E{"{episode_number}"} – {"{friendly_name}"}"
+        </p>
+      </div>
+      
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="text-base font-semibold text-slate-800">AI Content defaults</h3>
         <label className="inline-flex items-center gap-2 text-sm text-slate-700">
@@ -46,7 +67,7 @@ export default function TemplateAIContent({ value, onChange, className = "" }) {
       <div className="space-y-1">
         <label className="text-sm font-medium text-slate-700">Title instructions</label>
         <textarea className="w-full rounded border border-slate-300 px-3 py-2" rows={3}
-          placeholder='e.g., Use format "E### – Film – Hook". Keep ≤ 80 chars.'
+          placeholder='e.g., The movie title is {friendly_name}. Format: "S{season_number}E{episode_number} – {friendly_name} – [your hook]". Keep ≤ 80 chars.'
           value={v.title_instructions || ""}
           onChange={(e)=> set({ title_instructions: e.target.value })} />
       </div>
@@ -54,7 +75,7 @@ export default function TemplateAIContent({ value, onChange, className = "" }) {
       <div className="space-y-1">
         <label className="text-sm font-medium text-slate-700">Notes/Description instructions</label>
         <textarea className="w-full rounded border border-slate-300 px-3 py-2" rows={4}
-          placeholder='e.g., Snarky tone. Provide time-stamped overview of major points.'
+          placeholder='e.g., Start with "In this episode of {podcast_name}, we discuss {friendly_name}..." Use snarky tone. Include time-stamped highlights.'
           value={v.notes_instructions || ""}
           onChange={(e)=> set({ notes_instructions: e.target.value })} />
       </div>
@@ -62,7 +83,7 @@ export default function TemplateAIContent({ value, onChange, className = "" }) {
       <div className="space-y-1">
         <label className="text-sm font-medium text-slate-700">Tags instructions (optional)</label>
         <textarea className="w-full rounded border border-slate-300 px-3 py-2" rows={3}
-          placeholder='e.g., Focus on movie, director, year. No spoilers in tags.'
+          placeholder='e.g., Always include {friendly_name} as a tag. Focus on movie, director, year. No spoilers.'
           value={v.tags_instructions || ""}
           onChange={(e)=> set({ tags_instructions: e.target.value })} />
       </div>

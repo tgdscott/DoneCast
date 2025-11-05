@@ -471,6 +471,13 @@ export default function PodcastPlusDashboard() {
     }
   }, [token, currentView]);
   
+  // Initial fetch of preuploaded items when dashboard loads
+  useEffect(() => {
+    if (token && currentView === 'dashboard' && !preuploadFetchedOnceRef.current) {
+      refreshPreuploads();
+    }
+  }, [token, currentView, refreshPreuploads]);
+  
   // Poll for preupload updates when on dashboard with processing files
   useEffect(() => {
     if (!token || currentView !== 'dashboard') return;

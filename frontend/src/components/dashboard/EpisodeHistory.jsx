@@ -33,12 +33,90 @@ const normalizeDate = (iso) => {
   return isNaN(d.getTime()) ? null : d;
 };
 const episodeSortDate = (ep) => normalizeDate(ep.publish_at) || normalizeDate(ep.processed_at) || normalizeDate(ep.created_at) || new Date(0);
+
+// Enhanced sorting that prioritizes Season/Episode numbers over dates
+const compareEpisodes = (a, b, direction = 'desc') => {
+  // Extract season/episode numbers (handle null/undefined as no number)
+  const aHasSeason = typeof a.season_number === 'number';
+  const bHasSeason = typeof b.season_number === 'number';
+  const aHasEpisode = typeof a.episode_number === 'number';
+  const bHasEpisode = typeof b.episode_number === 'number';
+  
+  // If both have season numbers, compare by season first
+  if (aHasSeason && bHasSeason) {
+    const seasonDiff = a.season_number - b.season_number;
+    if (seasonDiff !== 0) {
+      return direction === 'desc' ? -seasonDiff : seasonDiff;
+    }
+    
+    // Same season, compare by episode number if both have it
+    if (aHasEpisode && bHasEpisode) {
+      const episodeDiff = a.episode_number - b.episode_number;
+      return direction === 'desc' ? -episodeDiff : episodeDiff;
+    }
+    
+    // One has episode number, one doesn't - prioritize the one with episode number
+    if (aHasEpisode && !bHasEpisode) return direction === 'desc' ? -1 : 1;
+    if (!aHasEpisode && bHasEpisode) return direction === 'desc' ? 1 : -1;
+  }
+  
+  // Only one has season number - prioritize the one with season/episode numbers
+  if (aHasSeason && !bHasSeason) return direction === 'desc' ? -1 : 1;
+  if (!aHasSeason && bHasSeason) return direction === 'desc' ? 1 : -1;
+  
+  // Neither has season numbers, fall back to date sorting
+  const dateDiff = episodeSortDate(a) - episodeSortDate(b);
+  return direction === 'desc' ? -dateDiff : dateDiff;
+};
+
 const resolveAssetUrl = (path) => {
   if (!path || typeof path !== 'string') return path;
   const trimmed = path.trim();
   if (!trimmed) return trimmed;
   if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed) || trimmed.startsWith('//')) return trimmed;
   return assetUrl(trimmed);
+};
+
+// Helper to build template variables for AI requests
+const buildTemplateVariables = (episode, podcast, mediaItem) => {
+  const vars = {};
+  
+  // From episode
+  if (episode) {
+    if (episode.season_number != null) vars.season_number = episode.season_number;
+    if (episode.episode_number != null) vars.episode_number = episode.episode_number;
+    
+    // Duration in minutes (convert from seconds if available)
+    const duration = episode.duration || episode.audio_duration;
+    if (duration != null) {
+      vars.duration_minutes = Math.round(duration / 60);
+    }
+    
+    // Date-based variables
+    const pubDate = normalizeDate(episode.publish_at) || normalizeDate(episode.created_at);
+    if (pubDate) {
+      vars.date = pubDate.toISOString().split('T')[0]; // YYYY-MM-DD
+      vars.year = pubDate.getFullYear();
+      vars.month = pubDate.toLocaleDateString('en-US', { month: 'long' });
+    }
+  }
+  
+  // From podcast
+  if (podcast?.title) {
+    vars.podcast_name = podcast.title;
+  }
+  
+  // From media item (main content)
+  if (mediaItem) {
+    if (mediaItem.friendly_name) {
+      vars.friendly_name = mediaItem.friendly_name;
+    }
+    if (mediaItem.filename) {
+      vars.filename = mediaItem.filename;
+    }
+  }
+  
+  return vars;
 };
 const isWithin24h = (iso) => {
   const d = normalizeDate(iso);
@@ -128,6 +206,7 @@ export default function EpisodeHistory({ token, onBack }) {
   const [templates, setTemplates] = useState([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [aiBusy, setAiBusy] = useState({ title: false, description: false, tags: false });
+  const [aiError, setAiError] = useState({ title: null, description: null, tags: null });
   const [templatePrompt, setTemplatePrompt] = useState({ open: false, field: null, saving: false, savingId: null });
   // Add state for numbering duplicates near other edit state declarations
   const [numberingConflict, setNumberingConflict] = useState(false);
@@ -478,10 +557,16 @@ export default function EpisodeHistory({ token, onBack }) {
 
   const updateAiBusy = (field, value) => {
     setAiBusy(prev => ({ ...prev, [field]: value }));
+    // Clear error state when starting a new request
+    if (value) {
+      setAiError(prev => ({ ...prev, [field]: null }));
+    }
   };
 
   const handleAiError = (err, label) => {
     let message = '';
+    let isRetryable = false;
+    
     if (isApiError(err)) {
       const detail = err.detail;
       if (detail && typeof detail === 'object') {
@@ -490,6 +575,10 @@ export default function EpisodeHistory({ token, onBack }) {
           message = 'Transcript not ready yet. Try again soon.';
         } else if (code === 'RATE_LIMIT' || err.status === 429) {
           message = 'Too many AI requests right now. Please wait and retry.';
+          isRetryable = true;
+        } else if (err.status === 503) {
+          message = 'AI service temporarily unavailable. Please retry.';
+          isRetryable = true;
         } else if (detail.message) {
           message = String(detail.message);
         } else if (detail.detail) {
@@ -506,10 +595,19 @@ export default function EpisodeHistory({ token, onBack }) {
       } else if (err.message) {
         message = String(err.message);
       }
+      
+      // Catch any 429 or 503 we might have missed
+      if (!isRetryable && (err.status === 429 || err.status === 503)) {
+        isRetryable = true;
+      }
     }
     if (!message) {
       message = `AI ${label} request failed.`;
     }
+    
+    // Store error state for UI
+    setAiError(prev => ({ ...prev, [label]: isRetryable ? message : null }));
+    
     alert(message);
   };
 
@@ -550,12 +648,34 @@ export default function EpisodeHistory({ token, onBack }) {
     updateAiBusy(field, true);
     const api = makeApi(token);
     const hint = deriveEpisodeHint(editing);
+    
+    // Build template variables from available episode data
+    // We'll fetch podcast name if needed, but for now use editing.podcast_name if available
+    const podcast = editing.podcast_name ? { title: editing.podcast_name } : null;
+    
+    // Try to get main content media item (usually has friendly_name)
+    let mediaItem = null;
+    try {
+      const meta = safeJsonParse(editing.meta_json);
+      const mainContentId = meta?.main_content_id;
+      if (mainContentId) {
+        const mediaRes = await api.get(`/api/media/${mainContentId}`);
+        mediaItem = mediaRes;
+      }
+    } catch {}
+    
+    const templateVars = buildTemplateVariables(editing, podcast, mediaItem);
+    
+    console.log('[AI] Template variables built:', templateVars);
+    console.log('[AI] Media item:', mediaItem);
+    
     const basePayload = {
       episode_id: editing.id,
       podcast_id: editing.podcast_id,
       transcript_path: null,
       hint: hint || null,
       base_prompt: '',
+      template_variables: templateVars,
     };
     const settings = template?.ai_settings || {};
     try {
@@ -574,6 +694,8 @@ export default function EpisodeHistory({ token, onBack }) {
           ...basePayload,
           extra_instructions: settings?.notes_instructions || undefined,
         };
+        console.log('[AI] Description payload:', payload);
+        console.log('[AI] Instructions:', settings?.notes_instructions);
         const res = await api.post('/api/ai/notes', payload);
         const raw = (res?.description || '').toString();
         const cleaned = raw
@@ -753,7 +875,7 @@ export default function EpisodeHistory({ token, onBack }) {
     }
     switch (sortKey) {
       case 'oldest':
-        list.sort((a,b)=> episodeSortDate(a) - episodeSortDate(b));
+        list.sort((a,b)=> compareEpisodes(a, b, 'asc'));
         break;
       case 'title':
         list.sort((a,b)=> (a.title||'').localeCompare(b.title||''));
@@ -766,7 +888,7 @@ export default function EpisodeHistory({ token, onBack }) {
         break;
       case 'newest':
       default:
-        list.sort((a,b)=> episodeSortDate(b) - episodeSortDate(a));
+        list.sort((a,b)=> compareEpisodes(a, b, 'desc'));
     }
     return list;
   }, [episodes, search, statusFilter, sortKey]);
@@ -1196,7 +1318,23 @@ export default function EpisodeHistory({ token, onBack }) {
                   >
                     {aiBusy.title ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
                   </Button>
+                  {aiError.title && !aiBusy.title && (
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => handleAiGenerate('title')}
+                      disabled={saving}
+                      title={aiError.title}
+                      className="text-xs"
+                    >
+                      Retry
+                    </Button>
+                  )}
                 </div>
+                {aiError.title && !aiBusy.title && (
+                  <p className="text-xs text-red-600 mt-1">{aiError.title}</p>
+                )}
                 {editingTemplate && (
                   <div className="mt-1 text-[11px] text-gray-500">
                     AI template: {editingTemplate.name}
@@ -1207,17 +1345,35 @@ export default function EpisodeHistory({ token, onBack }) {
                 <label className="block text-xs font-medium text-gray-600 mb-1">Description / Show Notes</label>
                 <div className="flex items-start gap-2">
                   <textarea rows={6} className="flex-1 border rounded px-2 py-1 text-sm resize-vertical" value={editValues.description} onChange={e=>setEditValues(v=>({...v,description:e.target.value}))} />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    onClick={() => handleAiGenerate('description')}
-                    disabled={saving || aiBusy.description}
-                    title="Regenerate description with AI"
-                  >
-                    {aiBusy.description ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-                  </Button>
+                  <div className="flex flex-col gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => handleAiGenerate('description')}
+                      disabled={saving || aiBusy.description}
+                      title="Regenerate description with AI"
+                    >
+                      {aiBusy.description ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                    </Button>
+                    {aiError.description && !aiBusy.description && (
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => handleAiGenerate('description')}
+                        disabled={saving}
+                        title={aiError.description}
+                        className="text-xs"
+                      >
+                        Retry
+                      </Button>
+                    )}
+                  </div>
                 </div>
+                {aiError.description && !aiBusy.description && (
+                  <p className="text-xs text-red-600 mt-1">{aiError.description}</p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Visibility</label>
@@ -1242,7 +1398,23 @@ export default function EpisodeHistory({ token, onBack }) {
                   >
                     {aiBusy.tags ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
                   </Button>
+                  {aiError.tags && !aiBusy.tags && (
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => handleAiGenerate('tags')}
+                      disabled={saving}
+                      title={aiError.tags}
+                      className="text-xs"
+                    >
+                      Retry
+                    </Button>
+                  )}
                 </div>
+                {aiError.tags && !aiBusy.tags && (
+                  <p className="text-xs text-red-600 mt-1">{aiError.tags}</p>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <input id="explicitFlag" type="checkbox" className="h-4 w-4" checked={editValues.is_explicit} onChange={e=>setEditValues(v=>({...v,is_explicit:e.target.checked}))} />

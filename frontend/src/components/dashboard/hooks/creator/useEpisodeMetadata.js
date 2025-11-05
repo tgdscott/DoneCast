@@ -23,16 +23,52 @@ export default function useEpisodeMetadata({
   transcriptPath,
   resetTranscriptState,
 }) {
-  // Episode metadata state
-  const [episodeDetails, setEpisodeDetails] = useState({
-    season: '1',
-    episodeNumber: '',
-    title: '',
-    description: '',
-    coverArt: null,
-    coverArtPreview: null,
-    cover_image_path: null,
-    cover_crop: null,
+  // Generate storage key based on uploaded filename (unique per audio file)
+  const storageKey = uploadedFilename ? `ppp_episode_draft_${uploadedFilename}` : null;
+
+  // Load persisted episode details from localStorage on mount
+  const loadPersistedDetails = () => {
+    if (!storageKey) return null;
+    try {
+      const stored = localStorage.getItem(storageKey);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        // Exclude non-serializable fields (File objects)
+        return {
+          season: parsed.season || '1',
+          episodeNumber: parsed.episodeNumber || '',
+          title: parsed.title || '',
+          description: parsed.description || '',
+          tags: parsed.tags || '',
+          is_explicit: parsed.is_explicit || false,
+          cover_image_path: parsed.cover_image_path || null,
+          cover_crop: parsed.cover_crop || null,
+          // Don't restore File objects (coverArt, coverArtPreview)
+          coverArt: null,
+          coverArtPreview: null,
+        };
+      }
+    } catch (err) {
+      console.warn('[useEpisodeMetadata] Failed to load persisted details:', err);
+    }
+    return null;
+  };
+
+  // Episode metadata state - initialize with persisted data if available
+  const [episodeDetails, setEpisodeDetails] = useState(() => {
+    const persisted = loadPersistedDetails();
+    return persisted || {
+      season: '1',
+      episodeNumber: '',
+      title: '',
+      description: '',
+      tags: '',
+      is_explicit: false,
+      coverArt: null,
+      coverArtPreview: null,
+      cover_image_path: null,
+      cover_crop: null,
+    };
   });
 
   // AI suggestion busy states
@@ -41,6 +77,61 @@ export default function useEpisodeMetadata({
 
   // AI cache (avoid re-generating same content) - using useState instead of useRef to prevent hooks order violations
   const [aiCache, setAiCache] = useState({ title: null, notes: null, tags: null });
+
+  // Persist episode details to localStorage whenever they change
+  useEffect(() => {
+    if (!storageKey || !uploadedFilename) return;
+    
+    try {
+      // Only persist serializable fields
+      const toStore = {
+        season: episodeDetails.season,
+        episodeNumber: episodeDetails.episodeNumber,
+        title: episodeDetails.title,
+        description: episodeDetails.description,
+        tags: episodeDetails.tags,
+        is_explicit: episodeDetails.is_explicit,
+        cover_image_path: episodeDetails.cover_image_path,
+        cover_crop: episodeDetails.cover_crop,
+        timestamp: Date.now(),
+      };
+      localStorage.setItem(storageKey, JSON.stringify(toStore));
+    } catch (err) {
+      console.warn('[useEpisodeMetadata] Failed to persist details:', err);
+    }
+  }, [episodeDetails, storageKey, uploadedFilename]);
+
+  // Clean up old draft data on mount (older than 7 days)
+  useEffect(() => {
+    try {
+      const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      const keysToRemove = [];
+      
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('ppp_episode_draft_')) {
+          try {
+            const stored = localStorage.getItem(key);
+            if (stored) {
+              const parsed = JSON.parse(stored);
+              const age = now - (parsed.timestamp || 0);
+              if (age > SEVEN_DAYS_MS) {
+                keysToRemove.push(key);
+              }
+            }
+          } catch {}
+        }
+      }
+      
+      keysToRemove.forEach(key => localStorage.removeItem(key));
+      if (keysToRemove.length > 0) {
+        console.log('[useEpisodeMetadata] Cleaned up', keysToRemove.length, 'old drafts');
+      }
+    } catch (err) {
+      console.warn('[useEpisodeMetadata] Failed to clean up old drafts:', err);
+    }
+  }, []); // Run once on mount
 
   // Auto-fill season and episode number from podcast's latest episode
   // NOTE: Using useState instead of useRef to avoid hooks order violation

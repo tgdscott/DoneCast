@@ -577,6 +577,30 @@ def _get_template_settings(session: Session, podcast_id):
         return {}
 
 
+def _apply_template_variables(text: str, variables: Dict[str, Any]) -> str:
+    """Replace {variable} placeholders in template instructions with actual values.
+    
+    Supports variables like:
+    - {friendly_name} - User-set name for audio file
+    - {season_number} - Episode season number
+    - {episode_number} - Episode number
+    - {podcast_name} - Name of the podcast
+    - {duration_minutes} - Audio duration in minutes
+    - {filename} - Original uploaded filename
+    - {date}, {year}, {month} - Current date info
+    """
+    if not text or not variables:
+        return text
+    
+    result = text
+    for key, value in variables.items():
+        if value is not None:
+            placeholder = f'{{{key}}}'
+            result = result.replace(placeholder, str(value))
+    
+    return result
+
+
 @router.post("/title", response_model=SuggestTitleOut)
 @(_limiter.limit("10/minute") if _limiter and hasattr(_limiter, "limit") else (lambda f: f))
 def post_title(request: Request, inp: SuggestTitleIn, session: Session = Depends(get_session)) -> SuggestTitleOut:
@@ -590,6 +614,13 @@ def post_title(request: Request, inp: SuggestTitleIn, session: Session = Depends
         extra = settings.get('title_instructions')
         if extra and not getattr(inp, 'extra_instructions', None):
             inp.extra_instructions = str(extra)
+    
+    # Apply template variables to instructions
+    if inp.extra_instructions and inp.template_variables:
+        inp.extra_instructions = _apply_template_variables(inp.extra_instructions, inp.template_variables)
+    if inp.base_prompt and inp.template_variables:
+        inp.base_prompt = _apply_template_variables(inp.base_prompt, inp.template_variables)
+    
     try:
         return suggest_title(inp)
     except RuntimeError as e:
@@ -617,6 +648,16 @@ def post_notes(request: Request, inp: SuggestNotesIn, session: Session = Depends
         extra = settings.get('notes_instructions')
         if extra and not getattr(inp, 'extra_instructions', None):
             inp.extra_instructions = str(extra)
+    
+    # Apply template variables to instructions
+    if inp.extra_instructions and inp.template_variables:
+        _log.info(f"[AI_NOTES] Applying variables to instructions: {inp.template_variables}")
+        _log.info(f"[AI_NOTES] Before: {inp.extra_instructions}")
+        inp.extra_instructions = _apply_template_variables(inp.extra_instructions, inp.template_variables)
+        _log.info(f"[AI_NOTES] After: {inp.extra_instructions}")
+    if inp.base_prompt and inp.template_variables:
+        inp.base_prompt = _apply_template_variables(inp.base_prompt, inp.template_variables)
+    
     try:
         return suggest_notes(inp)
     except RuntimeError as e:
@@ -647,6 +688,13 @@ def post_tags(request: Request, inp: SuggestTagsIn, session: Session = Depends(g
         # Respect opt-out: if auto_generate_tags is false, return only the pinned tags
         if settings.get('auto_generate_tags') is False:
             return SuggestTagsOut(tags=list(inp.tags_always_include or []))
+    
+    # Apply template variables to instructions
+    if inp.extra_instructions and inp.template_variables:
+        inp.extra_instructions = _apply_template_variables(inp.extra_instructions, inp.template_variables)
+    if inp.base_prompt and inp.template_variables:
+        inp.base_prompt = _apply_template_variables(inp.base_prompt, inp.template_variables)
+    
     try:
         return suggest_tags(inp)
     except RuntimeError as e:

@@ -55,6 +55,14 @@ from worker.tasks.assembly.chunk_worker import (
     validate_process_chunk_payload,
 )
 
+# Track active tasks for monitoring
+import psutil
+import threading
+from datetime import datetime
+
+_active_tasks = {}
+_task_lock = threading.Lock()
+
 # -------------------- Health Check --------------------
 
 @app.get("/")
@@ -67,6 +75,54 @@ async def root():
 async def health_check():
     """Simple health check endpoint for Cloud Run."""
     return {"status": "healthy", "service": "worker"}
+
+
+@app.get("/status")
+async def worker_status():
+    """Real-time worker status and resource usage - NO AUTH REQUIRED for monitoring."""
+    try:
+        process = psutil.Process(os.getpid())
+        memory_info = process.memory_info()
+        cpu_percent = process.cpu_percent(interval=0.1)
+        
+        # Get system-wide stats
+        system_memory = psutil.virtual_memory()
+        system_cpu = psutil.cpu_percent(interval=0.1, percpu=False)
+        
+        with _task_lock:
+            active_count = len(_active_tasks)
+            tasks_snapshot = {
+                task_id: {
+                    "episode_id": info.get("episode_id"),
+                    "type": info.get("type"),
+                    "started_at": info.get("started_at"),
+                    "duration_seconds": (datetime.utcnow() - datetime.fromisoformat(info.get("started_at"))).total_seconds() if info.get("started_at") else 0
+                }
+                for task_id, info in _active_tasks.items()
+            }
+        
+        return {
+            "status": "healthy",
+            "service": "worker",
+            "pid": os.getpid(),
+            "active_tasks": active_count,
+            "tasks": tasks_snapshot,
+            "worker_process": {
+                "cpu_percent": round(cpu_percent, 1),
+                "memory_mb": round(memory_info.rss / 1024 / 1024, 1),
+                "memory_percent": round(process.memory_percent(), 1),
+            },
+            "system": {
+                "cpu_percent": round(system_cpu, 1),
+                "memory_used_gb": round(system_memory.used / 1024 / 1024 / 1024, 1),
+                "memory_total_gb": round(system_memory.total / 1024 / 1024 / 1024, 1),
+                "memory_percent": round(system_memory.percent, 1),
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        log.exception("event=worker.status.error")
+        return {"status": "error", "error": str(e)}
 
 
 # -------------------- Episode Assembly --------------------
@@ -140,6 +196,15 @@ async def assemble_episode_worker(request: Request, x_tasks_auth: str | None = H
     # Execute assembly SYNCHRONOUSLY in this request
     log.info("event=worker.assemble.start episode_id=%s pid=%s", payload.episode_id, os.getpid())
 
+    # Track task for monitoring
+    task_id = f"assemble-{payload.episode_id}"
+    with _task_lock:
+        _active_tasks[task_id] = {
+            "episode_id": payload.episode_id,
+            "type": "assembly",
+            "started_at": datetime.utcnow().isoformat()
+        }
+
     try:
         # Import here to avoid loading heavy dependencies on startup
         
@@ -165,6 +230,10 @@ async def assemble_episode_worker(request: Request, x_tasks_auth: str | None = H
             status_code=500,
             detail=f"Assembly failed: {str(exc)}"
         )
+    finally:
+        # Remove from active tasks
+        with _task_lock:
+            _active_tasks.pop(task_id, None)
 
 
 # -------------------- Chunk Processing --------------------
@@ -209,6 +278,16 @@ async def process_chunk_worker(request: Request, x_tasks_auth: str | None = Head
         os.getpid(),
     )
 
+    # Track task for monitoring
+    task_id = f"chunk-{payload.chunk_id}"
+    with _task_lock:
+        _active_tasks[task_id] = {
+            "episode_id": payload.episode_id,
+            "chunk_id": payload.chunk_id,
+            "type": "chunk_processing",
+            "started_at": datetime.utcnow().isoformat()
+        }
+
     try:
         run_chunk_processing(payload)
     except Exception as exc:
@@ -224,6 +303,11 @@ async def process_chunk_worker(request: Request, x_tasks_auth: str | None = Head
         payload.episode_id,
         payload.chunk_id,
     )
+    
+    # Remove from active tasks
+    with _task_lock:
+        _active_tasks.pop(task_id, None)
+    
     return {
         "ok": True,
         "status": "completed",
