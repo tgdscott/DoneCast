@@ -106,6 +106,7 @@ export default function PodcastCreator({
     handleAISuggestDescription,
     handleAIRefineDescription,
     handleAssemble,
+    handleCancelAssembly,
     assemblyComplete,
     processingEstimate,
     assembledEpisode,
@@ -538,6 +539,12 @@ export default function PodcastCreator({
             assembledEpisode={assembledEpisode || {}}
             statusMessage={statusMessage}
             onBack={onBack}
+            onCancel={() => {
+              if (handleCancelAssembly) {
+                handleCancelAssembly();
+                setCurrentStep(5); // Go back to Episode Details step
+              }
+            }}
           />
         );
       default:

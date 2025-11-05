@@ -17,6 +17,7 @@ from typing import Any, Dict, Iterable, Optional, Union
 import requests
 from requests import Session
 from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from .types import UploadResp, StartResp, TranscriptResp
 
@@ -42,7 +43,22 @@ _shared_session: Optional[Session] = None
 
 def _build_shared_session() -> Session:
     session = requests.Session()
-    adapter = HTTPAdapter(pool_connections=8, pool_maxsize=16)
+    
+    # Retry strategy for transient network/SSL errors
+    # Retry on SSL errors (common on Windows), connection errors, and specific HTTP status codes
+    retry_strategy = Retry(
+        total=3,  # 3 retries
+        backoff_factor=1,  # Wait 1s, 2s, 4s between retries
+        status_forcelist=[500, 502, 503, 504],  # Retry on server errors
+        allowed_methods=["POST", "GET"],  # Allow retries on POST (for upload)
+        raise_on_status=False,  # Don't raise on HTTP errors (we handle those)
+    )
+    
+    adapter = HTTPAdapter(
+        pool_connections=8, 
+        pool_maxsize=16,
+        max_retries=retry_strategy
+    )
     session.mount("https://", adapter)
     session.mount("http://", adapter)
     return session
@@ -79,7 +95,29 @@ def upload_audio(
     
     headers = {"authorization": stripped_key, "content-type": "application/octet-stream"}
     http = session or _get_session()
-    resp = http.post(f"{base_url}/upload", headers=headers, data=_stream_file(p))
+    
+    try:
+        resp = http.post(f"{base_url}/upload", headers=headers, data=_stream_file(p))
+    except requests.exceptions.SSLError as ssl_err:
+        # SSL errors are common on Windows - provide helpful diagnostic
+        import logging
+        logging.warning(
+            "[assemblyai_upload] ❌ SSL error uploading to AssemblyAI. "
+            "This is common on Windows. Try: pip install --upgrade certifi urllib3 requests"
+        )
+        raise AssemblyAITranscriptionError(
+            f"SSL connection failed to AssemblyAI (common on Windows). "
+            f"Try updating SSL certificates: pip install --upgrade certifi urllib3 requests. "
+            f"Error: {ssl_err}"
+        ) from ssl_err
+    except requests.exceptions.ConnectionError as conn_err:
+        import logging
+        logging.warning("[assemblyai_upload] ❌ Connection error: %s", conn_err)
+        raise AssemblyAITranscriptionError(
+            f"Network connection failed to AssemblyAI. Check internet connection or firewall. "
+            f"Error: {conn_err}"
+        ) from conn_err
+    
     if resp.status_code != 200:
         if resp.status_code == 401:
             raise AssemblyAITranscriptionError(

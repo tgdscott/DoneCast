@@ -20,6 +20,7 @@ export default function StepAssemble({
   assembledEpisode,
   statusMessage,
   onBack,
+  onCancel,
 }) {
   if (!assemblyComplete) {
     return (
@@ -42,10 +43,22 @@ export default function StepAssemble({
                 depending on length and cleanup.
               </p>
             )}
+            {statusMessage && (
+              <div className="text-sm text-gray-600 mt-2">
+                {statusMessage}
+              </div>
+            )}
             <div className="text-sm text-gray-500">If you stay, this page will auto-update when complete.</div>
-            <Button onClick={onBack} variant="outline" className="mt-4">
-              Back to Dashboard
-            </Button>
+            <div className="flex gap-3 justify-center mt-6">
+              <Button onClick={onBack} variant="outline">
+                Back to Dashboard
+              </Button>
+              {onCancel && (
+                <Button onClick={onCancel} variant="destructive">
+                  Stop & Go Back
+                </Button>
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>

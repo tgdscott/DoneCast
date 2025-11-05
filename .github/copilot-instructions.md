@@ -247,47 +247,58 @@ This is non-negotiable for URL clarity and brand consistency. The ++ notation cr
 
 **ALWAYS double-check table names before using in SQL or migrations.** Getting this wrong causes silent failures in PostgreSQL.
 
-### Flubber Feature (CRITICAL - DO NOT CONFUSE WITH FILLER WORD REMOVAL)
+### Flubber vs Intern Features (CRITICAL - DO NOT CONFUSE THESE)
 
-**WHAT FLUBBER IS:**
-- User says the word "flubber" DURING RECORDING when they make a blatant mistake (e.g., mispronounce a word, say the wrong name, stumble over a sentence)
+#### **FLUBBER** - Keyword-Triggered DELETION Tool
+**WHAT FLUBBER DOES:**
+- User says the word "flubber" DURING RECORDING when they make a blatant mistake
 - System detects the spoken keyword "flubber" in the transcript
-- Analyzes the audio BEFORE the "flubber" marker to find repeated/incorrect words
-- Cuts out several seconds (typically 5-30 seconds) of the "flub" section
-- This is a MANUAL, USER-TRIGGERED editing tool for fixing specific mistakes
+- **CUTS OUT/DELETES** audio BEFORE the "flubber" marker (typically 5-30 seconds)
+- **FLUBBER REMOVES AUDIO - IT DOES NOT ADD ANYTHING**
 
-**WHAT FLUBBER IS NOT:**
-- ❌ NOT automatic filler word removal ("um", "uh", "like", "you know")
-- ❌ NOT AI-powered mistake detection
-- ❌ NOT continuous throughout the episode
-- ❌ NOT the same as Auphonic's automatic filler word cutting
-- ❌ NOT silence removal
-- ❌ NOT breath removal
-
-**Example Flubber Use Case:**
-1. User recording: "Welcome to episode 42 with our guest... uh... John... wait no... flubber... Welcome to episode 42 with our guest Sarah Johnson"
-2. User said "flubber" to mark that they want to cut the mistake
-3. System detects "flubber" keyword at timestamp 00:15
-4. Analyzes words before "flubber", finds repeated phrase "Welcome to episode 42 with our guest"
-5. Cuts from 00:10 to 00:15 (removes "John... wait no... flubber")
-6. Final audio: "Welcome to episode 42 with our guest Sarah Johnson" (seamless)
+**Example Flubber Use:**
+1. Recording: "Welcome to episode 42 with our guest... uh... John... wait no... **flubber**... Welcome to episode 42 with our guest Sarah Johnson"
+2. System cuts from 00:10 to 00:15 (removes the mistake)
+3. Final: "Welcome to episode 42 with our guest Sarah Johnson" (seamless)
 
 **Code Location:**
-- `backend/api/routers/flubber.py` - Flubber detection & cutting endpoints
+- `backend/api/routers/flubber.py` - Flubber detection & cutting
 - `backend/api/services/flubber_helper.py` - Audio cutting logic
-- `backend/api/services/keyword_detector.py` - "flubber" keyword detection in transcript
 
-**DO NOT:**
-- ❌ Call Flubber "filler word removal"
-- ❌ Compare Flubber to Auphonic's automatic filler word cutting (they are completely different)
-- ❌ Assume Flubber removes "um" or "uh" (it doesn't - it only cuts sections marked with the keyword "flubber")
-- ❌ Suggest Flubber as an alternative to automatic filler word removal tools
+---
+
+#### **INTERN** - Keyword-Triggered INSERTION Tool  
+**WHAT INTERN DOES:**
+- User says the word "intern" DURING RECORDING to trigger AI assistant commands
+- User marks an **endpoint** (where the intern should respond)
+- System generates AI response and **INSERTS IT** at the marked location
+- **INTERN ADDS AUDIO - IT DOES NOT DELETE ANYTHING**
+- **INTERN NEVER CUTS OR REMOVES AUDIO - ONLY INSERTS**
+
+**Example Intern Use:**
+1. Recording: "So intern, tell us who was the first guy to run a four minute mile."
+2. User clicks waveform at 7:02 to mark where intern should respond
+3. AI generates response: "That would be Roger Bannister in 1954"
+4. System inserts AI audio at 7:02 with 0.5s silence buffers
+5. Final audio has the question + AI response + rest of episode
+
+**Code Location:**
+- `backend/api/routers/intern.py` - Intern command detection & execution
+- `backend/api/services/audio/ai_intern.py` - Audio insertion logic
+- `backend/api/services/audio/orchestrator_steps_lib/ai_commands.py` - Command preparation
+
+---
+
+### CRITICAL RULES:
+1. **FLUBBER = DELETE/CUT** audio (removes mistakes)
+2. **INTERN = INSERT/ADD** audio (adds AI responses)
+3. **NEVER say Intern "removes" or "cuts" anything**
+4. **NEVER say Flubber "inserts" or "adds" anything**
+5. These are OPPOSITE operations - one removes, one adds
 
 **Filler word removal (separate feature we DON'T have):**
 - Automatic detection of "um", "uh", "like", "you know" throughout entire episode
-- Removes these words automatically without user marking them
-- Continuous processing, not keyword-triggered
-- We currently DO NOT have this feature (would need to build or use Auphonic)
+- We currently DO NOT have this feature (would need Auphonic or custom build)
 
 ### Subscription Tier → Transcription Pipeline Routing (CRITICAL)
 

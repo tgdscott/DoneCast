@@ -259,6 +259,15 @@ def _cleanup_main_content(*, session, episode, main_content_filename: str) -> No
                             "[cleanup] Unable to unlink file %s", candidate, exc_info=True
                         )
 
+        # Delete the MediaTranscript first (foreign key constraint)
+        from api.models.transcription import MediaTranscript
+        transcript_query = select(MediaTranscript).where(MediaTranscript.media_item_id == media_item.id)
+        transcripts = session.exec(transcript_query).all()
+        if transcripts:
+            logging.info("[cleanup] Deleting %d MediaTranscript record(s) for MediaItem (id=%s)", len(transcripts), media_item.id)
+            for transcript in transcripts:
+                session.delete(transcript)
+        
         # Delete the MediaItem from database
         logging.info("[cleanup] Deleting MediaItem (id=%s) from database", media_item.id)
         try:

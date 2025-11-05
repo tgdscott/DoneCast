@@ -58,9 +58,13 @@ export default function useEpisodeAssembly({
   const [assembledEpisode, setAssembledEpisode] = useState(null);
   const [expectedEpisodeId, setExpectedEpisodeId] = useState(null);
   const [jobId, setJobId] = useState(null);
+  const [assemblyStartTime, setAssemblyStartTime] = useState(null);
   
   // Publishing state (managed here because it's tied to assembly completion)
   const [autoPublishPending, setAutoPublishPending] = useState(false);
+  
+  // Polling control
+  const pollingIntervalRef = useRef(null);
   
   // Helper to normalize tags
   const normalizeTags = (rawTags) => {
@@ -162,6 +166,7 @@ export default function useEpisodeAssembly({
       setAutoPublishPending(false);
       setExpectedEpisodeId(null);
       setIsAssembling(true);
+      setAssemblyStartTime(Date.now());
       setStatusMessage('Assembling your episode...');
       setError('');
       setCurrentStep(6);
@@ -278,18 +283,69 @@ export default function useEpisodeAssembly({
     ]
   );
 
+  // Cancel assembly handler
+  const handleCancelAssembly = useCallback(() => {
+    console.log('[ASSEMBLE] User cancelled assembly');
+    
+    // Stop polling
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+    
+    // Reset assembly state
+    setIsAssembling(false);
+    setJobId(null);
+    setAssemblyStartTime(null);
+    setAutoPublishPending(false);
+    setStatusMessage('');
+    setError('');
+    
+    // Note: We don't delete the episode or cancel the backend job
+    // The job will complete in background and user can find it in history
+    toast({
+      title: 'Assembly Cancelled',
+      description: 'Stopped monitoring. The episode may still complete in the background.',
+    });
+  }, [setError, setStatusMessage]);
+
   // Job status polling effect
   useEffect(() => {
     if (!jobId) return;
 
     const api = makeApi(token);
-    const interval = setInterval(async () => {
+    const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+    const POLL_INTERVAL_MS = 5000; // 5 seconds
+    
+    const pollStatus = async () => {
       try {
+        // Check for timeout
+        if (assemblyStartTime && (Date.now() - assemblyStartTime) > TIMEOUT_MS) {
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+          }
+          setIsAssembling(false);
+          setError(
+            'Assembly is taking longer than expected. This may indicate a service issue. ' +
+            'You can safely leave - we\'ll notify you when it completes, or check Episode History later.'
+          );
+          toast({
+            variant: 'destructive',
+            title: 'Assembly Timeout',
+            description: 'Taking longer than expected. Check Episode History later or contact support.',
+          });
+          return;
+        }
+
         const data = await api.get(`/api/episodes/status/${jobId}`);
         setStatusMessage(data.status);
 
         if (data.status === 'processed' || data.status === 'error') {
-          clearInterval(interval);
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+          }
           setIsAssembling(false);
 
           if (data.status === 'processed') {
@@ -323,23 +379,53 @@ export default function useEpisodeAssembly({
               toast({ title: 'Draft Ready', description: 'Episode assembled (draft).' });
             }
           } else {
-            setError(data.error || 'An error occurred during processing.');
+            const errorMsg = data.error || 'An error occurred during processing.';
+            setError(errorMsg);
             toast({
               variant: 'destructive',
-              title: 'Error',
-              description: data.error || 'An error occurred during processing.',
+              title: 'Assembly Error',
+              description: errorMsg,
             });
           }
         }
       } catch (err) {
-        clearInterval(interval);
-        setError('Failed to poll for job status.');
-        setIsAssembling(false);
+        // Handle network errors gracefully
+        const is503 = err?.status === 503 || err?.message?.includes('503');
+        const isNetworkError = !err?.status || err?.message?.includes('fetch') || err?.message?.includes('network');
+        
+        if (is503 || isNetworkError) {
+          console.warn('[ASSEMBLE] Network/503 error during polling:', err);
+          setStatusMessage('Connection issue detected - retrying...');
+          // Don't stop polling on transient errors, let timeout handle it
+        } else {
+          // Fatal error - stop polling
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+          }
+          setIsAssembling(false);
+          const errorMsg = err?.message || 'Failed to check assembly status.';
+          setError(errorMsg);
+          toast({
+            variant: 'destructive',
+            title: 'Status Check Failed',
+            description: errorMsg,
+          });
+        }
       }
-    }, 5000); // Poll every 5 seconds
+    };
 
-    return () => clearInterval(interval);
-  }, [jobId, token, expectedEpisodeId, publishMode, setError, setStatusMessage]);
+    // Start polling
+    pollingIntervalRef.current = setInterval(pollStatus, POLL_INTERVAL_MS);
+    pollStatus(); // Initial poll
+
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+    };
+  }, [jobId, token, expectedEpisodeId, publishMode, assemblyStartTime, setError, setStatusMessage, uploadedFilename]);
 
   // Validation for Step 5 (Episode Details)
   const missingTitle = !episodeDetails?.title || episodeDetails.title.trim() === '';
@@ -372,5 +458,6 @@ export default function useEpisodeAssembly({
 
     // Handlers
     handleAssemble,
+    handleCancelAssembly,
   };
 }

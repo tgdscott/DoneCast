@@ -135,6 +135,9 @@ def detect_and_prepare_ai_commands(
                 "override_audio_url": str(override.get("audio_url") or "").strip() or None,
                 "voice_id": override.get("voice_id"),
                 "mode": "audio",
+                "insert_pad_ms": 500,  # 0.5s buffer after marked endpoint
+                "add_silence_before_ms": 500,  # 0.5s buffer before AI response
+                "add_silence_after_ms": 500,  # 0.5s buffer after AI response
             }
             ai_cmds.append(cmd)
             if insane_verbose:

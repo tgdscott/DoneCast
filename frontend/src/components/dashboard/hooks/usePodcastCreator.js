@@ -154,7 +154,7 @@ export default function usePodcastCreator({
     episodeDetails: metadata.episodeDetails,
     ttsValues: voiceConfig.ttsValues,
     flubberCutsMs: aiFeatures.flubberCutsMs,
-    intents: aiOrchestration.intents,
+    intents: aiFeatures.intents, // FIXED: Use aiFeatures.intents (has intern_overrides) not aiOrchestration.intents
     setError,
     setStatusMessage,
     setCurrentStep: stepNav.setCurrentStep,

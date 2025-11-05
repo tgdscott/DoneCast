@@ -303,6 +303,7 @@ def execute_intern_commands(
             try:
                 # Check if user provided pre-generated audio URL
                 override_audio_url = (cmd.get("override_audio_url") or "").strip()
+                log.append(f"[INTERN_AUDIO_SOURCE] override_url={'YES' if override_audio_url else 'NO'} fast_mode={fast_mode} disable_tts={bool(cmd.get('disable_tts'))}")
                 if override_audio_url:
                     # Download the pre-generated audio from the URL
                     try:
@@ -334,15 +335,27 @@ def execute_intern_commands(
                 else:
                     voice_id = cmd.get("voice_id")
                     log.append(f"[INTERN_TTS_GENERATE] voice_id={voice_id} text_len={len(answer)} provider={tts_provider}")
-                    speech = ai_enhancer.generate_speech_from_text(
-                        answer, voice_id=voice_id, provider=tts_provider, api_key=elevenlabs_api_key
-                    )
-                    log.append(f"[INTERN_TTS_SUCCESS] generated {len(speech)}ms audio")
+                    try:
+                        speech = ai_enhancer.generate_speech_from_text(
+                            answer, voice_id=voice_id, provider=tts_provider, api_key=elevenlabs_api_key
+                        )
+                        if speech:
+                            log.append(f"[INTERN_TTS_SUCCESS] generated {len(speech)}ms audio")
+                        else:
+                            log.append(f"[INTERN_TTS_WARNING] TTS returned empty/None audio")
+                    except Exception as tts_err:
+                        log.append(f"[INTERN_TTS_FAILED] {type(tts_err).__name__}: {tts_err}")
+                        speech = None
                 if speech is None:
-                    log.append("[INTERN_NO_AUDIO_INSERTED]")
+                    log.append(f"[INTERN_NO_AUDIO_INSERTED] cmd_id={cmd.get('command_id')} - speech generation failed")
+                    cmd["audio_generated"] = False
+                    cmd["skip_reason"] = "speech_generation_failed"
                     continue
                 if not speech:
-                    raise ValueError("TTS returned empty audio")
+                    log.append(f"[INTERN_EMPTY_AUDIO] cmd_id={cmd.get('command_id')} - speech is empty")
+                    cmd["audio_generated"] = False
+                    cmd["skip_reason"] = "speech_empty"
+                    continue
                 # normalize loudness and lightly fade out to avoid perceived tails
                 speech = match_target_dbfs(speech).fade_out(80)
                 orig_len = len(main_content_audio)
@@ -381,10 +394,28 @@ def execute_intern_commands(
                             log.append(f"[INTERN_PROMPT_MUTED] from_ms={prompt_start_ms} to_ms={prompt_end_ms}")
                 except Exception:
                     pass
-                out = out[:insertion_ms] + speech + out[insertion_ms:]
+                
+                # Add silence buffers around AI response for clean insertion
+                silence_before_ms = int(max(0, cmd.get("add_silence_before_ms", 0)))
+                silence_after_ms = int(max(0, cmd.get("add_silence_after_ms", 0)))
+                
+                if silence_before_ms > 0:
+                    silence_before = AudioSegment.silent(duration=silence_before_ms)
+                    log.append(f"[INTERN_BUFFER] adding {silence_before_ms}ms silence BEFORE response")
+                else:
+                    silence_before = AudioSegment.silent(duration=0)
+                
+                if silence_after_ms > 0:
+                    silence_after = AudioSegment.silent(duration=silence_after_ms)
+                    log.append(f"[INTERN_BUFFER] adding {silence_after_ms}ms silence AFTER response")
+                else:
+                    silence_after = AudioSegment.silent(duration=0)
+                
+                # Insert: silence_before + speech + silence_after at the marked position
+                out = out[:insertion_ms] + silence_before + speech + silence_after + out[insertion_ms:]
                 cmd["audio_inserted_at_ms"] = insertion_ms
                 cmd["audio_generated"] = True
-                log.append(f"[INTERN_AUDIO] at_ms={insertion_ms} duration_ms={len(speech)}")
+                log.append(f"[INTERN_AUDIO] at_ms={insertion_ms} duration_ms={len(speech)} total_with_buffers={len(silence_before) + len(speech) + len(silence_after)}")
             except Exception as e:
                 cmd["intern_audio_error"] = str(e)
                 log.append(f"[INTERN_AUDIO_ERROR] {e}; attempting fallback clip")
@@ -429,6 +460,15 @@ def execute_intern_commands(
                             log.append(f"[INTERN_AUDIO_FALLBACK] inserted fallback at_ms={insertion_ms} duration_ms={len(fb_speech)}")
                 except Exception as e2:
                     log.append(f"[INTERN_AUDIO_FALLBACK_ERROR] {e2}")
+    
+    # Summary logging
+    inserted_count = sum(1 for cmd in cmds if cmd.get("audio_generated"))
+    skipped_count = len(cmds) - inserted_count
+    log.append(f"[INTERN_SUMMARY] total_commands={len(cmds)} inserted={inserted_count} skipped={skipped_count}")
+    if skipped_count > 0:
+        skip_reasons = [cmd.get("skip_reason", "unknown") for cmd in cmds if not cmd.get("audio_generated")]
+        log.append(f"[INTERN_SKIPPED_REASONS] {skip_reasons}")
+    
     return out
 
 

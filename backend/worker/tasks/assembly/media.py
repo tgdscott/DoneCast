@@ -125,12 +125,12 @@ def _resolve_media_file(name: str) -> Optional[Path]:
         base = str(name)
 
     candidates = [
-        PROJECT_ROOT / "media_uploads" / base,
+        MEDIA_DIR / base,  # PRIORITY 1: Actual media storage directory (backend/local_media/)
+        MEDIA_DIR / "media_uploads" / base,
+        PROJECT_ROOT / "media_uploads" / base,  # Workspace directory (local_tmp/ws_root/media_uploads/)
         PROJECT_ROOT / "cleaned_audio" / base,
         APP_ROOT_DIR / "media_uploads" / base,
         APP_ROOT_DIR.parent / "media_uploads" / base,
-        MEDIA_DIR / base,
-        MEDIA_DIR / "media_uploads" / base,
         CLEANED_DIR / base,
     ]
 
@@ -270,9 +270,9 @@ def _resolve_image_to_local(path_like: str | None) -> Optional[Path]:
     try:
         base = Path(str(path_like)).name
         for candidate in [
-            PROJECT_ROOT / "media_uploads" / base,
+            MEDIA_DIR / base,  # PRIORITY 1: Actual media storage (backend/local_media/)
+            PROJECT_ROOT / "media_uploads" / base,  # Workspace directory
             APP_ROOT_DIR / "media_uploads" / base,
-            MEDIA_DIR / base,
         ]:
             if candidate.exists():
                 return candidate
