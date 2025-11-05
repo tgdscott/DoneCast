@@ -24,8 +24,19 @@ def primary_cleanup_and_rebuild(
 ) -> Tuple[AudioSegment, List[Dict[str, Any]], Dict[str, int], int]:
     if mix_only:
         log.append("[FILLERS] Skipping filler removal (mix_only=True)")
-        placeholder_audio = AudioSegment.silent(duration=1)
-        return placeholder_audio, mutable_words, {}, 0
+        try:
+            actual_audio = AudioSegment.from_file(content_path)
+            log.append(
+                f"[FILLERS] Loaded original audio for mix_only path: {len(actual_audio)}ms"
+            )
+            return actual_audio, mutable_words, {}, 0
+        except Exception as exc:
+            log.append(
+                f"[FILLERS] WARNING: failed to load audio for mix_only path ({type(exc).__name__}: {exc}); "
+                "falling back to placeholder"
+            )
+            placeholder_audio = AudioSegment.silent(duration=1)
+            return placeholder_audio, mutable_words, {}, 0
 
     auphonic_processed = bool(cleanup_options.get("auphonic_processed", False))
     if auphonic_processed:
