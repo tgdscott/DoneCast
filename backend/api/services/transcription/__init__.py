@@ -598,7 +598,14 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
                     else:
                         # R2 returns https:// URL directly
                         gcs_url = storage_url
-                        gcs_uri = f"r2://{bucket}/{key}"
+                        # CRITICAL FIX: Use actual R2 bucket name, not TRANSCRIPTS_BUCKET
+                        # When STORAGE_BACKEND=r2, we use R2_BUCKET env var
+                        storage_backend = os.getenv("STORAGE_BACKEND", "gcs").lower()
+                        if storage_backend == "r2":
+                            actual_bucket = os.getenv("R2_BUCKET", "ppp-media").strip()
+                        else:
+                            actual_bucket = bucket  # Use whatever bucket was resolved
+                        gcs_uri = f"r2://{actual_bucket}/{key}"
                 else:
                     gcs_uri = None
                 
