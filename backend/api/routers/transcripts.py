@@ -13,7 +13,7 @@ from api.services.audio.transcript_io import load_transcript_json
 from api.models.podcast import Episode
 from api.services.episodes import repo as _ep_repo
 from api.core.paths import TRANSCRIPTS_DIR
-from api.routers.ai_suggestions import _discover_transcript_json_path  # reuse discovery
+from api.services.transcripts import discover_transcript_json_path as _discover_transcript_json_path  # reuse discovery
 
 router = APIRouter(prefix="/transcripts", tags=["transcripts"])
 
