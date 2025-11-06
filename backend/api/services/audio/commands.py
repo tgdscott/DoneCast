@@ -155,8 +155,12 @@ def extract_ai_commands(
                     except Exception:
                         pass
                 max_idx = end_s if end_s != -1 else (i + 80)
-                for fw in mutable_words[i+1:max_idx]:
+                for fw_idx, fw in enumerate(mutable_words[i+1:max_idx], start=i+1):
                     if fw.get('word'):
+                        # ✅ NEW: Stop at end_marker position (don't include words after user's mark)
+                        if end_s != -1 and fw_idx >= end_s:
+                            break
+                        
                         # Stop if total window is too large (hard cap)
                         if fw['start'] - command_start_time > 15.0:
                             break

@@ -1,4 +1,4 @@
-﻿import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
@@ -102,20 +102,15 @@ export default function StepSelectPreprocessed({
   const hasDetectedAutomations = flubberCount > 0 || internCount > 0 || sfxCount > 0;
 
   const handleContinue = async () => {
-    // If intern/flubber detected, submit intents as "yes" and go to review
-    if (hasDetectedAutomations && typeof onIntentSubmit === 'function') {
-      // Build intent answers with "yes" for each detected automation
-      const intentAnswers = {
-        flubber: flubberCount > 0 ? 'yes' : 'no',
-        intern: internCount > 0 ? 'yes' : 'no',
-        sfx: sfxCount > 0 ? 'yes' : 'no',
-      };
-      
-      // Submit intents - this will trigger the review flow
-      await onIntentSubmit(intentAnswers);
+    if (hasDetectedAutomations && hasPendingIntents && typeof onEditAutomations === 'function') {
+      onEditAutomations();
       return;
     }
-    // Otherwise just proceed to next step
+    if (typeof onIntentSubmit === 'function') {
+      const result = await onIntentSubmit(intents);
+      if (result === false) return;
+      if (result === true) return;
+    }
     if (typeof onNext === 'function') onNext();
   };
 
@@ -360,13 +355,51 @@ export default function StepSelectPreprocessed({
         </div>
       )}
 
-      {/* REMOVED: Automation confirmation box - users who use intern/flubber know what they're doing.
-
-
-          Automations (flubber, intern, sfx) will process automatically when they hit Continue.
-
-
-          No extra clicks, no extra questions - just hit Continue and they'll process in order. */}
+      {selected && hasDetectedAutomations && (
+        <Card className="border border-slate-200">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base text-slate-800">
+              <Sparkles className="w-4 h-4 text-amber-500" />
+              Automations ready for {selectedDisplayName}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm text-slate-700">
+            {flubberCount > 0 && (
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5" />
+                <div>
+                  We found {flubberCount} flubber cue{flubberCount === 1 ? '' : 's'}. We’ll walk you through confirming those edits after this step.
+                </div>
+              </div>
+            )}
+            {internCount > 0 && (
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-blue-500 mt-0.5" />
+                <div>
+                  {internCount === 1 ? 'One intern command' : `${internCount} intern commands`} detected. We’ll capture the AI intern response when you configure automations.
+                </div>
+              </div>
+            )}
+            {sfxCount > 0 && (
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-green-500 mt-0.5" />
+                <div>
+                  {sfxCount} sound effect trigger{sfxCount === 1 ? '' : 's'} ready to swap with audio.
+                </div>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => typeof onEditAutomations === 'function' && onEditAutomations()}
+              >
+                Configure Automations
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="flex justify-between pt-4 items-start">
         <Button variant="ghost" onClick={onBack}>

@@ -5,7 +5,7 @@ import logging
 from typing import List
 from ..schemas import SuggestSectionIn, SuggestSectionOut
 from ..history import get_recent_sections
-from ..client_gemini import generate
+from ..client_router import generate
 
 
 log = logging.getLogger(__name__)

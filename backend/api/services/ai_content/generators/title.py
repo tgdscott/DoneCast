@@ -6,7 +6,7 @@ import time
 from ..prompts import BASE_TITLE_PROMPT
 from ..history import get_recent_titles
 from ..schemas import SuggestTitleIn, SuggestTitleOut
-from ..client_gemini import generate
+from ..client_router import generate
 
 
 log = logging.getLogger(__name__)
@@ -55,6 +55,11 @@ def suggest_title(inp: SuggestTitleIn) -> SuggestTitleOut:
     prompt = _compose_prompt(inp)
     try:
         title = generate(prompt, max_tokens=128).strip().replace("\n", " ")
+        # If Groq returns empty/near-empty (rate limit issue), fallback to Gemini
+        if len(title) < 10:
+            log.warning("[ai_title] Groq returned empty/short response, falling back to Gemini")
+            from ..client_gemini import generate as gemini_generate
+            title = gemini_generate(prompt).strip().replace("\n", " ")
     except RuntimeError:
         # In tests without external SDKs/keys, return a deterministic fallback
         title = "Test Title"

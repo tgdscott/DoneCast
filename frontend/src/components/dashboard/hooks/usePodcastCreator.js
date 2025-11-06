@@ -249,6 +249,33 @@ export default function usePodcastCreator({
     return () => { cancelled = true; };
   }, [stepNav.selectedTemplate, token]);
 
+  // Calculate pendingIntentLabels - intents that have detected commands but user hasn't answered yet
+  const pendingIntentLabels = useMemo(() => {
+    const labels = [];
+    const detections = aiOrchestration.intentDetections || {};
+    const answers = aiFeatures.intents || {};
+    
+    // Check flubber
+    if (Number((detections?.flubber?.count) ?? 0) > 0 && answers.flubber === null) {
+      labels.push('flubber');
+    }
+    // Check intern
+    if (Number((detections?.intern?.count) ?? 0) > 0 && answers.intern === null) {
+      labels.push('intern');
+    }
+    // Check sfx
+    if (Number((detections?.sfx?.count) ?? 0) > 0 && answers.sfx === null) {
+      labels.push('sfx');
+    }
+    
+    return labels;
+  }, [aiOrchestration.intentDetections, aiFeatures.intents]);
+
+  // Calculate intentsComplete - true if all detected intents have been answered
+  const intentsComplete = useMemo(() => {
+    return pendingIntentLabels.length === 0;
+  }, [pendingIntentLabels]);
+
   return {
     ...stepNav,
     ...fileUpload,
@@ -267,5 +294,7 @@ export default function usePodcastCreator({
     useAuphonic,
     setUseAuphonic,
     capabilities,
+    pendingIntentLabels,
+    intentsComplete,
   };
 }

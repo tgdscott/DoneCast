@@ -583,8 +583,47 @@ def resolve_media_context(
 
     if (not source_audio_path) or (not Path(str(source_audio_path)).exists()):
         fallback_name = Path(str(main_content_filename)).name
-        source_audio_path = (PROJECT_ROOT / "media_uploads" / fallback_name).resolve()
-        base_audio_name = fallback_name
+        # Try MEDIA_DIR first (actual storage), then workspace fallback
+        fallback_candidates = [
+            MEDIA_DIR / fallback_name,
+            PROJECT_ROOT / "media_uploads" / fallback_name,
+        ]
+        for candidate in fallback_candidates:
+            if candidate.exists():
+                source_audio_path = candidate.resolve()
+                base_audio_name = fallback_name
+                break
+        else:
+            # Fuzzy match: Strip hash and find files with matching suffix
+            # Example: b6d5f77e699e444ba31ae1b4cb15feb4_HASH_TheSmashingMachine.mp3
+            # Should match any b6d5f77e699e444ba31ae1b4cb15feb4_*_TheSmashingMachine.mp3
+            try:
+                parts = fallback_name.split('_', 2)  # Split on first 2 underscores
+                if len(parts) == 3:
+                    user_prefix = parts[0]
+                    suffix = parts[2]  # The actual filename part
+                    pattern = f"{user_prefix}_*_{suffix}"
+                    
+                    logging.info(f"[assemble] Exact file not found, trying fuzzy match: {pattern}")
+                    
+                    for search_dir in [MEDIA_DIR, PROJECT_ROOT / "media_uploads"]:
+                        matches = list(search_dir.glob(pattern))
+                        if matches:
+                            # Use the most recent match
+                            match = max(matches, key=lambda p: p.stat().st_mtime)
+                            logging.info(f"[assemble] Fuzzy match found: {match.name}")
+                            source_audio_path = match.resolve()
+                            base_audio_name = match.name
+                            break
+                    else:
+                        logging.warning(f"[assemble] No fuzzy matches found for pattern: {pattern}")
+            except Exception as e:
+                logging.warning(f"[assemble] Fuzzy match failed: {e}")
+            
+            # If still not found, use workspace path (will fail later with clear error)
+            if not source_audio_path or not Path(str(source_audio_path)).exists():
+                source_audio_path = (PROJECT_ROOT / "media_uploads" / fallback_name).resolve()
+                base_audio_name = fallback_name
 
     try:
         logging.info(

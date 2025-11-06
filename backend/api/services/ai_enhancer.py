@@ -17,7 +17,7 @@ except ImportError:  # pragma: no cover - optional dependency at runtime
 
 from api.core.config import settings
 from api.models.user import User
-from api.services.ai_content import client_gemini
+from api.services.ai_content import client_router as ai_client
 
 
 _DEFAULT_ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # Rachel
@@ -199,15 +199,16 @@ def get_answer_for_topic(
         guidance = "Produce concise bullet point show notes summarizing the key takeaways."
     else:
         guidance = (
-            "Write ONLY natural spoken sentences as if you're speaking directly into a microphone. "
-            "NO bullet points, NO lists, NO formatting, NO asterisks, NO dashes, NO markdown. "
-            "Just 2-3 conversational sentences that answer the question clearly and naturally. "
-            "Imagine you're having a conversation with a friend - keep it simple and speakable."
+            "Your response will be inserted directly into a podcast episode. "
+            "Give ONLY the factual answer in 1-2 SHORT sentences - NO editorializing, NO opinions, NO extra context. "
+            "Example: Question: 'who was the first guy to run a four minute mile' → Answer: 'Roger Bannister on May 6, 1954.' "
+            "That's it. Nothing more. Just the bare facts."
         )
 
     prompt = dedent(
         f"""
-        You are a helpful podcast intern. You research questions, and then provide the answer to a TTS service which will respond immediately after the request with the answer, so please format your response to be spoken-podcast friendly.  Make your response extremely brief and include nothing other than the response. {guidance}
+        You are a podcast intern providing brief factual answers. Give ONLY the direct answer in 1-2 sentences maximum. NO introductions, NO elaboration, NO opinions. Just the facts.
+        {guidance}
         Topic: {topic_text or 'General request'}
         """
     ).strip()
@@ -215,13 +216,20 @@ def get_answer_for_topic(
         prompt += "\nTranscript excerpt:\n" + context_text
     prompt += "\nSpoken response:"
 
+    _LOG.info("[intern-ai] 🎤 GENERATING RESPONSE topic='%s' context_len=%d mode=%s", 
+              topic_text[:50] if topic_text else "None", len(context_text), mode)
+
     try:
-        generated = client_gemini.generate(prompt, max_output_tokens=512, temperature=0.6)
+        # ✅ FIXED: Use max_tokens (correct param) instead of max_output_tokens, increased to 768
+        generated = ai_client.generate(prompt, max_tokens=768, temperature=0.6)
+        _LOG.info("[intern-ai] ✅ RESPONSE GENERATED length=%d text='%s'", 
+                  len(generated or ""), (generated or "")[:100])
     except Exception as exc:  # pragma: no cover - network/SDK issues downgraded to fallback
-        _LOG.warning("[intern-ai] generation failed: %s", exc)
+        _LOG.error("[intern-ai] ❌ GENERATION FAILED: %s", exc, exc_info=True)
         generated = ""
 
     cleaned = (generated or "").strip()
+    _LOG.info("[intern-ai] 🧹 CLEANED RESPONSE length=%d", len(cleaned))
 
     if mode == "shownote":
         if not cleaned:

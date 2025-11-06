@@ -8,7 +8,7 @@ import re
 from ..prompts import BASE_NOTES_PROMPT
 from ..history import get_recent_notes
 from ..schemas import SuggestNotesIn, SuggestNotesOut
-from ..client_gemini import generate
+from ..client_router import generate
 
 
 def _load_transcript(path: str) -> str:

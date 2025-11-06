@@ -8,9 +8,10 @@ import time
 import logging
 from ..prompts import BASE_TAGS_PROMPT
 from ..schemas import SuggestTagsIn, SuggestTagsOut
-from ..client_gemini import generate, generate_json
+from ..client_router import generate, generate_json
 
 
+log = logging.getLogger(__name__)
 _PUNCT_RE = re.compile(r"[^a-z0-9\- ]+")
 
 
@@ -58,6 +59,8 @@ def _post_process(raw_tags: List[str], always: List[str]) -> List[str]:
 def suggest_tags(inp: SuggestTagsIn) -> SuggestTagsOut:
     t0 = time.time()
     prompt = _compose_prompt(inp)
+    # ✅ FIXED: generate_json() doesn't accept max_tokens/temp (Gemini-only params)
+    # Those params only apply to the fallback generate() call
     data = generate_json(prompt)
     tags: List[str] = []
     if isinstance(data, list):
@@ -66,11 +69,25 @@ def suggest_tags(inp: SuggestTagsIn) -> SuggestTagsOut:
         tags = [str(x) for x in data.get("tags", [])]
     else:
         # fallback: try parsing lines if model ignored JSON
-        text = generate(prompt, max_tokens=256)
+        # ✅ max_tokens/temperature only work with Groq generate(), not Gemini generate_json()
+        text = generate(prompt, max_tokens=512, temperature=0.7)
         for ln in text.splitlines():
             ln = ln.strip("- •\t ")
             if ln:
                 tags.append(ln)
+    
+    # If we got very few tags (< 2), Groq probably failed - try Gemini fallback
+    if len(tags) < 2:
+        log.warning(f"[ai_tags] Got only {len(tags)} tags, falling back to Gemini")
+        try:
+            from ..client_gemini import generate_json as gemini_generate_json
+            data = gemini_generate_json(prompt)
+            if isinstance(data, list):
+                tags = [str(x) for x in data]
+            elif isinstance(data, dict) and "tags" in data:
+                tags = [str(x) for x in data.get("tags", [])]
+        except Exception as e:
+            log.error(f"[ai_tags] Gemini fallback also failed: {e}")
     final = _post_process(tags, inp.tags_always_include)
     dur_ms = int((time.time() - t0) * 1000)
     est_in = len(prompt) // 4

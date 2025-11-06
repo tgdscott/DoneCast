@@ -22,6 +22,7 @@ def execute_intern_commands(
     """Execute Intern commands (audio only), preserving spoken prompt.
     This code was extracted from commands.py to isolate Intern behavior.
     """
+    log.append(f"[INTERN_EXEC] 🎬 STARTING EXECUTION cmds_count={len(cmds)} audio_duration={len(cleaned_audio)/1000:.2f}s")
     out = cleaned_audio
     import re as _re
 
@@ -365,19 +366,13 @@ def execute_intern_commands(
                 prompt_end_ms = int(float(cmd.get("context_end", cmd.get("time", 0))) * 1000 * ratio)
                 prompt_start_ms = max(0, min(prompt_start_ms, len(out)))
                 prompt_end_ms = max(prompt_start_ms, min(prompt_end_ms, len(out)))
-                # Prefer explicit end-marker timing if present (e.g., 'stop'/'stop intern'), else use a tiny pad
-                end_marker_start = cmd.get("end_marker_start")
+                # CRITICAL FIX: DO NOT CUT ANYTHING - just insert AI response after the question
+                # User marks where the answer should START (end_marker_end), we insert there
                 end_marker_end = cmd.get("end_marker_end")
-                insertion_ms = prompt_end_ms
-                if isinstance(end_marker_start, (int, float)) and isinstance(end_marker_end, (int, float)) and end_marker_end >= end_marker_start:
-                    ems = int(float(end_marker_start) * 1000 * ratio)
-                    eme = int(float(end_marker_end) * 1000 * ratio)
-                    ems = max(0, min(ems, len(out)))
-                    eme = max(ems, min(eme, len(out)))
-                    if eme > ems:
-                        out = AudioSegment(out[:ems]) + AudioSegment(out[eme:])
-                        insertion_ms = ems
-                        log.append(f"[INTERN_END_MARKER_CUT] cut_ms=[{ems},{eme}] insert_at={insertion_ms}")
+                if isinstance(end_marker_end, (int, float)):
+                    insertion_ms = int(float(end_marker_end) * 1000 * ratio)
+                    insertion_ms = max(0, min(insertion_ms, len(out)))
+                    log.append(f"[INTERN_INSERT_ONLY] insert_at={insertion_ms} (no cutting)")
                 else:
                     insert_pad_ms = max(0, int(cmd.get("insert_pad_ms", 120)))
                     insertion_ms = min(prompt_end_ms + insert_pad_ms, len(out))

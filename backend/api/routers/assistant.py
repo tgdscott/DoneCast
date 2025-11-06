@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/assistant", tags=["assistant"])
 
 # Use Gemini/Vertex AI instead of OpenAI
-from api.services.ai_content.client_gemini import generate as gemini_generate
+from api.services.ai_content.client_router import generate as gemini_generate
 
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@podcastplusplus.com")
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.mailgun.org")
@@ -88,11 +88,11 @@ class ProactiveHelpRequest(BaseModel):
 def _ensure_gemini_available() -> bool:
     """Ensure Gemini/Vertex AI is available and configured."""
     try:
-        # Test that we can import and use Gemini
-        from api.services.ai_content.client_gemini import generate
+        # Test that we can import and use AI provider
+        from api.services.ai_content.client_router import generate
         return True
     except Exception as e:
-        log.error(f"Gemini not available: {e}")
+        log.error(f"AI provider not available: {e}")
         raise HTTPException(
             status_code=503,
             detail="AI Assistant not available - Gemini/Vertex AI not configured"
@@ -1000,7 +1000,7 @@ async def chat_with_assistant(
         # Check for image generation request
         if "GENERATE_IMAGE:" in response_content:
             try:
-                from api.services.ai_content.client_gemini import generate_podcast_cover_image
+                from api.services.ai_content.client_router import generate_podcast_cover_image
                 
                 # Extract image prompt
                 parts = response_content.split("GENERATE_IMAGE:")

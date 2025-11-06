@@ -61,7 +61,7 @@ def assemblyai_transcribe_with_speakers(filename: str, timeout_s: int = 7200) ->
             "speaker_labels": True,
             "punctuate": True,
             "format_text": False,
-            "disfluencies": False,  # False = remove filler words (um, uh, etc.)
+            "disfluencies": True,  # True = KEEP filler words (um, uh, etc.) - we handle cleanup in post-processing
             "filter_profanity": False,
             "language_detection": False,
             "custom_spelling": [],

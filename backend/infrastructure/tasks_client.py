@@ -81,7 +81,9 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
             def _runner() -> None:
                 try:
                     words = transcribe_media_file(filename, user_id)  # Pass user_id for tier routing
-                    # Persist a transcript JSON so /api/ai/transcript-ready becomes true.
+                    # Persist a transcript JSON locally for cache/debugging
+                    # NOTE: Transcript is ALSO saved to Database by transcribe_media_file()
+                    # Intern feature queries Database, NOT local files or GCS
                     try:
                         base_name = filename.split('/')[-1].split('\\')[-1]
                         stem = Path(base_name).stem
@@ -90,7 +92,7 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
                         # Only write if not already present to avoid clobbering later enriched versions
                         if not out_path.exists():
                             out_path.write_text(json.dumps(words, ensure_ascii=False, indent=2), encoding="utf-8")
-                            print(f"DEV MODE wrote transcript JSON -> {out_path}")
+                            print(f"DEV MODE wrote transcript JSON (cache only) -> {out_path}")
                     except Exception as write_err:  # pragma: no cover
                         print(f"DEV MODE warning: failed to write transcript JSON for {filename}: {write_err}")
                     print(f"DEV MODE transcription completed for {filename}")

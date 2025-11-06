@@ -146,7 +146,7 @@ def start_transcription(
         "speaker_labels": True,
         "punctuate": True,
         "format_text": False,
-        "disfluencies": False,  # False = remove filler words (um, uh, etc.)
+        "disfluencies": True,  # True = KEEP filler words in transcript so we can cut them from audio
         "filter_profanity": False,
         "language_detection": False,
         "custom_spelling": [],

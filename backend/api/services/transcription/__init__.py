@@ -580,7 +580,7 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
             key = None
             try:
                 bucket = _resolve_transcripts_bucket()
-                from ...infrastructure import storage  # type: ignore
+                from api.infrastructure import storage  # type: ignore
 
                 key = f"transcripts/{safe_stem}.json"
                 storage_url = storage.upload_bytes(

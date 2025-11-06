@@ -18,7 +18,7 @@ from api.core.config import settings
 from api.models.podcast import Episode, Podcast
 from api.models.user import User
 from api.models.website import PodcastWebsite, PodcastWebsiteStatus
-from api.services.ai_content import client_gemini
+from api.services.ai_content import client_router as ai_client
 
 try:  # pragma: no cover - optional dependency in local dev
     from google.cloud import storage  # type: ignore
@@ -548,7 +548,7 @@ def _build_context_prompt(ctx: WebsiteContext, include_layout: Optional[Dict[str
 
 
 def _invoke_site_builder(prompt: str) -> Dict[str, Any]:
-    raw = client_gemini.generate(prompt, max_output_tokens=2048, temperature=0.75)
+    raw = ai_client.generate(prompt, max_output_tokens=2048, temperature=0.75)
     if not raw:
         raise PodcastWebsiteAIError("Empty response from AI site builder")
     try:
@@ -1270,7 +1270,7 @@ Generate complete CSS that:
 Return ONLY the CSS code, no explanations or markdown fences."""
 
     try:
-        css = client_gemini.generate(prompt, max_output_tokens=2048, temperature=0.7)
+        css = ai_client.generate(prompt, max_output_tokens=2048, temperature=0.7)
         
         # Remove markdown code fences if present
         if css.startswith("```css"):

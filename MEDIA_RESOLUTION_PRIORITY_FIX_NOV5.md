@@ -34,7 +34,7 @@ The `_resolve_media_file()` function searches for audio files in a prioritized l
 
 ## THE FIX
 
-**Changed search order in TWO places:**
+**Changed search order in THREE places:**
 
 ### Location 1: `_resolve_media_file()` (Lines 118-135)
 
@@ -83,6 +83,50 @@ for candidate in [
     APP_ROOT_DIR / "media_uploads" / base,
 ]:
 ```
+
+### Location 3: `resolve_media_context()` Fallback Path (Lines 586-600)
+
+**BEFORE:**
+```python
+if (not source_audio_path) or (not Path(str(source_audio_path)).exists()):
+    fallback_name = Path(str(main_content_filename)).name
+    source_audio_path = (PROJECT_ROOT / "media_uploads" / fallback_name).resolve()  # ❌ WRONG!
+    base_audio_name = fallback_name
+```
+
+**AFTER:**
+```python
+if (not source_audio_path) or (not Path(str(source_audio_path)).exists()):
+    fallback_name = Path(str(main_content_filename)).name
+    # Try MEDIA_DIR first (actual storage), then workspace fallback
+    fallback_candidates = [
+        MEDIA_DIR / fallback_name,
+        PROJECT_ROOT / "media_uploads" / fallback_name,
+    ]
+    for candidate in fallback_candidates:
+        if candidate.exists():
+            source_audio_path = candidate.resolve()
+            base_audio_name = fallback_name
+            break
+    else:
+        # No file found anywhere - use workspace path (will fail later with clear error)
+        source_audio_path = (PROJECT_ROOT / "media_uploads" / fallback_name).resolve()
+        base_audio_name = fallback_name
+```
+
+**Why This Third Fix Was Critical:**
+- This is the **final fallback** when all candidate searches fail
+- Even though Location 1 checks MEDIA_DIR first, if the loop completes without finding the file, it falls through to this code
+- The old code blindly set `source_audio_path` to workspace directory without checking MEDIA_DIR one last time
+- This caused the "File not found" error because it used the wrong path for the actual assembly process
+
+**BONUS: Added Fuzzy Matching (Nov 5 - Second Issue)**
+- User encountered issue where frontend sent filename with hash `f4aae30f66ff41878768d3a4c962c5f8`
+- But actual file on disk had hash `2d16d01bc984433c865b3ba8a88e8594`
+- Files follow pattern: `{user_id}_{hash}_{original_name}.mp3`
+- Added fuzzy matcher that strips hash and finds files matching `{user_id}_*_{original_name}.mp3`
+- Uses most recently modified file if multiple matches exist
+- Logs fuzzy match attempts for debugging
 
 ## WHY THIS MATTERS
 

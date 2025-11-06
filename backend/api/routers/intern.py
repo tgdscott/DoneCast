@@ -214,76 +214,88 @@ def _load_transcript_words(filename: str) -> Tuple[List[Dict[str, Any]], Optiona
     tr_legacy = tr_dir / f"{stem}.words.json"
     transcript_path: Optional[Path] = None
     
-    # PRIORITY 1: Try GCS bucket (production architecture)
+    # PRIORITY 1: Try local filesystem (dev mode, ephemeral cache)
+    if tr_new.exists():
+        try:
+            words = json.loads(tr_new.read_text(encoding="utf-8"))
+            # Validate it's word-level data, not just metadata
+            if words and isinstance(words, list) and len(words) > 0:
+                # Check first item - should be word dict with "word", "start", "end"
+                first_item = words[0]
+                if isinstance(first_item, dict) and "word" in first_item:
+                    _LOG.info(f"[intern] ✅ Found word-level transcript locally: {tr_new}")
+                    return words, tr_new
+                else:
+                    _LOG.warning(f"[intern] Local file exists but contains metadata, not word-level data")
+        except Exception as e:
+            _LOG.warning(f"[intern] Failed to read local transcript: {e}")
+    
+    if tr_legacy.exists():
+        try:
+            words = json.loads(tr_legacy.read_text(encoding="utf-8"))
+            if words and isinstance(words, list):
+                _LOG.info(f"[intern] ✅ Found word-level transcript locally (legacy): {tr_legacy}")
+                return words, tr_legacy
+        except Exception as e:
+            _LOG.warning(f"[intern] Failed to read legacy transcript: {e}")
+    
+    # PRIORITY 2: Download from GCS using metadata in Database
     try:
         from api.core.database import get_session
-        from api.models.podcast import MediaItem
+        from api.models.transcription import MediaTranscript
         from sqlmodel import select
         from infrastructure.gcs import download_bytes
-        import os
         
         session = next(get_session())
-        # Query with original_filename (may be full GCS URL)
-        media_item = session.exec(select(MediaItem).where(MediaItem.filename == original_filename)).first()
         
-        if not media_item:
-            _LOG.info(f"[intern] MediaItem not found for {original_filename}, trying base filename {filename}")
-            media_item = session.exec(select(MediaItem).where(MediaItem.filename == filename)).first()
+        # Query MediaTranscript for GCS location metadata
+        transcript_record = session.exec(
+            select(MediaTranscript).where(MediaTranscript.filename == original_filename)
+        ).first()
         
-        if media_item:
-            user_id = str(media_item.user_id)
-            # CRITICAL: Use TRANSCRIPTS_BUCKET not GCS_BUCKET (different buckets!)
-            gcs_bucket = os.getenv("TRANSCRIPTS_BUCKET", "ppp-transcripts-us-west1")
-            gcs_key = f"transcripts/{stem}.json"  # NO user_id folder - matches assembly upload path
+        if not transcript_record:
+            transcript_record = session.exec(
+                select(MediaTranscript).where(MediaTranscript.filename == filename)
+            ).first()
+        
+        if transcript_record:
+            meta = json.loads(transcript_record.transcript_meta_json or "{}")
+            gcs_bucket = meta.get("gcs_bucket")
+            gcs_key = meta.get("gcs_key")
             
-            _LOG.info(f"[intern] Attempting GCS transcript download: gs://{gcs_bucket}/{gcs_key}")
-            content = download_bytes(gcs_bucket, gcs_key)
-            
-            if content:
-                # Cache locally for future calls
-                tr_dir.mkdir(parents=True, exist_ok=True)
-                tr_new.write_bytes(content)
-                _LOG.info(f"[intern] Downloaded transcript from GCS to {tr_new}")
-                return json.loads(content.decode("utf-8")), tr_new
+            if gcs_bucket and gcs_key:
+                _LOG.info(f"[intern] Downloading transcript from GCS: gs://{gcs_bucket}/{gcs_key}")
+                content = download_bytes(gcs_bucket, gcs_key)
+                
+                if content:
+                    words = json.loads(content.decode("utf-8"))
+                    
+                    # Cache locally for future use
+                    try:
+                        tr_dir.mkdir(parents=True, exist_ok=True)
+                        tr_new.write_text(json.dumps(words, ensure_ascii=False, indent=2), encoding="utf-8")
+                        _LOG.info(f"[intern] Cached transcript from GCS to {tr_new}")
+                        transcript_path = tr_new
+                    except Exception as cache_err:
+                        _LOG.warning(f"[intern] Failed to cache transcript: {cache_err}")
+                        transcript_path = None
+                    
+                    return words, transcript_path
+                else:
+                    _LOG.error(f"[intern] GCS download returned empty content for gs://{gcs_bucket}/{gcs_key}")
             else:
-                _LOG.warning(f"[intern] GCS download returned empty content for transcript")
+                _LOG.warning(f"[intern] MediaTranscript found but missing GCS metadata (bucket or key)")
         else:
-            _LOG.warning(f"[intern] No MediaItem found in database for filename: {original_filename}")
-    except Exception as e:
-        _LOG.error(f"[intern] GCS transcript download failed (will try local): {e}", exc_info=True)
+            _LOG.warning(f"[intern] No MediaTranscript record found for {original_filename} or {filename}")
     
-    # PRIORITY 2: Check local filesystem (dev environment or GCS failed)
-    try:
-        if tr_new.is_file():
-            transcript_path = tr_new
-            return json.loads(tr_new.read_text(encoding="utf-8")), transcript_path
-        if tr_legacy.is_file():
-            transcript_path = tr_legacy
-            return json.loads(tr_legacy.read_text(encoding="utf-8")), transcript_path
-    except Exception:
-        raise HTTPException(status_code=500, detail="Corrupt transcript file; please re-run upload")
-
-    # PRIORITY 3: Generate new transcript via AssemblyAI API
-    try:
-        words = transcription.get_word_timestamps(filename)
-        try:
-            tr_dir.mkdir(parents=True, exist_ok=True)
-            tr_new.write_text(json.dumps(words), encoding="utf-8")
-            transcript_path = tr_new
-        except Exception:
-            transcript_path = None
-        return words, transcript_path
-    except Exception as exc:  # pragma: no cover - defensive guards
-        transcribing_exc = getattr(transcription, "TranscriptionInProgressError", None)
-        if transcribing_exc and isinstance(exc, transcribing_exc):
-            headers = {"Retry-After": "2"}
-            raise HTTPException(
-                status_code=425,
-                detail="Transcript not ready yet; please retry shortly",
-                headers=headers,
-            )
-        _LOG.warning("[intern] transcript fetch failed for %s: %s", filename, exc)
-        raise HTTPException(status_code=500, detail="Failed to fetch word timestamps for uploaded file")
+    except Exception as e:
+        _LOG.error(f"[intern] Failed to download from GCS: {e}", exc_info=True)
+    
+    # PRIORITY 3: If all else fails, fail hard with clear message
+    raise HTTPException(
+        status_code=404,
+        detail=f"Transcript not found for {original_filename}. Please upload and transcribe the file first."
+    )
 
 
 def _default_cleanup_options(raw: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -619,7 +631,8 @@ def execute_intern_command(
     resolved_end = max(resolved_start + 0.5, float(end_s))
 
     transcript_excerpt = _collect_transcript_preview(words, resolved_start, resolved_end)
-    prompt_text = str(target_cmd.get("local_context") or transcript_excerpt or "").strip()
+    # CRITICAL FIX: Frontend local_context is truncated at marked endpoint, use full transcript_excerpt instead
+    prompt_text = str(transcript_excerpt or target_cmd.get("local_context") or "").strip()
 
     enhancer = _require_ai_enhancer()
 
@@ -629,7 +642,13 @@ def execute_intern_command(
     shownote_keywords = {"show notes", "shownotes", "show-note"}
     action = "add_to_shownotes" if any(kw in lowered_prompt for kw in shownote_keywords) else "generate_audio"
     action = action if target_cmd.get("mode") != "shownote" else "add_to_shownotes"  # Honor command mode
+    
+    # CRITICAL FIX: Strip "intern" keyword from the beginning so AI doesn't echo it back
     topic = prompt_text
+    if topic.lower().startswith("intern"):
+        topic = topic[6:].strip()  # Remove "intern" (6 chars) and leading whitespace
+    # Also handle "intern," or "intern:" variations
+    topic = re.sub(r'^intern[,:\s]+', '', topic, flags=re.IGNORECASE).strip()
 
     if override_text is not None and isinstance(override_text, str) and override_text.strip():
         answer = override_text.strip()

@@ -500,7 +500,17 @@ def get_show_stats_sync(show_url: str, days: int = 30) -> Optional[OP3ShowStats]
                 await client.close()
     
     try:
-        return asyncio.run(_fetch_with_lock())
+        # Try to use existing event loop if one exists, otherwise create new one
+        try:
+            loop = asyncio.get_running_loop()
+            # We're in an async context - create a task and run it
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, _fetch_with_lock())
+                return future.result(timeout=30)
+        except RuntimeError:
+            # No running loop - safe to use asyncio.run()
+            return asyncio.run(_fetch_with_lock())
     except Exception as e:
         logger.error(f"OP3: ⚠️ Failed to fetch stats: {e}")
         return None

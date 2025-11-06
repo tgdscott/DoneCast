@@ -116,8 +116,8 @@ def _kill_zombie_assembly_processes() -> None:
 def _recover_raw_file_transcripts(limit: int | None = None) -> None:
     """Recover transcript metadata for raw files from GCS after deployment.
     
-    After a Cloud Run deployment, the ephemeral filesystem is wiped. This causes
-    raw file transcripts to appear as "processing" even though they're complete.
+    After a Cloud Run deployment (or server restart in dev), the ephemeral filesystem is wiped.
+    This causes raw file transcripts to appear as "processing" even though they're complete.
     
     This function:
     1. Queries MediaTranscript table for all completed transcripts
@@ -126,11 +126,10 @@ def _recover_raw_file_transcripts(limit: int | None = None) -> None:
     4. Restores files to local storage so they appear as "ready" to users
     
     PERFORMANCE: Uses small limit (50) by default to minimize startup time.
+    
+    NOTE: Now enabled in dev mode too - transcripts should survive server restarts.
     """
-    # SKIP IN LOCAL DEV: Local dev uses persistent storage, no need to recover
-    if _APP_ENV in {"dev", "development", "local"}:
-        log.debug("[startup] Skipping transcript recovery in local dev environment")
-        return
+    # REMOVED: Dev mode check - transcripts should survive restarts in ALL environments
     
     # FAST PATH: Skip if TRANSCRIPTS_DIR already has files (container reuse, not fresh start)
     try:

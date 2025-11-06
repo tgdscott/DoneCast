@@ -109,15 +109,17 @@ def detect_and_prepare_ai_commands(
     sfx_markers = select_sfx_markers(mutable_words, commands_cfg, log)
 
     intern_overrides = cleanup_options.get("intern_overrides", []) or []
+    log.append(f"[AI_INTERN] 📋 CHECKING OVERRIDES: type={type(intern_overrides)} len={len(intern_overrides) if isinstance(intern_overrides, list) else 'N/A'}")
     if intern_overrides and isinstance(intern_overrides, list) and len(intern_overrides) > 0:
         log.append(
-            f"[AI_CMDS] using {len(intern_overrides)} user-reviewed intern overrides"
+            f"[AI_CMDS] ✅ USING {len(intern_overrides)} user-reviewed intern overrides"
         )
         for idx, ovr in enumerate(intern_overrides):
+            audio_url = ovr.get('audio_url', '')
             log.append(
                 f"[AI_OVERRIDE_INPUT] [{idx}] cmd_id={ovr.get('command_id')} "
-                f"has_audio_url={bool(ovr.get('audio_url'))} has_voice_id={bool(ovr.get('voice_id'))} "
-                f"text_len={len(str(ovr.get('response_text') or ''))}"
+                f"has_audio_url={bool(audio_url)} audio_url={audio_url[:100] if audio_url else 'NONE'} "
+                f"has_voice_id={bool(ovr.get('voice_id'))} text_len={len(str(ovr.get('response_text') or ''))}"
             )
         ai_cmds: List[Dict[str, Any]] = []
         for override in intern_overrides:
@@ -128,8 +130,8 @@ def detect_and_prepare_ai_commands(
                 "command_id": override.get("command_id"),
                 "time": float(override.get("start_s") or 0.0),
                 "context_end": float(override.get("end_s") or 0.0),
-                "end_marker_start": float(override.get("end_s") or 0.0),
-                "end_marker_end": float(override.get("end_s") or 0.0),
+                # CRITICAL: NO CUTTING - just insert at marked endpoint (end_s)
+                "end_marker_end": float(override.get("end_s") or 0.0),  # Where AI answer should be inserted
                 "local_context": str(override.get("prompt_text") or "").strip(),
                 "override_answer": str(override.get("response_text") or "").strip(),
                 "override_audio_url": str(override.get("audio_url") or "").strip() or None,
@@ -140,11 +142,14 @@ def detect_and_prepare_ai_commands(
                 "add_silence_after_ms": 500,  # 0.5s buffer after AI response
             }
             ai_cmds.append(cmd)
-            if insane_verbose:
-                log.append(
-                    f"[AI_OVERRIDE] cmd_id={cmd.get('command_id')} time={cmd.get('time'):.2f}s "
-                    f"end={cmd.get('end_marker_start'):.2f}s text_len={len(cmd.get('override_answer', ''))}"
-                )
+            # ALWAYS log built command details to trace if override_audio_url is present
+            audio_url_val = cmd.get('override_audio_url')
+            audio_url_display = audio_url_val[:100] if audio_url_val else 'NONE'
+            log.append(
+                f"[AI_OVERRIDE_BUILT] cmd_id={cmd.get('command_id')} time={cmd.get('time'):.2f}s "
+                f"insert_at={cmd.get('end_marker_end'):.2f}s override_audio_url={audio_url_display} "
+                f"text_len={len(cmd.get('override_answer', ''))} voice_id={cmd.get('voice_id')}"
+            )
     else:
         ai_cmds = build_intern_prompt(
             mutable_words, commands_cfg, log, insane_verbose=insane_verbose
@@ -232,10 +237,20 @@ def execute_intern_commands_step(
     insane_verbose: bool = False,
 ) -> Tuple[AudioSegment, List[str]]:
     ai_note_additions: List[str] = []
+    
+    # ✅ ADD PRE-EXECUTION LOGGING:
+    log.append(f"[INTERN_STEP] 🎯 execute_intern_commands_step CALLED: cmds={len(ai_cmds)} mix_only={mix_only} tts_provider={tts_provider}")
+    
     if ai_cmds:
+        # ✅ ADD COMMAND DETAILS:
+        log.append(f"[INTERN_STEP] 🎯 ai_cmds has {len(ai_cmds)} commands, proceeding to execution")
+        for idx, cmd in enumerate(ai_cmds):
+            log.append(f"[INTERN_STEP] 🎯 cmd[{idx}]: token={cmd.get('command_token')} time={cmd.get('time')} has_override_audio={bool(cmd.get('override_audio_url'))}")
+        
         try:
             try:
                 orig_audio = AudioSegment.from_file(content_path)
+                log.append(f"[INTERN_STEP] ✅ Loaded original audio: {len(orig_audio)}ms")
             except Exception as e:
                 try:
                     log.append(
@@ -244,6 +259,10 @@ def execute_intern_commands_step(
                 except Exception:
                     pass
                 orig_audio = AudioSegment.silent(duration=1)
+            
+            # ✅ ADD JUST BEFORE EXECUTION:
+            log.append(f"[INTERN_STEP] 🚀 CALLING execute_intern_commands NOW")
+            
             cleaned_audio = execute_intern_commands(
                 ai_cmds,
                 cleaned_audio,
@@ -256,6 +275,10 @@ def execute_intern_commands_step(
                 mutable_words=mutable_words,
                 fast_mode=bool(mix_only),
             )
+            
+            # ✅ ADD AFTER EXECUTION:
+            log.append(f"[INTERN_STEP] ✅ execute_intern_commands RETURNED: audio_len={len(cleaned_audio)}ms")
+            
             ai_note_additions = [c.get("note", "") for c in ai_cmds if c.get("note")]
         except ai_enhancer.AIEnhancerError as e:
             try:
