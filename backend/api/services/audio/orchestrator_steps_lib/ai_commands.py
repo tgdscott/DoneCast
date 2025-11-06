@@ -27,11 +27,45 @@ def _safe_float(value: Any) -> Optional[float]:
             return None
         if isinstance(value, (int, float)):
             return float(value)
-        if isinstance(value, str) and value.strip() == "":
-            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped == "":
+                return None
+            if stripped.lower() in {"none", "null", "nan"}:
+                return None
+            return float(stripped)
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _resolve_first_float(payload: Dict[str, Any], keys: List[str]) -> Optional[float]:
+    """Return the first non-null float found for the provided keys."""
+
+    for key in keys:
+        if key in payload:
+            value = _safe_float(payload.get(key))
+            if value is not None:
+                return value
+    return None
+
+
+def _extract_override_answer(override: Dict[str, Any]) -> str:
+    for key in ("response_text", "text", "answer_text", "answer", "response"):
+        value = override.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _extract_override_audio_url(override: Dict[str, Any]) -> Optional[str]:
+    for key in ("audio_url", "response_audio_url", "tts_url"):
+        value = override.get(key)
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped:
+                return stripped
+    return None
 
 
 def detect_and_prepare_ai_commands(
@@ -130,25 +164,64 @@ def detect_and_prepare_ai_commands(
             f"[AI_CMDS] ✅ USING {len(intern_overrides)} user-reviewed intern overrides"
         )
         for idx, ovr in enumerate(intern_overrides):
-            audio_url = ovr.get('audio_url', '')
+            audio_url = _extract_override_audio_url(ovr) or ""
+            override_text = _extract_override_answer(ovr)
             log.append(
                 f"[AI_OVERRIDE_INPUT] [{idx}] cmd_id={ovr.get('command_id')} "
                 f"has_audio_url={bool(audio_url)} audio_url={audio_url[:100] if audio_url else 'NONE'} "
-                f"has_voice_id={bool(ovr.get('voice_id'))} text_len={len(str(ovr.get('response_text') or ''))}"
+                f"has_voice_id={bool(ovr.get('voice_id'))} text_len={len(override_text)}"
             )
         ai_cmds: List[Dict[str, Any]] = []
         for override in intern_overrides:
             if not isinstance(override, dict):
                 continue
 
-            start_s = _safe_float(override.get("start_s"))
-            end_s = _safe_float(override.get("end_s"))
-            context_end = _safe_float(override.get("context_end"))
+            start_s = _resolve_first_float(
+                override,
+                [
+                    "start_s",
+                    "start",
+                    "startSeconds",
+                    "start_seconds",
+                    "absolute_start_s",
+                    "command_start_s",
+                    "trigger_time_s",
+                    "time_s",
+                    "context_start",
+                    "window_start_s",
+                    "snippet_start_s",
+                ],
+            )
+            end_s = _resolve_first_float(
+                override,
+                [
+                    "end_s",
+                    "end",
+                    "endSeconds",
+                    "end_seconds",
+                    "context_end",
+                    "window_end_s",
+                    "snippet_end_s",
+                ],
+            )
+            context_end = _resolve_first_float(
+                override,
+                ["context_end", "end_s", "end", "endSeconds", "end_seconds", "window_end_s", "snippet_end_s"],
+            )
 
             if context_end is None:
                 context_end = end_s if end_s is not None else start_s
 
-            insertion_s = end_s if end_s is not None else context_end
+            insertion_s = _resolve_first_float(
+                override,
+                ["insertion_s", "insertion", "end_s", "end", "endSeconds", "end_seconds"],
+            )
+            if insertion_s is None:
+                insertion_s = end_s if end_s is not None else context_end
+
+            if start_s is None:
+                start_s = insertion_s
+
             cmd = {
                 "command_token": "intern",
                 "command_id": override.get("command_id"),
@@ -159,8 +232,8 @@ def detect_and_prepare_ai_commands(
                 "end_marker_start": float(start_s if start_s is not None else 0.0),
                 "insertion_s": float(insertion_s if insertion_s is not None else 0.0),
                 "local_context": str(override.get("prompt_text") or "").strip(),
-                "override_answer": str(override.get("response_text") or "").strip(),
-                "override_audio_url": str(override.get("audio_url") or "").strip() or None,
+                "override_answer": _extract_override_answer(override),
+                "override_audio_url": _extract_override_audio_url(override),
                 "voice_id": override.get("voice_id"),
                 "mode": "audio",
                 "insert_pad_ms": 500,  # 0.5s buffer after marked endpoint
