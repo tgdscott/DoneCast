@@ -6,6 +6,19 @@ from .common import AudioSegment, match_target_dbfs
 from difflib import SequenceMatcher
 
 
+def _safe_float(value: Any) -> Optional[float]:
+    try:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str) and value.strip() == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def execute_intern_commands(
     cmds: List[Dict[str, Any]],
     cleaned_audio: AudioSegment,
@@ -239,6 +252,7 @@ def execute_intern_commands(
                 cmd["shownote_error"] = str(e)
                 log.append(f"[INTERN_NOTE_ERROR] {e}")
         else:
+            answer_text = ""
             try:
                 # Check if user provided an override answer first
                 override_answer = (cmd.get("override_answer") or "").strip()
@@ -257,20 +271,29 @@ def execute_intern_commands(
                         context=(cmd.get("local_context") or ""),
                         mode="audio",
                     )
+
+                answer_text = (answer or "").strip()
+                if not answer_text:
+                    answer_text = "The intern is out to lunch."
+
                 try:
                     spoken_prompt = (cmd.get("local_context") or "").strip()
                     prompts = [spoken_prompt, (query_text or "").strip()]
                     seen = set()
                     prompts = [p for p in prompts if p and not (p in seen or seen.add(p))]
-                    answer = _strip_prompt_prefix_suffix(answer, prompts, log)
+                    answer_text = _strip_prompt_prefix_suffix(answer_text, prompts, log)
                     # Also remove duplicated or prompt-like tail phrases to avoid end-echo in TTS
-                    answer = _dedupe_tail(answer, log)
-                    answer = _strip_promptish_tail(answer, prompts, log)
+                    answer_text = _dedupe_tail(answer_text, log)
+                    answer_text = _strip_promptish_tail(answer_text, prompts, log)
                 except Exception:
                     pass
                 try:
-                    if mutable_words is not None and (answer or "").strip():
-                        ctx_end = float(cmd.get("context_end", cmd.get("time", 0)) or 0.0)
+                    if mutable_words is not None and (answer_text or "").strip():
+                        ctx_end = _safe_float(cmd.get("context_end"))
+                        if ctx_end is None:
+                            ctx_end = _safe_float(cmd.get("time"))
+                        if ctx_end is None:
+                            ctx_end = 0.0
                         insert_idx = len(mutable_words)
                         for _idx, _w in enumerate(mutable_words):
                             try:
@@ -279,7 +302,7 @@ def execute_intern_commands(
                                     break
                             except Exception:
                                 continue
-                        tokens = [t for t in (answer or "").split() if t]
+                        tokens = [t for t in (answer_text or "").split() if t]
                         if tokens:
                             base_t = float(ctx_end)
                             synthetic_entries = [
@@ -296,11 +319,13 @@ def execute_intern_commands(
                 except Exception:
                     pass
                 if insane_verbose:
-                    log.append(f"[INTERN_ANSWER_TEXT] '{(answer or '')[:200]}'")
-                log.append(f"[INTERN_ANSWER] len={len(answer or '')}")
+                    log.append(f"[INTERN_ANSWER_TEXT] '{(answer_text or '')[:200]}'")
+                log.append(f"[INTERN_ANSWER] len={len(answer_text or '')}")
+                cmd["final_answer_text"] = answer_text
             except Exception as e:
                 log.append(f"[INTERN_ANSWER_ERROR] {e}; using fallback reply")
-                answer = "The intern is out to lunch."
+                answer_text = "The intern is out to lunch."
+                cmd["final_answer_text"] = answer_text
             try:
                 # Check if user provided pre-generated audio URL
                 override_audio_url = (cmd.get("override_audio_url") or "").strip()
@@ -320,7 +345,7 @@ def execute_intern_commands(
                         log.append(f"[INTERN_OVERRIDE_AUDIO_ERROR] {e}; will generate fresh TTS")
                         voice_id = cmd.get("voice_id")
                         speech = ai_enhancer.generate_speech_from_text(
-                            answer, voice_id=voice_id, provider=tts_provider, api_key=elevenlabs_api_key
+                            answer_text, voice_id=voice_id, provider=tts_provider, api_key=elevenlabs_api_key
                         )
                 elif fast_mode:
                     # Insert a short placeholder clip (silence) to avoid network calls in fast mode
@@ -335,10 +360,10 @@ def execute_intern_commands(
                     speech = None
                 else:
                     voice_id = cmd.get("voice_id")
-                    log.append(f"[INTERN_TTS_GENERATE] voice_id={voice_id} text_len={len(answer)} provider={tts_provider}")
+                    log.append(f"[INTERN_TTS_GENERATE] voice_id={voice_id} text_len={len(answer_text)} provider={tts_provider}")
                     try:
                         speech = ai_enhancer.generate_speech_from_text(
-                            answer, voice_id=voice_id, provider=tts_provider, api_key=elevenlabs_api_key
+                            answer_text, voice_id=voice_id, provider=tts_provider, api_key=elevenlabs_api_key
                         )
                         if speech:
                             log.append(f"[INTERN_TTS_SUCCESS] generated {len(speech)}ms audio")
@@ -362,20 +387,35 @@ def execute_intern_commands(
                 orig_len = len(main_content_audio)
                 cleaned_len = len(out)
                 ratio = cleaned_len / orig_len if orig_len else 1.0
-                prompt_start_ms = int(float(cmd.get("time", 0)) * 1000 * ratio)
-                prompt_end_ms = int(float(cmd.get("context_end", cmd.get("time", 0))) * 1000 * ratio)
+
+                start_s = _safe_float(cmd.get("time"))
+                if start_s is None:
+                    start_s = 0.0
+                context_end_s = _safe_float(cmd.get("context_end"))
+                if context_end_s is None:
+                    context_end_s = start_s
+                insertion_s = _safe_float(cmd.get("insertion_s"))
+                if insertion_s is None:
+                    insertion_s = _safe_float(cmd.get("end_marker_end"))
+                if insertion_s is None:
+                    insertion_s = context_end_s
+
+                prompt_start_ms = int(start_s * 1000 * ratio)
+                prompt_end_ms = int(context_end_s * 1000 * ratio)
                 prompt_start_ms = max(0, min(prompt_start_ms, len(out)))
                 prompt_end_ms = max(prompt_start_ms, min(prompt_end_ms, len(out)))
-                # CRITICAL FIX: DO NOT CUT ANYTHING - just insert AI response after the question
-                # User marks where the answer should START (end_marker_end), we insert there
-                end_marker_end = cmd.get("end_marker_end")
-                if isinstance(end_marker_end, (int, float)):
-                    insertion_ms = int(float(end_marker_end) * 1000 * ratio)
-                    insertion_ms = max(0, min(insertion_ms, len(out)))
-                    log.append(f"[INTERN_INSERT_ONLY] insert_at={insertion_ms} (no cutting)")
-                else:
-                    insert_pad_ms = max(0, int(cmd.get("insert_pad_ms", 120)))
-                    insertion_ms = min(prompt_end_ms + insert_pad_ms, len(out))
+
+                insertion_ms = int(insertion_s * 1000 * ratio)
+                insertion_ms = max(0, min(insertion_ms, len(out)))
+                log.append(f"[INTERN_INSERT_ONLY] insert_at={insertion_ms}ms (s={insertion_s:.3f})")
+                if insertion_ms < prompt_end_ms:
+                    log.append(
+                        f"[INTERN_INSERT_ADJUST] insertion before context_end; forcing at context_end {prompt_end_ms}"
+                    )
+                    insertion_ms = prompt_end_ms
+                    insertion_s = (prompt_end_ms / 1000.0) / ratio if ratio else (prompt_end_ms / 1000.0)
+                cmd["resolved_insertion_ms"] = insertion_ms
+                cmd["resolved_insertion_s"] = insertion_s
                 log.append(
                     f"[INTERN_TIMING_ANCHORED] insertion_ms={insertion_ms} window=[{prompt_start_ms},{prompt_end_ms}]"
                 )

@@ -19,6 +19,21 @@ from api.services.audio.intern_pipeline import (
 )
 
 
+def _safe_float(value: Any) -> Optional[float]:
+    """Convert a value to float when possible, returning ``None`` when conversion fails."""
+
+    try:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str) and value.strip() == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def detect_and_prepare_ai_commands(
     words: List[Dict[str, Any]],
     cleanup_options: Dict[str, Any],
@@ -125,13 +140,24 @@ def detect_and_prepare_ai_commands(
         for override in intern_overrides:
             if not isinstance(override, dict):
                 continue
+
+            start_s = _safe_float(override.get("start_s"))
+            end_s = _safe_float(override.get("end_s"))
+            context_end = _safe_float(override.get("context_end"))
+
+            if context_end is None:
+                context_end = end_s if end_s is not None else start_s
+
+            insertion_s = end_s if end_s is not None else context_end
             cmd = {
                 "command_token": "intern",
                 "command_id": override.get("command_id"),
-                "time": float(override.get("start_s") or 0.0),
-                "context_end": float(override.get("end_s") or 0.0),
+                "time": float(start_s if start_s is not None else 0.0),
+                "context_end": float(context_end if context_end is not None else 0.0),
                 # CRITICAL: NO CUTTING - just insert at marked endpoint (end_s)
-                "end_marker_end": float(override.get("end_s") or 0.0),  # Where AI answer should be inserted
+                "end_marker_end": float(insertion_s if insertion_s is not None else 0.0),  # Where AI answer should be inserted
+                "end_marker_start": float(start_s if start_s is not None else 0.0),
+                "insertion_s": float(insertion_s if insertion_s is not None else 0.0),
                 "local_context": str(override.get("prompt_text") or "").strip(),
                 "override_answer": str(override.get("response_text") or "").strip(),
                 "override_audio_url": str(override.get("audio_url") or "").strip() or None,
