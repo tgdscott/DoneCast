@@ -91,8 +91,10 @@ steps:
         # This avoids errors if submit/trigger passes values for them.
         echo "MEDIA_ROOT=${_MEDIA_ROOT}" >/dev/null || true
 
-  # ---------- API: build & push ----------
+  # ---------- API & WORKER: build in parallel ----------
   - name: gcr.io/cloud-builders/docker
+    id: api-build
+    waitFor: ['-']
     args:
       [ 'build',
         '-f', 'Dockerfile.api',
@@ -100,7 +102,19 @@ steps:
         '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$BUILD_ID',
         '.' ]
   - name: gcr.io/cloud-builders/docker
+    id: worker-build
+    waitFor: ['-']
+    args:
+      [ 'build',
+        '-f', 'Dockerfile.worker',
+        '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WORKER_SERVICE}:latest',
+        '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WORKER_SERVICE}:$BUILD_ID',
+        '.' ]
+  
+  # ---------- API & WORKER: push in parallel ----------
+  - name: gcr.io/cloud-builders/docker
     id: api-push
+    waitFor: ['api-build']
     entrypoint: sh
     args:
       - -c
@@ -109,18 +123,9 @@ steps:
         echo "==> Pushing API images"
         docker push "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:latest"
         docker push "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$BUILD_ID"
-
-  # ---------- WORKER: build & push ----------
-  - name: gcr.io/cloud-builders/docker
-    id: worker-build
-    args:
-      [ 'build',
-        '-f', 'Dockerfile.worker',
-        '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WORKER_SERVICE}:latest',
-        '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WORKER_SERVICE}:$BUILD_ID',
-        '.' ]
   - name: gcr.io/cloud-builders/docker
     id: worker-push
+    waitFor: ['worker-build']
     entrypoint: sh
     args:
       - -c
@@ -130,9 +135,10 @@ steps:
         docker push "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WORKER_SERVICE}:latest"
         docker push "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WORKER_SERVICE}:$BUILD_ID"
 
-  # ---------- WEB: build & push ----------
+  # ---------- WEB: build & push (can run in parallel with API/Worker builds) ----------
   - name: gcr.io/cloud-builders/docker
     id: web-build
+    waitFor: ['-']
     entrypoint: sh
     secretEnv:
       - GOOGLE_CLIENT_ID
@@ -173,34 +179,25 @@ steps:
           docker push "$${EXTRA_TAG}"
         fi
 
-  # ---------- API: deploy ----------
+  # ---------- API: deploy (waits for api-push) ----------
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     id: api-deploy
+    waitFor: ['api-push']
     entrypoint: bash
     args:
       - -c
       - |
         set -euo pipefail
-        set -x
-        gcloud config set core/verbosity debug
         # Allow new podcastplusplus domains; keep legacy getpodcastplus for a short transition
         CORS_ALLOWED='https://app.podcastplusplus.com;https://podcastplusplus.com;https://www.podcastplusplus.com;https://app.getpodcastplus.com;https://getpodcastplus.com;https://www.getpodcastplus.com'
 
         echo "==> API deploy prechecks"
         echo "Project: $PROJECT_ID  Region: ${_REGION}  Service: ${_SERVICE}"
-        echo "CORS_ALLOWED_ORIGINS length: $${#CORS_ALLOWED}"
-
-        # Verify we can list Run services (permission sanity)
-        if ! gcloud run services list --project=$PROJECT_ID --region=${_REGION} --platform=managed --format='value(name)' >/dev/null 2>&1; then
-          echo "ERROR: Unable to list Cloud Run services in project=$PROJECT_ID region=${_REGION}. Check Cloud Build SA permissions (roles/run.admin)." >&2
-          exit 1
-        fi
 
         # Verify API image tag exists in Artifact Registry
         API_IMG_PATH="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}"
-        if ! gcloud artifacts docker tags list "$${API_IMG_PATH}" --project="$PROJECT_ID" --format='value(tag)' | grep -Fx "$BUILD_ID" >/dev/null; then
+        if ! gcloud artifacts docker tags list "$${API_IMG_PATH}" --project="$PROJECT_ID" --format='value(tag)' 2>/dev/null | grep -Fx "$BUILD_ID" >/dev/null; then
           echo "ERROR: API image tag not found: $${API_IMG_PATH}:$BUILD_ID. Ensure image push succeeded." >&2
-          gcloud artifacts docker tags list "$${API_IMG_PATH}" --project="$PROJECT_ID" --format='table(tag,digest)'
           exit 1
         fi
 
@@ -219,59 +216,58 @@ steps:
             --execution-environment=gen2 \
             --cpu-boost \
             --cpu-throttling \
-            --update-env-vars="CLOUDPOD_MAX_MIX_BUFFER_BYTES=536870912,DB_POOL_SIZE=2,DB_MAX_OVERFLOW=3,DB_POOL_RECYCLE=180,DB_POOL_TIMEOUT=30,STORAGE_BACKEND=r2,AI_PROVIDER=gemini,GEMINI_MODEL=gemini-2.0-flash,TASKS_URL_BASE=https://api.podcastplusplus.com,WORKER_URL_BASE=https://assemble.podcastplusplus.com" \
-            --update-secrets="GCS_SIGNER_KEY_JSON=gcs-signer-key:latest,AUPHONIC_API_KEY=AUPHONIC_API_KEY:latest,R2_ACCOUNT_ID=r2-account-id:latest,R2_ACCESS_KEY_ID=r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=r2-secret-access-key:latest,R2_BUCKET=r2-bucket:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest"
+            --update-env-vars="CLOUDPOD_MAX_MIX_BUFFER_BYTES=536870912,DB_POOL_SIZE=2,DB_MAX_OVERFLOW=3,DB_POOL_RECYCLE=180,DB_POOL_TIMEOUT=30,STORAGE_BACKEND=r2,AI_PROVIDER=vertex,VERTEX_PROJECT=podcast612,VERTEX_LOCATION=us-central1,VERTEX_MODEL=gemini-2.5-flash-lite,TASKS_URL_BASE=https://api.podcastplusplus.com,WORKER_URL_BASE=https://assemble.podcastplusplus.com,ENABLE_LOCAL_WORKER=false,ENABLE_CELERY=false" \
+            --update-secrets="GCS_SIGNER_KEY_JSON=gcs-signer-key:latest,AUPHONIC_API_KEY=AUPHONIC_API_KEY:latest,R2_ACCOUNT_ID=r2-account-id:latest,R2_ACCESS_KEY_ID=r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=r2-secret-access-key:latest,R2_BUCKET=r2-bucket:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest" \
+            --quiet
         }
 
         # Retry deploy to handle transient API errors
         ATTEMPT=0
-        until [ "$${ATTEMPT}" -ge 3 ]; do
+        MAX_ATTEMPTS=3
+        while [ "$${ATTEMPT}" -lt "$${MAX_ATTEMPTS}" ]; do
           if deploy_once; then
             echo "==> API deploy succeeded"
-            
             # CRITICAL: Route 100% traffic to latest revision
-            # Without this, --update-env-vars creates new revision but doesn't route traffic
-            echo "==> Routing traffic to latest revision"
             gcloud run services update-traffic ${_SERVICE} \
               --project=$PROJECT_ID \
               --region=${_REGION} \
-              --to-latest
-            
-            break
+              --to-latest \
+              --quiet
+            exit 0
           fi
           ATTEMPT=$((ATTEMPT+1))
-          SLEEP=$((ATTEMPT*5))
-          echo "WARN: API deploy attempt $${ATTEMPT} failed, retrying in $${SLEEP}s ..." >&2
-          sleep "$${SLEEP}"
+          if [ "$${ATTEMPT}" -lt "$${MAX_ATTEMPTS}" ]; then
+            SLEEP=$((ATTEMPT*5))
+            echo "WARN: API deploy attempt $${ATTEMPT} failed, retrying in $${SLEEP}s ..." >&2
+            sleep "$${SLEEP}"
+          fi
         done
-        if [ "$${ATTEMPT}" -ge 3 ]; then
-          echo "ERROR: API deploy failed after retries. See logs above for detailed gcloud error output." >&2
-          exit 1
-        fi
+        echo "ERROR: API deploy failed after $${MAX_ATTEMPTS} attempts." >&2
+        exit 1
 
-  # ---------- WORKER: deploy ----------
+  # ---------- WORKER: deploy (waits for worker-push) ----------
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     id: worker-deploy
+    waitFor: ['worker-push']
     entrypoint: bash
     args:
       - -c
       - |
         set -euo pipefail
-        set -x
         
         echo "==> Worker deploy prechecks"
         echo "Project: $PROJECT_ID  Region: ${_REGION}  Service: ${_WORKER_SERVICE}"
         
         # Verify worker image tag exists in Artifact Registry
         WORKER_IMG_PATH="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WORKER_SERVICE}"
-        if ! gcloud artifacts docker tags list "$${WORKER_IMG_PATH}" --project="$PROJECT_ID" --format='value(tag)' | grep -Fx "$BUILD_ID" >/dev/null; then
+        if ! gcloud artifacts docker tags list "$${WORKER_IMG_PATH}" --project="$PROJECT_ID" --format='value(tag)' 2>/dev/null | grep -Fx "$BUILD_ID" >/dev/null; then
           echo "ERROR: Worker image tag not found: $${WORKER_IMG_PATH}:$BUILD_ID. Ensure image push succeeded." >&2
-          gcloud artifacts docker tags list "$${WORKER_IMG_PATH}" --project="$PROJECT_ID" --format='table(tag,digest)'
           exit 1
         fi
         
         deploy_worker() {
           # Worker needs same configuration as API to access database, GCS, etc.
+          # Note: PORT env var is set by Cloud Run, Dockerfile.worker uses ${PORT:-8080}
           gcloud run deploy ${_WORKER_SERVICE} \
             --project=$PROJECT_ID \
             --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WORKER_SERVICE}:$BUILD_ID \
@@ -284,41 +280,39 @@ steps:
             --max-instances=3 \
             --concurrency=10 \
             --execution-environment=gen2 \
-            --port=8080 \
-            --command="python" \
-            --args="-m,uvicorn,worker_service:app,--host,0.0.0.0,--port,8080" \
-            --set-env-vars="CLOUDPOD_MAX_MIX_BUFFER_BYTES=536870912,MEDIA_ROOT=/tmp,INSTANCE_CONNECTION_NAME=podcast612:us-west1:podcast-db,GOOGLE_CLOUD_PROJECT=podcast612,TASKS_LOCATION=us-west1,TASKS_QUEUE=ppp-queue,APP_ENV=production,AI_PROVIDER=gemini,GEMINI_MODEL=gemini-2.0-flash,USE_CLOUD_TASKS=1,DB_POOL_SIZE=5,DB_MAX_OVERFLOW=2,DB_POOL_RECYCLE=300,DB_POOL_TIMEOUT=15,GCS_CHUNK_MB=32,MEDIA_BUCKET=ppp-media-us-west1,TRANSCRIPTS_BUCKET=ppp-transcripts-us-west1,STORAGE_BACKEND=r2" \
-            --set-secrets="DB_USER=DB_USER:latest,DB_PASS=DB_PASS:latest,DB_NAME=DB_NAME:latest,DATABASE_URL=DATABASE_URL:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,ELEVENLABS_API_KEY=ELEVENLABS_API_KEY:latest,ASSEMBLYAI_API_KEY=ASSEMBLYAI_API_KEY:latest,TASKS_AUTH=TASKS_AUTH:latest,GCS_SIGNER_KEY_JSON=gcs-signer-key:latest,AUPHONIC_API_KEY=AUPHONIC_API_KEY:latest,R2_ACCOUNT_ID=r2-account-id:latest,R2_ACCESS_KEY_ID=r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=r2-secret-access-key:latest,R2_BUCKET=r2-bucket:latest"
+            --set-env-vars="CLOUDPOD_MAX_MIX_BUFFER_BYTES=536870912,MEDIA_ROOT=/tmp,INSTANCE_CONNECTION_NAME=podcast612:us-west1:podcast-db,GOOGLE_CLOUD_PROJECT=podcast612,TASKS_LOCATION=us-west1,TASKS_QUEUE=ppp-queue,APP_ENV=production,AI_PROVIDER=vertex,VERTEX_PROJECT=podcast612,VERTEX_LOCATION=us-central1,VERTEX_MODEL=gemini-2.5-flash-lite,USE_CLOUD_TASKS=1,DB_POOL_SIZE=5,DB_MAX_OVERFLOW=2,DB_POOL_RECYCLE=300,DB_POOL_TIMEOUT=15,GCS_CHUNK_MB=32,MEDIA_BUCKET=ppp-media-us-west1,TRANSCRIPTS_BUCKET=ppp-transcripts-us-west1,STORAGE_BACKEND=r2" \
+            --set-secrets="DB_USER=DB_USER:latest,DB_PASS=DB_PASS:latest,DB_NAME=DB_NAME:latest,DATABASE_URL=DATABASE_URL:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,ELEVENLABS_API_KEY=ELEVENLABS_API_KEY:latest,ASSEMBLYAI_API_KEY=ASSEMBLYAI_API_KEY:latest,TASKS_AUTH=TASKS_AUTH:latest,GCS_SIGNER_KEY_JSON=gcs-signer-key:latest,AUPHONIC_API_KEY=AUPHONIC_API_KEY:latest,R2_ACCOUNT_ID=r2-account-id:latest,R2_ACCESS_KEY_ID=r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=r2-secret-access-key:latest,R2_BUCKET=r2-bucket:latest" \
+            --quiet
         }
         
         # Retry deploy to handle transient API errors
         ATTEMPT=0
-        until [ "$${ATTEMPT}" -ge 3 ]; do
+        MAX_ATTEMPTS=3
+        while [ "$${ATTEMPT}" -lt "$${MAX_ATTEMPTS}" ]; do
           if deploy_worker; then
             echo "==> Worker deploy succeeded"
-            
             # Ensure traffic routes to latest revision
-            echo "==> Routing traffic to latest worker revision"
             gcloud run services update-traffic ${_WORKER_SERVICE} \
               --project=$PROJECT_ID \
               --region=${_REGION} \
-              --to-latest
-            
-            break
+              --to-latest \
+              --quiet
+            exit 0
           fi
           ATTEMPT=$((ATTEMPT+1))
-          SLEEP=$((ATTEMPT*5))
-          echo "WARN: Worker deploy attempt $${ATTEMPT} failed, retrying in $${SLEEP}s ..." >&2
-          sleep "$${SLEEP}"
+          if [ "$${ATTEMPT}" -lt "$${MAX_ATTEMPTS}" ]; then
+            SLEEP=$((ATTEMPT*5))
+            echo "WARN: Worker deploy attempt $${ATTEMPT} failed, retrying in $${SLEEP}s ..." >&2
+            sleep "$${SLEEP}"
+          fi
         done
-        if [ "$${ATTEMPT}" -ge 3 ]; then
-          echo "ERROR: Worker deploy failed after retries. See logs above for detailed gcloud error output." >&2
-          exit 1
-        fi
+        echo "ERROR: Worker deploy failed after $${MAX_ATTEMPTS} attempts." >&2
+        exit 1
 
-  # ---------- WEB: deploy ----------
+  # ---------- WEB: deploy (waits for web-build) ----------
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     id: web-deploy
+    waitFor: ['web-build']
     entrypoint: gcloud
     args:
       [ 'run', 'deploy', '${_WEB_SERVICE}',
@@ -326,7 +320,8 @@ steps:
         '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WEB_SERVICE}:$BUILD_ID',
         '--region=${_REGION}',
         '--platform=managed',
-        '--allow-unauthenticated' ]
+        '--allow-unauthenticated',
+        '--quiet' ]
 
 availableSecrets:
   secretManager:

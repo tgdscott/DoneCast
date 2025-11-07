@@ -29,5 +29,5 @@ ENV PYTHONPATH=/app:$PYTHONPATH
 # Expose port (Cloud Run will override this)
 EXPOSE 8080
 
-# Run worker service
-CMD ["python", "-m", "uvicorn", "worker_service:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "info"]
+# Run worker service (Cloud Run sets PORT env var)
+CMD ["sh", "-c", "python -m uvicorn worker_service:app --host 0.0.0.0 --port ${PORT:-8080} --log-level info"]

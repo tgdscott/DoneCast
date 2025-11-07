@@ -169,7 +169,12 @@ def do_tts(
     )
 
     ai_note_additions: List[str] = []
+    # CRITICAL: Log to Python logging for visibility (not just log list)
+    import logging as _py_logging
+    _py_log = _py_logging.getLogger(__name__)
+    _py_log.info(f"[DO_TTS] Called with ai_cmds count: {len(ai_cmds) if ai_cmds else 0}")
     if ai_cmds:
+        _py_log.info(f"[DO_TTS] Processing {len(ai_cmds)} intern commands")
         cleaned_audio, ai_note_additions = execute_intern_commands_step(
             ai_cmds,
             cleaned_audio,

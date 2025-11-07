@@ -66,12 +66,17 @@ def _get_model():
             return None
         raise RuntimeError("Gemini model class unavailable")
     # Model name resolution: prefer explicit env/setting otherwise fallback
+    # Production defaults to gemini-2.5-flash-lite, dev defaults to gemini-1.5-flash
+    env = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or getattr(settings_mod, 'APP_ENV', 'dev')).strip().lower()
+    is_production = env in {"prod", "production", "stage", "staging"}
+    default_model = "gemini-2.5-flash-lite" if is_production else "gemini-1.5-flash"
+    
     model_name = (
         os.getenv("GEMINI_MODEL")
         or getattr(settings_mod, 'GEMINI_MODEL', None)
         or os.getenv("VERTEX_MODEL")
         or getattr(settings_mod, 'VERTEX_MODEL', None)
-        or "gemini-1.5-flash"
+        or default_model
     )
     # Accept legacy forms like "models/gemini-1.5-flash-latest" and normalize
     if model_name.startswith("models/"):
@@ -154,6 +159,9 @@ def generate(content: str, **kwargs) -> str:
             _log.warning("[gemini] Failed to create relaxed safety settings: %s", e)
             pass
 
+    # Extract system_instruction early (used by both Gemini and Vertex paths)
+    system_instruction = kwargs.pop("system_instruction", None)
+    
     provider = (os.getenv("AI_PROVIDER") or getattr(settings, "AI_PROVIDER", "gemini")).lower()
     if provider not in ("gemini", "vertex"):
         provider = "gemini"
@@ -170,7 +178,7 @@ def generate(content: str, **kwargs) -> str:
         if _stub_mode() and not getattr(settings, "GEMINI_API_KEY", None):
             # Avoid calling SDK at all
             return "Stub output (Gemini key missing)"
-        system_instruction = kwargs.pop("system_instruction", None)
+        # system_instruction was already extracted above
         if not _GenerativeModel:
             if _stub_mode():
                 return "Stub output (model unavailable)"
@@ -279,7 +287,48 @@ def generate(content: str, **kwargs) -> str:
             or getattr(settings, "VERTEX_PROJECT_ID", None)
         )
         location = os.getenv("VERTEX_LOCATION") or getattr(settings, "VERTEX_LOCATION", "us-central1")
-        v_model = os.getenv("VERTEX_MODEL") or getattr(settings, "VERTEX_MODEL", None) or getattr(settings, "GEMINI_MODEL", None) or "gemini-1.5-flash"
+        
+        # CRITICAL: Production default to gemini-2.5-flash-lite, dev default to gemini-1.5-flash
+        # This ensures production uses the optimized model even if VERTEX_MODEL env var is missing/overridden
+        env = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or getattr(settings, "APP_ENV", "dev")).strip().lower()
+        is_production = env in {"prod", "production", "stage", "staging"}
+        default_model = "gemini-2.5-flash-lite" if is_production else "gemini-1.5-flash"
+        
+        v_model = (
+            os.getenv("VERTEX_MODEL") 
+            or getattr(settings, "VERTEX_MODEL", None) 
+            or getattr(settings, "GEMINI_MODEL", None) 
+            or default_model
+        )
+        
+        # CRITICAL: Log where we're getting the model from for debugging
+        _log.info(
+            "[vertex] Model selection: env=%s is_prod=%s os.getenv('VERTEX_MODEL')=%s, settings.VERTEX_MODEL=%s, settings.GEMINI_MODEL=%s, default=%s, final=%s",
+            env,
+            is_production,
+            os.getenv("VERTEX_MODEL"),
+            getattr(settings, "VERTEX_MODEL", None),
+            getattr(settings, "GEMINI_MODEL", None),
+            default_model,
+            v_model
+        )
+        _log.info(
+            "[vertex] Project selection: os.getenv('VERTEX_PROJECT')=%s, settings.VERTEX_PROJECT=%s, final=%s",
+            os.getenv("VERTEX_PROJECT"),
+            getattr(settings, "VERTEX_PROJECT", None),
+            project
+        )
+        _log.info(
+            "[vertex] Location selection: os.getenv('VERTEX_LOCATION')=%s, settings.VERTEX_LOCATION=%s, final=%s",
+            os.getenv("VERTEX_LOCATION"),
+            getattr(settings, "VERTEX_LOCATION", "us-central1"),
+            location
+        )
+        
+        # Normalize model name - remove "models/" prefix if present (Vertex accepts both formats)
+        if isinstance(v_model, str) and v_model.startswith("models/"):
+            v_model = v_model.split("/", 1)[1]
+        
         if not project:
             if _stub_mode() or _is_dev_env():
                 return "Stub output (vertex project missing)"
@@ -314,15 +363,186 @@ def generate(content: str, **kwargs) -> str:
                 return "Stub output (vertex model import error)"
             raise RuntimeError("VERTEX_MODEL_CLASS_UNAVAILABLE") from e
         try:
-            _log.debug("[vertex] using model=%s project=%s location=%s preview=%s", v_model, project, location, preview_used)
-            model = VertexModel(v_model)
-            # Vertex SDK uses generate_content similarly but may differ slightly
-            resp = model.generate_content(content)
+            # system_instruction was already extracted above (before provider check)
+            
+            _log.debug("[vertex] using model=%s project=%s location=%s preview=%s system_instruction=%s", 
+                      v_model, project, location, preview_used, bool(system_instruction))
+            
+            # Initialize Vertex model with system_instruction if provided
+            if system_instruction:
+                model = VertexModel(v_model, system_instruction=system_instruction)
+            else:
+                model = VertexModel(v_model)
+            
+            # Build Vertex GenerationConfig object (Vertex SDK requires object, not dict)
+            vertex_gen_config = None
+            if gen_conf:
+                try:
+                    # Try to import GenerationConfig from Vertex SDK
+                    try:
+                        from vertexai.generative_models import GenerationConfig  # type: ignore
+                    except Exception:
+                        from vertexai.preview.generative_models import GenerationConfig  # type: ignore
+                    
+                    # Build GenerationConfig with available params
+                    gen_config_kwargs = {}
+                    if "max_output_tokens" in gen_conf:
+                        gen_config_kwargs["max_output_tokens"] = gen_conf["max_output_tokens"]
+                    if "temperature" in gen_conf:
+                        gen_config_kwargs["temperature"] = gen_conf["temperature"]
+                    if "top_p" in gen_conf:
+                        gen_config_kwargs["top_p"] = gen_conf["top_p"]
+                    if "top_k" in gen_conf:
+                        gen_config_kwargs["top_k"] = gen_conf["top_k"]
+                    
+                    if gen_config_kwargs:
+                        vertex_gen_config = GenerationConfig(**gen_config_kwargs)
+                except Exception as config_err:
+                    _log.warning("[vertex] Failed to create GenerationConfig: %s, using None", config_err)
+                    vertex_gen_config = None
+            
+            # Build safety settings for Vertex
+            # CRITICAL: Vertex SDK requires SafetySetting objects, not dictionaries
+            # Always create BLOCK_NONE safety settings for podcast content (even if default_safety_settings is None)
+            vertex_safety_settings = None
+            try:
+                # Try stable import first
+                try:
+                    from vertexai.generative_models import (  # type: ignore
+                        HarmCategory, 
+                        HarmBlockThreshold,
+                        SafetySetting,
+                    )
+                except Exception:
+                    # Fall back to preview import
+                    from vertexai.preview.generative_models import (  # type: ignore
+                        HarmCategory, 
+                        HarmBlockThreshold,
+                        SafetySetting,
+                    )
+                
+                # Create SafetySetting objects (not dictionaries!)
+                vertex_safety_settings = [
+                    SafetySetting(
+                        category=HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                        threshold=HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                    SafetySetting(
+                        category=HarmCategory.HARM_CATEGORY_HARASSMENT,
+                        threshold=HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                    SafetySetting(
+                        category=HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                        threshold=HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                    SafetySetting(
+                        category=HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                        threshold=HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                ]
+                _log.debug("[vertex] Created SafetySetting objects with BLOCK_NONE for all categories")
+            except Exception as safety_err:
+                _log.warning("[vertex] Failed to import/create safety settings: %s, using None", safety_err)
+                vertex_safety_settings = None
+            
+            # Use caller's safety_settings if provided
+            # NOTE: If caller provides safety_settings for Vertex, they must be SafetySetting objects, not dicts
+            caller_safety = kwargs.pop("safety_settings", None)
+            if caller_safety is not None:
+                # Validate that caller-provided safety_settings are SafetySetting objects
+                # If they're dicts (from Gemini format), log a warning but try to use our defaults
+                if isinstance(caller_safety, list) and len(caller_safety) > 0:
+                    first_item = caller_safety[0]
+                    if isinstance(first_item, dict):
+                        _log.warning(
+                            "[vertex] Caller provided safety_settings as dicts (Gemini format), "
+                            "but Vertex requires SafetySetting objects. Using default BLOCK_NONE settings instead."
+                        )
+                        safety_to_use = vertex_safety_settings
+                    else:
+                        # Assume they're SafetySetting objects
+                        safety_to_use = caller_safety
+                else:
+                    safety_to_use = caller_safety
+            else:
+                safety_to_use = vertex_safety_settings
+            
+            _log.info(
+                "[vertex] generate_content: model=%s project=%s location=%s config=%s safety=%s content_len=%d",
+                v_model,
+                project,
+                location,
+                f"GenerationConfig({gen_conf})" if vertex_gen_config else "None",
+                "CALLER_PROVIDED" if caller_safety is not None else ("BLOCK_NONE" if safety_to_use else "DEFAULT"),
+                len(content)
+            )
+            
+            # Vertex SDK uses generate_content with generation_config and safety_settings
+            # Pass None if not set (don't pass empty dict)
+            resp = model.generate_content(
+                content,
+                generation_config=vertex_gen_config,
+                safety_settings=safety_to_use,
+            )
+            
+            # Check for blocked content (similar to Gemini path)
+            if not hasattr(resp, 'candidates') or not resp.candidates:
+                block_reason = None
+                if hasattr(resp, 'prompt_feedback'):
+                    block_reason = getattr(resp.prompt_feedback, 'block_reason', None)
+                if block_reason:
+                    _log.error(
+                        "[vertex] Content BLOCKED by safety filters! block_reason=%s. "
+                        "Prompt preview: %s",
+                        block_reason,
+                        content[:500] if content else "(empty)"
+                    )
+                    raise RuntimeError(f"VERTEX_CONTENT_BLOCKED:{block_reason}")
+            
             return getattr(resp, "text", "") or ""
         except Exception as e:
+            # CRITICAL FIX: Log the actual error even in dev mode for debugging
+            error_name = type(e).__name__
+            error_msg = str(e)
+            _log.error(
+                "[vertex] generate_content FAILED: %s: %s (model=%s project=%s location=%s)",
+                error_name,
+                error_msg,
+                v_model,
+                project,
+                location,
+                exc_info=True
+            )
+            
+            # In dev mode, still log but return stub for non-fatal errors
             if _stub_mode() or _is_dev_env():
-                # Specific auth guidance often appears in the error; keep it terse
-                return f"Stub output (vertex exception: {type(e).__name__})"
+                # For NotFound errors, provide helpful guidance
+                if "NotFound" in error_name or "404" in error_msg or "not found" in error_msg.lower():
+                    _log.error(
+                        "[vertex] MODEL NOT FOUND - Possible issues:\n"
+                        "  1. Model name '%s' may be invalid or not available in location '%s'\n"
+                        "  2. Try stable models: 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-1.5-flash-latest'\n"
+                        "  3. Experimental models like 'gemini-2.0-flash-exp' may not be available in all regions\n"
+                        "  4. Check Vertex AI Model Garden: https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/gemini\n"
+                        "  5. Verify VERTEX_PROJECT='%s' and VERTEX_LOCATION='%s' are correct\n"
+                        "  6. Ensure Vertex AI API is enabled in your GCP project\n"
+                        "  7. Verify ADC (gcloud auth application-default login) is configured\n"
+                        "  8. Try us-central1 if current location doesn't support the model",
+                        v_model,
+                        location,
+                        project,
+                        location
+                    )
+                    # Try suggesting a fallback model name if experimental model fails
+                    if "exp" in v_model.lower() or "2.0" in v_model:
+                        _log.warning(
+                            "[vertex] Experimental model '%s' not found, consider using 'gemini-1.5-flash' instead",
+                            v_model
+                        )
+                    return f"Stub output (vertex model not found: {v_model} in {location} - check logs for details)"
+                # For other errors, return stub with error type
+                return f"Stub output (vertex exception: {error_name})"
+            
             name = type(e).__name__
             # If the region was not 'us-central1', attempt a one-time region fallback and retry once
             if str(location) != "us-central1":
@@ -330,13 +550,30 @@ def generate(content: str, **kwargs) -> str:
                     _log.warning("[vertex] generate_content failed in %s (%s); retrying in us-central1", location, name)
                     from google.cloud import aiplatform as _ai2  # type: ignore
                     _ai2.init(project=project, location="us-central1")
-                    model = VertexModel(v_model)
-                    resp = model.generate_content(content)
+                    # Recreate model with same system_instruction
+                    if system_instruction:
+                        model = VertexModel(v_model, system_instruction=system_instruction)
+                    else:
+                        model = VertexModel(v_model)
+                    # Retry with same config
+                    resp = model.generate_content(
+                        content,
+                        generation_config=vertex_gen_config,
+                        safety_settings=safety_to_use,
+                    )
+                    # Check for blocked content on retry too
+                    if not hasattr(resp, 'candidates') or not resp.candidates:
+                        block_reason = None
+                        if hasattr(resp, 'prompt_feedback'):
+                            block_reason = getattr(resp.prompt_feedback, 'block_reason', None)
+                        if block_reason:
+                            raise RuntimeError(f"VERTEX_CONTENT_BLOCKED:{block_reason}")
                     return getattr(resp, "text", "") or ""
-                except Exception:
+                except Exception as retry_err:
+                    _log.error("[vertex] Retry in us-central1 also failed: %s", retry_err, exc_info=True)
                     pass
-            if "NotFound" in name or "404" in str(e):
-                raise RuntimeError("AI_MODEL_NOT_FOUND") from e
+            if "NotFound" in name or "404" in str(e) or "not found" in str(e).lower():
+                raise RuntimeError(f"AI_MODEL_NOT_FOUND: {v_model} not available in {location}") from e
             raise
 
     # Should not reach here; if we do, return stub or raise

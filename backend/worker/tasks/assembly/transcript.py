@@ -9,7 +9,7 @@ import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from sqlmodel import select
@@ -457,6 +457,10 @@ def prepare_transcript_context(
     intents: dict | None,
     auphonic_processed: bool = False,
 ) -> TranscriptContext:
+    # Initialize intern_overrides at the VERY START to avoid UnboundLocalError
+    # This must be done before any conditional blocks that might reference it
+    intern_overrides: List[Dict[str, Any]] = []
+    
     episode = media_context.episode
     base_audio_name = media_context.base_audio_name
     source_audio_path = media_context.source_audio_path
@@ -603,6 +607,13 @@ def prepare_transcript_context(
             return AudioSegment.silent(duration=800)
 
     intents = intents or {}
+    
+    # Extract intern_overrides from intents (already initialized at function start)
+    if intents and isinstance(intents, dict):
+        overrides = intents.get("intern_overrides", [])
+        if overrides and isinstance(overrides, list):
+            intern_overrides = overrides
+    
     flubber_intent = str((intents.get("flubber") if isinstance(intents, dict) else "") or "").lower()
     intern_intent = str((intents.get("intern") if isinstance(intents, dict) else "") or "").lower()
     sfx_intent = str((intents.get("sfx") if isinstance(intents, dict) else "") or "").lower()
@@ -651,6 +662,15 @@ def prepare_transcript_context(
         except Exception:
             audio_src = None
         if audio_src is not None:
+            # CRITICAL FIX: Disable old insert_intern_responses when user-reviewed overrides exist
+            # The orchestrator will handle intern commands via execute_intern_commands_step (new path)
+            # The old insert_intern_responses uses synth(cmd_text) which speaks the question, not the answer
+            should_disable_old_intern = bool(intern_overrides and len(intern_overrides) > 0)
+            if should_disable_old_intern:
+                logging.info(
+                    "[assemble] Disabling old insert_intern_responses because %d user-reviewed overrides exist (orchestrator will handle)",
+                    len(intern_overrides),
+                )
             engine_result = clean_engine.run_all(
                 audio_path=audio_src,
                 words_json_path=words_json_path,
@@ -663,7 +683,7 @@ def prepare_transcript_context(
                 synth=_synth,
                 flubber_cuts_ms=cuts_ms,
                 output_name=engine_output,
-                disable_intern_insertion=False,  # Enable Intern insertion for user-reviewed overrides
+                disable_intern_insertion=should_disable_old_intern,  # Disable old path when user-reviewed overrides exist
             )
         cleaned_path = None
         try:
@@ -948,6 +968,9 @@ def prepare_transcript_context(
     except Exception:
         parsed_settings = {}
 
+    # intern_overrides was already extracted earlier (right after intents normalization)
+    # No need to extract again here
+
     user_commands = (parsed_settings or {}).get("commands") or {}
     try:
         defaults = {
@@ -969,16 +992,12 @@ def prepare_transcript_context(
 
     user_filler_words = (parsed_settings or {}).get("fillerWords") or []
     
-    # Extract intern_overrides from intents if provided
-    intern_overrides = []
-    if intents and isinstance(intents, dict):
-        overrides = intents.get("intern_overrides", [])
-        if overrides and isinstance(overrides, list):
-            intern_overrides = overrides
-            logging.info(
-                "[assemble] found %d intern_overrides from user review",
-                len(intern_overrides),
-            )
+    # intern_overrides was already extracted earlier (see above), just log it here
+    if intern_overrides:
+        logging.info(
+            "[assemble] found %d intern_overrides from user review",
+            len(intern_overrides),
+        )
     
     mixer_only_opts = {
         "removeFillers": False,

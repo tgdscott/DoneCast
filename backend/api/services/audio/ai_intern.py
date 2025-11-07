@@ -281,12 +281,42 @@ def execute_intern_commands(
                     prompts = [spoken_prompt, (query_text or "").strip()]
                     seen = set()
                     prompts = [p for p in prompts if p and not (p in seen or seen.add(p))]
+                    
+                    # CRITICAL FIX: Ensure answer_text is not the same as the prompt/question
+                    # If answer_text matches the prompt exactly or is very similar, it means AI echoed the question
+                    prompt_normalized = _norm(spoken_prompt) if spoken_prompt else ""
+                    query_normalized = _norm(query_text) if query_text else ""
+                    answer_normalized = _norm(answer_text)
+                    
+                    # Check if answer is essentially the same as the prompt (AI echoed question back)
+                    if answer_normalized and prompt_normalized:
+                        if answer_normalized == prompt_normalized or answer_normalized.startswith(prompt_normalized[:min(20, len(prompt_normalized))]):
+                            log.append(f"[INTERN_ANSWER_ECHO_DETECTED] Answer matches prompt - AI echoed question back")
+                            # Don't use the echoed prompt, use a fallback
+                            answer_text = "The intern is processing that request."
+                            answer_normalized = _norm(answer_text)
+                    
+                    if answer_normalized and query_normalized:
+                        if answer_normalized == query_normalized or answer_normalized.startswith(query_normalized[:min(20, len(query_normalized))]):
+                            log.append(f"[INTERN_ANSWER_ECHO_DETECTED] Answer matches query_text - AI echoed question back")
+                            answer_text = "The intern is processing that request."
+                            answer_normalized = _norm(answer_text)
+                    
+                    # Now strip any remaining prompt-like content from the answer
                     answer_text = _strip_prompt_prefix_suffix(answer_text, prompts, log)
                     # Also remove duplicated or prompt-like tail phrases to avoid end-echo in TTS
                     answer_text = _dedupe_tail(answer_text, log)
                     answer_text = _strip_promptish_tail(answer_text, prompts, log)
-                except Exception:
-                    pass
+                    
+                    # Final safety check: ensure answer is not empty after stripping
+                    if not answer_text or not answer_text.strip():
+                        log.append(f"[INTERN_ANSWER_EMPTY_AFTER_STRIP] Using fallback answer")
+                        answer_text = "The intern is processing that request."
+                except Exception as e:
+                    log.append(f"[INTERN_ANSWER_PROCESSING_ERROR] {e}; using answer as-is")
+                    # If processing fails, use answer as-is but ensure it's not empty
+                    if not answer_text or not answer_text.strip():
+                        answer_text = "The intern is processing that request."
                 try:
                     if mutable_words is not None and (answer_text or "").strip():
                         ctx_end = _safe_float(cmd.get("context_end"))
@@ -344,6 +374,13 @@ def execute_intern_commands(
                     except Exception as e:
                         log.append(f"[INTERN_OVERRIDE_AUDIO_ERROR] {e}; will generate fresh TTS")
                         voice_id = cmd.get("voice_id")
+                        # Safety check: ensure we're using answer_text, not prompt
+                        prompt_check = (cmd.get("local_context") or "").strip()
+                        if answer_text == prompt_check:
+                            log.append(f"[INTERN_TTS_ERROR] answer_text matches prompt_text in fallback - using fallback!")
+                            answer_text = "The intern is processing that request."
+                        log.append(f"[INTERN_TTS_GENERATE_FALLBACK] voice_id={voice_id} text_len={len(answer_text)}")
+                        log.append(f"[INTERN_TTS_TEXT_FALLBACK] First 200 chars: '{answer_text[:200]}'")
                         speech = ai_enhancer.generate_speech_from_text(
                             answer_text, voice_id=voice_id, provider=tts_provider, api_key=elevenlabs_api_key
                         )
@@ -360,7 +397,15 @@ def execute_intern_commands(
                     speech = None
                 else:
                     voice_id = cmd.get("voice_id")
+                    # CRITICAL FIX: Log the actual text being sent to TTS to verify it's the answer, not the prompt
                     log.append(f"[INTERN_TTS_GENERATE] voice_id={voice_id} text_len={len(answer_text)} provider={tts_provider}")
+                    log.append(f"[INTERN_TTS_TEXT] First 200 chars of answer_text: '{answer_text[:200]}'")
+                    # Safety check: ensure we're not accidentally using prompt text for TTS
+                    prompt_check = (cmd.get("local_context") or "").strip()
+                    if answer_text == prompt_check:
+                        log.append(f"[INTERN_TTS_ERROR] CRITICAL: answer_text matches prompt_text - using fallback!")
+                        answer_text = "The intern is processing that request."
+                        log.append(f"[INTERN_TTS_TEXT_FIXED] Using fallback: '{answer_text[:200]}'")
                     try:
                         speech = ai_enhancer.generate_speech_from_text(
                             answer_text, voice_id=voice_id, provider=tts_provider, api_key=elevenlabs_api_key
@@ -394,11 +439,20 @@ def execute_intern_commands(
                 context_end_s = _safe_float(cmd.get("context_end"))
                 if context_end_s is None:
                     context_end_s = start_s
-                insertion_s = _safe_float(cmd.get("insertion_s"))
+                
+                # CRITICAL FIX: Always use end_marker_end (the marked endpoint) as insertion point
+                # This is where the user marked the END of the command, which is where we should insert AFTER
+                insertion_s = _safe_float(cmd.get("end_marker_end"))
                 if insertion_s is None:
-                    insertion_s = _safe_float(cmd.get("end_marker_end"))
-                if insertion_s is None:
+                    # Fallback to insertion_s if end_marker_end not available
+                    insertion_s = _safe_float(cmd.get("insertion_s"))
+                if insertion_s is None or insertion_s <= 0:
+                    # Last resort: use context_end_s (end of command context)
                     insertion_s = context_end_s
+                    if insertion_s <= 0:
+                        # Absolute last resort: use start_s + a small offset to insert after the command starts
+                        insertion_s = start_s + 0.5
+                        log.append(f"[INTERN_INSERT_WARNING] Using fallback insertion_s={insertion_s:.3f} (start_s + 0.5s)")
 
                 prompt_start_ms = int(start_s * 1000 * ratio)
                 prompt_end_ms = int(context_end_s * 1000 * ratio)
@@ -407,13 +461,23 @@ def execute_intern_commands(
 
                 insertion_ms = int(insertion_s * 1000 * ratio)
                 insertion_ms = max(0, min(insertion_ms, len(out)))
-                log.append(f"[INTERN_INSERT_ONLY] insert_at={insertion_ms}ms (s={insertion_s:.3f})")
-                if insertion_ms < prompt_end_ms:
+                
+                # CRITICAL FIX: Ensure insertion is AFTER the command ends (not before or at start)
+                # NEVER insert at the very beginning (0ms) - always ensure it's after the command
+                if insertion_ms <= prompt_start_ms:
                     log.append(
-                        f"[INTERN_INSERT_ADJUST] insertion before context_end; forcing at context_end {prompt_end_ms}"
+                        f"[INTERN_INSERT_CRITICAL] insertion_ms={insertion_ms} is at/before prompt_start_ms={prompt_start_ms} - FORCING to prompt_end_ms={prompt_end_ms}"
+                    )
+                    insertion_ms = max(prompt_end_ms, prompt_start_ms + 100)  # At least 100ms after start
+                    insertion_s = (insertion_ms / 1000.0) / ratio if ratio else (insertion_ms / 1000.0)
+                elif insertion_ms < prompt_end_ms:
+                    log.append(
+                        f"[INTERN_INSERT_ADJUST] insertion_ms={insertion_ms} is before prompt_end_ms={prompt_end_ms}; adjusting to prompt_end_ms"
                     )
                     insertion_ms = prompt_end_ms
                     insertion_s = (prompt_end_ms / 1000.0) / ratio if ratio else (prompt_end_ms / 1000.0)
+                else:
+                    log.append(f"[INTERN_INSERT_ONLY] insert_at={insertion_ms}ms (s={insertion_s:.3f}) AFTER command end at {prompt_end_ms}ms")
                 cmd["resolved_insertion_ms"] = insertion_ms
                 cmd["resolved_insertion_s"] = insertion_s
                 log.append(

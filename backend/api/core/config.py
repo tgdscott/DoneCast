@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
 from typing import Optional
 
 from pydantic import Field
@@ -17,6 +19,33 @@ except Exception:  # pragma: no cover
     SettingsConfigDict = None  # type: ignore
 
 log = logging.getLogger("api.core.config")
+
+# Try to load .env.local explicitly using python-dotenv if available
+# This ensures env vars are in os.environ before pydantic-settings reads them
+# CRITICAL: This must happen BEFORE Settings class is instantiated
+try:
+    from dotenv import load_dotenv
+    # Get the project root (backend/ directory)
+    _PROJECT_ROOT = Path(__file__).parent.parent.parent
+    _ENV_LOCAL = _PROJECT_ROOT / ".env.local"
+    _ENV_FILE = _PROJECT_ROOT / ".env"
+    
+    # Load .env.local first, then .env (later files override earlier ones if override=True)
+    # Use override=False so existing env vars take precedence (useful for CI/CD)
+    if _ENV_LOCAL.exists():
+        load_dotenv(_ENV_LOCAL, override=False)
+        log.info(f"[config] Loaded .env.local from {_ENV_LOCAL}")
+    elif _ENV_LOCAL.parent.exists():
+        log.debug(f"[config] .env.local not found at {_ENV_LOCAL}")
+    
+    if _ENV_FILE.exists():
+        load_dotenv(_ENV_FILE, override=False)
+        log.info(f"[config] Loaded .env from {_ENV_FILE}")
+except ImportError:
+    # python-dotenv not installed, rely on pydantic-settings only
+    log.debug("[config] python-dotenv not installed, skipping explicit .env loading")
+except Exception as e:
+    log.warning(f"[config] Failed to load .env files explicitly: {e}")
 
 _PROD_ENVS = {"prod", "production", "stage", "staging"}
 _DEV_ENVS = {"dev", "development", "local", "test", "testing"}
@@ -224,8 +253,13 @@ class Settings(BaseSettings):
         return self
 
     # pydantic-settings v2 uses model_config; keep fallback Config for older versions
+    # Use absolute paths to ensure we find .env files regardless of working directory
     if SettingsConfigDict is not None:  # type: ignore
-        model_config = SettingsConfigDict(env_file=(".env.local", ".env"), extra="ignore")  # type: ignore
+        _PROJECT_ROOT = Path(__file__).parent.parent.parent
+        _ENV_LOCAL_ABS = str(_PROJECT_ROOT / ".env.local")
+        _ENV_FILE_ABS = str(_PROJECT_ROOT / ".env")
+        model_config = SettingsConfigDict(env_file=(_ENV_LOCAL_ABS, _ENV_FILE_ABS), extra="ignore")  # type: ignore
+        log.debug(f"[config] pydantic-settings will look for .env files at: {_ENV_LOCAL_ABS}, {_ENV_FILE_ABS}")
 
 # Create a single, immutable instance of the settings
 settings = Settings()

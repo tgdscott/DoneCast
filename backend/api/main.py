@@ -60,10 +60,9 @@ def create_app() -> FastAPI:
         log.warning("[startup] Password hash warmup skipped: %s", _warm_err)
     
     # Log database connection pool configuration for debugging
+    # CRITICAL: Don't access engine.pool during startup - it may try to connect
+    # Just log the configuration without touching the actual pool
     try:
-        from api.core.database import engine
-        pool = engine.pool
-        # Access pool configuration via the creation args stored during init
         from api.core import database as db_module
         pool_kwargs = db_module._POOL_KWARGS
         log.info(

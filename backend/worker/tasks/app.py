@@ -29,7 +29,13 @@ except Exception:
 os.chdir(PROJECT_ROOT)
 
 # Celery app configuration (verbatim behavior)
+# CRITICAL: In Cloud Run/production, we use Cloud Tasks (HTTP) not RabbitMQ/Celery
+# Only enable Celery if explicitly configured for local development
 broker_url = os.getenv("RABBITMQ_URL", "amqp://guest:guest@127.0.0.1:5672//")
+ENABLE_CELERY = os.getenv("ENABLE_CELERY", "false").lower() in {"true", "1", "yes"}
+
+# Create Celery app but disable connection retry to prevent blocking during import
+# This allows the module to be imported without trying to connect to RabbitMQ
 celery_app = Celery("tasks", broker=broker_url, backend="rpc://")
 celery_app.conf.update(
     # Prefer explicit include of task modules; package stubs will exist
@@ -46,7 +52,9 @@ celery_app.conf.update(
     task_serializer="json",
     result_serializer="json",
     accept_content=["json"],
-    broker_connection_retry_on_startup=True,
+    # CRITICAL: Disable connection retry on startup to prevent blocking during import
+    # Cloud Run uses Cloud Tasks (HTTP) to assemble.podcastplusplus.com, not RabbitMQ
+    broker_connection_retry_on_startup=False,
     broker_heartbeat=30,
     worker_prefetch_multiplier=1,
     task_acks_late=True,

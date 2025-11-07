@@ -112,48 +112,75 @@ _POOL_KWARGS = {
 }
 
 
-if _DATABASE_URL:
-    try:
-        parsed_url = make_url(_DATABASE_URL)
-        backend_name = parsed_url.get_backend_name()
-    except Exception as e:
-        raise RuntimeError(f"Invalid DATABASE_URL format: {e}") from e
+# Lazy engine creation - don't fail hard during import, allow app to start
+# The engine will be created on first use, or we can initialize it lazily
+_engine = None
 
-    if backend_name != "postgresql":
-        raise RuntimeError(f"Only PostgreSQL is supported, got: {backend_name}. DATABASE_URL must start with postgresql://")
+def _create_engine():
+    """Create database engine with proper configuration."""
+    global _engine
+    if _engine is not None:
+        return _engine
     
-    engine = create_engine(_DATABASE_URL, **_POOL_KWARGS)
-    driver = parsed_url.drivername if parsed_url is not None else "unknown"
-    log.info("[db] Using DATABASE_URL for engine (driver=%s)", driver)
+    if _DATABASE_URL:
+        try:
+            parsed_url = make_url(_DATABASE_URL)
+            backend_name = parsed_url.get_backend_name()
+        except Exception as e:
+            raise RuntimeError(f"Invalid DATABASE_URL format: {e}") from e
 
-elif _INSTANCE_CONNECTION_NAME and _HAS_DISCRETE_DB_CONFIG:
-    db_user = settings.DB_USER.strip()
-    db_pass = settings.DB_PASS.strip()
-    db_name = settings.DB_NAME.strip()
-    instance_connection = _INSTANCE_CONNECTION_NAME
-    password = quote_plus(db_pass)
+        if backend_name != "postgresql":
+            raise RuntimeError(f"Only PostgreSQL is supported, got: {backend_name}. DATABASE_URL must start with postgresql://")
+        
+        _engine = create_engine(_DATABASE_URL, **_POOL_KWARGS)
+        driver = parsed_url.drivername if parsed_url is not None else "unknown"
+        log.info("[db] Using DATABASE_URL for engine (driver=%s)", driver)
+        return _engine
 
-    if DB_HOST:
-        engine = create_engine(
-            f"postgresql+psycopg://{db_user}:{password}@{DB_HOST}:{DB_PORT}/{db_name}",
-            **_POOL_KWARGS,
-        )
-        log.info(
-            "[db] Using Cloud SQL via TCP %s:%s for instance %s", DB_HOST, DB_PORT, instance_connection
-        )
+    elif _INSTANCE_CONNECTION_NAME and _HAS_DISCRETE_DB_CONFIG:
+        db_user = settings.DB_USER.strip()
+        db_pass = settings.DB_PASS.strip()
+        db_name = settings.DB_NAME.strip()
+        instance_connection = _INSTANCE_CONNECTION_NAME
+        password = quote_plus(db_pass)
+
+        if DB_HOST:
+            _engine = create_engine(
+                f"postgresql+psycopg://{db_user}:{password}@{DB_HOST}:{DB_PORT}/{db_name}",
+                **_POOL_KWARGS,
+            )
+            log.info(
+                "[db] Using Cloud SQL via TCP %s:%s for instance %s", DB_HOST, DB_PORT, instance_connection
+            )
+            return _engine
+        else:
+            db_socket_dir = os.getenv("DB_SOCKET_DIR", "/cloudsql")
+            socket_path = f"{db_socket_dir}/{instance_connection}"
+            _engine = create_engine(
+                f"postgresql+psycopg://{db_user}:{password}@/{db_name}?host={socket_path}&port=5432",
+                **_POOL_KWARGS,
+            )
+            log.info("[db] Using Cloud SQL via Unix socket %s", socket_path)
+            return _engine
     else:
-        db_socket_dir = os.getenv("DB_SOCKET_DIR", "/cloudsql")
-        socket_path = f"{db_socket_dir}/{instance_connection}"
-        engine = create_engine(
-            f"postgresql+psycopg://{db_user}:{password}@/{db_name}?host={socket_path}&port=5432",
-            **_POOL_KWARGS,
+        # Don't raise during import - allow app to start and fail on first DB use
+        log.warning(
+            "[db] PostgreSQL database configuration missing! "
+            "Set DATABASE_URL or provide INSTANCE_CONNECTION_NAME + DB_USER + DB_PASS + DB_NAME. "
+            "Database operations will fail until configured."
         )
-        log.info("[db] Using Cloud SQL via Unix socket %s", socket_path)
-else:
-    raise RuntimeError(
-        "PostgreSQL database configuration required! "
-        "Set DATABASE_URL or provide INSTANCE_CONNECTION_NAME + DB_USER + DB_PASS + DB_NAME."
-    )
+        # Create a dummy engine that will fail on first use with a clear error
+        # This allows the app to start and serve health checks
+        _engine = create_engine("postgresql+psycopg://invalid/invalid", **_POOL_KWARGS)
+        return _engine
+
+# Create engine immediately (but with better error handling)
+try:
+    engine = _create_engine()
+except Exception as e:
+    log.error("[db] Failed to create database engine during import: %s", e, exc_info=True)
+    # Create a dummy engine so imports don't fail - will error on first use
+    engine = create_engine("postgresql+psycopg://invalid/invalid", **_POOL_KWARGS)
 
 
 # Add connection pool event listeners for better Cloud SQL Proxy compatibility

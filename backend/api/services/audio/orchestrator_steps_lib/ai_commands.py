@@ -75,6 +75,10 @@ def detect_and_prepare_ai_commands(
     mix_only: bool,
     log: List[str],
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any], List[Dict[str, Any]], int, int]:
+    # CRITICAL: Initialize Python logging for visibility (not just log list)
+    import logging as _py_logging
+    _py_log = _py_logging.getLogger(__name__)
+    
     insane_verbose = bool(
         cleanup_options.get("insaneVerbose") or cleanup_options.get("debugCommands")
     )
@@ -122,6 +126,12 @@ def detect_and_prepare_ai_commands(
         else:
             if "flubber" in (commands_cfg or {}):
                 log.append("[AI_DISABLED_BY_INTENT] flubber config present but intent=skip/no")
+        # CRITICAL: Check for intern_overrides BEFORE checking intent
+        # User-reviewed overrides should ALWAYS be processed, regardless of intent
+        has_overrides = bool(cleanup_options.get("intern_overrides") and 
+                           isinstance(cleanup_options.get("intern_overrides"), list) and 
+                           len(cleanup_options.get("intern_overrides", [])) > 0)
+        
         if _allow(intern_intent):
             if "intern" in (commands_cfg or {}) or intern_count > 0:
                 new_cfg["intern"] = (commands_cfg or {}).get("intern") or {
@@ -131,6 +141,13 @@ def detect_and_prepare_ai_commands(
         else:
             if "intern" in (commands_cfg or {}):
                 log.append("[AI_DISABLED_BY_INTENT] intern config present but intent=skip/no")
+            # CRITICAL: Even if intent is "no", still enable intern if we have overrides
+            if has_overrides:
+                new_cfg["intern"] = (commands_cfg or {}).get("intern") or {
+                    "action": "ai_command"
+                }
+                log.append("[AI_ENABLE_INTERN_BY_OVERRIDES] intern_intent=no but intern_overrides present -> enabling intern")
+                _py_log.info("[AI_ENABLE_INTERN_BY_OVERRIDES] intern_intent=no but intern_overrides present -> enabling intern")
         commands_cfg = new_cfg
     elif mix_only and force_commands:
         log.append("[AI_FORCED] mix_only=True but forceCommands=True -> commands enabled")
@@ -158,11 +175,26 @@ def detect_and_prepare_ai_commands(
     sfx_markers = select_sfx_markers(mutable_words, commands_cfg, log)
 
     intern_overrides = cleanup_options.get("intern_overrides", []) or []
-    log.append(f"[AI_INTERN] 📋 CHECKING OVERRIDES: type={type(intern_overrides)} len={len(intern_overrides) if isinstance(intern_overrides, list) else 'N/A'}")
+    # CRITICAL: Log to both log list AND Python logging for visibility
+    override_count = len(intern_overrides) if isinstance(intern_overrides, list) else 0
+    log_msg = f"[AI_INTERN] 📋 CHECKING OVERRIDES: type={type(intern_overrides)} len={override_count}"
+    log.append(log_msg)
+    _py_log.info(log_msg)
+    _py_log.info(f"[AI_INTERN] cleanup_options keys: {list(cleanup_options.keys())}")
+    _py_log.info(f"[AI_INTERN] intern_overrides value: {intern_overrides}")
+    
     if intern_overrides and isinstance(intern_overrides, list) and len(intern_overrides) > 0:
-        log.append(
-            f"[AI_CMDS] ✅ USING {len(intern_overrides)} user-reviewed intern overrides"
-        )
+        override_log_msg = f"[AI_CMDS] ✅ USING {len(intern_overrides)} user-reviewed intern overrides (NEW PATH - old insert_intern_responses should be disabled)"
+        log.append(override_log_msg)
+        _py_log.info(override_log_msg)
+        # Log first override details for debugging
+        if len(intern_overrides) > 0:
+            first_ovr = intern_overrides[0]
+            log.append(
+                f"[AI_CMDS] First override: cmd_id={first_ovr.get('command_id')} start_s={first_ovr.get('start_s')} "
+                f"end_s={first_ovr.get('end_s')} has_response_text={bool(first_ovr.get('response_text'))} "
+                f"has_audio_url={bool(first_ovr.get('audio_url'))}"
+            )
         for idx, ovr in enumerate(intern_overrides):
             audio_url = _extract_override_audio_url(ovr) or ""
             override_text = _extract_override_answer(ovr)
@@ -216,21 +248,63 @@ def detect_and_prepare_ai_commands(
                 override,
                 ["insertion_s", "insertion", "end_s", "end", "endSeconds", "end_seconds"],
             )
+            # CRITICAL FIX: Ensure insertion_s defaults to end_s (the marked endpoint) if not explicitly set
             if insertion_s is None:
                 insertion_s = end_s if end_s is not None else context_end
+            # Additional safety: if insertion_s is still None or invalid, use end_s or context_end
+            if insertion_s is None or insertion_s <= 0:
+                if end_s is not None and end_s > 0:
+                    insertion_s = end_s
+                elif context_end is not None and context_end > 0:
+                    insertion_s = context_end
+                elif start_s is not None and start_s > 0:
+                    # Last resort: insert shortly after start
+                    insertion_s = start_s + 0.5
 
             if start_s is None:
                 start_s = insertion_s
+
+            # CRITICAL FIX: Ensure end_marker_end is always set to a valid value (the marked endpoint)
+            # This is where the user marked the END of the command, which is where we should insert AFTER
+            # NEVER use start_s for insertion - always use end_s (the marked endpoint)
+            final_insertion_s = None
+            if end_s is not None and end_s > 0:
+                final_insertion_s = end_s  # User-marked endpoint (PREFERRED)
+            elif insertion_s is not None and insertion_s > 0:
+                final_insertion_s = insertion_s
+            elif context_end is not None and context_end > 0:
+                final_insertion_s = context_end
+            
+            # CRITICAL: If we still don't have a valid insertion point, use start_s + offset (NOT start_s itself!)
+            if final_insertion_s is None or final_insertion_s <= 0:
+                if start_s is not None and start_s > 0:
+                    final_insertion_s = start_s + 0.5  # Insert 0.5s after start as last resort
+                else:
+                    final_insertion_s = 0.5  # Absolute last resort
+            
+            # CRITICAL SAFETY CHECK: Ensure insertion is AFTER start_s, never at or before it
+            if start_s is not None and start_s > 0:
+                if final_insertion_s <= start_s:
+                    log.append(f"[AI_OVERRIDE_SAFETY] insertion_s={final_insertion_s} <= start_s={start_s}, adjusting to start_s + 0.5")
+                    final_insertion_s = start_s + 0.5
+            
+            # Log the final values for debugging
+            log.append(
+                f"[AI_OVERRIDE_INSERTION] cmd_id={override.get('command_id')} start_s={start_s} end_s={end_s} "
+                f"context_end={context_end} final_insertion_s={final_insertion_s} "
+                f"(this is where audio will be inserted AFTER)"
+            )
 
             cmd = {
                 "command_token": "intern",
                 "command_id": override.get("command_id"),
                 "time": float(start_s if start_s is not None else 0.0),
-                "context_end": float(context_end if context_end is not None else 0.0),
-                # CRITICAL: NO CUTTING - just insert at marked endpoint (end_s)
-                "end_marker_end": float(insertion_s if insertion_s is not None else 0.0),  # Where AI answer should be inserted
+                "context_end": float(context_end if context_end is not None else (end_s if end_s is not None else (start_s if start_s is not None else 0.0))),
+                # CRITICAL: NO CUTTING - just insert at marked endpoint (end_s/insertion_s)
+                # This represents where the user marked the END of the command
+                "end_marker_end": float(final_insertion_s),  # Where AI answer should be inserted (AFTER the marked endpoint)
                 "end_marker_start": float(start_s if start_s is not None else 0.0),
-                "insertion_s": float(insertion_s if insertion_s is not None else 0.0),
+                "insertion_s": float(final_insertion_s),
                 "local_context": str(override.get("prompt_text") or "").strip(),
                 "override_answer": _extract_override_answer(override),
                 "override_audio_url": _extract_override_audio_url(override),
@@ -254,7 +328,11 @@ def detect_and_prepare_ai_commands(
             mutable_words, commands_cfg, log, insane_verbose=insane_verbose
         )
 
-    log.append(f"[AI_CMDS] detected={len(ai_cmds)}")
+    cmds_log_msg = f"[AI_CMDS] detected={len(ai_cmds)}"
+    log.append(cmds_log_msg)
+    _py_log.info(cmds_log_msg)
+    if len(ai_cmds) > 0:
+        _py_log.info(f"[AI_CMDS] ai_cmds details: {[{'cmd_id': c.get('command_id'), 'time': c.get('time'), 'has_audio': bool(c.get('override_audio_url'))} for c in ai_cmds]}")
     if (intern_count or flubber_count) and not ai_cmds:
         log.append(
             f"[AI_CMDS_MISMATCH] tokens_seen intern={intern_count} flubber={flubber_count} "

@@ -55,9 +55,9 @@ def suggest_title(inp: SuggestTitleIn) -> SuggestTitleOut:
     prompt = _compose_prompt(inp)
     try:
         title = generate(prompt, max_tokens=128).strip().replace("\n", " ")
-        # If Groq returns empty/near-empty (rate limit issue), fallback to Gemini
+        # If AI returns empty/near-empty response, retry with direct client call
         if len(title) < 10:
-            log.warning("[ai_title] Groq returned empty/short response, falling back to Gemini")
+            log.warning("[ai_title] Primary call returned empty/short response, retrying")
             from ..client_gemini import generate as gemini_generate
             title = gemini_generate(prompt).strip().replace("\n", " ")
     except RuntimeError:
