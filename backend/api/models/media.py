@@ -2,15 +2,17 @@
 from __future__ import annotations
 
 from sqlmodel import SQLModel, Field, Relationship
+from sqlalchemy.orm import relationship
 from typing import List, Optional, Literal, TYPE_CHECKING
 from datetime import datetime
 from uuid import UUID, uuid4
 import json
 
 from .enums import MediaCategory, MusicAssetSource
+from .user import User
 
 if TYPE_CHECKING:
-    from .user import User
+    pass
 
 
 class BackgroundMusicRule(SQLModel):
@@ -44,7 +46,7 @@ class MediaItem(SQLModel, table=True):
     # Optional spoken trigger keyword (used for SFX insertion during cleanup if spoken in content)
     trigger_keyword: Optional[str] = Field(default=None, index=False, description="Spoken keyword that triggers this media as SFX")
     user_id: UUID = Field(foreign_key="user.id")
-    user: Optional["User"] = Relationship()
+    user: Optional[User] = Relationship(sa_relationship=relationship("User"))
     created_at: datetime = Field(default_factory=datetime.utcnow)
     # When to expire this raw upload (UTC). For main_content, defaults to the first 2am PT boundary after upload + 14 days.
     expires_at: Optional[datetime] = Field(default=None, description="UTC timestamp when this media item should be purged if unused")
@@ -85,3 +87,11 @@ class MusicAsset(SQLModel, table=True):
             return json.loads(self.mood_tags_json)
         except Exception:
             return []
+
+
+_ns = globals().copy()
+_ns.update({'User': User})
+BackgroundMusicRule.model_rebuild(_types_namespace=_ns)
+SegmentTiming.model_rebuild(_types_namespace=_ns)
+MediaItem.model_rebuild(_types_namespace=_ns)
+MusicAsset.model_rebuild(_types_namespace=_ns)

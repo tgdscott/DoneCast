@@ -3,9 +3,8 @@
 This module contains models specific to podcasts, including show metadata,
 templates for episode assembly, and distribution tracking.
 """
-from __future__ import annotations
-
 from sqlmodel import SQLModel, Field, Column, Relationship
+from sqlalchemy.orm import relationship
 from typing import List, Optional, Literal, Union, TYPE_CHECKING
 from datetime import datetime
 from uuid import UUID, uuid4
@@ -18,6 +17,15 @@ if TYPE_CHECKING:
     from .user import User
     from .episode import Episode
     from .media import BackgroundMusicRule, SegmentTiming
+
+
+# NOTE: We deliberately import these at runtime (not just TYPE_CHECKING) so that
+# Pydantic/SQLModel can resolve the forward references without requiring a
+# manual model_rebuild() call in application code. When the models all lived in
+# a single module this happened implicitly; after the refactor into separate
+# modules we need to ensure the types are imported before model creation.
+from .media import BackgroundMusicRule, SegmentTiming
+from .user import User
 
 
 class PodcastBase(SQLModel):
@@ -60,7 +68,7 @@ class Podcast(PodcastBase, table=True):
     """Main podcast (show) model with relationship to episodes."""
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
     user_id: UUID = Field(foreign_key="user.id")
-    user: Optional["User"] = Relationship()
+    user: Optional[User] = Relationship(sa_relationship=relationship("User"))
 
     episodes: List["Episode"] = Relationship(back_populates="podcast", sa_relationship_kwargs={"cascade": "all, delete-orphan"})
 
@@ -163,8 +171,8 @@ class PodcastTemplateCreate(SQLModel):
     """Schema for creating a new podcast template (Pydantic model, not a table)."""
     name: str
     segments: List[TemplateSegment]
-    background_music_rules: List["BackgroundMusicRule"] = []
-    timing: "SegmentTiming" = Field(default_factory=lambda: __import__('api.models.media', fromlist=['SegmentTiming']).SegmentTiming())
+    background_music_rules: List[BackgroundMusicRule] = Field(default_factory=list)
+    timing: SegmentTiming = Field(default_factory=SegmentTiming)
     podcast_id: Optional[UUID] = None  # Associate template with a specific podcast/show
     # Optional: default ElevenLabs voice to seed per-episode TTS segments
     default_elevenlabs_voice_id: Optional[str] = None
@@ -191,11 +199,11 @@ class PodcastTemplate(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
     name: str
     user_id: UUID = Field(foreign_key="user.id")
-    user: Optional["User"] = Relationship(back_populates="templates")
+    user: Optional[User] = Relationship(back_populates="templates", sa_relationship=relationship("User"))
     podcast_id: Optional[UUID] = Field(default=None, foreign_key="podcast.id")
     segments_json: str = Field(default="[]")
     background_music_rules_json: str = Field(default="[]")
-    timing_json: str = Field(default_factory=lambda: __import__('api.models.media', fromlist=['SegmentTiming']).SegmentTiming().model_dump_json())
+    timing_json: str = Field(default_factory=lambda: SegmentTiming().model_dump_json())
     # New: JSON blob to hold AI settings
     ai_settings_json: str = Field(default_factory=lambda: PodcastTemplateCreate.AITemplateSettings().model_dump_json())
     # New: Active status toggle
@@ -213,3 +221,17 @@ class PodcastTemplatePublic(PodcastTemplateCreate):
     id: UUID
     user_id: UUID
     podcast_id: Optional[UUID] = None
+
+
+# Resolve forward references now that dependent modules are imported.
+_ns = globals().copy()
+_ns.update({
+    'User': User,
+})
+PodcastBase.model_rebuild(_types_namespace=_ns)
+Podcast.model_rebuild(_types_namespace=_ns)
+PodcastImportState.model_rebuild(_types_namespace=_ns)
+PodcastDistributionStatus.model_rebuild(_types_namespace=_ns)
+PodcastTemplateCreate.model_rebuild(_types_namespace=_ns)
+PodcastTemplate.model_rebuild(_types_namespace=_ns)
+PodcastTemplatePublic.model_rebuild(_types_namespace=_ns)

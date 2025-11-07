@@ -1,7 +1,6 @@
 """Episode-related models: Episode and EpisodeSection."""
-from __future__ import annotations
-
 from sqlmodel import SQLModel, Field, Column, Relationship
+from sqlalchemy.orm import relationship
 from typing import List, Optional, TYPE_CHECKING
 from datetime import datetime
 from uuid import UUID, uuid4
@@ -9,10 +8,11 @@ from sqlalchemy.dialects.postgresql import JSON
 import json
 
 from .enums import EpisodeStatus, SectionType, SectionSourceType
+from .podcast_models import Podcast, PodcastTemplate
+from .user import User
 
 if TYPE_CHECKING:
-    from .user import User
-    from .podcast_models import Podcast, PodcastTemplate
+    pass
 
 
 class Episode(SQLModel, table=True):
@@ -20,7 +20,7 @@ class Episode(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
     
     user_id: UUID = Field(foreign_key="user.id")
-    user: Optional["User"] = Relationship()
+    user: Optional[User] = Relationship(sa_relationship=relationship("User"))
     template_id: Optional[UUID] = Field(default=None, foreign_key="podcasttemplate.id")
     template: Optional["PodcastTemplate"] = Relationship(back_populates="episodes")
     podcast_id: UUID = Field(foreign_key="podcast.id")
@@ -120,7 +120,7 @@ class EpisodeSection(SQLModel, table=True):
     """
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
     user_id: UUID = Field(foreign_key="user.id")
-    user: Optional["User"] = Relationship()
+    user: Optional[User] = Relationship(sa_relationship=relationship("User"))
     podcast_id: UUID = Field(foreign_key="podcast.id")
     podcast: Optional["Podcast"] = Relationship()
     episode_id: Optional[UUID] = Field(default=None, foreign_key="episode.id")
@@ -133,3 +133,13 @@ class EpisodeSection(SQLModel, table=True):
     voice_id: Optional[str] = Field(default=None)
     voice_name: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+_ns = globals().copy()
+_ns.update({
+    'User': User,
+    'Podcast': Podcast,
+    'PodcastTemplate': PodcastTemplate,
+})
+Episode.model_rebuild(_types_namespace=_ns)
+EpisodeSection.model_rebuild(_types_namespace=_ns)

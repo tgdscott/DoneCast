@@ -1,4 +1,5 @@
 from sqlmodel import SQLModel, Field, Relationship
+from sqlalchemy.orm import relationship
 from pydantic import EmailStr
 from datetime import datetime
 from uuid import UUID, uuid4
@@ -78,4 +79,4 @@ class UserTermsAcceptance(SQLModel, table=True):
     ip_address: Optional[str] = Field(default=None, max_length=64)
     user_agent: Optional[str] = Field(default=None, max_length=512)
 
-    user: Optional["User"] = Relationship(back_populates="terms_acceptances")
+    user: Optional[User] = Relationship(back_populates="terms_acceptances", sa_relationship=relationship("User"))
