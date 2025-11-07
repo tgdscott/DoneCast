@@ -20,11 +20,11 @@ class Episode(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
     
     user_id: UUID = Field(foreign_key="user.id")
-    user: Optional["User"] = Relationship()
+    user: User = Relationship()
     template_id: Optional[UUID] = Field(default=None, foreign_key="podcasttemplate.id")
-    template: Optional["PodcastTemplate"] = Relationship(back_populates="episodes")
+    template: PodcastTemplate = Relationship(back_populates="episodes")
     podcast_id: UUID = Field(foreign_key="podcast.id")
-    podcast: Optional["Podcast"] = Relationship(back_populates="episodes")
+    podcast: Podcast = Relationship(back_populates="episodes")
 
     title: str = Field(default="Untitled Episode")
     cover_path: Optional[str] = Field(default=None)
@@ -120,11 +120,11 @@ class EpisodeSection(SQLModel, table=True):
     """
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
     user_id: UUID = Field(foreign_key="user.id")
-    user: Optional["User"] = Relationship()
+    user: User = Relationship()
     podcast_id: UUID = Field(foreign_key="podcast.id")
-    podcast: Optional["Podcast"] = Relationship()
+    podcast: Podcast = Relationship()
     episode_id: Optional[UUID] = Field(default=None, foreign_key="episode.id")
-    episode: Optional["Episode"] = Relationship()
+    episode: Episode = Relationship()
 
     tag: str = Field(index=True)
     section_type: SectionType = Field(default=SectionType.intro)

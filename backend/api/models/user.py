@@ -78,4 +78,4 @@ class UserTermsAcceptance(SQLModel, table=True):
     ip_address: Optional[str] = Field(default=None, max_length=64)
     user_agent: Optional[str] = Field(default=None, max_length=512)
 
-    user: Optional["User"] = Relationship(back_populates="terms_acceptances")
+    user: User = Relationship(back_populates="terms_acceptances")

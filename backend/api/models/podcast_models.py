@@ -60,9 +60,9 @@ class Podcast(PodcastBase, table=True):
     """Main podcast (show) model with relationship to episodes."""
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
     user_id: UUID = Field(foreign_key="user.id")
-    user: Optional["User"] = Relationship()
+    user: User = Relationship()
 
-    episodes: List["Episode"] = Relationship(back_populates="podcast", sa_relationship_kwargs={"cascade": "all, delete-orphan"})
+    episodes: List[Episode] = Relationship(back_populates="podcast", sa_relationship_kwargs={"cascade": "all, delete-orphan"})
 
     @property
     def rss_feed_url(self) -> Optional[str]:
@@ -191,7 +191,7 @@ class PodcastTemplate(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
     name: str
     user_id: UUID = Field(foreign_key="user.id")
-    user: Optional["User"] = Relationship(back_populates="templates")
+    user: User = Relationship(back_populates="templates")
     podcast_id: Optional[UUID] = Field(default=None, foreign_key="podcast.id")
     segments_json: str = Field(default="[]")
     background_music_rules_json: str = Field(default="[]")
@@ -205,7 +205,7 @@ class PodcastTemplate(SQLModel, table=True):
     # New: default voice id for Intern command detection
     default_intern_voice_id: Optional[str] = Field(default=None)
 
-    episodes: List["Episode"] = Relationship(back_populates="template")
+    episodes: List[Episode] = Relationship(back_populates="template")
 
 
 class PodcastTemplatePublic(PodcastTemplateCreate):
