@@ -44,7 +44,7 @@ class MediaItem(SQLModel, table=True):
     # Optional spoken trigger keyword (used for SFX insertion during cleanup if spoken in content)
     trigger_keyword: Optional[str] = Field(default=None, index=False, description="Spoken keyword that triggers this media as SFX")
     user_id: UUID = Field(foreign_key="user.id")
-    user: User = Relationship()
+    user: Optional["User"] = Relationship()
     created_at: datetime = Field(default_factory=datetime.utcnow)
     # When to expire this raw upload (UTC). For main_content, defaults to the first 2am PT boundary after upload + 14 days.
     expires_at: Optional[datetime] = Field(default=None, description="UTC timestamp when this media item should be purged if unused")

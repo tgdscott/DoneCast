@@ -1,7 +1,7 @@
 """Episode-related models: Episode and EpisodeSection."""
 from __future__ import annotations
 
-from sqlmodel import SQLModel, Field, Relationship, Column
+from sqlmodel import SQLModel, Field, Column, Relationship
 from typing import List, Optional, TYPE_CHECKING
 from datetime import datetime
 from uuid import UUID, uuid4
@@ -20,11 +20,11 @@ class Episode(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
     
     user_id: UUID = Field(foreign_key="user.id")
-    user: User = Relationship()
+    user: Optional["User"] = Relationship()
     template_id: Optional[UUID] = Field(default=None, foreign_key="podcasttemplate.id")
-    template: PodcastTemplate = Relationship(back_populates="episodes")
+    template: Optional["PodcastTemplate"] = Relationship(back_populates="episodes")
     podcast_id: UUID = Field(foreign_key="podcast.id")
-    podcast: Podcast = Relationship(back_populates="episodes")
+    podcast: Optional["Podcast"] = Relationship(back_populates="episodes")
 
     title: str = Field(default="Untitled Episode")
     cover_path: Optional[str] = Field(default=None)
@@ -120,11 +120,11 @@ class EpisodeSection(SQLModel, table=True):
     """
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
     user_id: UUID = Field(foreign_key="user.id")
-    user: User = Relationship()
+    user: Optional["User"] = Relationship()
     podcast_id: UUID = Field(foreign_key="podcast.id")
-    podcast: Podcast = Relationship()
+    podcast: Optional["Podcast"] = Relationship()
     episode_id: Optional[UUID] = Field(default=None, foreign_key="episode.id")
-    episode: Episode = Relationship()
+    episode: Optional["Episode"] = Relationship()
 
     tag: str = Field(index=True)
     section_type: SectionType = Field(default=SectionType.intro)
