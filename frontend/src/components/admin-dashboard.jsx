@@ -1,52 +1,22 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import {
-  Headphones,
-  Users,
-  BarChart3,
-  Settings as SettingsIcon,
-  CreditCard,
-  HelpCircle,
-  LogOut,
-  Shield,
-  TrendingUp,
-  Play,
-  Zap,
-  AlertTriangle,
-  MessageSquare,
-  Database,
-  Bug,
-  ArrowLeft,
-  Coins,
-} from "lucide-react";
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Coins } from "lucide-react";
+import React from "react";
 import { useAuth } from "@/AuthContext";
-import DbExplorer from "@/components/admin/DbExplorer.jsx";
 import { useToast } from "@/hooks/use-toast";
-import AdminTierEditor from "@/components/admin/AdminTierEditor.jsx";
-import AdminTierEditorV2 from "@/components/admin/AdminTierEditorV2.jsx";
-import AdminMusicLibrary from "@/components/admin/AdminMusicLibrary.jsx";
-import AdminLandingEditor from "@/components/admin/AdminLandingEditor.jsx";
-import AdminBugsTab from "@/components/admin/tabs/AdminBugsTab.jsx";
-import AdminPodcastsTab from "@/components/admin/tabs/AdminPodcastsTab.jsx";
-import AdminBillingTab from "@/components/admin/tabs/AdminBillingTab.jsx";
-import AdminHelpTab from "@/components/admin/tabs/AdminHelpTab.jsx";
-import AdminDashboardTab from "@/components/admin/tabs/AdminDashboardTab.jsx";
 import { useResolvedTimezone } from "@/hooks/useResolvedTimezone";
-import { formatInTimezone } from "@/lib/timezone";
 import useAdminDashboardData from "@/components/admin-dashboard/hooks/useAdminDashboardData";
 import useAdminDashboardState from "@/components/admin-dashboard/hooks/useAdminDashboardState";
-import UsersTab from "@/components/admin-dashboard/tabs/UsersTab.jsx";
-import AnalyticsTab from "@/components/admin-dashboard/tabs/AnalyticsTab.jsx";
-import DashboardOverviewTab from "@/components/admin-dashboard/tabs/DashboardOverviewTab.jsx";
-import SettingsTab from "@/components/admin-dashboard/tabs/SettingsTab.jsx";
+import { navigationItems } from "@/constants/adminNavigation";
+import AdminSidebar from "@/components/admin-dashboard/AdminSidebar.jsx";
+import AdminHeader from "@/components/admin-dashboard/AdminHeader.jsx";
+import AdminMainContent from "@/components/admin-dashboard/AdminMainContent.jsx";
 
 export default function AdminDashboard() {
   const { token, logout, user: authUser } = useAuth();
@@ -145,21 +115,6 @@ export default function AdminDashboard() {
     setMaintenanceDraft(adminSettings?.maintenance_message ?? "");
   };
 
-  const navigationItems = [
-    { id: "dashboard", label: "Dashboard Overview", icon: BarChart3 },
-    { id: "users", label: "Users", icon: Users },
-    { id: "podcasts", label: "Podcasts", icon: Play },
-    { id: "analytics", label: "Analytics", icon: TrendingUp },
-    { id: "bugs", label: "Bug Reports", icon: Bug },
-    { id: "tiers", label: "Tier Editor", icon: SettingsIcon },
-    { id: "music", label: "Music Library", icon: Headphones },
-    { id: "landing", label: "Front Page Content", icon: MessageSquare },
-    { id: "db", label: "DB Explorer", icon: Database },
-    { id: "settings", label: "Settings", icon: SettingsIcon },
-    { id: "billing", label: "Billing", icon: CreditCard },
-    { id: "help", label: "Help & Docs", icon: HelpCircle },
-  ]
-
   const handleUserUpdate = (id, payload) => {
     if (payload.tier === "admin") {
       const targetUser = users.find((user) => user.id === id);
@@ -191,280 +146,75 @@ export default function AdminDashboard() {
   return (
     <div className="min-h-screen bg-gray-50 flex">
       {/* Sidebar Navigation */}
-      <div className="w-64 bg-white border-r border-gray-200 flex flex-col">
-        {/* Logo */}
-        <div className="p-6 border-b border-gray-200">
-          <div className="flex items-center space-x-3">
-            <Headphones className="w-8 h-8" style={{ color: "#2C3E50" }} />
-            <div>
-              <h1 className="text-xl font-bold" style={{ color: "#2C3E50" }}>
-                Podcast Plus Plus
-              </h1>
-              <p className="text-sm text-gray-600">Admin Panel</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Navigation Menu */}
-  <nav className="flex-1 p-4" role="navigation" aria-label="Admin side navigation">
-          <ul className="space-y-2">
-            {navigationItems.map((item) => (
-              <li key={item.id}>
-                <button
-                  onClick={() => setActiveTab(item.id)}
-                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-left transition-all ${
-                    activeTab === item.id
-                      ? "text-white shadow-md"
-                      : "text-gray-600 hover:bg-gray-100 hover:text-gray-800"
-                  }`}
-                  style={{
-                    backgroundColor: activeTab === item.id ? "#2C3E50" : "transparent",
-                  }}>
-                  <item.icon className="w-5 h-5" />
-                  <span className="font-medium">{item.label}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </nav>
-
-        {/* Admin Info */}
-        <div className="p-4 border-t border-gray-200">
-          <div className="flex items-center space-x-3 mb-3">
-            <Avatar className="h-8 w-8">
-              <AvatarFallback>
-                <Shield className="w-4 h-4" />
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-800">Admin User</p>
-              <p className="text-xs text-gray-500">Platform Administrator</p>
-            </div>
-          </div>
-          <Button 
-            onClick={() => window.location.href = '/dashboard?view=user'} 
-            variant="ghost" 
-            size="sm" 
-            className="w-full justify-start text-gray-600 mb-2"
-          >
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Dashboard
-          </Button>
-          <Button onClick={logout} variant="ghost" size="sm" className="w-full justify-start text-gray-600">
-            <LogOut className="w-4 h-4 mr-2" />
-            Logout
-          </Button>
-        </div>
-      </div>
-  {/* Main Content */}
-  <div className="flex-1 flex flex-col" role="main" aria-label="Admin main content" tabIndex={-1}>
+      <AdminSidebar
+        navigationItems={navigationItems}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        logout={logout}
+      />
+      
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col" role="main" aria-label="Admin main content" tabIndex={-1}>
         {/* Top Header */}
-        <header className="bg-white border-b border-gray-200 px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold" style={{ color: "#2C3E50" }}>
-                {navigationItems.find((item) => item.id === activeTab)?.label}
-              </h1>
-              <p className="text-gray-600 mt-1">
-                {activeTab === "users" && "Manage platform users and their accounts"}
-                {activeTab === "analytics" && "Monitor platform performance and user engagement"}
-                {activeTab === "bugs" && "View and manage bug reports and user feedback from Mike"}
-                {activeTab === "tiers" && "Configure tier features, credits, and processing pipelines (database-driven)"}
-                {activeTab === "db" && "Browse & edit core tables (safe fields only)"}
-                {activeTab === "music" && "Curate previewable background tracks for onboarding/templates"}
-                {activeTab === "settings" && "Configure platform settings and features"}
-                {activeTab === "dashboard" && "Overview of platform metrics and activity"}
-                {activeTab === "landing" && "Customize landing page reviews, FAQs, and hero messaging"}
-                {activeTab === "billing" && "View and manage billing details and subscriptions"}
-              </p>
-            </div>
-            <div className="flex items-center space-x-4">
-              <div className="text-xs px-2 py-1 rounded bg-secondary text-secondary-foreground">
-                Brand: {document.documentElement.getAttribute("data-brand") || "ppp"}
-              </div>
-              <div className="text-sm text-gray-600">Last updated: {formatInTimezone(new Date(), { timeStyle: 'medium' }, resolvedTimezone)}</div>
-            </div>
-          </div>
-        </header>
-
+        <AdminHeader
+          activeTab={activeTab}
+          navigationItems={navigationItems}
+          resolvedTimezone={resolvedTimezone}
+        />
+        
         {/* Content Area */}
-        <main className="flex-1 p-6">
-          {/* Real-time Alerts */}
-          <div className="mb-6">
-            {activeTab === 'dashboard' && (
-              <DashboardOverviewTab analytics={analytics} runSeed={runSeed} seedResult={seedResult} />
-            )}
-            {adminSettings?.maintenance_mode && (
-              <Card className="border-l-4 border-orange-500 bg-orange-50">
-                <CardContent className="p-4">
-                  <div className="flex items-center">
-                    <AlertTriangle className="w-5 h-5 text-orange-600 mr-3" />
-                    <div>
-                      <p className="font-medium text-orange-800">Maintenance Mode Active</p>
-                      <p className="text-sm text-orange-700">
-                        {adminSettings?.maintenance_message || 'Platform is currently in maintenance mode. Users cannot access the service right now.'}
-                      </p>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="ml-auto bg-transparent"
-                      disabled={adminSettingsSaving}
-                      onClick={() => saveAdminSettings({ maintenance_mode: false })}>
-                      Disable
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {false && (
-              <Card className="border-l-4 border-blue-500 bg-blue-50">
-                <CardContent className="p-4">
-                  <div className="flex items-center">
-                    <Zap className="w-5 h-5 text-blue-600 mr-3" />
-                    <div>
-                      <p className="font-medium text-blue-800">System Update Available</p>
-                      <p className="text-sm text-blue-700">
-                        Version 2.1.0 is ready to install with new AI features and performance improvements.
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      className="ml-auto text-white"
-                      style={{ backgroundColor: "#2C3E50" }}>
-                      Update Now
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-
-          {/* Users Tab */}
-          {activeTab === "users" && (
-            <UsersTab
-              usersLoading={usersLoading}
-              currentUsers={currentUsers}
-              filteredUsers={filteredUsers}
-              searchTerm={searchTerm}
-              onSearchChange={setSearchTerm}
-              tierFilter={tierFilter}
-              onTierFilterChange={setTierFilter}
-              statusFilter={statusFilter}
-              onStatusFilterChange={setStatusFilter}
-              verificationFilter={verificationFilter}
-              onVerificationFilterChange={setVerificationFilter}
-              usersPerPage={usersPerPage}
-              indexOfFirstUser={indexOfFirstUser}
-              indexOfLastUser={indexOfLastUser}
-              currentPage={currentPage}
-              onCurrentPageChange={setCurrentPage}
-              totalPages={totalPages}
-              savingIds={savingIds}
-              saveErrors={saveErrors}
-              editingDates={editingDates}
-              setEditingDates={setEditingDates}
-              onUpdateUser={handleUserUpdate}
-              onPrepareUserForDeletion={prepareUserForDeletion}
-              onViewUserCredits={viewUserCredits}
-              onVerifyUserEmail={verifyUserEmail}
-              isSuperAdmin={isSuperAdmin}
-              isAdmin={isAdmin}
-            />
-          )}
-
-          {activeTab === "tiers" && (
-            <div className="space-y-4">
-              <AdminTierEditorV2 />
-              <div className="mt-8 pt-8 border-t">
-                <div className="text-sm text-gray-500 mb-4">Legacy Editor (Deprecated)</div>
-                <AdminTierEditor />
-              </div>
-            </div>
-          )}
-
-          {activeTab === "music" && (
-            <div className="space-y-4">
-              <AdminMusicLibrary />
-            </div>
-          )}
-
-          {activeTab === "landing" && (
-            <div className="space-y-4">
-              <AdminLandingEditor token={token} />
-            </div>
-          )}
-
-          {/* DB Explorer Tab */}
-          {activeTab === "db" && (
-            <div className="space-y-4">
-              <DbExplorer readOnly={!isSuperAdmin} />
-            </div>
-          )}
-
-          {/* Bug Reports Tab (Admin) */}
-          {activeTab === "bugs" && (
-            <AdminBugsTab token={token} />
-          )}
-
-          {/* Podcasts Tab (Admin) */}
-          {activeTab === "podcasts" && (
-            <AdminPodcastsTab />
-          )}
-
-          {/* Billing Tab (Admin) */}
-          {activeTab === "billing" && (
-            <AdminBillingTab />
-          )}
-
-          {/* Help & Docs Tab (Admin) */}
-          {activeTab === "help" && (
-            <AdminHelpTab />
-          )}
-
-          {/* Enhanced Analytics Tab */}
-          {activeTab === "analytics" && (
-            <AnalyticsTab analytics={analytics} metrics={metrics} analyticsLoading={analyticsLoading} />
-          )}
-          {/* Enhanced Dashboard Overview Tab */}
-          {activeTab === "dashboard" && (
-            <AdminDashboardTab
-              analytics={analytics}
-              handleKillQueue={handleKillQueue}
-              killingQueue={killingQueue}
-            />
-          )}
-
-          {/* Settings Tab */}
-          {activeTab === "settings" && (
-            <SettingsTab
-              token={token}
-              adminSettings={adminSettings}
-              onAdminSettingsSaved={setAdminSettings}
-              settings={settings}
-              setSettings={setSettings}
-              adminSettingsSaving={adminSettingsSaving}
-              adminSettingsErr={adminSettingsErr}
-              maintenanceDraft={maintenanceDraft}
-              setMaintenanceDraft={setMaintenanceDraft}
-              maintenanceMessageChanged={maintenanceMessageChanged}
-              handleMaintenanceToggle={handleMaintenanceToggle}
-              handleMaintenanceMessageSave={handleMaintenanceMessageSave}
-              handleMaintenanceMessageReset={handleMaintenanceMessageReset}
-              isSuperAdmin={isSuperAdmin}
-            />
-          )}
-          {/* Other tabs placeholder */}
-          {!["users", "analytics", "settings", "dashboard", "music", "tiers", "landing", "db", "podcasts", "bugs", "billing", "help"].includes(activeTab) && (
-            <div className="text-center py-12">
-              <h3 className="text-xl font-semibold text-gray-600 mb-2">
-                {navigationItems.find((item) => item.id === activeTab)?.label} Coming Soon
-              </h3>
-              <p className="text-gray-500">This section is under development and will be available soon.</p>
-            </div>
-          )}
-        </main>
+        <AdminMainContent
+          activeTab={activeTab}
+          navigationItems={navigationItems}
+          adminSettings={adminSettings}
+          adminSettingsSaving={adminSettingsSaving}
+          saveAdminSettings={saveAdminSettings}
+          analytics={analytics}
+          runSeed={runSeed}
+          seedResult={seedResult}
+          metrics={metrics}
+          analyticsLoading={analyticsLoading}
+          handleKillQueue={handleKillQueue}
+          killingQueue={killingQueue}
+          token={token}
+          settings={settings}
+          setSettings={setSettings}
+          adminSettingsErr={adminSettingsErr}
+          maintenanceDraft={maintenanceDraft}
+          setMaintenanceDraft={setMaintenanceDraft}
+          maintenanceMessageChanged={maintenanceMessageChanged}
+          handleMaintenanceToggle={handleMaintenanceToggle}
+          handleMaintenanceMessageSave={handleMaintenanceMessageSave}
+          handleMaintenanceMessageReset={handleMaintenanceMessageReset}
+          isSuperAdmin={isSuperAdmin}
+          isAdmin={isAdmin}
+          usersLoading={usersLoading}
+          currentUsers={currentUsers}
+          filteredUsers={filteredUsers}
+          searchTerm={searchTerm}
+          setSearchTerm={setSearchTerm}
+          tierFilter={tierFilter}
+          setTierFilter={setTierFilter}
+          statusFilter={statusFilter}
+          setStatusFilter={setStatusFilter}
+          verificationFilter={verificationFilter}
+          setVerificationFilter={setVerificationFilter}
+          usersPerPage={usersPerPage}
+          indexOfFirstUser={indexOfFirstUser}
+          indexOfLastUser={indexOfLastUser}
+          currentPage={currentPage}
+          setCurrentPage={setCurrentPage}
+          totalPages={totalPages}
+          savingIds={savingIds}
+          saveErrors={saveErrors}
+          editingDates={editingDates}
+          setEditingDates={setEditingDates}
+          handleUserUpdate={handleUserUpdate}
+          prepareUserForDeletion={prepareUserForDeletion}
+          viewUserCredits={viewUserCredits}
+          verifyUserEmail={verifyUserEmail}
+          setAdminSettings={setAdminSettings}
+        />
       </div>
       
       {/* Admin Tier Confirmation Dialog */}
