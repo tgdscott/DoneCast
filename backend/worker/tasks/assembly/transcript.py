@@ -21,17 +21,20 @@ from api.services.clean_engine.features import apply_flubber_cuts
 from api.core.paths import MEDIA_DIR, WS_ROOT as PROJECT_ROOT
 from api.core.paths import TRANSCRIPTS_DIR as _TRANSCRIPTS_DIR
 
-try:  # Optional GCS util
-    from api.infrastructure.gcs import download_bytes as _gcs_download  # type: ignore
+# Select storage backend (R2 or GCS) dynamically to avoid importing GCS when unused
+STORAGE_BACKEND = (os.getenv("STORAGE_BACKEND") or "").strip().lower()
+try:
+    if STORAGE_BACKEND == "r2":
+        from infrastructure import r2 as storage_utils  # type: ignore
+        from infrastructure.r2 import download_bytes as _storage_download  # type: ignore
+    else:
+        from infrastructure import gcs as storage_utils  # type: ignore
+        from api.infrastructure.gcs import download_bytes as _storage_download  # type: ignore
 except Exception:  # pragma: no cover
-    _gcs_download = None  # type: ignore
+    storage_utils = None  # type: ignore
+    _storage_download = None  # type: ignore
 
 from .media import MediaContext, _resolve_media_file
-
-try:  # Heavy dependency; optional for local dev/test
-    from infrastructure import gcs as gcs_utils  # type: ignore
-except Exception:  # pragma: no cover - fallback when GCS helpers unavailable
-    gcs_utils = None  # type: ignore
 
 
 def _commit_with_retry(session, *, max_retries: int = 3, backoff_seconds: float = 1.0) -> bool:
@@ -216,8 +219,12 @@ def _maybe_generate_transcript(
         return val in {"1", "true", "yes", "on"}
 
     def _attempt_download_from_bucket(stem: str) -> Optional[Path]:
-        bucket = (os.getenv("TRANSCRIPTS_BUCKET") or os.getenv("MEDIA_BUCKET") or "").strip()
-        if not bucket or not _gcs_download or not stem:
+        backend = (os.getenv("STORAGE_BACKEND") or "").strip().lower()
+        if backend == "r2":
+            bucket = (os.getenv("TRANSCRIPTS_BUCKET") or os.getenv("R2_BUCKET") or "").strip()
+        else:
+            bucket = (os.getenv("TRANSCRIPTS_BUCKET") or os.getenv("MEDIA_BUCKET") or "").strip()
+        if not bucket or not _storage_download or not stem:
             return None
         variants = [
             f"{stem}.json",
@@ -231,7 +238,7 @@ def _maybe_generate_transcript(
         for v in variants:
             key = f"transcripts/{v}"
             try:
-                data = _gcs_download(bucket, key)  # type: ignore[misc]
+                data = _storage_download(bucket, key)  # type: ignore[misc]
                 if data:
                     out = target_dir / v
                     out.parent.mkdir(parents=True, exist_ok=True)
@@ -879,8 +886,9 @@ def prepare_transcript_context(
 
             gcs_uri = None
             gcs_key = None
-            bucket = (os.getenv("MEDIA_BUCKET") or "").strip()
-            if bucket and dest.exists() and gcs_utils and hasattr(gcs_utils, "upload_fileobj"):
+            backend = (os.getenv("STORAGE_BACKEND") or "").strip().lower()
+            bucket = (os.getenv("MEDIA_BUCKET") or (os.getenv("R2_BUCKET") if backend == "r2" else "") or "").strip()
+            if bucket and dest.exists() and storage_utils and hasattr(storage_utils, "upload_fileobj"):
                 try:
                     user_part = media_context.user_id or "shared"
                     if not user_part:
@@ -891,7 +899,7 @@ def prepare_transcript_context(
                         if part
                     )
                     with open(dest, "rb") as fh:
-                        gcs_uri = gcs_utils.upload_fileobj(  # type: ignore[attr-defined]
+                        gcs_uri = storage_utils.upload_fileobj(  # type: ignore[attr-defined]
                             bucket,
                             gcs_key,
                             fh,
