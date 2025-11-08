@@ -541,7 +541,7 @@ def upload_fileobj(
     key: str,
     fileobj: IO,
     content_type: Optional[str] = None,
-    allow_fallback: bool = True,
+    allow_fallback: bool = False,  # Changed default to False - GCS is required
     **kwargs,
 ) -> str:
     """Upload a file-like object to GCS, with optional local development fallback.
@@ -594,7 +594,7 @@ def upload_bytes(
     key: str,
     data: bytes,
     content_type: Optional[str] = None,
-    allow_fallback: bool = True,
+    allow_fallback: bool = False,  # Changed default to False - GCS is required
 ) -> str:
     """Upload raw bytes to GCS, with optional local development fallback.
     

@@ -671,6 +671,7 @@ export default function PodcastCreator({
             setShowVoicePicker(false);
             setVoicePickerTargetId(null);
           }}
+          token={token}
         />
       )}
     </>

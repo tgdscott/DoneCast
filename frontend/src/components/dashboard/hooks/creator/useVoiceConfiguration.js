@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { makeApi } from '@/lib/apiClient';
 import { fetchVoices as fetchElevenVoices } from '@/api/elevenlabs';
 
@@ -30,6 +30,45 @@ export default function useVoiceConfiguration({
   const [voiceNameById, setVoiceNameById] = useState({});
   const [voicesLoading, setVoicesLoading] = useState(false);
 
+  // Compute active segment based on voicePickerTargetId
+  const activeSegment = useMemo(() => {
+    if (!voicePickerTargetId || !selectedTemplate?.segments) return null;
+    
+    // Try to find segment by id first
+    let segment = selectedTemplate.segments.find(s => s.id === voicePickerTargetId);
+    
+    // If not found by id, try matching by other identifiers
+    if (!segment) {
+      segment = selectedTemplate.segments.find(s => {
+        // Try matching by prompt_id if it exists
+        if (s?.source?.prompt_id === voicePickerTargetId) return true;
+        // Try matching by slug
+        if (s?.slug === voicePickerTargetId) return true;
+        // Try matching by name
+        if (s?.name === voicePickerTargetId) return true;
+        return false;
+      });
+    }
+    
+    // If still not found and targetId is a computed fallback (e.g., "segment-0"), try index matching
+    if (!segment && typeof voicePickerTargetId === 'string' && voicePickerTargetId.startsWith('segment-')) {
+      const indexMatch = voicePickerTargetId.match(/^segment-(\d+)$/);
+      if (indexMatch) {
+        const index = parseInt(indexMatch[1], 10);
+        if (!isNaN(index) && index >= 0 && index < selectedTemplate.segments.length) {
+          segment = selectedTemplate.segments[index];
+        }
+      }
+    }
+    
+    // Only return TTS segments
+    if (segment?.source?.source_type === 'tts') {
+      return segment;
+    }
+    
+    return null;
+  }, [voicePickerTargetId, selectedTemplate?.segments]);
+
   // TTS value change handler
   const handleTtsChange = useCallback(
     (promptId, value) => {
@@ -37,6 +76,29 @@ export default function useVoiceConfiguration({
     },
     []
   );
+
+  // Helper function to match a segment by voicePickerTargetId (same logic as activeSegment)
+  // Note: Index-based matching for computed keys is handled in handleVoiceChange using the segments array
+  const matchesSegment = useCallback((segment, targetId, segmentIndex = null, allSegments = null) => {
+    if (!segment || !targetId) return false;
+    // Try matching by id first
+    if (segment.id === targetId) return true;
+    // Try matching by prompt_id if it exists
+    if (segment?.source?.prompt_id === targetId) return true;
+    // Try matching by slug
+    if (segment?.slug === targetId) return true;
+    // Try matching by name
+    if (segment?.name === targetId) return true;
+    // Try index-based matching for computed fallback keys (e.g., "segment-0")
+    if (typeof targetId === 'string' && targetId.startsWith('segment-') && segmentIndex !== null) {
+      const indexMatch = targetId.match(/^segment-(\d+)$/);
+      if (indexMatch) {
+        const targetIndex = parseInt(indexMatch[1], 10);
+        if (!isNaN(targetIndex) && targetIndex === segmentIndex) return true;
+      }
+    }
+    return false;
+  }, []);
 
   // Voice selection handler
   const handleVoiceChange = useCallback(
@@ -46,8 +108,8 @@ export default function useVoiceConfiguration({
       setSelectedTemplate(prev => {
         if (!prev?.segments) return prev;
         
-        const nextSegs = prev.segments.map(s => {
-          if (s.id === voicePickerTargetId && s?.source?.source_type === 'tts') {
+        const nextSegs = prev.segments.map((s, index) => {
+          if (matchesSegment(s, voicePickerTargetId, index, prev.segments) && s?.source?.source_type === 'tts') {
             const updatedSource = { ...s.source, voice_id };
             // If full voice object provided, store the display name
             if (voiceItem) {
@@ -64,7 +126,7 @@ export default function useVoiceConfiguration({
         return { ...prev, segments: nextSegs };
       });
     },
-    [voicePickerTargetId, setSelectedTemplate]
+    [voicePickerTargetId, setSelectedTemplate, matchesSegment]
   );
 
   // Voice name resolution effect (fetch display names for voice IDs)
@@ -148,6 +210,7 @@ export default function useVoiceConfiguration({
     setShowVoicePicker,
     voicePickerTargetId,
     setVoicePickerTargetId,
+    activeSegment,
     
     // Voice resolution state
     voiceNameById,

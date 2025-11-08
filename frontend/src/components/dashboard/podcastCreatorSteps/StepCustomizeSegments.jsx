@@ -123,7 +123,7 @@ export default function StepCustomizeSegments({
                 Voice: {baseVoiceLabel}
                 {isResolvingVoice ? '…' : ''}
               </span>
-              <Button size="sm" variant="outline" onClick={() => onOpenVoicePicker(segment.id)}>
+              <Button size="sm" variant="outline" onClick={() => onOpenVoicePicker(segment.id || promptKey)}>
                 Change voice
               </Button>
             </div>

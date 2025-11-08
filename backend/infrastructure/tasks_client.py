@@ -1,6 +1,19 @@
 import os, json, threading, logging
 from datetime import datetime
 
+# Try to load .env.local if available (for USE_WORKER_IN_DEV support in dev mode)
+# This ensures env vars are available even if this module is imported before config.py
+try:
+    from dotenv import load_dotenv
+    from pathlib import Path
+    # Get backend/ directory (parent of infrastructure/)
+    _BACKEND_ROOT = Path(__file__).parent.parent
+    _ENV_LOCAL = _BACKEND_ROOT / ".env.local"
+    if _ENV_LOCAL.exists():
+        load_dotenv(_ENV_LOCAL, override=False)
+except (ImportError, Exception):
+    pass  # python-dotenv not installed or file not found, skip
+
 try:
     from google.cloud import tasks_v2
     from google.protobuf import timestamp_pb2
@@ -24,12 +37,15 @@ def should_use_cloud_tasks() -> bool:
     """Return ``True`` when Cloud Tasks HTTP dispatch should be used."""
 
     if IS_DEV_ENV or IS_TEST_ENV:
+        log.info("event=tasks.cloud.disabled reason=dev_env is_dev=%s is_test=%s", IS_DEV_ENV, IS_TEST_ENV)
         return False
 
     if os.getenv("TASKS_FORCE_HTTP_LOOPBACK"):
+        log.info("event=tasks.cloud.disabled reason=force_loopback")
         return False
 
     if tasks_v2 is None:
+        log.warning("event=tasks.cloud.disabled reason=import_failed tasks_v2=None")
         return False
 
     required = {
@@ -41,11 +57,12 @@ def should_use_cloud_tasks() -> bool:
 
     missing = [name for name, value in required.items() if not (value and value.strip())]
     if missing:
-        log.info(
+        log.warning(
             "event=tasks.cloud.disabled reason=missing_config missing=%s", missing
         )
         return False
 
+    log.info("event=tasks.cloud.enabled all_checks_passed")
     return True
 
 
@@ -62,7 +79,98 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
     To eliminate that delay, we now dispatch the transcription directly in a
     background thread immediately. An opt-in env var
     ``TASKS_FORCE_HTTP_LOOPBACK=true`` restores the old behavior for debugging.
+    
+    In dev mode, if WORKER_URL_BASE is set and USE_WORKER_IN_DEV=true,
+    assembly and chunk processing tasks will be sent directly to the worker
+    server via HTTP instead of running locally. This allows testing the worker
+    server without deploying to production.
     """
+    
+    # Check if we should use worker server in dev mode
+    # Reload .env.local here to ensure we have the latest values
+    try:
+        from dotenv import load_dotenv
+        from pathlib import Path
+        _BACKEND_ROOT = Path(__file__).parent.parent
+        _ENV_LOCAL = _BACKEND_ROOT / ".env.local"
+        if _ENV_LOCAL.exists():
+            load_dotenv(_ENV_LOCAL, override=False)
+    except (ImportError, Exception):
+        pass
+    
+    use_worker_in_dev_raw = os.getenv("USE_WORKER_IN_DEV", "false")
+    use_worker_in_dev = use_worker_in_dev_raw and use_worker_in_dev_raw.lower().strip() in {"true", "1", "yes", "on"}
+    worker_url_base = os.getenv("WORKER_URL_BASE")
+    
+    # For assembly and chunk processing, use worker server if configured
+    is_worker_task = "/assemble" in path or "/process-chunk" in path
+    
+    # Debug logging - ALWAYS print this so we can see what's happening
+    print("=" * 80)
+    print(f"DEV MODE WORKER CHECK:")
+    print(f"  path={path}")
+    print(f"  USE_WORKER_IN_DEV={use_worker_in_dev_raw} (parsed={use_worker_in_dev})")
+    print(f"  WORKER_URL_BASE={worker_url_base}")
+    print(f"  is_worker_task={is_worker_task} (path contains '/assemble' or '/process-chunk')")
+    print(f"  Condition check: use_worker_in_dev={use_worker_in_dev}, worker_url_base={bool(worker_url_base)}, is_worker_task={is_worker_task}")
+    print(f"  Will use worker: {use_worker_in_dev and bool(worker_url_base) and is_worker_task}")
+    print("=" * 80)
+    
+    log.info("event=tasks.dev.checking_worker_config path=%s use_worker_in_dev_raw=%s use_worker_in_dev=%s worker_url_base=%s is_worker_task=%s", 
+             path, use_worker_in_dev_raw, use_worker_in_dev, worker_url_base, is_worker_task)
+    
+    if use_worker_in_dev and worker_url_base and is_worker_task:
+        log.info("event=tasks.dev.worker_config_valid using_worker_server path=%s", path)
+        print(f"DEV MODE: Worker config valid - will use worker server for {path}")
+        import httpx
+        base_url = worker_url_base.rstrip("/")
+        url = f"{base_url}{path}"
+        tasks_auth = os.getenv("TASKS_AUTH", "a-secure-local-secret")
+        headers = {"Content-Type": "application/json", "X-Tasks-Auth": tasks_auth}
+        
+        log.info("event=tasks.dev.using_worker_server path=%s url=%s", path, url)
+        print(f"DEV MODE: Sending {path} to worker server at {url}")
+        
+        def _call_worker():
+            try:
+                # Use a longer timeout for assembly tasks (30 minutes)
+                timeout = 1800.0 if "/assemble" in path else 300.0
+                with httpx.Client(timeout=timeout) as client:
+                    print(f"DEV MODE: POST {url} with timeout {timeout}s")
+                    r = client.post(url, json=body, headers=headers)
+                    r.raise_for_status()
+                    print(f"DEV MODE: Worker server responded with status {r.status_code}")
+                    log.info("event=tasks.dev.worker_success path=%s status=%s", path, r.status_code)
+                    return r.json() if r.content else {}
+            except httpx.TimeoutException as e:
+                error_msg = f"DEV MODE: Worker server timeout after {timeout}s: {e}"
+                print(error_msg)
+                log.error(f"event=tasks.dev.worker_timeout path={path} timeout={timeout} error={e}")
+                raise
+            except httpx.HTTPStatusError as e:
+                error_msg = f"DEV MODE: Worker server returned error {e.response.status_code}: {e.response.text}"
+                print(error_msg)
+                log.error(f"event=tasks.dev.worker_error path={path} status={e.response.status_code} error={e.response.text}")
+                raise
+            except Exception as e:
+                error_msg = f"DEV MODE: Worker server call failed: {e}"
+                print(error_msg)
+                log.exception(f"event=tasks.dev.worker_exception path={path} error={e}")
+                raise
+        
+        # Run in background thread to avoid blocking
+        threading.Thread(
+            target=_call_worker,
+            name=f"dev-worker-call-{path.replace('/', '-')}",
+            daemon=True,
+        ).start()
+        
+        return {"name": f"dev-worker-dispatch-{datetime.utcnow().isoformat()}"}
+    else:
+        log.info("event=tasks.dev.worker_config_invalid falling_back_to_local path=%s use_worker_in_dev=%s worker_url_base=%s is_worker_task=%s",
+                 path, use_worker_in_dev, bool(worker_url_base), is_worker_task)
+        print(f"DEV MODE: Worker config invalid or not a worker task - will use local dispatch. use_worker_in_dev={use_worker_in_dev}, worker_url_base={bool(worker_url_base)}, is_worker_task={is_worker_task}")
+    
     def _dispatch_transcribe(payload: dict) -> None:
             filename = str(payload.get("filename") or "").strip()
             user_id = str(payload.get("user_id") or "").strip() or None  # Extract user_id from payload
@@ -203,6 +311,9 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
                     _dispatch_transcribe(body)
                 return {"name": "local-loopback-failed"}
 
+    # Only do local dispatch if we didn't already use the worker server
+    # (The worker server path returns early, so if we get here, we should use local dispatch)
+    
     # Default: immediate background dispatch based on path (non-loopback dev mode)
     if "/assemble" in path:
         _dispatch_assemble(body)
@@ -218,9 +329,14 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
 
 
 def enqueue_http_task(path: str, body: dict) -> dict:
+    log.info("event=tasks.enqueue_http_task.start path=%s", path)
+    
     if not should_use_cloud_tasks():
+        log.info("event=tasks.enqueue_http_task.using_local_dispatch path=%s", path)
         return _dispatch_local_task(path, body)
 
+    log.info("event=tasks.enqueue_http_task.using_cloud_tasks path=%s", path)
+    
     if tasks_v2 is None:
         raise ImportError("google-cloud-tasks is not installed")
     client = tasks_v2.CloudTasksClient()
@@ -234,8 +350,10 @@ def enqueue_http_task(path: str, body: dict) -> dict:
     # Route heavy tasks to dedicated worker service for isolation
     if "/assemble" in path or "/process-chunk" in path:
         base_url = os.getenv("WORKER_URL_BASE") or os.getenv("TASKS_URL_BASE")
+        log.info("event=tasks.enqueue_http_task.using_worker_url path=%s worker_url_base=%s", path, base_url)
     else:
         base_url = os.getenv("TASKS_URL_BASE")
+        log.info("event=tasks.enqueue_http_task.using_tasks_url path=%s tasks_url_base=%s", path, base_url)
 
     if not base_url:
         raise ValueError("Missing TASKS_URL_BASE (and WORKER_URL_BASE for worker-bound tasks)")
@@ -243,11 +361,18 @@ def enqueue_http_task(path: str, body: dict) -> dict:
     base_url = base_url.rstrip("/")
     url = f"{base_url}{path}"
     
+    # Check TASKS_AUTH
+    tasks_auth = os.getenv("TASKS_AUTH")
+    if not tasks_auth:
+        log.warning("event=tasks.enqueue_http_task.tasks_auth_missing path=%s", path)
+    else:
+        log.info("event=tasks.enqueue_http_task.tasks_auth_set path=%s auth_length=%d", path, len(tasks_auth))
+    
     # Build HTTP request
     http_request = tasks_v2.HttpRequest(
         http_method=tasks_v2.HttpMethod.POST,
         url=url,
-        headers={"Content-Type": "application/json", "X-Tasks-Auth": os.getenv("TASKS_AUTH")},
+        headers={"Content-Type": "application/json", "X-Tasks-Auth": tasks_auth},
         body=json.dumps(body).encode(),
     )
     
@@ -264,8 +389,14 @@ def enqueue_http_task(path: str, body: dict) -> dict:
         task = tasks_v2.Task(http_request=http_request, dispatch_deadline=deadline)
     else:
         task = tasks_v2.Task(http_request=http_request)
-    created = client.create_task(request={"parent": parent, "task": task})
-    log.info("event=tasks.cloud.enqueued path=%s url=%s task_name=%s deadline=%ds", path, url, created.name, 1800 if ("/transcribe" in path or "/assemble" in path or "/process-chunk" in path) else 30)
-    return {"name": created.name}
+    
+    try:
+        log.info("event=tasks.enqueue_http_task.creating_task path=%s url=%s", path, url)
+        created = client.create_task(request={"parent": parent, "task": task})
+        log.info("event=tasks.cloud.enqueued path=%s url=%s task_name=%s deadline=%ds", path, url, created.name, 1800 if ("/transcribe" in path or "/assemble" in path or "/process-chunk" in path) else 30)
+        return {"name": created.name}
+    except Exception as e:
+        log.exception("event=tasks.enqueue_http_task.create_task_failed path=%s url=%s error=%s", path, url, str(e))
+        raise
 
 

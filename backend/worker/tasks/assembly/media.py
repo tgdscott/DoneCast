@@ -101,21 +101,43 @@ def _resolve_media_file(name: str) -> Optional[Path]:
 
     try:
         raw = str(name)
-        if raw.startswith("gs://"):
+        if raw.startswith("gs://") or raw.startswith("http"):
             try:
-                without_scheme = raw[len("gs://"):]
-                bucket_name, key = without_scheme.split("/", 1)
-                base = Path(key).name
-                destination = MEDIA_DIR / base
-                MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-                from google.cloud import storage  # lazy import
+                # Handle GCS URLs (gs://bucket/key)
+                if raw.startswith("gs://"):
+                    without_scheme = raw[len("gs://"):]
+                    bucket_name, key = without_scheme.split("/", 1)
+                    base = Path(key).name
+                    destination = MEDIA_DIR / base
+                    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+                    from google.cloud import storage  # lazy import
 
-                client = storage.Client()
-                blob = client.bucket(bucket_name).blob(key)
-                blob.download_to_filename(str(destination))
-                return _ensure_media_dir_copy(destination)
-            except Exception:
-                pass
+                    client = storage.Client()
+                    blob = client.bucket(bucket_name).blob(key)
+                    blob.download_to_filename(str(destination))
+                    logging.info("[assemble] Downloaded from GCS: %s -> %s", raw, destination)
+                    return _ensure_media_dir_copy(destination)
+                # Handle R2 URLs (https://bucket.r2.cloudflarestorage.com/key)
+                elif raw.startswith("http"):
+                    try:
+                        from infrastructure import storage as storage_module
+                        # Extract bucket and key from R2 URL
+                        r2_match = re.search(r'https://([^.]+)\.r2\.cloudflarestorage\.com/(.+)', raw)
+                        if r2_match:
+                            bucket_name, key = r2_match.groups()
+                            base = Path(key).name
+                            destination = MEDIA_DIR / base
+                            MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+                            # Download using storage module (handles R2)
+                            file_bytes = storage_module.download_bytes(bucket_name, key)
+                            if file_bytes:
+                                destination.write_bytes(file_bytes)
+                                logging.info("[assemble] Downloaded from R2: %s -> %s", raw, destination)
+                                return _ensure_media_dir_copy(destination)
+                    except Exception as r2_err:
+                        logging.warning("[assemble] Failed to download from R2 URL %s: %s", raw, r2_err)
+            except Exception as gcs_err:
+                logging.warning("[assemble] Failed to download from cloud storage URL %s: %s", raw, gcs_err)
     except Exception:
         pass
 
@@ -531,6 +553,7 @@ def resolve_media_context(
     except Exception:
         pass
 
+    # First, try to resolve from candidates (might include GCS URLs if already in database)
     for candidate in candidate_names:
         resolved = _resolve_media_file(candidate)
         if resolved and Path(str(resolved)).exists():
@@ -538,9 +561,11 @@ def resolve_media_context(
             if promoted and promoted.exists():
                 source_audio_path = promoted
                 base_audio_name = promoted.name
+                logging.info("[assemble] Resolved audio from candidate: %s -> %s", candidate, source_audio_path)
             else:
                 source_audio_path = Path(str(resolved))
                 base_audio_name = source_audio_path.name
+                logging.info("[assemble] Resolved audio from candidate (direct): %s -> %s", candidate, source_audio_path)
             if candidate != main_content_filename:
                 try:
                     episode.working_audio_name = base_audio_name
@@ -550,39 +575,131 @@ def resolve_media_context(
                     session.rollback()
             break
 
-    if (not source_audio_path) or (not Path(str(source_audio_path)).exists()):
+    # If file not found, look up MediaItem in database and download from GCS
+    file_exists = source_audio_path and Path(str(source_audio_path)).exists()
+    if not file_exists:
         basename = Path(str(base_audio_name or main_content_filename)).name
+        logging.info("[assemble] Audio file not found locally, looking up MediaItem for: %s (basename: %s)", main_content_filename, basename)
         gcs_uri = None
+        media_item = None
+        
+        # Look up MediaItem by filename - try multiple matching strategies
         try:
             query = select(MediaItem).where(MediaItem.user_id == UUID(user_id))
             query = query.where(MediaItem.category == MediaCategory.main_content)
-            for item in session.exec(query).all():
+            all_items = list(session.exec(query).all())
+            logging.info("[assemble] Found %d main_content MediaItems for user %s", len(all_items), user_id)
+            
+            for item in all_items:
                 filename = str(getattr(item, "filename", "") or "")
-                if filename.startswith("gs://") and filename.rstrip().lower().endswith("/" + basename.lower()):
-                    gcs_uri = filename
+                if not filename:
+                    continue
+                
+                logging.debug("[assemble] Checking MediaItem: id=%s, filename='%s'", item.id, filename)
+                
+                # Strategy 1: Exact match
+                if filename == basename or filename == main_content_filename:
+                    media_item = item
+                    logging.info("[assemble] Matched MediaItem by exact filename: %s", filename)
                     break
-        except Exception:
-            gcs_uri = None
+                
+                # Strategy 2: Filename ends with basename (for GCS URLs like gs://bucket/path/basename.mp3)
+                filename_lower = filename.lower()
+                basename_lower = basename.lower()
+                if filename_lower.endswith("/" + basename_lower) or filename_lower.endswith(basename_lower):
+                    media_item = item
+                    logging.info("[assemble] Matched MediaItem by ending: %s (basename: %s)", filename, basename)
+                    break
+                
+                # Strategy 3: Basename is in filename (partial match)
+                if basename in filename or filename in basename:
+                    media_item = item
+                    logging.info("[assemble] Matched MediaItem by partial match: %s (basename: %s)", filename, basename)
+                    break
+                
+                # Strategy 4: Extract basename from filename and compare
+                try:
+                    filename_basename = Path(filename).name
+                    if filename_basename.lower() == basename_lower:
+                        media_item = item
+                        logging.info("[assemble] Matched MediaItem by extracted basename: %s (basename: %s)", filename, basename)
+                        break
+                except Exception:
+                    pass
+        except Exception as e:
+            logging.warning("[assemble] Error looking up MediaItem: %s", e, exc_info=True)
+            media_item = None
+        
+        # If MediaItem found, try to get GCS URL
+        if media_item:
+            filename = str(getattr(media_item, "filename", "") or "")
+            if filename.startswith("gs://") or filename.startswith("http"):
+                # Direct GCS/R2 URL
+                gcs_uri = filename
+                logging.info("[assemble] Found MediaItem with GCS/R2 URL: %s", gcs_uri)
+            else:
+                # Just a filename - construct GCS path based on upload pattern
+                # Main content files are uploaded to: {user_id}/media_uploads/{filename}
+                try:
+                    from infrastructure import storage
+                    gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+                    
+                    # Convert user_id to hex format if it's a UUID
+                    try:
+                        user_uuid = UUID(user_id)
+                        user_id_hex = user_uuid.hex
+                    except (ValueError, AttributeError):
+                        # Already in hex format or invalid
+                        user_id_hex = str(user_id).replace("-", "")
+                    
+                    # Try the expected GCS path (new upload pattern)
+                    expected_key = f"{user_id_hex}/media_uploads/{filename}"
+                    logging.info("[assemble] Checking GCS path: gs://%s/%s", gcs_bucket, expected_key)
+                    if storage.blob_exists(gcs_bucket, expected_key):
+                        gcs_uri = f"gs://{gcs_bucket}/{expected_key}"
+                        logging.info("[assemble] Constructed GCS URI from filename: %s", gcs_uri)
+                    else:
+                        # Try alternative path pattern (for backward compatibility)
+                        alt_key = f"{user_id_hex}/media/main_content/{filename}"
+                        logging.info("[assemble] Checking alternative GCS path: gs://%s/%s", gcs_bucket, alt_key)
+                        if storage.blob_exists(gcs_bucket, alt_key):
+                            gcs_uri = f"gs://{gcs_bucket}/{alt_key}"
+                            logging.info("[assemble] Found file at alternative GCS path: %s", gcs_uri)
+                        else:
+                            logging.warning("[assemble] File not found in GCS at expected paths: %s or %s", expected_key, alt_key)
+                except Exception as e:
+                    logging.warning("[assemble] Error constructing GCS path: %s", e, exc_info=True)
+                    gcs_uri = None
+        
+        # Download from GCS if we have a URI
         if gcs_uri:
             logging.info("[assemble] downloading main content from GCS: %s", gcs_uri)
-            download = _resolve_media_file(gcs_uri)
-            if download and Path(str(download)).exists():
-                promoted = _ensure_media_dir_copy(Path(str(download)))
-                if promoted and promoted.exists():
-                    source_audio_path = promoted
-                    base_audio_name = promoted.name
+            try:
+                download = _resolve_media_file(gcs_uri)
+                if download and Path(str(download)).exists():
+                    promoted = _ensure_media_dir_copy(Path(str(download)))
+                    if promoted and promoted.exists():
+                        source_audio_path = promoted
+                        base_audio_name = promoted.name
+                    else:
+                        source_audio_path = Path(str(download))
+                        base_audio_name = source_audio_path.name
+                    try:
+                        episode.working_audio_name = base_audio_name
+                        session.add(episode)
+                        session.commit()
+                    except Exception:
+                        session.rollback()
+                    logging.info("[assemble] Successfully downloaded main content from GCS to: %s", source_audio_path)
                 else:
-                    source_audio_path = Path(str(download))
-                    base_audio_name = source_audio_path.name
-                try:
-                    episode.working_audio_name = base_audio_name
-                    session.add(episode)
-                    session.commit()
-                except Exception:
-                    session.rollback()
+                    logging.error("[assemble] Failed to download from GCS: %s (download returned: %s)", gcs_uri, download)
+            except Exception as e:
+                logging.error("[assemble] Exception downloading from GCS %s: %s", gcs_uri, e, exc_info=True)
 
+    # Final fallback: try local paths (but these should rarely be needed if GCS download worked)
     if (not source_audio_path) or (not Path(str(source_audio_path)).exists()):
         fallback_name = Path(str(main_content_filename)).name
+        logging.warning("[assemble] GCS download failed or not attempted, trying local fallback paths for: %s", fallback_name)
         # Try MEDIA_DIR first (actual storage), then workspace fallback
         fallback_candidates = [
             MEDIA_DIR / fallback_name,
@@ -592,6 +709,7 @@ def resolve_media_context(
             if candidate.exists():
                 source_audio_path = candidate.resolve()
                 base_audio_name = fallback_name
+                logging.info("[assemble] Found file in local fallback path: %s", source_audio_path)
                 break
         else:
             # Fuzzy match: Strip hash and find files with matching suffix
@@ -625,12 +743,20 @@ def resolve_media_context(
                 source_audio_path = (PROJECT_ROOT / "media_uploads" / fallback_name).resolve()
                 base_audio_name = fallback_name
 
-    try:
-        logging.info(
-            "[assemble] resolved base audio path=%s", str(source_audio_path)
+    # Final check - if still no file, log detailed diagnostics
+    if not source_audio_path or not Path(str(source_audio_path)).exists():
+        logging.error(
+            "[assemble] ❌ CRITICAL: Audio file not found after all attempts. main_content_filename=%s, resolved_path=%s",
+            main_content_filename,
+            source_audio_path
         )
-    except Exception:
-        pass
+        logging.error(
+            "[assemble] Please ensure the file was uploaded to GCS and the MediaItem has the correct filename/GCS URL"
+        )
+    else:
+        logging.info(
+            "[assemble] ✅ resolved base audio path=%s", str(source_audio_path)
+        )
 
     words_json_path = None
     for directory in search_dirs:

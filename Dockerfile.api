@@ -6,30 +6,49 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8080
 
 # Install required system deps (ffmpeg etc)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg build-essential libpq-dev libffi-dev \
-  && rm -rf /var/lib/apt/lists/*
+# Use specific packages instead of build-essential meta-package for faster installs
+# Combine update and install to reduce layers and use non-interactive mode
+RUN export DEBIAN_FRONTEND=noninteractive && \
+    apt-get update -qq && \
+    apt-get install -y -qq --no-install-recommends --fix-missing \
+        ffmpeg \
+        gcc \
+        g++ \
+        make \
+        libpq-dev \
+        libffi-dev \
+        ca-certificates \
+    && apt-get clean -qq && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 WORKDIR /app
 
-# Copy ONLY backend code (no frontend)
+# Copy requirements.txt first for better Docker layer caching
+# This allows pip install to be cached unless requirements change
+COPY backend/requirements.txt /app/backend/requirements.txt
+
+# Install Python dependencies (cached unless requirements.txt changes)
+# Use --no-warn-script-location to reduce warnings and speed up
+RUN python -m pip install --upgrade --quiet pip setuptools wheel \
+  && pip install --no-cache-dir --quiet -r /app/backend/requirements.txt \
+  && pip check \
+  && python -c "import importlib; [importlib.import_module(m) for m in ('jose','passlib','feedparser','stripe','celery','google.cloud.storage','authlib','psycopg')]" \
+  && rm -rf /root/.cache/pip
+
+# Copy ONLY backend code (no frontend) - done after pip install for better caching
 COPY backend/ /app/backend/
 COPY conftest.py /app/
 
-# Install Python dependencies
-# Use requirements.txt with minimum version constraints to avoid dependency conflicts
-RUN python -m pip install --upgrade pip setuptools wheel \
-  && pip install --no-cache-dir -r /app/backend/requirements.txt \
-  && pip check \
-  && python -c "import importlib; [importlib.import_module(m) for m in ('jose','passlib','feedparser','stripe','celery','google.cloud.storage','authlib','psycopg')]"
+# Remove Procfile if it exists - it references api.main:app which doesn't exist
+# We use api.app:app instead (defined in Dockerfile CMD)
+RUN rm -f /app/backend/Procfile 2>/dev/null || true
 
 ENV PYTHONPATH=/app/backend
 
-# Verify the simple server exists and test it works
-RUN test -f /app/backend/start_simple.py || (echo "ERROR: start_simple.py not found!" && ls -la /app/backend/ | head -20 && exit 1) \
-  && echo "start_simple.py found, testing..." \
-  && python /app/backend/start_simple.py --test 2>&1 || echo "Note: --test flag not implemented, continuing..." \
-  && echo "File exists and is readable"
+# Verify api.app module exists and has app attribute at build time
+RUN python -c "import sys; sys.path.insert(0, '/app/backend'); from api.app import app; print(f'SUCCESS: api.app:app found, type: {type(app)}')" \
+  || (echo "ERROR: api.app:app not available at build time!" && python -c "import sys; sys.path.insert(0, '/app/backend'); import api.app; print('api.app contents:', dir(api.app))" && exit 1)
 
-# Use shell form like worker does, with explicit error handling
-CMD ["sh", "-c", "python /app/backend/start_simple.py"]
+# Use uvicorn directly with the correct app module (api.app, not api.main)
+# Use shell form to allow PORT environment variable substitution
+CMD ["sh", "-c", "exec python -m uvicorn api.app:app --host 0.0.0.0 --port ${PORT:-8080} --log-level info"]

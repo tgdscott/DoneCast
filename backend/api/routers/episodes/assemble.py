@@ -19,7 +19,11 @@ async def assemble_episode(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    log.debug("assemble_episode payload keys=%s", list(payload.keys()) if isinstance(payload, dict) else type(payload))
+    log.info("event=assemble.endpoint.start user_id=%s template_id=%s main_content=%s output=%s", 
+             getattr(current_user, 'id', None), 
+             payload.get("template_id"),
+             payload.get("main_content_filename"),
+             payload.get("output_filename"))
 
     template_id = payload.get("template_id")
     main_content_filename = payload.get("main_content_filename")
@@ -33,21 +37,31 @@ async def assemble_episode(
         episode_details["flubber_cuts_ms"] = payload.get("flubber_cuts_ms")
 
     if not template_id or not main_content_filename or not output_filename:
+        log.error("event=assemble.endpoint.validation_failed missing_fields template_id=%s main_content=%s output=%s",
+                 template_id, main_content_filename, output_filename)
         raise HTTPException(status_code=400, detail="template_id, main_content_filename, output_filename are required.")
 
-    svc_result = _svc_assembler.assemble_or_queue(
-        session=session,
-        current_user=current_user,
-        template_id=str(template_id),
-        main_content_filename=str(main_content_filename),
-        output_filename=str(output_filename),
-        tts_values=tts_values,
-        episode_details=episode_details,
-        intents=payload.get('intents') or None,
-        use_auphonic=use_auphonic,
-    )
+    try:
+        log.info("event=assemble.endpoint.calling_service")
+        svc_result = _svc_assembler.assemble_or_queue(
+            session=session,
+            current_user=current_user,
+            template_id=str(template_id),
+            main_content_filename=str(main_content_filename),
+            output_filename=str(output_filename),
+            tts_values=tts_values,
+            episode_details=episode_details,
+            intents=payload.get('intents') or None,
+            use_auphonic=use_auphonic,
+        )
+        log.info("event=assemble.endpoint.service_complete mode=%s episode_id=%s job_id=%s",
+                svc_result.get("mode"), svc_result.get("episode_id"), svc_result.get("job_id"))
+    except Exception as e:
+        log.exception("event=assemble.endpoint.service_error error=%s", str(e))
+        raise
 
     if svc_result.get("mode") == "eager-inline":
+        log.info("event=assemble.endpoint.returning_eager_inline episode_id=%s", svc_result.get("episode_id"))
         return {
             "job_id": "eager-inline",
             "status": "processed",
@@ -56,6 +70,8 @@ async def assemble_episode(
             "result": svc_result.get("result"),
         }
     else:
+        log.info("event=assemble.endpoint.returning_queued episode_id=%s job_id=%s", 
+                svc_result.get("episode_id"), svc_result.get("job_id"))
         return {
             "job_id": svc_result.get("job_id"),
             "status": "queued",

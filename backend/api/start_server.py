@@ -4,15 +4,32 @@
 This script ensures that even if app creation fails, we still start a server
 that can log errors and respond to health checks.
 """
-# CRITICAL: Print immediately to verify script execution
+# CRITICAL: Print immediately to verify script execution - use both stderr and stdout
 import sys
-print("=" * 80, file=sys.stderr, flush=True)
-print("[start_server] Script started!", file=sys.stderr, flush=True)
-print(f"[start_server] Python executable: {sys.executable}", file=sys.stderr, flush=True)
-print(f"[start_server] Python version: {sys.version}", file=sys.stderr, flush=True)
-print("=" * 80, file=sys.stderr, flush=True)
-
 import os
+
+# Force flush both streams
+sys.stderr.flush()
+sys.stdout.flush()
+
+# Print to both streams to ensure we see output
+print("=" * 80, file=sys.stderr, flush=True)
+print("=" * 80, file=sys.stdout, flush=True)
+print("[start_server] Script started!", file=sys.stderr, flush=True)
+print("[start_server] Script started!", file=sys.stdout, flush=True)
+print(f"[start_server] Python executable: {sys.executable}", file=sys.stderr, flush=True)
+print(f"[start_server] Python executable: {sys.executable}", file=sys.stdout, flush=True)
+print(f"[start_server] Python version: {sys.version}", file=sys.stderr, flush=True)
+print(f"[start_server] Python version: {sys.version}", file=sys.stdout, flush=True)
+print(f"[start_server] Working directory: {os.getcwd()}", file=sys.stderr, flush=True)
+print(f"[start_server] Working directory: {os.getcwd()}", file=sys.stdout, flush=True)
+print(f"[start_server] PYTHONPATH: {os.getenv('PYTHONPATH', 'NOT SET')}", file=sys.stderr, flush=True)
+print(f"[start_server] PYTHONPATH: {os.getenv('PYTHONPATH', 'NOT SET')}", file=sys.stdout, flush=True)
+print(f"[start_server] PORT: {os.getenv('PORT', 'NOT SET')}", file=sys.stderr, flush=True)
+print(f"[start_server] PORT: {os.getenv('PORT', 'NOT SET')}", file=sys.stdout, flush=True)
+print("=" * 80, file=sys.stderr, flush=True)
+print("=" * 80, file=sys.stdout, flush=True)
+
 import logging
 from pathlib import Path
 

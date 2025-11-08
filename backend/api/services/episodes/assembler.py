@@ -676,6 +676,76 @@ def assemble_or_queue(
     except Exception:
         session.rollback()
 
+    # Check if we should use worker server in dev mode (even if CELERY_EAGER is set)
+    # CELERY_EAGER only affects Celery tasks, not HTTP-based worker routing
+    use_worker_in_dev_raw = os.getenv("USE_WORKER_IN_DEV", "false")
+    use_worker_in_dev = use_worker_in_dev_raw and use_worker_in_dev_raw.lower().strip() in {"true", "1", "yes", "on"}
+    worker_url_base = os.getenv("WORKER_URL_BASE")
+    
+    # If USE_WORKER_IN_DEV is set, route to worker server (bypassing CELERY_EAGER)
+    if use_worker_in_dev and worker_url_base:
+        log = logging.getLogger("assemble")
+        # Extract episode_id as string BEFORE starting background thread (to avoid SQLAlchemy detached instance error)
+        episode_id_str = str(ep.id)
+        podcast_id_str = str(getattr(ep, 'podcast_id', '') or '')
+        log.info("event=assemble.service.use_worker_in_dev episode_id=%s worker_url=%s", episode_id_str, worker_url_base)
+        print(f"ASSEMBLE: USE_WORKER_IN_DEV=true, routing to worker server at {worker_url_base}")
+        
+        try:
+            import httpx
+            import threading
+            base_url = worker_url_base.rstrip("/")
+            url = f"{base_url}/api/tasks/assemble"
+            tasks_auth = os.getenv("TASKS_AUTH", "a-secure-local-secret")
+            headers = {"Content-Type": "application/json", "X-Tasks-Auth": tasks_auth}
+            
+            payload = {
+                "episode_id": episode_id_str,
+                "template_id": str(template_id),
+                "main_content_filename": str(main_content_filename),
+                "output_filename": str(output_filename or ""),
+                "tts_values": cast(Dict[str, Any], tts_values or {}),
+                "episode_details": cast(Dict[str, Any], episode_details or {}),
+                "user_id": str(current_user.id),
+                "podcast_id": podcast_id_str,
+                "intents": cast(Dict[str, Any], intents or {}),
+                "use_auphonic": bool(use_auphonic),
+            }
+            
+            def _call_worker_direct():
+                try:
+                    timeout = 1800.0  # 30 minutes
+                    with httpx.Client(timeout=timeout) as client:
+                        log.info("event=assemble.service.worker_dev_post episode_id=%s url=%s", episode_id_str, url)
+                        print(f"ASSEMBLE: POST {url} with timeout {timeout}s")
+                        r = client.post(url, json=payload, headers=headers)
+                        r.raise_for_status()
+                        log.info("event=assemble.service.worker_dev_success episode_id=%s status=%s", episode_id_str, r.status_code)
+                        print(f"ASSEMBLE: Worker server responded with status {r.status_code}")
+                except httpx.TimeoutException as e:
+                    log.error(f"event=assemble.service.worker_dev_timeout episode_id={episode_id_str} timeout={timeout} error={e}")
+                    print(f"ASSEMBLE: Worker server timeout after {timeout}s: {e}")
+                except httpx.HTTPStatusError as e:
+                    log.error(f"event=assemble.service.worker_dev_error episode_id={episode_id_str} status={e.response.status_code} error={e.response.text}")
+                    print(f"ASSEMBLE: Worker server returned error {e.response.status_code}: {e.response.text}")
+                except Exception as e:
+                    log.exception(f"event=assemble.service.worker_dev_exception episode_id={episode_id_str} error={e}")
+                    print(f"ASSEMBLE: Worker server call failed: {e}")
+            
+            # Start worker call in background thread
+            threading.Thread(
+                target=_call_worker_direct,
+                name=f"worker-dev-{episode_id_str}",
+                daemon=True,
+            ).start()
+            
+            log.info("event=assemble.service.worker_dev_dispatched episode_id=%s", episode_id_str)
+            return {"mode": "worker-dev", "job_id": f"worker-dev-{episode_id_str}", "episode_id": episode_id_str}
+        except Exception as e:
+            log.exception(f"event=assemble.service.worker_dev_failed episode_id={episode_id_str} error={e}")
+            print(f"ASSEMBLE: Failed to dispatch to worker server: {e}")
+            # Fall through to normal routing
+    
     # Run inline or queue
     if os.getenv("CELERY_EAGER", "").strip().lower() in {"1","true","yes","on"}:
         # EAGER path: charge immediately using source duration and inline correlation id
@@ -712,16 +782,21 @@ def assemble_or_queue(
         _raise_worker_unavailable()
     else:
         # ALWAYS use Cloud Tasks in production - Celery is disabled
+        log = logging.getLogger("assemble")
+        log.info("event=assemble.service.checking_cloud_tasks episode_id=%s", str(ep.id))
+        
         try:
             from infrastructure.tasks_client import enqueue_http_task, should_use_cloud_tasks  # type: ignore
             should_use = bool(should_use_cloud_tasks())
+            log.info("event=assemble.service.cloud_tasks_check should_use=%s episode_id=%s", should_use, str(ep.id))
         except Exception as e:
-            logging.getLogger("assemble").error(f"[assemble] Cloud Tasks import failed: {e}", exc_info=True)
+            log.error(f"event=assemble.service.cloud_tasks_import_failed error={e} episode_id={ep.id}", exc_info=True)
             should_use = False
 
         cloud_tasks_succeeded = False
         if should_use:
                 try:
+                    log.info("event=assemble.service.enqueueing_task episode_id=%s", str(ep.id))
                     # Build payload to send to /api/tasks/assemble; in dev this will route to a local
                     # thread fallback; in prod it uses Cloud Tasks HTTP to call back into the API.
                     payload = {
@@ -736,7 +811,9 @@ def assemble_or_queue(
                         "intents": cast(Dict[str, Any], intents or {}),
                         "use_auphonic": bool(use_auphonic),
                     }
+                    log.info("event=assemble.service.calling_enqueue_http_task episode_id=%s path=/api/tasks/assemble", str(ep.id))
                     task_info = enqueue_http_task("/api/tasks/assemble", payload)
+                    log.info("event=assemble.service.task_enqueued episode_id=%s task_name=%s", str(ep.id), task_info.get("name"))
                     # Store pseudo job id for visibility
                     try:
                         import json as _json
@@ -751,19 +828,92 @@ def assemble_or_queue(
                         session.add(ep)
                         session.commit()
                         session.refresh(ep)
-                    except Exception:
+                        log.info("event=assemble.service.metadata_saved episode_id=%s job_id=%s", str(ep.id), meta.get('assembly_job_id'))
+                    except Exception as meta_err:
+                        log.warning("event=assemble.service.metadata_save_failed episode_id=%s error=%s", str(ep.id), str(meta_err))
                         session.rollback()
                     cloud_tasks_succeeded = True
+                    log.info("event=assemble.service.cloud_task_success episode_id=%s job_id=%s", str(ep.id), task_info.get("name", "cloud-task"))
                     return {"mode": "cloud-task", "job_id": task_info.get("name", "cloud-task"), "episode_id": str(ep.id)}
                 except Exception as e:
                     # If Cloud Tasks path fails, log and fall back to inline
-                    logging.getLogger("assemble").error(f"[assemble] Cloud Tasks dispatch failed: {e}", exc_info=True)
+                    log.error(f"event=assemble.service.cloud_tasks_dispatch_failed episode_id={ep.id} error={e}", exc_info=True)
                     cloud_tasks_succeeded = False
 
-        # If Cloud Tasks failed or unavailable, fall back to inline execution
-        # Celery is DISABLED in production - inline execution is the only fallback
+        # If Cloud Tasks failed or unavailable, try worker server directly via HTTP
+        # This allows the worker server to be used even if Cloud Tasks is misconfigured
         if not should_use or not cloud_tasks_succeeded:
-            logging.getLogger("assemble").warning("[assemble] Cloud Tasks unavailable or failed, falling back to inline execution")
+            log.warning("event=assemble.service.cloud_tasks_unavailable should_use=%s succeeded=%s episode_id=%s trying_worker_direct", 
+                       should_use, cloud_tasks_succeeded, str(ep.id))
+            
+            # Try calling worker server directly via HTTP before falling back to inline
+            worker_url_base = os.getenv("WORKER_URL_BASE")
+            if worker_url_base:
+                try:
+                    import httpx
+                    import json as _json
+                    base_url = worker_url_base.rstrip("/")
+                    url = f"{base_url}/api/tasks/assemble"
+                    tasks_auth = os.getenv("TASKS_AUTH", "a-secure-local-secret")
+                    headers = {"Content-Type": "application/json", "X-Tasks-Auth": tasks_auth}
+                    
+                    payload = {
+                        "episode_id": str(ep.id),
+                        "template_id": str(template_id),
+                        "main_content_filename": str(main_content_filename),
+                        "output_filename": str(output_filename or ""),
+                        "tts_values": cast(Dict[str, Any], tts_values or {}),
+                        "episode_details": cast(Dict[str, Any], episode_details or {}),
+                        "user_id": str(current_user.id),
+                        "podcast_id": str(getattr(ep, 'podcast_id', '') or ''),
+                        "intents": cast(Dict[str, Any], intents or {}),
+                        "use_auphonic": bool(use_auphonic),
+                    }
+                    
+                    log.info("event=assemble.service.trying_worker_direct episode_id=%s url=%s", str(ep.id), url)
+                    print(f"ASSEMBLE: Cloud Tasks unavailable, sending to worker server directly at {url}")
+                    
+                    # Run worker call in background thread to avoid blocking
+                    import threading
+                    def _call_worker_direct():
+                        try:
+                            timeout = 1800.0  # 30 minutes
+                            with httpx.Client(timeout=timeout) as client:
+                                log.info("event=assemble.service.worker_direct_post episode_id=%s url=%s", str(ep.id), url)
+                                r = client.post(url, json=payload, headers=headers)
+                                r.raise_for_status()
+                                log.info("event=assemble.service.worker_direct_success episode_id=%s status=%s", str(ep.id), r.status_code)
+                                print(f"ASSEMBLE: Worker server responded with status {r.status_code}")
+                        except httpx.TimeoutException as e:
+                            log.error(f"event=assemble.service.worker_direct_timeout episode_id={ep.id} timeout={timeout} error={e}")
+                            print(f"ASSEMBLE: Worker server timeout after {timeout}s: {e}")
+                        except httpx.HTTPStatusError as e:
+                            log.error(f"event=assemble.service.worker_direct_error episode_id={ep.id} status={e.response.status_code} error={e.response.text}")
+                            print(f"ASSEMBLE: Worker server returned error {e.response.status_code}: {e.response.text}")
+                        except Exception as e:
+                            log.exception(f"event=assemble.service.worker_direct_exception episode_id={ep.id} error={e}")
+                            print(f"ASSEMBLE: Worker server call failed: {e}")
+                    
+                    # Start worker call in background thread
+                    threading.Thread(
+                        target=_call_worker_direct,
+                        name=f"worker-direct-{ep.id}",
+                        daemon=True,
+                    ).start()
+                    
+                    # Return immediately - worker is processing in background
+                    log.info("event=assemble.service.worker_direct_dispatched episode_id=%s", str(ep.id))
+                    return {"mode": "worker-direct", "job_id": f"worker-direct-{ep.id}", "episode_id": str(ep.id)}
+                except Exception as e:
+                    log.exception(f"event=assemble.service.worker_direct_failed episode_id={ep.id} error={e}")
+                    print(f"ASSEMBLE: Failed to call worker server directly: {e}")
+            else:
+                log.warning("event=assemble.service.worker_url_not_set episode_id=%s", str(ep.id))
+                print(f"ASSEMBLE: WORKER_URL_BASE not set, cannot try worker server directly")
+            
+            # Last resort: fall back to inline execution
+            log.warning("event=assemble.service.falling_back_to_inline episode_id=%s", str(ep.id))
+            print(f"ASSEMBLE: Falling back to inline execution")
             inline_result = _run_inline_fallback(
                 episode_id=ep.id,
                 template_id=template_id,
@@ -777,7 +927,9 @@ def assemble_or_queue(
                 use_auphonic=use_auphonic,
             )
             if inline_result:
+                log.info("event=assemble.service.inline_fallback_success episode_id=%s", str(ep.id))
                 return inline_result
+            log.error("event=assemble.service.inline_fallback_failed episode_id=%s", str(ep.id))
             _raise_worker_unavailable()
 
         # Should never reach here - either Cloud Tasks worked or inline fallback returned

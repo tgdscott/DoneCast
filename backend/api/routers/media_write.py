@@ -109,82 +109,67 @@ async def upload_media_files(
 
 		safe_orig = sanitize_name(file.filename)
 		safe_filename = f"{current_user.id.hex}_{uuid4().hex}_{safe_orig}"
-		file_path = MEDIA_DIR / safe_filename
 
 		max_bytes = CATEGORY_SIZE_LIMITS.get(category, 50 * MB)
-		try:
-			bytes_written = copy_with_limit(file.file, file_path, max_bytes)
-		except HTTPException:
-			try:
-				if file_path.exists():
-					file_path.unlink()
-			finally:
-				pass
-			raise
-		except Exception as e:
-			log.error("[upload.write] failed writing %s: %s", safe_filename, e)
-			try:
-				if file_path.exists():
-					file_path.unlink()
-			finally:
-				pass
-			raise HTTPException(status_code=500, detail="Failed to save uploaded file.")
-
-		# Upload to GCS for persistence (intro/outro/music/sfx/commercial)
-		# **CRITICAL**: These categories MUST be in GCS for production
+		
+		# **CRITICAL**: ALL files MUST be uploaded to GCS - no local storage fallback
+		# This ensures files are accessible to worker servers and production environments
 		gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
-		if gcs_bucket and category in (
-			MediaCategory.intro,
-			MediaCategory.outro,
-			MediaCategory.music,
-			MediaCategory.sfx,
-			MediaCategory.commercial,
-		):
-			try:
-				from infrastructure import storage
+		if not gcs_bucket:
+			raise HTTPException(status_code=500, detail="GCS_BUCKET environment variable not set - cloud storage is required")
+		
+		try:
+			from infrastructure import storage
+			# Determine storage key based on category
+			if category == MediaCategory.main_content:
+				# Main content goes to media_uploads for worker access
+				storage_key = f"{current_user.id.hex}/media_uploads/{safe_filename}"
+			else:
+				# Other categories go to media/{category}
 				storage_key = f"{current_user.id.hex}/media/{category.value}/{safe_filename}"
-				log.info("[upload.storage] Uploading %s to bucket (backend: %s), key: %s", category.value, os.getenv("STORAGE_BACKEND", "gcs"), storage_key)
-				with open(file_path, "rb") as f:
-					# Upload to configured storage backend (R2 or GCS)
-					storage_url = storage.upload_fileobj(
-						gcs_bucket,  # Bucket name (abstraction layer uses correct backend)
-						storage_key, 
-						f, 
-						content_type=file.content_type or "audio/mpeg"
-					)
-				
-				# Store storage URL instead of local filename for persistence
-				# URL format depends on backend: gs://bucket/key (GCS) or https://bucket.r2.cloudflarestorage.com/key (R2)
-				if storage_url and (storage_url.startswith("gs://") or storage_url.startswith("http")):
-					safe_filename = storage_url
-					log.info("[upload.storage] SUCCESS: %s uploaded: %s", category.value, storage_url)
-				else:
-					# This should never happen, but belt-and-suspenders
-					log.error("[upload.storage] Upload returned invalid URL: %s", storage_url)
-					# Clean up local file
-					try:
-						if file_path.exists():
-							file_path.unlink()
-					except Exception:
-						pass
-					raise HTTPException(
-						status_code=500,
-						detail=f"Failed to upload {category.value} to cloud storage - this is required for production use"
-					)
-			except HTTPException:
-				raise
-			except Exception as e:
-				log.error("[upload.storage] CRITICAL: Failed to upload %s to storage backend: %s", category.value, e, exc_info=True)
-				# Clean up local file
-				try:
-					if file_path.exists():
-						file_path.unlink()
-				except Exception:
-					pass
+			
+			log.info("[upload.storage] Uploading %s to bucket (backend: %s), key: %s", category.value, os.getenv("STORAGE_BACKEND", "gcs"), storage_key)
+			
+			# Read file content and get size
+			file_content = file.file.read(max_bytes)
+			bytes_written = len(file_content)
+			
+			if bytes_written >= max_bytes:
+				# Check if there's more data
+				remaining = file.file.read(1)
+				if remaining:
+					raise HTTPException(status_code=413, detail=f"File exceeds maximum size of {max_bytes / MB:.1f} MB")
+			
+			# Upload directly to GCS from memory - NO local file write
+			from io import BytesIO
+			file_stream = BytesIO(file_content)
+			storage_url = storage.upload_fileobj(
+				gcs_bucket,
+				storage_key,
+				file_stream,
+				content_type=file.content_type or ("audio/mpeg" if category != MediaCategory.podcast_cover and category != MediaCategory.episode_cover else "image/jpeg")
+			)
+			
+			# Store storage URL instead of local filename for persistence
+			# URL format depends on backend: gs://bucket/key (GCS) or https://bucket.r2.cloudflarestorage.com/key (R2)
+			if storage_url and (storage_url.startswith("gs://") or storage_url.startswith("http")):
+				safe_filename = storage_url
+				log.info("[upload.storage] SUCCESS: %s uploaded: %s", category.value, storage_url)
+			else:
+				# This should never happen, but belt-and-suspenders
+				log.error("[upload.storage] Upload returned invalid URL: %s", storage_url)
 				raise HTTPException(
 					status_code=500,
-					detail=f"Failed to upload {category.value} to cloud storage: {str(e)}"
+					detail=f"Failed to upload {category.value} to cloud storage - this is required for production use"
 				)
+		except HTTPException:
+			raise
+		except Exception as e:
+			log.error("[upload.storage] CRITICAL: Failed to upload %s to storage backend: %s", category.value, e, exc_info=True)
+			raise HTTPException(
+				status_code=500,
+				detail=f"Failed to upload {category.value} to cloud storage: {str(e)}"
+			)
 
                 provided_name = names[i] if i < len(names) else None
                 provided_clean = str(provided_name).strip() if provided_name is not None else ""
@@ -246,19 +231,13 @@ async def upload_media_files(
 		except Exception:
 			pass
 
-	# Commit and cleanup on failure
+	# Commit - no local files to clean up since everything goes to GCS
 	try:
 		session.commit()
 	except Exception as e:
 		log.error("[upload.db] commit failed for %d items in category=%s: %s", len(created_items), category.value, e)
-		# remove any files written for this batch
-		for item in created_items:
-			try:
-				p = MEDIA_DIR / item.filename
-				if p.exists():
-					p.unlink()
-			except Exception:
-				pass
+		# Note: Files are already in GCS, so we can't easily clean them up here
+		# They'll be orphaned but that's acceptable - GCS lifecycle policies can handle cleanup
 		session.rollback()
 		raise HTTPException(status_code=500, detail="Upload stored file(s), but database write failed. Please retry.")
 	for item in created_items:
@@ -328,9 +307,31 @@ async def delete_media_item(
 	if not media_item:
 		raise HTTPException(status_code=404, detail="Media item not found or you don't have permission to delete it.")
 
-	file_path = MEDIA_DIR / media_item.filename
-	if file_path.exists():
-		file_path.unlink()
+	# Delete from cloud storage if it's a GCS/R2 URL
+	filename = media_item.filename
+	if filename and (filename.startswith("gs://") or filename.startswith("http")):
+		try:
+			from infrastructure import storage
+			# Extract bucket and key from URL
+			if filename.startswith("gs://"):
+				# gs://bucket/key
+				parts = filename[5:].split("/", 1)
+				if len(parts) == 2:
+					bucket, key = parts
+					storage.delete_blob(bucket, key)
+					log.info("[delete] Deleted %s from GCS", filename)
+			elif "r2.cloudflarestorage.com" in filename:
+				# https://bucket.r2.cloudflarestorage.com/key
+				# Extract bucket and key from URL
+				import re
+				match = re.search(r'https://([^.]+)\.r2\.cloudflarestorage\.com/(.+)', filename)
+				if match:
+					bucket, key = match.groups()
+					storage.delete_blob(bucket, key)
+					log.info("[delete] Deleted %s from R2", filename)
+		except Exception as e:
+			log.warning("[delete] Failed to delete %s from cloud storage: %s", filename, e)
+			# Continue with DB deletion even if cloud storage deletion fails
 
 	session.delete(media_item)
 	session.commit()

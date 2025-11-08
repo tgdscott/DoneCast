@@ -1,0 +1,69 @@
+// KQL query to search for a specific Request ID in Azure Log Analytics / Google Cloud Logging
+// Replace REQUEST_ID_HERE with the actual request ID: 2ea47562-a82d-42ca-8676-1f7bab6d709d
+
+let requestId = "2ea47562-a82d-42ca-8676-1f7bab6d709d";
+let timeWindow = 24h; // Adjust time window as needed
+
+// Search in traces/logs
+traces
+| where timestamp > ago(timeWindow)
+| where cloud_RunRevision_s contains "podcast"
+| where message contains requestId 
+    or customDimensions.request_id == requestId
+    or customDimensions["request_id"] == requestId
+    or (isnotempty(customDimensions) and tostring(customDimensions) contains requestId)
+| extend 
+    Service = case(
+        cloud_RunRevision_s contains "api", "API",
+        cloud_RunRevision_s contains "worker", "Worker",
+        "Unknown"
+    ),
+    IsError = severityLevel >= 3,
+    RequestId = coalesce(
+        customDimensions.request_id,
+        customDimensions["request_id"],
+        extract(@"request[_-]?id['":\s]+([a-f0-9\-]{36})", 1, message, typeof(string)),
+        requestId
+    )
+| project 
+    timestamp, 
+    Service, 
+    severityLevel, 
+    IsError,
+    RequestId,
+    message,
+    cloud_RunRevision_s,
+    customDimensions
+| order by timestamp desc
+
+// Also search in HTTP requests
+union 
+    (
+        requests
+        | where timestamp > ago(timeWindow)
+        | where cloud_RunRevision_s contains "podcast"
+        | where customDimensions.request_id == requestId
+           or customDimensions["request_id"] == requestId
+           or url contains requestId
+           or (isnotempty(customDimensions) and tostring(customDimensions) contains requestId)
+        | extend 
+            Service = case(
+                cloud_RunRevision_s contains "api", "API",
+                cloud_RunRevision_s contains "worker", "Worker",
+                "Unknown"
+            ),
+            IsError = resultCode >= 400
+        | project 
+            timestamp,
+            Service,
+            resultCode,
+            duration,
+            url,
+            IsError,
+            client_IP,
+            customDimensions
+        | order by timestamp desc
+    )
+
+
+
