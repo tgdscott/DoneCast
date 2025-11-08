@@ -21,6 +21,11 @@ from .media_common import sanitize_name, copy_with_limit
 router = APIRouter(prefix="/media", tags=["Media Library"])
 log = logging.getLogger("media.upload")
 
+# Ensure upload logs are visible
+logging.getLogger("media.upload").setLevel(logging.INFO)
+logging.getLogger("infrastructure.storage").setLevel(logging.INFO)
+logging.getLogger("infrastructure.gcs").setLevel(logging.INFO)
+
 
 @router.post("/upload/{category}", response_model=List[MediaItem], status_code=status.HTTP_201_CREATED)
 async def upload_media_files(
@@ -101,6 +106,10 @@ async def upload_media_files(
 	for i, file in enumerate(files):
 		if not file.filename:
 			continue
+		
+		# Log upload request received - this helps diagnose if upload endpoint is being called
+		log.info("[upload.request] Received upload request: category=%s, filename=%s, user_id=%s", 
+		        category.value, file.filename, current_user.id)
 
 		_validate_meta(file, category)
 
@@ -118,6 +127,13 @@ async def upload_media_files(
 		if not gcs_bucket:
 			raise HTTPException(status_code=500, detail="GCS_BUCKET environment variable not set - cloud storage is required")
 		
+		# Read file content and get size
+		file_content = file.file.read(max_bytes)
+		bytes_written = len(file_content)
+		
+		log.info("[upload.storage] Starting upload for %s: filename=%s, size=%d bytes, bucket=%s", 
+		        category.value, safe_filename, bytes_written, gcs_bucket)
+		
 		try:
 			from infrastructure import storage
 			# Determine storage key based on category
@@ -128,11 +144,9 @@ async def upload_media_files(
 				# Other categories go to media/{category}
 				storage_key = f"{current_user.id.hex}/media/{category.value}/{safe_filename}"
 			
-			log.info("[upload.storage] Uploading %s to bucket (backend: %s), key: %s", category.value, os.getenv("STORAGE_BACKEND", "gcs"), storage_key)
-			
-			# Read file content and get size
-			file_content = file.file.read(max_bytes)
-			bytes_written = len(file_content)
+			storage_backend = os.getenv("STORAGE_BACKEND", "gcs")
+			log.info("[upload.storage] Uploading %s to %s bucket %s, key: %s", 
+			        category.value, storage_backend, gcs_bucket, storage_key)
 			
 			if bytes_written >= max_bytes:
 				# Check if there's more data
@@ -141,26 +155,36 @@ async def upload_media_files(
 					raise HTTPException(status_code=413, detail=f"File exceeds maximum size of {max_bytes / MB:.1f} MB")
 			
 			# Upload directly to GCS from memory - NO local file write
+			# CRITICAL: allow_fallback=False to ensure files are ALWAYS uploaded to cloud storage
 			from io import BytesIO
 			file_stream = BytesIO(file_content)
 			storage_url = storage.upload_fileobj(
 				gcs_bucket,
 				storage_key,
 				file_stream,
-				content_type=file.content_type or ("audio/mpeg" if category != MediaCategory.podcast_cover and category != MediaCategory.episode_cover else "image/jpeg")
+				content_type=file.content_type or ("audio/mpeg" if category != MediaCategory.podcast_cover and category != MediaCategory.episode_cover else "image/jpeg"),
+				allow_fallback=False  # Require cloud storage - no local fallback
 			)
 			
 			# Store storage URL instead of local filename for persistence
 			# URL format depends on backend: gs://bucket/key (GCS) or https://bucket.r2.cloudflarestorage.com/key (R2)
-			if storage_url and (storage_url.startswith("gs://") or storage_url.startswith("http")):
-				safe_filename = storage_url
-				log.info("[upload.storage] SUCCESS: %s uploaded: %s", category.value, storage_url)
-			else:
-				# This should never happen, but belt-and-suspenders
-				log.error("[upload.storage] Upload returned invalid URL: %s", storage_url)
+			if not storage_url:
+				log.error("[upload.storage] CRITICAL: Upload returned None for %s - this should never happen with allow_fallback=False", category.value)
 				raise HTTPException(
 					status_code=500,
-					detail=f"Failed to upload {category.value} to cloud storage - this is required for production use"
+					detail=f"Failed to upload {category.value} to cloud storage - upload returned None"
+				)
+			elif storage_url.startswith("gs://") or storage_url.startswith("http"):
+				safe_filename = storage_url
+				log.info("[upload.storage] SUCCESS: %s uploaded to cloud storage: %s", category.value, storage_url)
+				log.info("[upload.storage] MediaItem will be saved with filename='%s'", safe_filename)
+			else:
+				# Upload returned a local path (should not happen with allow_fallback=False)
+				log.error("[upload.storage] CRITICAL: Upload returned local path instead of cloud URL: %s", storage_url)
+				log.error("[upload.storage] This indicates a fallback occurred despite allow_fallback=False")
+				raise HTTPException(
+					status_code=500,
+					detail=f"Failed to upload {category.value} to cloud storage - upload returned local path: {storage_url}"
 				)
 		except HTTPException:
 			raise
@@ -181,6 +205,16 @@ async def upload_media_files(
 
                 friendly_name = provided_name if provided_clean else default_friendly_name
 
+                # Verify safe_filename is a GCS/R2 URL before saving
+                if not (safe_filename.startswith("gs://") or safe_filename.startswith("http")):
+                    log.error("[upload.storage] CRITICAL: safe_filename is not a cloud storage URL: '%s'", safe_filename)
+                    log.error("[upload.storage] This should never happen - upload should have failed or returned a URL")
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Internal error: filename is not a cloud storage URL. This indicates a bug in the upload process."
+                    )
+                
+                log.info("[upload.storage] Creating MediaItem with filename='%s' (GCS/R2 URL)", safe_filename)
                 media_item = MediaItem(
                         filename=safe_filename,
                         friendly_name=friendly_name,
@@ -191,6 +225,7 @@ async def upload_media_files(
                 )
                 session.add(media_item)
                 created_items.append(media_item)
+                log.info("[upload.storage] MediaItem created: id=%s, filename='%s'", media_item.id, media_item.filename)
 
                 if (
                     category == MediaCategory.main_content
@@ -233,15 +268,24 @@ async def upload_media_files(
 
 	# Commit - no local files to clean up since everything goes to GCS
 	try:
+		log.info("[upload.db] Committing %d MediaItem(s) to database", len(created_items))
 		session.commit()
+		# Verify the filenames were saved correctly
+		for item in created_items:
+			session.refresh(item)
+			log.info("[upload.db] MediaItem saved: id=%s, filename='%s' (starts with gs://: %s, starts with http: %s)", 
+			        item.id, item.filename, 
+			        item.filename.startswith("gs://") if item.filename else False,
+			        item.filename.startswith("http") if item.filename else False)
+			if item.filename and not (item.filename.startswith("gs://") or item.filename.startswith("http")):
+				log.error("[upload.db] CRITICAL: MediaItem filename is not a cloud storage URL: '%s'", item.filename)
+				log.error("[upload.db] This indicates the database save failed or was rolled back")
 	except Exception as e:
-		log.error("[upload.db] commit failed for %d items in category=%s: %s", len(created_items), category.value, e)
+		log.error("[upload.db] commit failed for %d items in category=%s: %s", len(created_items), category.value, e, exc_info=True)
 		# Note: Files are already in GCS, so we can't easily clean them up here
 		# They'll be orphaned but that's acceptable - GCS lifecycle policies can handle cleanup
 		session.rollback()
 		raise HTTPException(status_code=500, detail="Upload stored file(s), but database write failed. Please retry.")
-	for item in created_items:
-		session.refresh(item)
 
 	return created_items
 

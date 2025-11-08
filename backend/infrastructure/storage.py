@@ -45,6 +45,7 @@ def upload_fileobj(
     key: str,
     fileobj: IO,
     content_type: str = "application/octet-stream",
+    allow_fallback: bool = False,  # Default to False - require cloud storage
 ) -> Optional[str]:
     """Upload file-like object to configured storage backend.
     
@@ -53,19 +54,53 @@ def upload_fileobj(
         key: Object key/path
         fileobj: File-like object to upload
         content_type: MIME type
+        allow_fallback: If False, raise exception instead of falling back to local storage.
+                       Set to False for production-critical uploads that MUST be in cloud storage.
     
     Returns:
-        Public URL if successful, None if failed
+        Public URL (gs://... or https://...) if successful, None if failed
+        Raises RuntimeError if upload fails and allow_fallback=False
+    
+    Raises:
+        RuntimeError: If upload fails and allow_fallback=False
     """
     backend = _get_backend()
     bucket = _get_bucket_name()
     
     if backend == "r2":
-        logger.debug(f"[storage] Uploading {key} to R2 bucket {bucket}")
-        return r2.upload_fileobj(bucket, key, fileobj, content_type)
+        logger.info(f"[storage] Uploading {key} to R2 bucket {bucket}")
+        result = r2.upload_fileobj(bucket, key, fileobj, content_type)
+        if result:
+            logger.info(f"[storage] Successfully uploaded to R2: {result}")
+        else:
+            logger.error(f"[storage] R2 upload failed for {key}")
+            if not allow_fallback:
+                raise RuntimeError(f"R2 upload failed for {key} and fallback is disabled")
+        return result
     else:
-        logger.debug(f"[storage] Uploading {key} to GCS bucket {bucket}")
-        return gcs.upload_fileobj(bucket, key, fileobj, content_type)
+        logger.info(f"[storage] Uploading {key} to GCS bucket {bucket} (allow_fallback={allow_fallback})")
+        try:
+            result = gcs.upload_fileobj(bucket, key, fileobj, content_type, allow_fallback=allow_fallback)
+            if result and (result.startswith("gs://") or result.startswith("http")):
+                logger.info(f"[storage] Successfully uploaded to GCS: {result}")
+            elif result:
+                # Local fallback path was returned
+                logger.warning(f"[storage] Upload fell back to local storage: {result}")
+                if not allow_fallback:
+                    raise RuntimeError(f"GCS upload failed for {key} and fallback is disabled (returned: {result})")
+            else:
+                logger.error(f"[storage] GCS upload returned None for {key}")
+                if not allow_fallback:
+                    raise RuntimeError(f"GCS upload failed for {key} and fallback is disabled (returned None)")
+            return result
+        except RuntimeError:
+            # Re-raise RuntimeError as-is (it's from gcs.upload_fileobj when allow_fallback=False)
+            raise
+        except Exception as e:
+            logger.error(f"[storage] Unexpected error during GCS upload: {e}", exc_info=True)
+            if not allow_fallback:
+                raise RuntimeError(f"GCS upload failed for {key}: {e}") from e
+            return None
 
 
 def upload_bytes(
@@ -73,6 +108,7 @@ def upload_bytes(
     key: str,
     data: bytes,
     content_type: str = "application/octet-stream",
+    allow_fallback: bool = False,  # Default to False - require cloud storage
 ) -> Optional[str]:
     """Upload bytes to configured storage backend.
     
@@ -81,19 +117,53 @@ def upload_bytes(
         key: Object key/path
         data: Bytes to upload
         content_type: MIME type
+        allow_fallback: If False, raise exception instead of falling back to local storage.
+                       Set to False for production-critical uploads that MUST be in cloud storage.
     
     Returns:
-        Public URL if successful, None if failed
+        Public URL (gs://... or https://...) if successful, None if failed
+        Raises RuntimeError if upload fails and allow_fallback=False
+    
+    Raises:
+        RuntimeError: If upload fails and allow_fallback=False
     """
     backend = _get_backend()
     bucket = _get_bucket_name()
     
     if backend == "r2":
-        logger.debug(f"[storage] Uploading {len(data)} bytes to R2 bucket {bucket}")
-        return r2.upload_bytes(bucket, key, data, content_type)
+        logger.info(f"[storage] Uploading {len(data)} bytes to R2 bucket {bucket}")
+        result = r2.upload_bytes(bucket, key, data, content_type)
+        if result:
+            logger.info(f"[storage] Successfully uploaded to R2: {result}")
+        else:
+            logger.error(f"[storage] R2 upload failed for {key}")
+            if not allow_fallback:
+                raise RuntimeError(f"R2 upload failed for {key} and fallback is disabled")
+        return result
     else:
-        logger.debug(f"[storage] Uploading {len(data)} bytes to GCS bucket {bucket}")
-        return gcs.upload_bytes(bucket, key, data, content_type)
+        logger.info(f"[storage] Uploading {len(data)} bytes to GCS bucket {bucket} (allow_fallback={allow_fallback})")
+        try:
+            result = gcs.upload_bytes(bucket, key, data, content_type, allow_fallback=allow_fallback)
+            if result and (result.startswith("gs://") or result.startswith("http")):
+                logger.info(f"[storage] Successfully uploaded to GCS: {result}")
+            elif result:
+                # Local fallback path was returned
+                logger.warning(f"[storage] Upload fell back to local storage: {result}")
+                if not allow_fallback:
+                    raise RuntimeError(f"GCS upload failed for {key} and fallback is disabled (returned: {result})")
+            else:
+                logger.error(f"[storage] GCS upload returned None for {key}")
+                if not allow_fallback:
+                    raise RuntimeError(f"GCS upload failed for {key} and fallback is disabled (returned None)")
+            return result
+        except RuntimeError:
+            # Re-raise RuntimeError as-is (it's from gcs.upload_bytes when allow_fallback=False)
+            raise
+        except Exception as e:
+            logger.error(f"[storage] Unexpected error during GCS upload: {e}", exc_info=True)
+            if not allow_fallback:
+                raise RuntimeError(f"GCS upload failed for {key}: {e}") from e
+            return None
 
 
 def download_bytes(bucket_name: str, key: str) -> Optional[bytes]:

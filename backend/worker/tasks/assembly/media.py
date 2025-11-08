@@ -633,16 +633,35 @@ def resolve_media_context(
         # If MediaItem found, try to get GCS URL
         if media_item:
             filename = str(getattr(media_item, "filename", "") or "")
+            logging.info("[assemble] MediaItem filename value: '%s' (starts with gs://: %s, starts with http: %s, length=%d)", 
+                        filename, filename.startswith("gs://"), filename.startswith("http"), len(filename))
+            logging.info("[assemble] MediaItem details: id=%s, user_id=%s, category=%s, filesize=%s", 
+                        media_item.id, media_item.user_id, media_item.category, getattr(media_item, 'filesize', 'N/A'))
+            
             if filename.startswith("gs://") or filename.startswith("http"):
-                # Direct GCS/R2 URL
+                # Direct GCS/R2 URL - download directly
                 gcs_uri = filename
-                logging.info("[assemble] Found MediaItem with GCS/R2 URL: %s", gcs_uri)
+                logging.info("[assemble] ✅ Found MediaItem with GCS/R2 URL: %s", gcs_uri)
+                logging.info("[assemble] Downloading from cloud storage...")
+                try:
+                    downloaded_path = _resolve_media_file(gcs_uri)
+                    if downloaded_path and Path(str(downloaded_path)).exists():
+                        source_audio_path = downloaded_path
+                        base_audio_name = Path(str(downloaded_path)).name
+                        logging.info("[assemble] ✅ Successfully downloaded from cloud storage: %s -> %s", gcs_uri, source_audio_path)
+                    else:
+                        logging.error("[assemble] ❌ Failed to download from cloud storage URL: %s", gcs_uri)
+                        logging.error("[assemble] Downloaded path: %s, exists: %s", downloaded_path, downloaded_path.exists() if downloaded_path else False)
+                except Exception as download_err:
+                    logging.error("[assemble] ❌ Exception downloading from cloud storage: %s", download_err, exc_info=True)
+                    gcs_uri = None  # Reset so we can try alternative paths
             else:
                 # Just a filename - construct GCS path based on upload pattern
                 # Main content files are uploaded to: {user_id}/media_uploads/{filename}
                 try:
                     from infrastructure import storage
                     gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+                    storage_backend = os.getenv("STORAGE_BACKEND", "gcs")
                     
                     # Convert user_id to hex format if it's a UUID
                     try:
@@ -652,21 +671,56 @@ def resolve_media_context(
                         # Already in hex format or invalid
                         user_id_hex = str(user_id).replace("-", "")
                     
-                    # Try the expected GCS path (new upload pattern)
-                    expected_key = f"{user_id_hex}/media_uploads/{filename}"
-                    logging.info("[assemble] Checking GCS path: gs://%s/%s", gcs_bucket, expected_key)
-                    if storage.blob_exists(gcs_bucket, expected_key):
-                        gcs_uri = f"gs://{gcs_bucket}/{expected_key}"
-                        logging.info("[assemble] Constructed GCS URI from filename: %s", gcs_uri)
-                    else:
-                        # Try alternative path pattern (for backward compatibility)
-                        alt_key = f"{user_id_hex}/media/main_content/{filename}"
-                        logging.info("[assemble] Checking alternative GCS path: gs://%s/%s", gcs_bucket, alt_key)
-                        if storage.blob_exists(gcs_bucket, alt_key):
-                            gcs_uri = f"gs://{gcs_bucket}/{alt_key}"
-                            logging.info("[assemble] Found file at alternative GCS path: %s", gcs_uri)
-                        else:
-                            logging.warning("[assemble] File not found in GCS at expected paths: %s or %s", expected_key, alt_key)
+                    logging.info("[assemble] Constructing GCS paths for user_id=%s (hex=%s), filename=%s, bucket=%s, backend=%s",
+                                user_id, user_id_hex, filename, gcs_bucket, storage_backend)
+                    
+                    # Try multiple path patterns - the file might be in different locations
+                    path_candidates = [
+                        f"{user_id_hex}/media_uploads/{filename}",  # New upload pattern
+                        f"{user_id_hex}/media/main_content/{filename}",  # Old pattern
+                        f"{user_id}/media_uploads/{filename}",  # UUID format (if not converted)
+                        f"{user_id}/media/main_content/{filename}",  # UUID format old pattern
+                    ]
+                    
+                    gcs_uri = None
+                    for candidate_key in path_candidates:
+                        logging.info("[assemble] Checking GCS path: gs://%s/%s", gcs_bucket, candidate_key)
+                        try:
+                            if storage.blob_exists(gcs_bucket, candidate_key):
+                                gcs_uri = f"gs://{gcs_bucket}/{candidate_key}"
+                                logging.info("[assemble] ✅ Found file at GCS path: %s", gcs_uri)
+                                break
+                            else:
+                                logging.debug("[assemble] File not found at: gs://%s/%s", gcs_bucket, candidate_key)
+                        except Exception as check_err:
+                            logging.warning("[assemble] Error checking path %s: %s", candidate_key, check_err)
+                    
+                    if not gcs_uri:
+                        logging.error("[assemble] ❌ File not found in GCS at any of these paths:")
+                        for candidate_key in path_candidates:
+                            logging.error("[assemble]   - gs://%s/%s", gcs_bucket, candidate_key)
+                        logging.error("[assemble] MediaItem filename in DB: '%s'", filename)
+                        logging.error("[assemble] MediaItem id: %s", media_item.id)
+                        logging.error("[assemble] This suggests the file was not uploaded to GCS, or was uploaded to a different path")
+                        logging.error("[assemble] ACTION REQUIRED: Verify the file was uploaded successfully. Check:")
+                        logging.error("[assemble]   1. Upload logs to see if GCS upload succeeded")
+                        logging.error("[assemble]   2. GCS bucket %s to see if file exists", gcs_bucket)
+                        logging.error("[assemble]   3. MediaItem record in database to verify filename matches GCS path")
+                        # Try to list files in the user's directory to see what's actually there
+                        try:
+                            from google.cloud import storage as gcs_storage
+                            client = gcs_storage.Client()
+                            bucket_obj = client.bucket(gcs_bucket)
+                            user_prefix = f"{user_id_hex}/media_uploads/"
+                            blobs = list(bucket_obj.list_blobs(prefix=user_prefix, max_results=10))
+                            if blobs:
+                                logging.info("[assemble] Found %d files in GCS at prefix %s:", len(blobs), user_prefix)
+                                for blob in blobs[:5]:  # Show first 5
+                                    logging.info("[assemble]   - %s", blob.name)
+                            else:
+                                logging.warning("[assemble] No files found in GCS at prefix %s", user_prefix)
+                        except Exception as list_err:
+                            logging.warning("[assemble] Could not list GCS files: %s", list_err)
                 except Exception as e:
                     logging.warning("[assemble] Error constructing GCS path: %s", e, exc_info=True)
                     gcs_uri = None
