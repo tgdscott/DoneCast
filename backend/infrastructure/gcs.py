@@ -231,9 +231,16 @@ _signer_email = None
 
 
 def _get_gcs_client():
-    """Initialise and return a GCS client, handling credentials gracefully."""
+    """Initialise and return a GCS client, handling credentials gracefully.
+
+    If STORAGE_BACKEND=r2 or GCS_DISABLED is set, return None without logging warnings.
+    """
 
     global _gcs_client, _gcs_credentials, _gcs_project, _signer_email
+
+    # Hard-disable GCS when using R2 or explicitly disabled
+    if (os.getenv("STORAGE_BACKEND") or "").strip().lower() == "r2" or (os.getenv("GCS_DISABLED") or "").strip().lower() in {"1","true","yes","on"}:
+        return None
 
     if _gcs_client:
         return _gcs_client
@@ -256,15 +263,18 @@ def _get_gcs_client():
         )
         return _gcs_client
     except DefaultCredentialsError:  # type: ignore[unreachable]
-        logger.warning("GCS credentials not found. GCS operations will be disabled.")
+        # Downgrade to debug to avoid noisy logs when GCS is optional
+        logger.debug("GCS credentials not found. GCS operations will be disabled.")
         return None
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error("Failed to initialize GCS client: %s", exc, exc_info=True)
         return None
 
 
-# Prepare client on import so we surface logging early when possible.
-_get_gcs_client()
+# Prepare client on import unless explicitly disabled (e.g., STORAGE_BACKEND=r2)
+_DEF_GCS_DISABLED = (os.getenv("GCS_DISABLED") or "").strip().lower() in {"1","true","yes","on"} or (os.getenv("STORAGE_BACKEND") or "").strip().lower() == "r2"
+if not _DEF_GCS_DISABLED:
+    _get_gcs_client()
 
 
 # ---------------------------------------------------------------------------

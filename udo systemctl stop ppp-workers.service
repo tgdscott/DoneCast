@@ -1,0 +1,20 @@
+[0;1;32m●[0m ppp-workers.service - CloudPod Background Workers (uvicorn worker_service)
+     Loaded: loaded (/etc/systemd/system/ppp-workers.service; enabled; vendor preset: enabled)
+     Active: [0;1;32mactive (running)[0m since Sat 2025-11-08 01:18:07 UTC; 7h ago
+   Main PID: 4964 (python)
+      Tasks: 6 (limit: 19081)
+     Memory: 149.0M
+        CPU: 28.188s
+     CGroup: /system.slice/ppp-workers.service
+             └─4964 /root/CloudPod/.venv/bin/python -m uvicorn worker_service:app --host 0.0.0.0 --port 8080 --log-level info
+
+Nov 08 07:14:39 podcast-worker python[4964]:   File "/root/CloudPod/backend/worker/tasks/assembly/__init__.py", line 33, in _delegate_orchestrator
+Nov 08 07:14:39 podcast-worker python[4964]:     return _impl(
+Nov 08 07:14:39 podcast-worker python[4964]:            ^^^^^^
+Nov 08 07:14:39 podcast-worker python[4964]:   File "/root/CloudPod/backend/worker/tasks/assembly/orchestrator.py", line 1184, in orchestrate_create_podcast_episode
+Nov 08 07:14:39 podcast-worker python[4964]:     return _finalize_episode(
+Nov 08 07:14:39 podcast-worker python[4964]:            ^^^^^^^^^^^^^^^^^^
+Nov 08 07:14:39 podcast-worker python[4964]:   File "/root/CloudPod/backend/worker/tasks/assembly/orchestrator.py", line 741, in _finalize_episode
+Nov 08 07:14:39 podcast-worker python[4964]:     raise RuntimeError(f"Audio processor crashed: {type(proc_err).__name__}: {proc_err}")
+Nov 08 07:14:39 podcast-worker python[4964]: RuntimeError: Audio processor crashed: AudioProcessingError: Main content file not found: b6d5f77e699e444ba31ae1b4cb15feb4_ab0d725d32e548baa4bebe874fd6e385_Shit_covered_Plunger.mp3
+Nov 08 07:14:39 podcast-worker python[4964]: INFO:     64.239.143.220:0 - "POST /api/tasks/assemble HTTP/1.1" 500 Internal Server Error
