@@ -147,6 +147,12 @@ async def upload_media_files(
     for i, file in enumerate(files):
         if not file.filename:
             continue
+        
+        # Log upload request received
+        import logging
+        log = logging.getLogger("api.media")
+        log.info("[upload.request] Received upload request: category=%s, filename=%s, user_id=%s", 
+                category.value, file.filename, current_user.id)
 
         # Validate type and extension early
         _validate_meta(file, category)
@@ -157,112 +163,100 @@ async def upload_media_files(
         # --- FIX: Add uuid4 to filename to ensure uniqueness ---
         safe_orig = _sanitize_name(file.filename)
         safe_filename = f"{current_user.id.hex}_{uuid4().hex}_{safe_orig}"
-        file_path = MEDIA_DIR / safe_filename
 
-    # Enforce per-category size limit during streaming copy
+        # Enforce per-category size limit
         max_bytes = CATEGORY_SIZE_LIMITS.get(category, 50 * MB)
-        try:
-            bytes_written = _copy_with_limit(file.file, file_path, max_bytes)
-        except HTTPException:
-            # Ensure partial file is removed
-            try:
-                if file_path.exists():
-                    file_path.unlink()
-            finally:
-                pass
-            raise
-        except Exception:
-            try:
-                if file_path.exists():
-                    file_path.unlink()
-            finally:
-                pass
-            raise HTTPException(status_code=500, detail="Failed to save uploaded file.")
         
-        # Optional: Convert large PCM formats (WAV/AIFF) to FLAC to save space
-        final_content_type = (file.content_type or None)
+        # **CRITICAL**: ALL files MUST be uploaded to GCS - no local storage fallback
+        # This ensures files are accessible to worker servers and production environments
+        gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+        if not gcs_bucket:
+            raise HTTPException(status_code=500, detail="GCS_BUCKET environment variable not set - cloud storage is required")
+        
+        # Read file content into memory
+        file_content = file.file.read(max_bytes)
+        bytes_written = len(file_content)
+        
+        log.info("[upload.storage] Starting upload for %s: filename=%s, size=%d bytes, bucket=%s", 
+                category.value, safe_filename, bytes_written, gcs_bucket)
+        
+        if bytes_written >= max_bytes:
+            # Check if there's more data
+            remaining = file.file.read(1)
+            if remaining:
+                raise HTTPException(status_code=413, detail=f"File exceeds maximum size of {max_bytes / MB:.1f} MB")
+        
         try:
-            ext_lower = Path(safe_filename).suffix.lower()
-            if ext_lower in {".wav", ".aif", ".aiff"}:
-                flac_filename = Path(safe_filename).with_suffix(".flac").name
-                flac_path = MEDIA_DIR / flac_filename
-                # Attempt conversion via ffmpeg (must be available on PATH)
-                # -y overwrite, lossless FLAC
-                ffmpeg_bin = os.getenv("FFMPEG_BIN") or os.getenv("FFMPEG_PATH") or shutil.which("ffmpeg") or "ffmpeg"
-                cmd = [
-                    ffmpeg_bin, "-hide_banner", "-loglevel", "error",
-                    "-y", "-i", str(file_path),
-                    "-c:a", "flac",
-                    str(flac_path),
-                ]
-                try:
-                    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-                    if proc.returncode == 0 and flac_path.exists():
-                        # Replace stored file with FLAC
-                        try:
-                            file_path.unlink(missing_ok=True)
-                        except Exception:
-                            pass
-                        file_path = flac_path
-                        safe_filename = flac_filename
-                        bytes_written = file_path.stat().st_size
-                        final_content_type = "audio/flac"
-                    else:
-                        # Conversion failed; keep original
-                        # Optionally log stderr via print to avoid adding logging deps here
-                        try:
-                            print("[media.upload] ffmpeg conversion failed:", proc.stderr)
-                        except Exception:
-                            pass
-                except Exception as conv_err:
-                    # ffmpeg unavailable or failed; keep original
-                    try:
-                        print("[media.upload] ffmpeg error:", conv_err)
-                    except Exception:
-                        pass
-        except Exception:
-            # Never fail the upload due to conversion issues
-            pass
+            # **CRITICAL**: Intermediate files (uploads) ALWAYS go to GCS, not R2
+            # R2 is only for final files (assembled episodes)
+            # This ensures worker servers can download intermediate files for processing
+            from infrastructure import gcs
+            # Determine storage key based on category
+            if category == MediaCategory.main_content:
+                # Main content goes to media_uploads for worker access
+                storage_key = f"{current_user.id.hex}/media_uploads/{safe_filename}"
+            else:
+                # Other categories go to media/{category}
+                storage_key = f"{current_user.id.hex}/media/{category.value}/{safe_filename}"
+            
+            log.info("[upload.storage] Uploading %s to GCS bucket %s, key: %s", 
+                    category.value, gcs_bucket, storage_key)
+            
+            # Upload directly to GCS from memory - NO local file write, NO R2
+            # CRITICAL: allow_fallback=False to ensure files are ALWAYS uploaded to GCS
+            from io import BytesIO
+            file_stream = BytesIO(file_content)
+            final_content_type = file.content_type or ("audio/mpeg" if category != MediaCategory.podcast_cover and category != MediaCategory.episode_cover else "image/jpeg")
+            storage_url = gcs.upload_fileobj(
+                gcs_bucket,
+                storage_key,
+                file_stream,
+                content_type=final_content_type,
+                allow_fallback=False,  # Require GCS - no local fallback
+                force_gcs=True  # Force GCS even if STORAGE_BACKEND=r2 (intermediate files must go to GCS)
+            )
+            
+            # Store GCS URL - intermediate files always go to GCS (not R2)
+            # URL format: gs://bucket/key
+            if not storage_url:
+                log.error("[upload.storage] CRITICAL: GCS upload returned None for %s - this should never happen with allow_fallback=False", category.value)
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to upload {category.value} to GCS - upload returned None"
+                )
+            elif storage_url.startswith("gs://"):
+                final_filename = storage_url
+                log.info("[upload.storage] SUCCESS: %s uploaded to GCS: %s", category.value, storage_url)
+                log.info("[upload.storage] MediaItem will be saved with filename='%s'", final_filename)
+            else:
+                # Upload returned a local path or invalid URL (should not happen with allow_fallback=False)
+                log.error("[upload.storage] CRITICAL: GCS upload returned invalid URL: %s", storage_url)
+                log.error("[upload.storage] Expected gs:// URL, but got: %s", storage_url)
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to upload {category.value} to GCS - upload returned invalid URL: {storage_url}"
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            log.error("[upload.storage] CRITICAL: Failed to upload %s to GCS: %s", category.value, e, exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to upload {category.value} to GCS: {str(e)}"
+            )
 
         friendly_name = names[i] if i < len(names) and names[i].strip() else default_friendly_name
+        
+        # Verify final_filename is a GCS URL before saving (intermediate files always go to GCS)
+        if not final_filename.startswith("gs://"):
+            log.error("[upload.storage] CRITICAL: final_filename is not a GCS URL: '%s'", final_filename)
+            log.error("[upload.storage] Expected gs:// URL for intermediate file upload")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Internal error: filename is not a GCS URL. This indicates a bug in the upload process."
+            )
 
-        # Upload to GCS for persistence (intro/outro/music/sfx/commercial)
-        gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
-        final_filename = safe_filename  # Will be replaced with gs:// URL if GCS upload succeeds
-        if gcs_bucket and category in (
-            MediaCategory.intro,
-            MediaCategory.outro,
-            MediaCategory.music,
-            MediaCategory.sfx,
-            MediaCategory.commercial,
-        ):
-            try:
-                from infrastructure import gcs
-                # Use consistent path format: {user_id}/media/{category}/{filename}
-                gcs_key = f"{current_user.id.hex}/media/{category.value}/{safe_filename}"
-                with open(file_path, "rb") as f:
-                    gcs_url = gcs.upload_fileobj(gcs_bucket, gcs_key, f, content_type=final_content_type or "audio/mpeg")
-                
-                # Verify GCS upload succeeded
-                if gcs_url and gcs_url.startswith("gs://"):
-                    final_filename = gcs_url
-                    print(f"[media.upload] ✅ Uploaded {category.value} to GCS: {gcs_url}")
-                else:
-                    # GCS upload returned invalid URL - fail the upload
-                    raise Exception(f"GCS upload returned invalid URL: {gcs_url}")
-                    
-            except Exception as e:
-                # FAIL THE UPLOAD - don't silently fall back to /tmp
-                print(f"[media.upload] ❌ FAILED to upload {category.value} to GCS: {e}")
-                try:
-                    file_path.unlink(missing_ok=True)
-                except:
-                    pass
-                raise HTTPException(
-                    status_code=500, 
-                    detail=f"Failed to upload {category.value} to cloud storage: {str(e)}"
-                )
-
+        log.info("[upload.storage] Creating MediaItem with filename='%s' (GCS URL)", final_filename)
         media_item = MediaItem(
             filename=final_filename,
             friendly_name=friendly_name,
@@ -273,25 +267,45 @@ async def upload_media_files(
         )
         session.add(media_item)
         created_items.append(media_item)
+        log.info("[upload.storage] MediaItem created: id=%s, filename='%s'", media_item.id, media_item.filename)
 
         # Kick off immediate background transcription for main content uploads
         try:
             if category == MediaCategory.main_content:
                 # Use Cloud Tasks to schedule transcription
+                # Pass the GCS URL (final_filename) so transcription can download from GCS if needed
                 from infrastructure.tasks_client import enqueue_http_task  # type: ignore
                 task_result = enqueue_http_task("/api/tasks/transcribe", {
-                    "filename": safe_filename,
+                    "filename": final_filename,  # Use GCS URL instead of just filename
                     "user_id": str(current_user.id)  # Pass user_id for tier-based routing
                 })
-                import logging
-                logging.getLogger("api.media").info(f"Transcription task enqueued for {safe_filename}: {task_result}")
+                log.info("Transcription task enqueued for %s: %s", final_filename, task_result)
         except Exception as e:
             # Non-fatal; upload should still succeed
             # But log the error so we can diagnose why transcription isn't starting
-            import logging
-            logging.getLogger("api.media").error(f"Failed to enqueue transcription task for {safe_filename}: {e}", exc_info=True)
+            log.error("Failed to enqueue transcription task for %s: %s", final_filename, e, exc_info=True)
 
-    session.commit()
+    # Commit - no local files to clean up since everything goes to GCS
+    try:
+        log.info("[upload.db] Committing %d MediaItem(s) to database", len(created_items))
+        session.commit()
+        # Verify the filenames were saved correctly
+        for item in created_items:
+            session.refresh(item)
+            log.info("[upload.db] MediaItem saved: id=%s, filename='%s' (starts with gs://: %s)", 
+                    item.id, item.filename, 
+                    item.filename.startswith("gs://") if item.filename else False)
+            if item.filename and not item.filename.startswith("gs://"):
+                log.error("[upload.db] CRITICAL: MediaItem filename is not a GCS URL: '%s'", item.filename)
+                log.error("[upload.db] Expected gs:// URL for intermediate file")
+                log.error("[upload.db] This indicates the database save failed or was rolled back")
+    except Exception as e:
+        log.error("[upload.db] commit failed for %d items in category=%s: %s", len(created_items), category.value, e, exc_info=True)
+        # Note: Files are already in GCS, so we can't easily clean them up here
+        # They'll be orphaned but that's acceptable - GCS lifecycle policies can handle cleanup
+        session.rollback()
+        raise HTTPException(status_code=500, detail="Upload stored file(s), but database write failed. Please retry.")
+    
     for item in created_items:
         session.refresh(item)
     

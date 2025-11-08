@@ -130,3 +130,5 @@ CRITICAL_DEPLOYMENT_*.md
 
 # End of aggressive .gitignore
 
+gcp-key.json
+

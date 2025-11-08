@@ -104,19 +104,43 @@ def _resolve_media_file(name: str) -> Optional[Path]:
         if raw.startswith("gs://") or raw.startswith("http"):
             try:
                 # Handle GCS URLs (gs://bucket/key)
+                # Use infrastructure.storage module which handles credentials properly
                 if raw.startswith("gs://"):
                     without_scheme = raw[len("gs://"):]
                     bucket_name, key = without_scheme.split("/", 1)
                     base = Path(key).name
                     destination = MEDIA_DIR / base
                     MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-                    from google.cloud import storage  # lazy import
-
-                    client = storage.Client()
-                    blob = client.bucket(bucket_name).blob(key)
-                    blob.download_to_filename(str(destination))
-                    logging.info("[assemble] Downloaded from GCS: %s -> %s", raw, destination)
-                    return _ensure_media_dir_copy(destination)
+                    
+                    try:
+                        # Use infrastructure.storage module which handles credentials
+                        from infrastructure import storage as storage_module
+                        file_bytes = storage_module.download_bytes(bucket_name, key)
+                        if file_bytes:
+                            destination.write_bytes(file_bytes)
+                            logging.info("[assemble] Downloaded from GCS: %s -> %s (%d bytes)", raw, destination, len(file_bytes))
+                            return _ensure_media_dir_copy(destination)
+                        else:
+                            logging.error("[assemble] GCS download returned None for %s", raw)
+                    except Exception as storage_err:
+                        # Fallback to direct GCS client if infrastructure.storage fails
+                        logging.warning("[assemble] infrastructure.storage failed, trying direct GCS client: %s", storage_err)
+                        try:
+                            from google.cloud import storage  # lazy import
+                            client = storage.Client()
+                            blob = client.bucket(bucket_name).blob(key)
+                            blob.download_to_filename(str(destination))
+                            logging.info("[assemble] Downloaded from GCS (direct): %s -> %s", raw, destination)
+                            return _ensure_media_dir_copy(destination)
+                        except Exception as direct_err:
+                            logging.error(
+                                "[assemble] ❌ CRITICAL: Failed to download from GCS %s: %s. "
+                                "Worker server needs GCS credentials. Set GOOGLE_APPLICATION_CREDENTIALS "
+                                "environment variable or configure GCS_SIGNER_KEY_JSON. "
+                                "See: https://cloud.google.com/docs/authentication/application-default-credentials",
+                                raw, direct_err
+                            )
+                            raise
                 # Handle R2 URLs (https://bucket.r2.cloudflarestorage.com/key)
                 elif raw.startswith("http"):
                     try:
@@ -137,7 +161,9 @@ def _resolve_media_file(name: str) -> Optional[Path]:
                     except Exception as r2_err:
                         logging.warning("[assemble] Failed to download from R2 URL %s: %s", raw, r2_err)
             except Exception as gcs_err:
-                logging.warning("[assemble] Failed to download from cloud storage URL %s: %s", raw, gcs_err)
+                logging.error("[assemble] ❌ Failed to download from cloud storage URL %s: %s", raw, gcs_err)
+                # Re-raise so caller knows download failed
+                raise
     except Exception:
         pass
 
@@ -262,12 +288,31 @@ def _resolve_image_to_local(path_like: str | None) -> Optional[Path]:
             bucket_name, key = without.split("/", 1)
             base = Path(key).name
             local = MEDIA_DIR / base
-            from google.cloud import storage
-
-            client = storage.Client()
-            blob = client.bucket(bucket_name).blob(key)
-            blob.download_to_filename(str(local))
-            return local
+            
+            try:
+                # Use infrastructure.storage module which handles credentials
+                from infrastructure import storage as storage_module
+                file_bytes = storage_module.download_bytes(bucket_name, key)
+                if file_bytes:
+                    local.write_bytes(file_bytes)
+                    logging.info("[assemble] Downloaded image from GCS: %s -> %s", raw, local)
+                    return local
+            except Exception as storage_err:
+                # Fallback to direct GCS client
+                logging.warning("[assemble] infrastructure.storage failed for image, trying direct GCS: %s", storage_err)
+                try:
+                    from google.cloud import storage
+                    client = storage.Client()
+                    blob = client.bucket(bucket_name).blob(key)
+                    blob.download_to_filename(str(local))
+                    logging.info("[assemble] Downloaded image from GCS (direct): %s -> %s", raw, local)
+                    return local
+                except Exception as direct_err:
+                    logging.error(
+                        "[assemble] ❌ Failed to download image from GCS %s: %s. "
+                        "Worker server needs GCS credentials.",
+                        raw, direct_err
+                    )
     except Exception:
         pass
 
@@ -731,13 +776,21 @@ def resolve_media_context(
             try:
                 download = _resolve_media_file(gcs_uri)
                 if download and Path(str(download)).exists():
+                    # _ensure_media_dir_copy copies the file to MEDIA_DIR and returns the path there
                     promoted = _ensure_media_dir_copy(Path(str(download)))
                     if promoted and promoted.exists():
                         source_audio_path = promoted
                         base_audio_name = promoted.name
+                        logging.info("[assemble] ✅ File copied to MEDIA_DIR: %s (exists: True, size: %d bytes)", 
+                                   source_audio_path, promoted.stat().st_size)
                     else:
+                        # Copy failed or file doesn't exist - use original download path
                         source_audio_path = Path(str(download))
                         base_audio_name = source_audio_path.name
+                        if source_audio_path.exists():
+                            logging.warning("[assemble] ⚠️ Using original download path (copy to MEDIA_DIR may have failed): %s", source_audio_path)
+                        else:
+                            logging.error("[assemble] ❌ File doesn't exist at download path: %s", source_audio_path)
                     try:
                         episode.working_audio_name = base_audio_name
                         session.add(episode)

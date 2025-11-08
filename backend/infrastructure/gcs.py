@@ -230,22 +230,34 @@ _gcs_project = None
 _signer_email = None
 
 
-def _get_gcs_client():
+def _get_gcs_client(force: bool = False):
     """Initialise and return a GCS client, handling credentials gracefully.
 
+    Args:
+        force: If True, force GCS initialization even if STORAGE_BACKEND=r2.
+               Use this for intermediate file uploads that must go to GCS.
+
     If STORAGE_BACKEND=r2 or GCS_DISABLED is set, return None without logging warnings.
+    (Unless force=True, which bypasses STORAGE_BACKEND check)
     """
 
     global _gcs_client, _gcs_credentials, _gcs_project, _signer_email
 
-    # Hard-disable GCS when using R2 or explicitly disabled
-    if (os.getenv("STORAGE_BACKEND") or "").strip().lower() == "r2" or (os.getenv("GCS_DISABLED") or "").strip().lower() in {"1","true","yes","on"}:
-        return None
+    # Hard-disable GCS when using R2 or explicitly disabled (unless forced)
+    if not force:
+        if (os.getenv("STORAGE_BACKEND") or "").strip().lower() == "r2" or (os.getenv("GCS_DISABLED") or "").strip().lower() in {"1","true","yes","on"}:
+            return None
 
     if _gcs_client:
         return _gcs_client
 
     if not storage:
+        if force:
+            raise RuntimeError(
+                "GCS client unavailable: google-cloud-storage package is not installed. "
+                "Intermediate files must be uploaded to GCS. "
+                "Please install the google-cloud-storage package: pip install google-cloud-storage"
+            )
         logger.debug("GCS client requested but google-cloud-storage is unavailable")
         return None
 
@@ -262,11 +274,30 @@ def _get_gcs_client():
             _signer_email or "N/A (will use key if available)",
         )
         return _gcs_client
-    except DefaultCredentialsError:  # type: ignore[unreachable]
+    except DefaultCredentialsError as cred_err:  # type: ignore[unreachable]
+        if force:
+            # When forcing GCS (for intermediate file uploads), raise a clear error
+            logger.error("GCS credentials not found (force_gcs=True). Error: %s", cred_err)
+            raise RuntimeError(
+                "GCS client unavailable: Credentials not found. "
+                "Intermediate files must be uploaded to GCS. "
+                "Please configure GCS credentials by setting GOOGLE_APPLICATION_CREDENTIALS "
+                "environment variable pointing to a service account key file, "
+                "or run 'gcloud auth application-default login' to use Application Default Credentials. "
+                "See https://cloud.google.com/docs/authentication/application-default-credentials"
+            ) from cred_err
         # Downgrade to debug to avoid noisy logs when GCS is optional
         logger.debug("GCS credentials not found. GCS operations will be disabled.")
         return None
     except Exception as exc:  # pragma: no cover - defensive logging
+        if force:
+            # When forcing GCS, re-raise with helpful context
+            logger.error("Failed to initialize GCS client (force_gcs=True): %s", exc, exc_info=True)
+            raise RuntimeError(
+                f"GCS client initialization failed: {exc}. "
+                "Intermediate files must be uploaded to GCS. "
+                "Please check your GCS configuration and credentials."
+            ) from exc
         logger.error("Failed to initialize GCS client: %s", exc, exc_info=True)
         return None
 
@@ -552,6 +583,7 @@ def upload_fileobj(
     fileobj: IO,
     content_type: Optional[str] = None,
     allow_fallback: bool = False,  # Changed default to False - GCS is required
+    force_gcs: bool = False,  # Force GCS even if STORAGE_BACKEND=r2 (for intermediate files)
     **kwargs,
 ) -> str:
     """Upload a file-like object to GCS, with optional local development fallback.
@@ -563,6 +595,8 @@ def upload_fileobj(
         content_type: MIME type for the object
         allow_fallback: If False, raise exception instead of falling back to local storage.
                        Set to False for production-critical uploads that MUST be in GCS.
+        force_gcs: If True, force GCS client initialization even if STORAGE_BACKEND=r2.
+                   Use this for intermediate file uploads that must go to GCS.
     
     Returns:
         GCS URL (gs://...) or local path if fallback is allowed and triggered
@@ -571,7 +605,7 @@ def upload_fileobj(
         RuntimeError: If GCS upload fails and allow_fallback=False
     """
 
-    client = _get_gcs_client()
+    client = _get_gcs_client(force=force_gcs)
     if client:
         try:
             bucket = client.bucket(bucket_name)
@@ -581,6 +615,14 @@ def upload_fileobj(
             return f"gs://{bucket_name}/{key}"
         except Exception as exc:
             if not allow_fallback or not _should_fallback(bucket_name, exc):
+                if force_gcs:
+                    raise RuntimeError(
+                        f"GCS upload failed for gs://{bucket_name}/{key}: {exc}. "
+                        "Intermediate files must be uploaded to GCS. "
+                        "Please configure GCS credentials by setting GOOGLE_APPLICATION_CREDENTIALS "
+                        "environment variable pointing to a service account key file, "
+                        "or ensure Application Default Credentials are configured."
+                    ) from exc
                 raise RuntimeError(f"GCS upload failed for gs://{bucket_name}/{key}: {exc}") from exc
             logger.warning(
                 "GCS upload failed for gs://%s/%s: %s -- writing to local media",
@@ -594,6 +636,15 @@ def upload_fileobj(
             except Exception:
                 pass
     elif not allow_fallback or not _should_fallback(bucket_name):
+        if force_gcs:
+            raise RuntimeError(
+                "GCS client unavailable and fallback is disabled. "
+                "Intermediate files must be uploaded to GCS. "
+                "Please configure GCS credentials by setting GOOGLE_APPLICATION_CREDENTIALS "
+                "environment variable pointing to a service account key file, "
+                "or ensure Application Default Credentials are configured. "
+                "See https://cloud.google.com/docs/authentication/application-default-credentials"
+            )
         raise RuntimeError("GCS client unavailable and fallback is disabled")
 
     return _write_local_stream(bucket_name, key, fileobj)
@@ -605,6 +656,7 @@ def upload_bytes(
     data: bytes,
     content_type: Optional[str] = None,
     allow_fallback: bool = False,  # Changed default to False - GCS is required
+    force_gcs: bool = False,  # Force GCS even if STORAGE_BACKEND=r2 (for intermediate files)
 ) -> str:
     """Upload raw bytes to GCS, with optional local development fallback.
     
@@ -615,6 +667,8 @@ def upload_bytes(
         content_type: MIME type for the object
         allow_fallback: If False, raise exception instead of falling back to local storage.
                        Set to False for production-critical uploads that MUST be in GCS.
+        force_gcs: If True, force GCS client initialization even if STORAGE_BACKEND=r2.
+                   Use this for intermediate file uploads that must go to GCS.
     
     Returns:
         GCS URL (gs://...) or local path if fallback is allowed and triggered
@@ -623,7 +677,7 @@ def upload_bytes(
         RuntimeError: If GCS upload fails and allow_fallback=False
     """
 
-    client = _get_gcs_client()
+    client = _get_gcs_client(force=force_gcs)
     if client:
         try:
             bucket = client.bucket(bucket_name)
@@ -633,6 +687,14 @@ def upload_bytes(
             return f"gs://{bucket_name}/{key}"
         except Exception as exc:
             if not allow_fallback or not _should_fallback(bucket_name, exc):
+                if force_gcs:
+                    raise RuntimeError(
+                        f"GCS upload failed for gs://{bucket_name}/{key}: {exc}. "
+                        "Intermediate files must be uploaded to GCS. "
+                        "Please configure GCS credentials by setting GOOGLE_APPLICATION_CREDENTIALS "
+                        "environment variable pointing to a service account key file, "
+                        "or ensure Application Default Credentials are configured."
+                    ) from exc
                 raise RuntimeError(f"GCS upload failed for gs://{bucket_name}/{key}: {exc}") from exc
             logger.warning(
                 "GCS upload failed for gs://%s/%s: %s -- writing to local media",
@@ -641,6 +703,15 @@ def upload_bytes(
                 exc,
             )
     elif not allow_fallback or not _should_fallback(bucket_name):
+        if force_gcs:
+            raise RuntimeError(
+                "GCS client unavailable and fallback is disabled. "
+                "Intermediate files must be uploaded to GCS. "
+                "Please configure GCS credentials by setting GOOGLE_APPLICATION_CREDENTIALS "
+                "environment variable pointing to a service account key file, "
+                "or ensure Application Default Credentials are configured. "
+                "See https://cloud.google.com/docs/authentication/application-default-credentials"
+            )
         raise RuntimeError("GCS client unavailable and fallback is disabled")
 
     return _write_local_bytes(bucket_name, key, data)

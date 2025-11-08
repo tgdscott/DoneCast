@@ -135,7 +135,10 @@ async def upload_media_files(
 		        category.value, safe_filename, bytes_written, gcs_bucket)
 		
 		try:
-			from infrastructure import storage
+			# **CRITICAL**: Intermediate files (uploads) ALWAYS go to GCS, not R2
+			# R2 is only for final files (assembled episodes)
+			# This ensures worker servers can download intermediate files for processing
+			from infrastructure import gcs
 			# Determine storage key based on category
 			if category == MediaCategory.main_content:
 				# Main content goes to media_uploads for worker access
@@ -144,9 +147,8 @@ async def upload_media_files(
 				# Other categories go to media/{category}
 				storage_key = f"{current_user.id.hex}/media/{category.value}/{safe_filename}"
 			
-			storage_backend = os.getenv("STORAGE_BACKEND", "gcs")
-			log.info("[upload.storage] Uploading %s to %s bucket %s, key: %s", 
-			        category.value, storage_backend, gcs_bucket, storage_key)
+			log.info("[upload.storage] Uploading %s to GCS bucket %s, key: %s", 
+			        category.value, gcs_bucket, storage_key)
 			
 			if bytes_written >= max_bytes:
 				# Check if there's more data
@@ -154,45 +156,46 @@ async def upload_media_files(
 				if remaining:
 					raise HTTPException(status_code=413, detail=f"File exceeds maximum size of {max_bytes / MB:.1f} MB")
 			
-			# Upload directly to GCS from memory - NO local file write
-			# CRITICAL: allow_fallback=False to ensure files are ALWAYS uploaded to cloud storage
+			# Upload directly to GCS from memory - NO local file write, NO R2
+			# CRITICAL: allow_fallback=False to ensure files are ALWAYS uploaded to GCS
 			from io import BytesIO
 			file_stream = BytesIO(file_content)
-			storage_url = storage.upload_fileobj(
+			storage_url = gcs.upload_fileobj(
 				gcs_bucket,
 				storage_key,
 				file_stream,
 				content_type=file.content_type or ("audio/mpeg" if category != MediaCategory.podcast_cover and category != MediaCategory.episode_cover else "image/jpeg"),
-				allow_fallback=False  # Require cloud storage - no local fallback
+				allow_fallback=False,  # Require GCS - no local fallback
+				force_gcs=True  # Force GCS even if STORAGE_BACKEND=r2 (intermediate files must go to GCS)
 			)
 			
-			# Store storage URL instead of local filename for persistence
-			# URL format depends on backend: gs://bucket/key (GCS) or https://bucket.r2.cloudflarestorage.com/key (R2)
+			# Store GCS URL - intermediate files always go to GCS (not R2)
+			# URL format: gs://bucket/key
 			if not storage_url:
-				log.error("[upload.storage] CRITICAL: Upload returned None for %s - this should never happen with allow_fallback=False", category.value)
+				log.error("[upload.storage] CRITICAL: GCS upload returned None for %s - this should never happen with allow_fallback=False", category.value)
 				raise HTTPException(
 					status_code=500,
-					detail=f"Failed to upload {category.value} to cloud storage - upload returned None"
+					detail=f"Failed to upload {category.value} to GCS - upload returned None"
 				)
-			elif storage_url.startswith("gs://") or storage_url.startswith("http"):
+			elif storage_url.startswith("gs://"):
 				safe_filename = storage_url
-				log.info("[upload.storage] SUCCESS: %s uploaded to cloud storage: %s", category.value, storage_url)
+				log.info("[upload.storage] SUCCESS: %s uploaded to GCS: %s", category.value, storage_url)
 				log.info("[upload.storage] MediaItem will be saved with filename='%s'", safe_filename)
 			else:
-				# Upload returned a local path (should not happen with allow_fallback=False)
-				log.error("[upload.storage] CRITICAL: Upload returned local path instead of cloud URL: %s", storage_url)
-				log.error("[upload.storage] This indicates a fallback occurred despite allow_fallback=False")
+				# Upload returned a local path or invalid URL (should not happen with allow_fallback=False)
+				log.error("[upload.storage] CRITICAL: GCS upload returned invalid URL: %s", storage_url)
+				log.error("[upload.storage] Expected gs:// URL, but got: %s", storage_url)
 				raise HTTPException(
 					status_code=500,
-					detail=f"Failed to upload {category.value} to cloud storage - upload returned local path: {storage_url}"
+					detail=f"Failed to upload {category.value} to GCS - upload returned invalid URL: {storage_url}"
 				)
 		except HTTPException:
 			raise
 		except Exception as e:
-			log.error("[upload.storage] CRITICAL: Failed to upload %s to storage backend: %s", category.value, e, exc_info=True)
+			log.error("[upload.storage] CRITICAL: Failed to upload %s to GCS: %s", category.value, e, exc_info=True)
 			raise HTTPException(
 				status_code=500,
-				detail=f"Failed to upload {category.value} to cloud storage: {str(e)}"
+				detail=f"Failed to upload {category.value} to GCS: {str(e)}"
 			)
 
                 provided_name = names[i] if i < len(names) else None
@@ -205,16 +208,16 @@ async def upload_media_files(
 
                 friendly_name = provided_name if provided_clean else default_friendly_name
 
-                # Verify safe_filename is a GCS/R2 URL before saving
-                if not (safe_filename.startswith("gs://") or safe_filename.startswith("http")):
-                    log.error("[upload.storage] CRITICAL: safe_filename is not a cloud storage URL: '%s'", safe_filename)
-                    log.error("[upload.storage] This should never happen - upload should have failed or returned a URL")
+                # Verify safe_filename is a GCS URL before saving (intermediate files always go to GCS)
+                if not safe_filename.startswith("gs://"):
+                    log.error("[upload.storage] CRITICAL: safe_filename is not a GCS URL: '%s'", safe_filename)
+                    log.error("[upload.storage] Expected gs:// URL for intermediate file upload")
                     raise HTTPException(
                         status_code=500,
-                        detail=f"Internal error: filename is not a cloud storage URL. This indicates a bug in the upload process."
+                        detail=f"Internal error: filename is not a GCS URL. This indicates a bug in the upload process."
                     )
                 
-                log.info("[upload.storage] Creating MediaItem with filename='%s' (GCS/R2 URL)", safe_filename)
+                log.info("[upload.storage] Creating MediaItem with filename='%s' (GCS URL)", safe_filename)
                 media_item = MediaItem(
                         filename=safe_filename,
                         friendly_name=friendly_name,
@@ -273,12 +276,12 @@ async def upload_media_files(
 		# Verify the filenames were saved correctly
 		for item in created_items:
 			session.refresh(item)
-			log.info("[upload.db] MediaItem saved: id=%s, filename='%s' (starts with gs://: %s, starts with http: %s)", 
+			log.info("[upload.db] MediaItem saved: id=%s, filename='%s' (starts with gs://: %s)", 
 			        item.id, item.filename, 
-			        item.filename.startswith("gs://") if item.filename else False,
-			        item.filename.startswith("http") if item.filename else False)
-			if item.filename and not (item.filename.startswith("gs://") or item.filename.startswith("http")):
-				log.error("[upload.db] CRITICAL: MediaItem filename is not a cloud storage URL: '%s'", item.filename)
+			        item.filename.startswith("gs://") if item.filename else False)
+			if item.filename and not item.filename.startswith("gs://"):
+				log.error("[upload.db] CRITICAL: MediaItem filename is not a GCS URL: '%s'", item.filename)
+				log.error("[upload.db] Expected gs:// URL for intermediate file")
 				log.error("[upload.db] This indicates the database save failed or was rolled back")
 	except Exception as e:
 		log.error("[upload.db] commit failed for %d items in category=%s: %s", len(created_items), category.value, e, exc_info=True)

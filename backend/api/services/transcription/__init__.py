@@ -71,28 +71,57 @@ def get_word_timestamps(filename: str) -> List[Dict[str, Any]]:
         raise NotImplementedError("Only AssemblyAI and Google transcription are supported.")
 
 
-def _is_gcs_path(path: str) -> bool:
-    return isinstance(path, str) and path.startswith("gs://")
+def _is_gcs_url(path: str) -> bool:
+    """Check if path is a GCS URL.
+    
+    Note: Intermediate files (uploads) always go to GCS, not R2.
+    R2 is only for final files (assembled episodes).
+    """
+    if not isinstance(path, str):
+        return False
+    return path.startswith("gs://")
 
 
 def _download_gcs_to_media(gcs_uri: str) -> str:
-    """Download ``gs://bucket/key`` to ``MEDIA_DIR`` and return the local filename."""
-
+    """Download from GCS to MEDIA_DIR and return the local filename.
+    
+    Supports:
+    - GCS: gs://bucket/key
+    
+    Note: Intermediate files (uploads) are always in GCS, so we only need to handle GCS URLs.
+    """
+    logging.info("[transcription] Downloading from GCS: %s", gcs_uri)
+    
+    if not gcs_uri.startswith("gs://"):
+        raise ValueError(f"Expected GCS URL (gs://...), got: {gcs_uri}")
+    
+    # Extract bucket and key from GCS URL
+    without_scheme = gcs_uri[len("gs://"):]
+    parts = without_scheme.split("/", 1)
+    if len(parts) != 2:
+        raise ValueError(f"Invalid GCS URI format: {gcs_uri}")
+    
+    bucket_name, key = parts
+    
+    # Download from GCS directly (bypass storage abstraction to ensure GCS)
     try:
-        from google.cloud import storage  # type: ignore - optional dependency in tests
-    except Exception as exc:  # pragma: no cover - optional dependency missing in tests
-        raise RuntimeError("google-cloud-storage not installed") from exc
-
-    without_scheme = gcs_uri[len("gs://") :]
-    bucket_name, key = without_scheme.split("/", 1)
-    dst_name = os.path.basename(key) or "audio"
-    dst_path = MEDIA_DIR / dst_name
-    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-    client = storage.Client()
-    bucket = client.bucket(bucket_name)
-    blob = bucket.blob(key)
-    blob.download_to_filename(str(dst_path))
-    return dst_name
+        from google.cloud import storage
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(key)
+        
+        # Download to MEDIA_DIR
+        dst_name = os.path.basename(key) or "audio"
+        dst_path = MEDIA_DIR / dst_name
+        MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+        blob.download_to_filename(str(dst_path))
+        
+        file_size = dst_path.stat().st_size
+        logging.info("[transcription] Downloaded %d bytes from GCS to %s", file_size, dst_path)
+        return dst_name
+    except Exception as e:
+        logging.error("[transcription] Failed to download from GCS %s: %s", gcs_uri, e, exc_info=True)
+        raise FileNotFoundError(f"Failed to download from GCS: {gcs_uri}") from e
 
 
 def _store_media_transcript_metadata(
@@ -380,11 +409,16 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
             if user:
                 # Get audio duration
                 try:
-                    if _is_gcs_path(filename):
+                    if _is_gcs_url(filename):
+                        # Download from GCS if needed (intermediate files are always in GCS)
                         local_filename = _download_gcs_to_media(filename)
                         audio_path = MEDIA_DIR / local_filename
                     else:
+                        # Local file path
                         audio_path = MEDIA_DIR / filename
+                    
+                    if not audio_path.exists():
+                        raise FileNotFoundError(f"Audio file not found: {audio_path}")
                     
                     audio = AudioSegment.from_file(str(audio_path))
                     duration_minutes = len(audio) / 1000 / 60
@@ -534,12 +568,13 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
     local_name = filename
     delete_after = False
     try:
-        if _is_gcs_path(filename):
+        if _is_gcs_url(filename):
             try:
                 local_name = _download_gcs_to_media(filename)
                 delete_after = True
+                logging.info("[transcription] Downloaded GCS file to local: %s -> %s", filename, local_name)
             except Exception as exc:  # pragma: no cover - network dependent
-                logging.error("[transcription] GCS download failed for %s: %s", filename, exc)
+                logging.error("[transcription] GCS download failed for %s: %s", filename, exc, exc_info=True)
                 raise
 
         # Respect global kill-switch if set to falsey values.
@@ -580,7 +615,7 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
             key = None
             try:
                 bucket = _resolve_transcripts_bucket()
-                from api.infrastructure import storage  # type: ignore
+                from infrastructure import storage  # type: ignore
 
                 key = f"transcripts/{safe_stem}.json"
                 storage_url = storage.upload_bytes(

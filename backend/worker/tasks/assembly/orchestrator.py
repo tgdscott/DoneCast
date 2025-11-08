@@ -492,8 +492,15 @@ def _finalize_episode(
         from worker.tasks.assembly import chunked_processor
         
         # Find the main audio file path
-        audio_name = episode.working_audio_name or main_content_filename
-        main_audio_path = MEDIA_DIR / audio_name if not PathLib(audio_name).is_absolute() else PathLib(audio_name)
+        # Use the resolved source_audio_path from media_context if available (full path to downloaded file)
+        if media_context.source_audio_path and media_context.source_audio_path.exists():
+            main_audio_path = media_context.source_audio_path
+            logging.info("[assemble] Using resolved source_audio_path for chunking check: %s", main_audio_path)
+        else:
+            # Fallback to working_audio_name or main_content_filename
+            audio_name = episode.working_audio_name or main_content_filename
+            main_audio_path = MEDIA_DIR / audio_name if not PathLib(audio_name).is_absolute() else PathLib(audio_name)
+            logging.info("[assemble] Using fallback path for chunking check: %s", main_audio_path)
         
         use_chunking = chunked_processor.should_use_chunking(main_audio_path)
     
@@ -675,13 +682,48 @@ def _finalize_episode(
             use_chunking = False
     
     # Determine which audio file to use for mixing
-    # Priority: Auphonic processed > chunked reassembled > original
+    # Priority: Auphonic processed > chunked reassembled > resolved source path > working_audio_name > main_content_filename
     if use_auphonic and auphonic_processed_path:
         audio_input_path = str(auphonic_processed_path)
     elif use_chunking:
         audio_input_path = main_content_filename  # This is the reassembled path
     else:
-        audio_input_path = episode.working_audio_name or main_content_filename
+        # Use the resolved source_audio_path from media_context if available (full path to downloaded file)
+        # This ensures the audio processor can find the file that was downloaded from GCS
+        if media_context.source_audio_path:
+            source_path = Path(str(media_context.source_audio_path))
+            # Verify the file exists and use the absolute path
+            if source_path.exists():
+                audio_input_path = str(source_path.absolute())
+                logging.info("[assemble] ✅ Using resolved source_audio_path: %s (exists: True, size: %d bytes)", 
+                           audio_input_path, source_path.stat().st_size)
+            else:
+                # File doesn't exist at resolved path - try to find it in MEDIA_DIR or other locations
+                logging.warning("[assemble] ⚠️ Resolved source_audio_path doesn't exist: %s", source_path)
+                # Try MEDIA_DIR with just the filename
+                filename_only = source_path.name
+                media_dir_path = MEDIA_DIR / filename_only
+                project_media_path = PROJECT_ROOT / "media_uploads" / filename_only
+                
+                # Check multiple possible locations
+                if media_dir_path.exists():
+                    audio_input_path = str(media_dir_path.absolute())
+                    logging.info("[assemble] ✅ Found file in MEDIA_DIR: %s", audio_input_path)
+                elif project_media_path.exists():
+                    audio_input_path = str(project_media_path.absolute())
+                    logging.info("[assemble] ✅ Found file in PROJECT_ROOT/media_uploads: %s", audio_input_path)
+                else:
+                    # Last resort: use the resolved path anyway (will fail with clear error)
+                    audio_input_path = str(source_path.absolute())
+                    logging.error("[assemble] ❌ File not found at any location:")
+                    logging.error("[assemble]   - Resolved path: %s", source_path)
+                    logging.error("[assemble]   - MEDIA_DIR: %s", media_dir_path)
+                    logging.error("[assemble]   - PROJECT_ROOT/media_uploads: %s", project_media_path)
+        else:
+            # Fallback to working_audio_name or main_content_filename
+            # If working_audio_name is just a filename, it should be relative to MEDIA_DIR
+            audio_input_path = episode.working_audio_name or main_content_filename
+            logging.info("[assemble] Using fallback audio_input_path: %s", audio_input_path)
     
     # Prepare cleanup options - respect existing cleanup_opts from Auphonic if set
     # Otherwise, skip all cleaning if chunking was used, or use normal options
