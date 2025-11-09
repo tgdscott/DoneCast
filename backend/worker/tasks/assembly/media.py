@@ -435,6 +435,80 @@ def resolve_media_context(
                 logging.info(
                     "[assemble] resolved local cover image: %s", cover_image_path
                 )
+            else:
+                # If not found via standard resolution, try database lookup (like template segments)
+                # Cover images might be stored as MediaItems with episode_cover category
+                logging.info("[assemble] Cover image not found locally, trying database lookup for: %s", cover_image_path)
+                try:
+                    from api.models.podcast import MediaItem, MediaCategory
+                    
+                    # Try to find MediaItem by filename or basename
+                    cover_filename = str(cover_image_path)
+                    cover_basename = Path(cover_filename).name
+                    
+                    # Search for MediaItem with episode_cover category
+                    query = select(MediaItem).where(MediaItem.user_id == UUID(user_id))
+                    query = query.where(MediaItem.category == MediaCategory.episode_cover)
+                    all_cover_items = list(session.exec(query).all())
+                    
+                    logging.info("[assemble] Found %d episode_cover MediaItems for user %s", len(all_cover_items), user_id)
+                    
+                    # Try multiple matching strategies
+                    media_item = None
+                    for item in all_cover_items:
+                        filename = str(item.filename or "")
+                        if not filename:
+                            continue
+                        
+                        # Strategy 1: Exact match
+                        if filename == cover_filename or filename == cover_basename:
+                            media_item = item
+                            logging.info("[assemble] Matched cover MediaItem by exact filename: '%s'", filename)
+                            break
+                        
+                        # Strategy 2: Filename ends with basename (for GCS URLs)
+                        if filename.endswith(cover_basename):
+                            media_item = item
+                            logging.info("[assemble] Matched cover MediaItem by ending: '%s' ends with '%s'", filename, cover_basename)
+                            break
+                        
+                        # Strategy 3: Filename contains cover_filename
+                        if cover_filename in filename or cover_basename in filename:
+                            media_item = item
+                            logging.info("[assemble] Matched cover MediaItem by partial: '%s' in '%s'", cover_filename, filename)
+                            break
+                    
+                    if media_item and media_item.filename:
+                        resolved_cover_url = str(media_item.filename)
+                        logging.info("[assemble] Found cover MediaItem id=%s, filename='%s'", media_item.id, resolved_cover_url)
+                        
+                        # If MediaItem has GCS URL, download it
+                        if resolved_cover_url.startswith("gs://"):
+                            try:
+                                local_cover = _resolve_image_to_local(resolved_cover_url)
+                                if local_cover and local_cover.exists():
+                                    cover_image_path = str(local_cover)
+                                    logging.info("[assemble] ✅ Downloaded cover from GCS via MediaItem: %s -> %s", resolved_cover_url, cover_image_path)
+                                else:
+                                    logging.warning("[assemble] Failed to download cover from GCS URL: %s", resolved_cover_url)
+                            except Exception as gcs_err:
+                                logging.error("[assemble] Failed to download cover from GCS: %s", gcs_err, exc_info=True)
+                        elif resolved_cover_url.startswith("http"):
+                            # R2 URL - try to download it (though intermediate files should be in GCS)
+                            logging.warning("[assemble] Cover MediaItem has R2 URL (should be GCS): %s", resolved_cover_url)
+                            try:
+                                local_cover = _resolve_image_to_local(resolved_cover_url)
+                                if local_cover and local_cover.exists():
+                                    cover_image_path = str(local_cover)
+                                    logging.info("[assemble] Downloaded cover from R2 URL: %s", resolved_cover_url)
+                            except Exception as r2_err:
+                                logging.error("[assemble] Failed to download cover from R2: %s", r2_err, exc_info=True)
+                        else:
+                            logging.warning("[assemble] Cover MediaItem filename is not a GCS/R2 URL: '%s'", resolved_cover_url)
+                    else:
+                        logging.warning("[assemble] No cover MediaItem found for filename: %s", cover_image_path)
+                except Exception as db_err:
+                    logging.warning("[assemble] Failed to lookup cover MediaItem: %s", db_err, exc_info=True)
         except Exception:
             logging.warning(
                 "[assemble] Failed to resolve local cover image; continuing without embed",

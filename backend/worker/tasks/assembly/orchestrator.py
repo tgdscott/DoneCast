@@ -1065,28 +1065,38 @@ def _finalize_episode(
                     media_context.cover_image_path = str(cover_path)
                 episode.cover_path = cover_name
                 
-                # Upload cover to GCS (REQUIRED - ephemeral storage cannot rely on local files)
+                # Upload cover to R2 (FINAL FILE - covers are not intermediate, they're final assets)
+                # Covers should go directly to R2 since they're not part of the assembly process, just metadata
                 user_id = str(episode.user_id)
                 episode_id = str(episode.id)
-                gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
-                gcs_cover_key = f"{user_id}/episodes/{episode_id}/cover/{cover_name}"
+                r2_bucket = os.getenv("R2_BUCKET", "ppp-media").strip()
+                r2_cover_key = f"{user_id}/episodes/{episode_id}/cover/{cover_name}"
                 
-                with open(cover_path, "rb") as f:
-                    cover_ext = cover_name.lower().split(".")[-1]
-                    content_type = f"image/{cover_ext}" if cover_ext in ("jpg", "jpeg", "png", "gif") else "image/jpeg"
-                    gcs_cover_url = storage.upload_fileobj(gcs_bucket, gcs_cover_key, f, content_type=content_type)  # type: ignore[attr-defined]
-                
-                # Validate URL format (GCS: gs://, R2: https://)
-                cover_url_str = str(gcs_cover_url) if gcs_cover_url else ""
-                if not cover_url_str or not (cover_url_str.startswith("gs://") or cover_url_str.startswith("https://")):
-                    raise RuntimeError(f"[assemble] CRITICAL: Cover cloud storage upload failed - returned invalid URL: {gcs_cover_url}")
-                
-                episode.gcs_cover_path = gcs_cover_url
-                logging.info("[assemble] ✅ Cover uploaded to cloud storage: %s", gcs_cover_url)
+                try:
+                    from infrastructure import r2 as r2_storage
+                    with open(cover_path, "rb") as f:
+                        cover_ext = cover_name.lower().split(".")[-1]
+                        content_type = f"image/{cover_ext}" if cover_ext in ("jpg", "jpeg", "png", "gif", "webp") else "image/jpeg"
+                        r2_cover_url = r2_storage.upload_fileobj(r2_bucket, r2_cover_key, f, content_type=content_type)
+                        
+                        # Validate R2 URL format (should be https://)
+                        cover_url_str = str(r2_cover_url) if r2_cover_url else ""
+                        if not cover_url_str or not cover_url_str.startswith("https://"):
+                            raise RuntimeError(f"[assemble] CRITICAL: Cover R2 upload failed - returned invalid URL: {r2_cover_url}")
+                        
+                        # Store R2 URL in episode (covers go to R2, not GCS)
+                        episode.gcs_cover_path = r2_cover_url  # Note: field name is gcs_cover_path but it stores R2 URL for final files
+                        logging.info("[assemble] ✅ Cover uploaded to R2 (final storage): %s", r2_cover_url)
+                except ImportError:
+                    logging.error("[assemble] ❌ R2 storage not available - cannot upload cover to R2")
+                    raise RuntimeError("[assemble] R2 storage is required for final cover upload but r2 module is not available")
+                except Exception as r2_err:
+                    logging.error("[assemble] ❌ Failed to upload cover to R2: %s", r2_err, exc_info=True)
+                    raise RuntimeError(f"[assemble] Failed to upload cover to R2: {r2_err}") from r2_err
                 
                 # Mirror to local media directory for dev environment playback
                 try:
-                    local_cover_mirror = MEDIA_DIR / gcs_cover_key
+                    local_cover_mirror = MEDIA_DIR / r2_cover_key
                     local_cover_mirror.parent.mkdir(parents=True, exist_ok=True)
                     if not local_cover_mirror.exists():
                         shutil.copy2(cover_path, local_cover_mirror)
