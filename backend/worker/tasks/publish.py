@@ -121,8 +121,33 @@ def publish_episode_to_spreaker_task(
             or ""
         )
 
-        audio_path = str(episode.final_audio_path)
-        if audio_path and not os.path.isabs(audio_path):
+        audio_path = str(episode.final_audio_path or "")
+        
+        # Check if we have an R2 URL stored (final files are in R2)
+        r2_audio_url = getattr(episode, 'gcs_audio_path', None) or getattr(episode, 'r2_audio_path', None)
+        if r2_audio_url and (r2_audio_url.startswith("https://") or r2_audio_url.startswith("http://")):
+            # Audio is in R2 - download it for publishing
+            logging.info("[publish] Audio is in R2, downloading: %s", r2_audio_url)
+            try:
+                import requests
+                import tempfile
+                resp = requests.get(r2_audio_url, timeout=300)  # 5 minute timeout for large files
+                resp.raise_for_status()
+                
+                # Save to temp file
+                temp_fd, temp_path = tempfile.mkstemp(suffix=".mp3")
+                os.close(temp_fd)
+                with open(temp_path, "wb") as f:
+                    f.write(resp.content)
+                
+                audio_path = temp_path
+                logging.info("[publish] Downloaded audio from R2: %s (%d bytes)", r2_audio_url, os.path.getsize(temp_path))
+            except Exception as r2_err:
+                logging.error("[publish] Failed to download audio from R2: %s", r2_err, exc_info=True)
+                raise RuntimeError(f"Failed to download audio from R2 for publishing: {r2_err}") from r2_err
+        
+        # Try to resolve local path if we have a filename
+        if audio_path and not os.path.isabs(audio_path) and not audio_path.startswith("http"):
             candidate = (FINAL_DIR / os.path.basename(audio_path)).resolve()
             if candidate.is_file():
                 audio_path = str(candidate)
@@ -130,13 +155,19 @@ def publish_episode_to_spreaker_task(
                 alt = (MEDIA_DIR / os.path.basename(audio_path)).resolve()
                 if alt.is_file():
                     audio_path = str(alt)
-        if not os.path.isfile(audio_path):
+        
+        # Verify file exists
+        if not os.path.isfile(audio_path) and not audio_path.startswith("http"):
             # Final fallback: check media mirror for absolute paths as well
             alt = os.path.join(str(MEDIA_DIR), os.path.basename(audio_path))
             if os.path.isfile(alt):
                 audio_path = alt
             else:
-                raise RuntimeError(f"Final audio file not found for publishing: {audio_path}")
+                # Last resort: check if we can download from R2 using the filename
+                if not r2_audio_url:
+                    raise RuntimeError(f"Final audio file not found for publishing: {audio_path}")
+                # If we have r2_audio_url but download failed above, re-raise that error
+                raise RuntimeError(f"Final audio file not found for publishing: {audio_path} (and R2 download failed)")
 
         # Ensure the episode keeps a stable basename so downstream tooling finds the asset
         try:
