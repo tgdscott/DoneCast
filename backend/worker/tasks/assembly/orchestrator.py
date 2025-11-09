@@ -1115,6 +1115,9 @@ def _finalize_episode(
                 )
 
     # CRITICAL: This commit marks episode as "processed" - MUST succeed or episode stuck forever
+    # Verify cover image is set before committing
+    logging.info("[assemble] 🔍 Pre-commit check: episode.gcs_cover_path='%s', episode.cover_path='%s'", 
+                episode.gcs_cover_path, episode.cover_path)
     session.add(episode)
     if not _commit_with_retry(session, max_retries=5, backoff_seconds=2.0):
         logging.error(
@@ -1132,6 +1135,14 @@ def _finalize_episode(
             session.commit()  # One final try without retry
         except Exception:
             logging.exception("[assemble] Even error status commit failed - episode truly stuck")
+    
+    # Refresh episode to verify values were saved (for debugging)
+    try:
+        session.refresh(episode)
+        logging.info("[assemble] ✅ Post-commit verification: episode.gcs_cover_path='%s', episode.cover_path='%s', episode.status='%s'", 
+                    episode.gcs_cover_path, episode.cover_path, episode.status)
+    except Exception as refresh_err:
+        logging.warning("[assemble] Failed to refresh episode after commit: %s", refresh_err)
     
     logging.info("[assemble] done. final=%s status_committed=True", final_path)
 
