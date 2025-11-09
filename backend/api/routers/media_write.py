@@ -121,6 +121,32 @@ async def upload_media_files(
 
 		max_bytes = CATEGORY_SIZE_LIMITS.get(category, 50 * MB)
 		
+		# Check file size early to provide helpful error messages
+		# Cloud Run has a 32MB request body limit, so files >25MB may fail with multipart encoding overhead
+		CLOUD_RUN_LIMIT = 32 * MB
+		WARNING_THRESHOLD = 25 * MB  # Warn users about files that may hit the limit
+		
+		# Try to get file size without reading the entire file
+		file_size = None
+		try:
+			# Some upload implementations expose file size
+			if hasattr(file, 'size') and file.size:
+				file_size = file.size
+			elif hasattr(file.file, 'seek') and hasattr(file.file, 'tell'):
+				# Try to get size by seeking to end
+				current_pos = file.file.tell()
+				file.file.seek(0, 2)  # Seek to end
+				file_size = file.file.tell()
+				file.file.seek(current_pos, 0)  # Seek back
+		except Exception:
+			pass  # Size unknown, will check after reading
+		
+		# Warn if file is large enough to potentially hit Cloud Run's limit
+		if file_size and file_size > WARNING_THRESHOLD:
+			log.warning("[upload.request] Large file detected: %s bytes (%.1f MB). May hit Cloud Run's 32MB limit with multipart encoding.", 
+			           file_size, file_size / MB)
+			# Note: We can't prevent the upload here, but we'll provide a better error message if it fails
+		
 		# **CRITICAL**: ALL files MUST be uploaded to GCS - no local storage fallback
 		# This ensures files are accessible to worker servers and production environments
 		gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
@@ -128,8 +154,22 @@ async def upload_media_files(
 			raise HTTPException(status_code=500, detail="GCS_BUCKET environment variable not set - cloud storage is required")
 		
 		# Read file content and get size
-		file_content = file.file.read(max_bytes)
-		bytes_written = len(file_content)
+		# Note: For files >25MB, this may fail due to Cloud Run's 32MB request body limit
+		try:
+			file_content = file.file.read(max_bytes)
+			bytes_written = len(file_content)
+		except Exception as read_err:
+			# If reading fails, it might be due to Cloud Run's request size limit
+			error_msg = str(read_err).lower()
+			if "413" in error_msg or "too large" in error_msg or "request entity too large" in error_msg:
+				log.error("[upload.request] File upload failed due to size limit: %s", file.filename)
+				raise HTTPException(
+					status_code=413,
+					detail=f"File is too large for standard upload (Cloud Run limit: 32MB). Files larger than 25MB should use direct upload. Please try uploading again - the system will automatically use direct upload for large files."
+				)
+			else:
+				# Re-raise other errors
+				raise
 		
 		log.info("[upload.storage] Starting upload for %s: filename=%s, size=%d bytes, bucket=%s", 
 		        category.value, safe_filename, bytes_written, gcs_bucket)

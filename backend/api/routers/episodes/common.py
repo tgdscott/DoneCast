@@ -51,15 +51,31 @@ def _cover_url_for(path: Optional[str], *, gcs_path: Optional[str] = None) -> Op
             # Fall through to path-based resolution
     
     # Priority 1b: R2 URL (https://) - use directly (R2 URLs are already public/signed)
+    # BUT reject Spreaker URLs (push-only relationship)
     if gcs_path and str(gcs_path).lower().startswith(("http://", "https://")):
+        gcs_path_str = str(gcs_path).lower()
+        # CRITICAL: Reject Spreaker URLs - we have a push-only relationship
+        if "spreaker.com" in gcs_path_str or "cdn.spreaker.com" in gcs_path_str:
+            from api.core.logging import get_logger
+            logger = get_logger("api.episodes.common")
+            logger.warning("Rejecting Spreaker URL in gcs_path: %s", str(gcs_path)[:100])
+            return None
         # R2 URLs stored in gcs_cover_path are already public URLs, use them directly
         return str(gcs_path)
     
-    # Priority 2: Remote URL (Spreaker hosted)
+    # Priority 2: Remote URL - but REJECT Spreaker URLs (push-only relationship)
     if not path:
         return None
     p = str(path)
     if p.lower().startswith(("http://", "https://")):
+        # CRITICAL: Reject Spreaker URLs - we have a push-only relationship
+        # Only allow R2 URLs (which we control) or other non-Spreaker URLs
+        if "spreaker.com" in p.lower() or "cdn.spreaker.com" in p.lower():
+            from api.core.logging import get_logger
+            logger = get_logger("api.episodes.common")
+            logger.warning("Rejecting Spreaker URL in _cover_url_for: %s", p[:100])
+            return None
+        # Allow R2 URLs and other non-Spreaker URLs
         return p
     
     # Priority 3: Local file (only if exists)
@@ -326,15 +342,15 @@ def compute_cover_info(episode: Any, *, now: Optional[datetime] = None) -> dict[
         else:
             logger.warning("[compute_cover_info] episode_id=%s ❌ _cover_url_for returned None for cover_path: %s", episode_id, cover_path)
     
-    # ALWAYS fall back to Spreaker remote_cover_url if nothing else works
+    # CRITICAL: Push-only relationship with Spreaker - NEVER use Spreaker URLs
+    # DO NOT fall back to remote_cover_url - it contains Spreaker URLs which we never serve
+    # Only use our own storage (gcs_cover_path or cover_path)
     if not cover_url and remote_cover_url:
-        logger.info("[compute_cover_info] episode_id=%s trying remote_cover_url: %s", episode_id, remote_cover_url)
-        cover_url = _cover_url_for(remote_cover_url)
-        if cover_url:
-            cover_source = "remote"
-            logger.info("[compute_cover_info] episode_id=%s ✅ resolved cover_url from remote_cover_url: %s", episode_id, cover_url)
-        else:
-            logger.warning("[compute_cover_info] episode_id=%s ❌ _cover_url_for returned None for remote_cover_url: %s", episode_id, remote_cover_url)
+        logger.warning(
+            "[compute_cover_info] episode_id=%s ⚠️ Ignoring remote_cover_url (contains Spreaker URLs - push-only relationship): %s",
+            episode_id,
+            remote_cover_url[:100] if remote_cover_url else None
+        )
     
     if not cover_url:
         logger.warning(

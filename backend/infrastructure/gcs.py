@@ -57,17 +57,37 @@ def _get_signing_credentials():
     signer_key_json = os.getenv("GCS_SIGNER_KEY_JSON")
     if signer_key_json:
         try:
-            # If it starts with sm://, Cloud Run will have already resolved it to the actual JSON content
-            # Otherwise, treat it as inline JSON
-            key_dict = json.loads(signer_key_json)
-            credentials = service_account.Credentials.from_service_account_info(key_dict)
-            _SIGNING_CREDENTIALS = credentials
-            logger.info("Loaded signing credentials from GCS_SIGNER_KEY_JSON env var")
-            return credentials
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse GCS_SIGNER_KEY_JSON as JSON: {e}")
+            # Cloud Run resolves secrets like "sm://project/secret" to the actual secret value
+            # So signer_key_json should be the actual JSON content, not a path
+            # However, if it's a path to a file, try to read it
+            if os.path.exists(signer_key_json):
+                logger.info(f"GCS_SIGNER_KEY_JSON appears to be a file path: {signer_key_json}")
+                credentials = service_account.Credentials.from_service_account_file(signer_key_json)
+                _SIGNING_CREDENTIALS = credentials
+                logger.info("Loaded signing credentials from GCS_SIGNER_KEY_JSON file")
+                return credentials
+            
+            # Try to parse as JSON (Cloud Run secret should be JSON content)
+            try:
+                key_dict = json.loads(signer_key_json)
+                credentials = service_account.Credentials.from_service_account_info(key_dict)
+                _SIGNING_CREDENTIALS = credentials
+                logger.info("Loaded signing credentials from GCS_SIGNER_KEY_JSON env var (JSON)")
+                return credentials
+            except json.JSONDecodeError as json_err:
+                # If it's not valid JSON, it might be a base64-encoded string or have extra whitespace
+                logger.warning(f"Failed to parse GCS_SIGNER_KEY_JSON as JSON: {json_err}")
+                # Try stripping whitespace
+                try:
+                    key_dict = json.loads(signer_key_json.strip())
+                    credentials = service_account.Credentials.from_service_account_info(key_dict)
+                    _SIGNING_CREDENTIALS = credentials
+                    logger.info("Loaded signing credentials from GCS_SIGNER_KEY_JSON env var (JSON, stripped)")
+                    return credentials
+                except Exception:
+                    logger.warning(f"GCS_SIGNER_KEY_JSON is set but not valid JSON or file path: {signer_key_json[:100]}...")
         except Exception as e:
-            logger.warning(f"Failed to load signing credentials from GCS_SIGNER_KEY_JSON: {e}")
+            logger.warning(f"Failed to load signing credentials from GCS_SIGNER_KEY_JSON: {e}", exc_info=True)
     
     # Try loading from Secret Manager directly (fallback for Cloud Run only)
     # Skip Secret Manager in local dev to avoid CORS issues with presigned URLs
@@ -269,9 +289,11 @@ def _get_gcs_client(force: bool = False):
         if hasattr(_gcs_credentials, "service_account_email"):
             _signer_email = _gcs_credentials.service_account_email
         logger.info(
-            "GCS client initialized for project %s. Signer: %s",
+            "GCS client initialized for project %s. Signer: %s (force=%s, STORAGE_BACKEND=%s)",
             _gcs_project,
             _signer_email or "N/A (will use key if available)",
+            force,
+            os.getenv("STORAGE_BACKEND", "not set"),
         )
         return _gcs_client
     except DefaultCredentialsError as cred_err:  # type: ignore[unreachable]

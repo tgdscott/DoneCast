@@ -366,32 +366,42 @@ def _generate_podcast_rss(
         if podcast.contact_email:
             ET.SubElement(owner, "itunes:email").text = podcast.contact_email
 
+    # CRITICAL: Push-only relationship with Spreaker - NEVER use Spreaker URLs in RSS feeds
+    # ONLY use cover_path (our own storage) - IGNORE remote_cover_url (contains Spreaker URLs)
     cover_url = None
-    if podcast.remote_cover_url:
-        remote_cover = podcast.remote_cover_url.strip()
-        if _looks_like_gcs_path(remote_cover):
+    if podcast.cover_path:
+        raw_cover = podcast.cover_path.strip()
+        # Only process R2 paths (bucket/key format, r2://, or R2 HTTPS URLs)
+        if _looks_like_r2_path(raw_cover):
+            if raw_cover.startswith("http") and ".r2.cloudflarestorage.com" in raw_cover:
+                # R2 HTTPS URL - resolve to signed URL
+                cover_url = _resolve_storage_asset(
+                    raw_cover,
+                    asset_kind="podcast-cover",
+                    expiration_days=30,
+                )
+            elif not raw_cover.startswith("http"):
+                # R2 path format (r2:// or bucket/key) - resolve to signed URL
+                cover_url = _resolve_storage_asset(
+                    raw_cover,
+                    asset_kind="podcast-cover",
+                    expiration_days=30,
+                )
+        # Reject any HTTP URLs that aren't R2 (likely Spreaker or other external URLs)
+        elif raw_cover.startswith("http"):
             logger.warning(
-                "RSS Feed: Podcast %s remote cover is still on GCS; skipping",
+                "RSS Feed: Podcast %s cover_path contains external URL (not R2); rejecting: %s",
+                podcast.id,
+                raw_cover[:50],
+            )
+            cover_url = None
+        # GCS paths are deprecated (migrated to R2)
+        elif _looks_like_gcs_path(raw_cover):
+            logger.warning(
+                "RSS Feed: Podcast %s cover is still on GCS (should be migrated to R2); skipping",
                 podcast.id,
             )
-        elif _looks_like_r2_path(remote_cover) and not remote_cover.startswith("http"):
-            cover_url = _resolve_storage_asset(
-                remote_cover,
-                asset_kind="podcast-cover",
-                expiration_days=30,
-            )
-        else:
-            cover_url = _ensure_https(remote_cover)
-    elif podcast.cover_path:
-        raw_cover = podcast.cover_path.strip()
-        if _looks_like_r2_path(raw_cover) and not raw_cover.startswith("http"):
-            cover_url = _resolve_storage_asset(
-                raw_cover,
-                asset_kind="podcast-cover",
-                expiration_days=30,
-            )
-        elif raw_cover.startswith("http"):
-            cover_url = _ensure_https(raw_cover)
+    # Explicitly ignore remote_cover_url - it contains Spreaker URLs which we never serve
 
     if cover_url:
         ET.SubElement(channel, "itunes:image", {"href": cover_url})

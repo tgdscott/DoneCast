@@ -178,7 +178,14 @@ export async function uploadMediaDirect({
   let presign;
   let useDirectUpload = true;
 
+  // For files larger than 25MB, prefer direct upload to avoid Cloud Run's 32MB limit
+  // Cloud Run has a hard 32MB request body limit, and multipart encoding adds overhead
+  const FILE_SIZE_MB = file.size / (1024 * 1024);
+  const LARGE_FILE_THRESHOLD_MB = 25;
+  const preferDirectUpload = FILE_SIZE_MB > LARGE_FILE_THRESHOLD_MB;
+  
   // Try presign endpoint - if it returns 501, fall back to standard upload
+  // However, for large files, we should warn the user if direct upload is not available
   try {
     presign = await api.post(`/api/media/upload/${category}/presign`, {
       filename: file.name || 'upload',
@@ -187,6 +194,12 @@ export async function uploadMediaDirect({
   } catch (err) {
     // If presign endpoint returns 501 (Not Implemented), fall back to standard upload
     if (err?.response?.status === 501 || err?.status === 501) {
+      if (preferDirectUpload) {
+        // For large files, direct upload is recommended - warn the user
+        const errorMsg = `Direct upload is not available. Files larger than ${LARGE_FILE_THRESHOLD_MB}MB may fail due to server limits. ` +
+                        `Your file is ${FILE_SIZE_MB.toFixed(1)}MB. Please contact support for assistance with large file uploads.`;
+        throw new Error(errorMsg);
+      }
       useDirectUpload = false;
     } else {
       throw err; // Re-throw other errors

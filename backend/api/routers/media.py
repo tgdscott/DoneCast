@@ -169,9 +169,10 @@ async def upload_media_files(
         
         # **CRITICAL**: ALL files MUST be uploaded to GCS - no local storage fallback
         # This ensures files are accessible to worker servers and production environments
-        gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+        # Use MEDIA_BUCKET (set in production) with fallback to GCS_BUCKET (for compatibility)
+        gcs_bucket = os.getenv("MEDIA_BUCKET") or os.getenv("GCS_BUCKET") or "ppp-media-us-west1"
         if not gcs_bucket:
-            raise HTTPException(status_code=500, detail="GCS_BUCKET environment variable not set - cloud storage is required")
+            raise HTTPException(status_code=500, detail="MEDIA_BUCKET or GCS_BUCKET environment variable not set - cloud storage is required")
         
         # Read file content into memory
         file_content = file.file.read(max_bytes)
@@ -638,60 +639,138 @@ async def presign_upload(
 ):
     """Generate a presigned URL for direct GCS upload.
     
-    Uses service account key from Secret Manager to sign URLs.
-    This bypasses Cloud Run's 32MB request body limit.
+    Uses signed URLs to bypass Cloud Run's 32MB request body limit.
+    Files are uploaded directly to GCS, bypassing the API server.
     """
     import uuid
     from google.cloud import storage
     from datetime import timedelta
     
     # Generate unique object path in user's media directory
+    # IMPORTANT: Match the path structure used by standard upload
+    # main_content goes to media_uploads/, others go to media/{category}/
     user_id = current_user.id.hex
     file_ext = Path(request.filename).suffix.lower()
     unique_name = f"{uuid.uuid4().hex}{file_ext}"
-    object_path = f"{user_id}/{category.value}/{unique_name}"
+    
+    # Use same path structure as standard upload endpoint
+    if category == MediaCategory.main_content:
+        # Main content goes to media_uploads for worker access
+        object_path = f"{user_id}/media_uploads/{unique_name}"
+    else:
+        # Other categories go to media/{category}
+        object_path = f"{user_id}/media/{category.value}/{unique_name}"
     
     # Get GCS bucket name from environment
-    gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+    # Use MEDIA_BUCKET (set in production) with fallback to GCS_BUCKET (for compatibility)
+    gcs_bucket = os.getenv("MEDIA_BUCKET") or os.getenv("GCS_BUCKET") or "ppp-media-us-west1"
     
+    import logging
+    log = logging.getLogger("api.media")
+    
+    log.info(f"Generating upload URL for: gs://{gcs_bucket}/{object_path}")
+    
+    # Generate upload URL for direct GCS upload
+    # Try resumable upload session first (works with ADC, no private key needed)
+    # Then fall back to signed URLs if needed
     try:
-        # Get signing credentials from Secret Manager
-        from infrastructure.gcs import _get_signing_credentials
-        credentials = _get_signing_credentials()
+        log.info("Generating upload URL for direct GCS upload (PUT method)")
         
-        if credentials is None:
+        from google.cloud import storage
+        
+        # Method 1: Try resumable upload session (works with Application Default Credentials)
+        # This is the preferred method as it doesn't require private keys or IAM permissions
+        try:
+            log.info("Attempting to create resumable upload session")
+            client = storage.Client()  # Uses Application Default Credentials
+            bucket = client.bucket(gcs_bucket)
+            blob = bucket.blob(object_path)
+            
+            # Create resumable upload session - this works with ADC
+            upload_url = blob.create_resumable_upload_session(
+                content_type=request.content_type,
+            )
+            
+            if upload_url:
+                log.info(f"Successfully created resumable upload session for {object_path}")
+                return PresignResponse(
+                    upload_url=str(upload_url),
+                    object_path=object_path,
+                    headers={"Content-Type": request.content_type}
+                )
+            else:
+                log.warning("create_resumable_upload_session returned None")
+        except Exception as resumable_err:
+            log.warning(f"Resumable upload session failed: {resumable_err}, trying signed URL fallback")
+            # Fall through to signed URL method
+        
+        # Method 2: Try signed URL generation (requires private key or IAM permissions)
+        from infrastructure import gcs as gcs_module
+        
+        log.info("Attempting to generate signed URL (requires credentials)")
+        try:
+            upload_url = gcs_module._generate_signed_url(
+                bucket_name=gcs_bucket,
+                key=object_path,
+                expires=timedelta(hours=1),
+                method="PUT",
+                content_type=request.content_type,
+            )
+        except RuntimeError as runtime_err:
+            # IAM signing failed - log and re-raise as 501
+            log.error(f"Signed URL generation failed (likely IAM permissions issue): {runtime_err}")
             raise HTTPException(
                 status_code=501,
-                detail="Direct upload not available, use standard upload"
+                detail="Direct upload not available (IAM permissions required). Files larger than 25MB may fail. Please contact support."
+            )
+        except Exception as sign_err:
+            # Other signing errors
+            log.error(f"Signed URL generation failed: {sign_err}", exc_info=True)
+            raise
+        
+        # Validate the URL was generated
+        if not upload_url:
+            log.error("Signed URL generation returned None - this indicates a configuration issue")
+            raise HTTPException(
+                status_code=501,
+                detail="Direct upload not available (GCS client or credentials issue). Files larger than 25MB may fail. Please contact support."
             )
         
-        # Create storage client with signing credentials
-        client = storage.Client(credentials=credentials)
-        bucket = client.bucket(gcs_bucket)
-        blob = bucket.blob(object_path)
+        if not isinstance(upload_url, str) or len(upload_url.strip()) == 0:
+            log.error(f"Signed URL generation returned invalid value: {upload_url}")
+            raise ValueError("Signed URL generation returned empty or invalid value")
         
-        # Generate signed URL for PUT operation
-        url = blob.generate_signed_url(
-            version="v4",
-            expiration=timedelta(hours=1),
-            method="PUT",
-            content_type=request.content_type,
-        )
+        log.info(f"Successfully generated signed URL for {object_path} (length: {len(upload_url)})")
         
         return PresignResponse(
-            upload_url=url,
+            upload_url=upload_url,
             object_path=object_path,
             headers={"Content-Type": request.content_type}
         )
-    except HTTPException:
+        
+    except HTTPException as http_err:
+        # Re-raise HTTP exceptions as-is (these are intentional)
         raise
-    except Exception as e:
-        import logging
-        logging.getLogger("api.media").error(f"Failed to generate signed URL: {e}", exc_info=True)
-        # Fall back to 501 so frontend uses standard upload
+    except Exception as url_err:
+        # Catch ALL other errors - log them and return 501 so frontend falls back
+        import traceback
+        error_trace = traceback.format_exc()
+        error_msg = str(url_err).lower()
+        error_type = type(url_err).__name__
+        
+        # Log the full error for debugging
+        log.error(
+            f"Failed to generate upload URL for {object_path}: {error_type}: {url_err}\n"
+            f"Traceback: {error_trace}"
+        )
+        
+        # For ANY error, return 501 (Not Implemented) so frontend falls back to standard upload
+        # This ensures uploads don't completely fail - they'll just use the standard endpoint
+        # which works for files <25MB (or might work for larger files if Cloud Run allows it)
         raise HTTPException(
             status_code=501,
-            detail="Direct upload not available, use standard upload"
+            detail=f"Direct upload temporarily unavailable. Falling back to standard upload. "
+                   f"(Error: {error_type})"
         )
 
 @router.post("/upload/{category}/register", response_model=List[MediaItem])
@@ -709,7 +788,8 @@ async def register_upload(
     import logging
     
     log = logging.getLogger("api.media")
-    gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+    # Use MEDIA_BUCKET (set in production) with fallback to GCS_BUCKET (for compatibility)
+    gcs_bucket = os.getenv("MEDIA_BUCKET") or os.getenv("GCS_BUCKET") or "ppp-media-us-west1"
     created_items = []
     
     for upload_item in request.uploads:

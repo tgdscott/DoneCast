@@ -281,37 +281,86 @@ async def get_user_podcasts(
             else:
                 payload["import_status"] = None
             
-            # Add cover_url field with GCS URL resolution
+            # Add cover_url field with storage URL resolution (GCS/R2 ONLY - NEVER use Spreaker URLs)
+            # CRITICAL: Push-only relationship with Spreaker - we never serve images from Spreaker
             cover_url = None
             try:
-                # Priority 1: GCS path → generate signed URL
-                if pod.cover_path and str(pod.cover_path).startswith("gs://"):
+                # ONLY use cover_path (our own storage) - IGNORE remote_cover_url (Spreaker URLs)
+                cover_source = pod.cover_path
+                
+                if not cover_source:
+                    cover_url = None
+                # Priority 1: R2 URL (https://bucket.account-id.r2.cloudflarestorage.com/key)
+                elif cover_source.startswith("https://") and ".r2.cloudflarestorage.com" in cover_source:
+                    # R2 URL - parse and generate signed URL
+                    import os
+                    from urllib.parse import unquote
+                    try:
+                        # Remove protocol
+                        url_without_proto = cover_source.replace("https://", "").replace("http://", "")
+                        # Split on first slash to separate host from path
+                        if "/" in url_without_proto:
+                            host_part, key_part = url_without_proto.split("/", 1)
+                            # Extract bucket name (first part before first dot)
+                            bucket_name = host_part.split(".")[0]
+                            # URL-decode the key
+                            key = unquote(key_part)
+                            # Generate signed URL
+                            from infrastructure.r2 import generate_signed_url
+                            cover_url = generate_signed_url(bucket_name, key, expiration=86400)  # 24 hours
+                        else:
+                            # Fallback: try using storage abstraction
+                            from infrastructure.storage import get_public_audio_url
+                            resolved = get_public_audio_url(cover_source, expiration_days=1)
+                            cover_url = resolved or cover_source
+                    except Exception as r2_err:
+                        log.warning(f"[podcasts.list] Failed to parse R2 URL {cover_source}: {r2_err}")
+                        cover_url = None
+                # Priority 2: GCS path (gs://) → generate signed URL
+                elif cover_source.startswith("gs://"):
                     from infrastructure.gcs import get_signed_url
-                    gcs_str = str(pod.cover_path)[5:]  # Remove "gs://"
+                    gcs_str = cover_source[5:]  # Remove "gs://"
                     parts = gcs_str.split("/", 1)
                     if len(parts) == 2:
                         bucket, key = parts
                         cover_url = get_signed_url(bucket, key, expiration=3600)
-                # Priority 2: HTTP URL in cover_path (legacy)
-                elif pod.cover_path and str(pod.cover_path).startswith("http"):
-                    cover_url = pod.cover_path
-                # Priority 4: Local file (dev only)
-                elif pod.cover_path:
+                # Priority 3: R2 path (r2://) → resolve to signed URL
+                elif cover_source.startswith("r2://"):
+                    from infrastructure.storage import get_public_audio_url
+                    cover_url = get_public_audio_url(cover_source, expiration_days=1)
+                # Priority 4: R2 bucket path (bucket/key format) → resolve to signed URL
+                elif "/" in cover_source and not cover_source.startswith("/") and not cover_source.startswith("http"):
+                    # Might be R2 bucket/key format - try to resolve it
                     import os
-                    filename = os.path.basename(str(pod.cover_path))
-                    # Add cache-busting parameter using file modification time
-                    try:
-                        from pathlib import Path
+                    r2_bucket = os.getenv("R2_BUCKET", "").strip()
+                    if r2_bucket and r2_bucket in cover_source:
+                        from infrastructure.storage import get_public_audio_url
+                        cover_url = get_public_audio_url(cover_source, expiration_days=1)
+                    # If not R2, fall through to local file handling
+                    if not cover_url:
+                        filename = os.path.basename(cover_source)
                         file_path = MEDIA_DIR / filename
                         if file_path.exists():
                             mtime = int(file_path.stat().st_mtime)
                             cover_url = f"/static/media/{filename}?t={mtime}"
                         else:
                             cover_url = f"/static/media/{filename}"
-                    except:
+                # Priority 5: Local file (dev only) - skip HTTP URLs (could be Spreaker)
+                elif not cover_source.startswith("http"):
+                    import os
+                    filename = os.path.basename(cover_source)
+                    file_path = MEDIA_DIR / filename
+                    if file_path.exists():
+                        mtime = int(file_path.stat().st_mtime)
+                        cover_url = f"/static/media/{filename}?t={mtime}"
+                    else:
                         cover_url = f"/static/media/{filename}"
+                # Explicitly reject any HTTP URLs that aren't R2 (likely Spreaker)
+                else:
+                    log.warning(f"[podcasts.list] Rejecting external URL in cover_path for podcast {pod.id}: {cover_source[:50]}...")
+                    cover_url = None
             except Exception as e:
-                log.warning(f"[podcasts.list] Failed to resolve cover URL for podcast {pod.id}: {e}")
+                log.warning(f"[podcasts.list] Failed to resolve cover URL for podcast {pod.id}: {e}", exc_info=True)
             
             payload["cover_url"] = cover_url
             enriched.append(payload)
@@ -506,30 +555,86 @@ async def update_podcast(
             log.warning("Spreaker metadata/cover update error: %s", exc)
 
     # Enrich response with cover_url for frontend display
+    # CRITICAL: Push-only relationship with Spreaker - we never serve images from Spreaker
     response_data = podcast_to_update.model_dump()
     cover_url = None
     try:
-        # Priority 1: GCS path → generate signed URL
-        if podcast_to_update.cover_path and str(podcast_to_update.cover_path).startswith("gs://"):
+        # ONLY use cover_path (our own storage) - IGNORE remote_cover_url (Spreaker URLs)
+        cover_source = podcast_to_update.cover_path
+        
+        if not cover_source:
+            cover_url = None
+        # Priority 1: R2 URL (https://bucket.account-id.r2.cloudflarestorage.com/key)
+        elif cover_source.startswith("https://") and ".r2.cloudflarestorage.com" in cover_source:
+            # R2 URL - parse and generate signed URL
+            import os
+            from urllib.parse import unquote
+            try:
+                # Remove protocol
+                url_without_proto = cover_source.replace("https://", "").replace("http://", "")
+                # Split on first slash to separate host from path
+                if "/" in url_without_proto:
+                    host_part, key_part = url_without_proto.split("/", 1)
+                    # Extract bucket name (first part before first dot)
+                    bucket_name = host_part.split(".")[0]
+                    # URL-decode the key
+                    key = unquote(key_part)
+                    # Generate signed URL
+                    from infrastructure.r2 import generate_signed_url
+                    cover_url = generate_signed_url(bucket_name, key, expiration=86400)  # 24 hours
+                else:
+                    # Fallback: try using storage abstraction
+                    from infrastructure.storage import get_public_audio_url
+                    resolved = get_public_audio_url(cover_source, expiration_days=1)
+                    cover_url = resolved or cover_source
+            except Exception as r2_err:
+                log.warning(f"[podcast.update] Failed to parse R2 URL {cover_source}: {r2_err}")
+                cover_url = None
+        # Priority 2: GCS path (gs://) → generate signed URL
+        elif cover_source.startswith("gs://"):
             from infrastructure.gcs import get_signed_url
-            gcs_str = str(podcast_to_update.cover_path)[5:]  # Remove "gs://"
+            gcs_str = cover_source[5:]  # Remove "gs://"
             parts = gcs_str.split("/", 1)
             if len(parts) == 2:
                 bucket, key = parts
                 cover_url = get_signed_url(bucket, key, expiration=3600)
-        # Priority 2: HTTP URL in cover_path (legacy)
-        elif podcast_to_update.cover_path and str(podcast_to_update.cover_path).startswith("http"):
-            cover_url = podcast_to_update.cover_path
-        # Priority 4: Local file (dev only)
-        elif podcast_to_update.cover_path:
+        # Priority 3: R2 path (r2://) → resolve to signed URL
+        elif cover_source.startswith("r2://"):
+            from infrastructure.storage import get_public_audio_url
+            cover_url = get_public_audio_url(cover_source, expiration_days=1)
+        # Priority 4: R2 bucket path (bucket/key format) → resolve to signed URL
+        elif "/" in cover_source and not cover_source.startswith("/") and not cover_source.startswith("http"):
+            # Might be R2 bucket/key format - try to resolve it
             import os
-            from datetime import datetime
-            filename = os.path.basename(str(podcast_to_update.cover_path))
-            # Add timestamp to bust browser cache when cover is updated
-            timestamp = int(datetime.utcnow().timestamp())
-            cover_url = f"/static/media/{filename}?t={timestamp}"
+            r2_bucket = os.getenv("R2_BUCKET", "").strip()
+            if r2_bucket and r2_bucket in cover_source:
+                from infrastructure.storage import get_public_audio_url
+                cover_url = get_public_audio_url(cover_source, expiration_days=1)
+            # If not R2, fall through to local file handling
+            if not cover_url:
+                filename = os.path.basename(cover_source)
+                file_path = MEDIA_DIR / filename
+                if file_path.exists():
+                    mtime = int(file_path.stat().st_mtime)
+                    cover_url = f"/static/media/{filename}?t={mtime}"
+                else:
+                    cover_url = f"/static/media/{filename}"
+        # Priority 5: Local file (dev only) - skip HTTP URLs (could be Spreaker)
+        elif not cover_source.startswith("http"):
+            import os
+            filename = os.path.basename(cover_source)
+            file_path = MEDIA_DIR / filename
+            if file_path.exists():
+                mtime = int(file_path.stat().st_mtime)
+                cover_url = f"/static/media/{filename}?t={mtime}"
+            else:
+                cover_url = f"/static/media/{filename}"
+        # Explicitly reject any HTTP URLs that aren't R2 (likely Spreaker)
+        else:
+            log.warning(f"[podcast.update] Rejecting external URL in cover_path for podcast {podcast_to_update.id}: {cover_source[:50]}...")
+            cover_url = None
     except Exception as e:
-        log.warning(f"[podcast.update] Failed to resolve cover URL: {e}")
+        log.warning(f"[podcast.update] Failed to resolve cover URL: {e}", exc_info=True)
     
     response_data["cover_url"] = cover_url
     return response_data
