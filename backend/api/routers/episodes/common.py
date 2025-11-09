@@ -270,10 +270,10 @@ def compute_cover_info(episode: Any, *, now: Optional[datetime] = None) -> dict[
     publish_at = _as_utc(getattr(episode, "publish_at", None))
     episode_id = getattr(episode, "id", None)
     
-    # Debug logging for cover resolution (INFO level for troubleshooting)
+    # Debug logging for cover resolution (DEBUG level to reduce log spam)
     from api.core.logging import get_logger
     logger = get_logger("api.episodes.common")
-    logger.info(
+    logger.debug(
         "[compute_cover_info] episode_id=%s status=%s gcs_cover_path=%s cover_path=%s remote_cover_url=%s",
         episode_id, status_str, 
         gcs_cover_path[:100] + "..." if gcs_cover_path and len(str(gcs_cover_path)) > 100 else gcs_cover_path,
@@ -307,7 +307,7 @@ def compute_cover_info(episode: Any, *, now: Optional[datetime] = None) -> dict[
             # For GCS URLs: use if unpublished, or if published and within 7-day window
             should_use = is_r2_url or (not is_published) or (is_published and within_7days)
             
-            logger.info(
+            logger.debug(
                 "[compute_cover_info] episode_id=%s evaluating gcs_cover_path: is_r2_url=%s is_published=%s within_7days=%s should_use=%s",
                 episode_id, is_r2_url, is_published, within_7days, should_use
             )
@@ -316,7 +316,7 @@ def compute_cover_info(episode: Any, *, now: Optional[datetime] = None) -> dict[
                 cover_url = _cover_url_for(None, gcs_path=gcs_cover_path)
                 if cover_url:
                     cover_source = "r2" if is_r2_url else "gcs"
-                    logger.info(
+                    logger.debug(
                         "[compute_cover_info] episode_id=%s ✅ resolved cover_url from gcs_cover_path: %s (source=%s)",
                         episode_id, cover_url[:100] + "..." if len(cover_url) > 100 else cover_url, cover_source
                     )
@@ -334,13 +334,13 @@ def compute_cover_info(episode: Any, *, now: Optional[datetime] = None) -> dict[
     
     # Try local/remote cover_path
     if not cover_url and cover_path:
-        logger.info("[compute_cover_info] episode_id=%s trying cover_path: %s", episode_id, cover_path)
+        logger.debug("[compute_cover_info] episode_id=%s trying cover_path: %s", episode_id, cover_path)
         cover_url = _cover_url_for(cover_path)
         if cover_url:
             cover_source = "local"
-            logger.info("[compute_cover_info] episode_id=%s ✅ resolved cover_url from cover_path: %s", episode_id, cover_url)
+            logger.debug("[compute_cover_info] episode_id=%s ✅ resolved cover_url from cover_path: %s", episode_id, cover_url)
         else:
-            logger.warning("[compute_cover_info] episode_id=%s ❌ _cover_url_for returned None for cover_path: %s", episode_id, cover_path)
+            logger.debug("[compute_cover_info] episode_id=%s ❌ _cover_url_for returned None for cover_path: %s", episode_id, cover_path)
     
     # CRITICAL: Push-only relationship with Spreaker - NEVER use Spreaker URLs
     # DO NOT fall back to remote_cover_url - it contains Spreaker URLs which we never serve

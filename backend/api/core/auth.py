@@ -8,6 +8,7 @@ from collections import OrderedDict
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlmodel import Session
+from sqlalchemy.orm.exc import DetachedInstanceError
 
 from api.core.config import settings
 from api.core.database import get_session
@@ -55,12 +56,14 @@ def _get_cached_user(email: str) -> Optional[User]:
     return None
 
 
-def _cache_user(email: str, user: User) -> None:
+def _cache_user(email: str, user: User, session: Optional[Session] = None) -> None:
     """Cache user for future requests.
     
-    Note: SQLModel objects are cached here. With expire_on_commit=False,
-    basic attributes remain accessible after session close, but lazy-loaded
-    relationships won't be available. For get_current_user() use case, this is fine.
+    CRITICAL: Load all required attributes and expunge the user instance from the session.
+    This creates a detached instance with all attributes in memory, preventing
+    DetachedInstanceError when accessing attributes after the session closes.
+    
+    If session is None, the user is already expunged (caller's responsibility).
     """
     _clean_user_cache()
     cache_key = email.lower().strip()
@@ -69,6 +72,27 @@ def _cache_user(email: str, user: User) -> None:
     # Enforce max size using LRU eviction
     if len(_USER_CACHE) >= _USER_CACHE_MAX_SIZE:
         _USER_CACHE.popitem(last=False)  # Remove oldest (first) item
+    
+    # CRITICAL: Eagerly access ALL attributes we'll need later while session is active
+    # This loads them into the instance's __dict__ so they're available after detaching
+    _ = user.is_deleted_view
+    _ = user.is_admin
+    _ = user.email
+    _ = user.id
+    _ = user.role
+    _ = user.terms_version_accepted
+    _ = user.tier
+    _ = user.is_active
+    
+    # CRITICAL: Expunge the instance from the session to detach it
+    # This ensures it won't try to lazy-load attributes after session closes
+    # The attributes we accessed above are now in memory and will remain accessible
+    if session is not None:
+        try:
+            session.expunge(user)
+        except Exception as e:
+            # If expunge fails, log but don't fail - the attributes are still loaded
+            logger.warning("Failed to expunge user from session during cache: %s", e)
     
     _USER_CACHE[cache_key] = (user, expiry)
 
@@ -127,31 +151,52 @@ async def get_current_user(
     # Try cache first to avoid DB hit
     cached_user = _get_cached_user(email)
     if cached_user is not None:
-        # Return cached user, but still check maintenance mode (requires DB)
-        # Maintenance mode check is infrequent, so DB hit is acceptable
+        # Safely extract critical attribute values from cached user
+        # We need to handle DetachedInstanceError in case attributes aren't accessible
         try:
-            admin_settings = load_admin_settings(session)
-        except Exception:
-            admin_settings = None
-        if admin_settings and getattr(admin_settings, "maintenance_mode", False):
-            if not getattr(cached_user, "is_admin", False):
-                detail: dict[str, Any] = {
-                    "detail": "Service is temporarily unavailable for maintenance.",
-                    "maintenance": True,
-                }
-                msg = getattr(admin_settings, "maintenance_message", None)
-                if msg:
-                    detail["message"] = msg
-                raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
-        
-        # Check deleted status (cached user might be stale, but this is rare)
-        if getattr(cached_user, "is_deleted_view", False):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="This account has been deleted. Contact support@podcastplusplus.com to restore access during the grace period."
+            # Try to access attributes - if this fails, we'll refetch from DB
+            cached_is_deleted = cached_user.is_deleted_view
+            cached_is_admin = cached_user.is_admin
+        except DetachedInstanceError:
+            # Cache entry is problematic - invalidate and refetch
+            logger.warning(
+                "DetachedInstanceError on cached user %s - invalidating cache and refetching from DB",
+                email
             )
+            cache_key = email.lower().strip()
+            _USER_CACHE.pop(cache_key, None)
+            cached_user = None
+            cached_is_deleted = None
+            cached_is_admin = None
         
-        return cached_user
+        if cached_user is not None and cached_is_deleted is not None:
+            # We successfully extracted values from cached user
+            # Check deleted status first (most critical security check)
+            if cached_is_deleted:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="This account has been deleted. Contact support@podcastplusplus.com to restore access during the grace period."
+                )
+            
+            # Check maintenance mode (requires DB query, but infrequent)
+            try:
+                admin_settings = load_admin_settings(session)
+            except Exception:
+                admin_settings = None
+            if admin_settings and getattr(admin_settings, "maintenance_mode", False):
+                # Use the cached is_admin value we already extracted
+                if not cached_is_admin:
+                    detail: dict[str, Any] = {
+                        "detail": "Service is temporarily unavailable for maintenance.",
+                        "maintenance": True,
+                    }
+                    msg = getattr(admin_settings, "maintenance_message", None)
+                    if msg:
+                        detail["message"] = msg
+                    raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
+            
+            # Return the cached user - it's been validated and values extracted
+            return cached_user
 
     # Cache miss - fetch from DB
     user = crud.get_user_by_email(session=session, email=email)
@@ -180,10 +225,45 @@ async def get_current_user(
                 detail["message"] = msg
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
 
-    # Cache the user for future requests (keyed by email)
-    _cache_user(email, user)
+    # Cache the user for future requests
+    # Strategy: Load all attributes, expunge for caching, then get a fresh instance to return
+    # This ensures the cached user is properly detached with all attributes loaded,
+    # while the returned user stays attached to the current session
     
-    return user
+    user_id = user.id  # Save ID before expunging
+    
+    # Load all attributes while session is active
+    _ = user.is_deleted_view
+    _ = user.is_admin
+    _ = user.email
+    _ = user.id
+    _ = user.role
+    _ = user.terms_version_accepted
+    _ = user.tier
+    _ = user.is_active
+    
+    try:
+        # Expunge the user to detach it for caching
+        session.expunge(user)
+        
+        # Cache the expunged user (all attributes are loaded, so they'll be accessible)
+        _cache_user(email, user, session=None)
+        
+        # Get a fresh instance attached to the current session for returning
+        # This ensures the returned user is properly attached and can be used in the request
+        user_to_return = session.get(User, user_id)
+        if user_to_return is None:
+            # Fallback: if get() fails, just return the expunged user
+            # It won't be attached, but attributes are loaded, so it should work
+            logger.warning("Failed to get fresh user instance for return, using expunged user")
+            return user
+        
+        return user_to_return
+    except Exception as e:
+        # If expunging/caching fails, log but don't fail the request
+        # Just return the user as-is (it's still attached)
+        logger.warning("Failed to cache user: %s", e)
+        return user
 
 
 async def get_current_user_with_terms(
@@ -211,13 +291,45 @@ async def get_current_user_with_terms(
         return user
     
     # Enforce terms acceptance for all other endpoints
+    # Safely access user attributes in case user came from cache and is detached
     required_version = getattr(settings, "TERMS_VERSION", None)
-    accepted_version = user.terms_version_accepted
+    try:
+        accepted_version = user.terms_version_accepted
+        user_email = user.email
+    except DetachedInstanceError:
+        # If we get DetachedInstanceError, refetch user from DB
+        # This shouldn't happen if _cache_user properly loads attributes, but be defensive
+        logger.warning("DetachedInstanceError accessing user attributes in get_current_user_with_terms - refetching from DB")
+        try:
+            jwt_mod = cast(Any, jwt)
+            payload = jwt_mod.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+            email = payload.get("sub")
+            if isinstance(email, str) and email:
+                user = crud.get_user_by_email(session=session, email=email)
+                if user:
+                    accepted_version = user.terms_version_accepted
+                    user_email = user.email
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Could not validate credentials"
+                    )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Could not validate credentials"
+                )
+        except Exception as e:
+            logger.error("Failed to refetch user after DetachedInstanceError: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Internal server error"
+            )
     
     if required_version and required_version != accepted_version:
         logger.warning(
             "[Terms Enforcement] Blocking user %s - terms not accepted (required: %s, accepted: %s)",
-            user.email,
+            user_email,
             required_version,
             accepted_version
         )

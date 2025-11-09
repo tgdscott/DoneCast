@@ -515,7 +515,8 @@ def run_chunk_processing(payload_data: Dict[str, Any]) -> None:
             cleaned_bytes = cleaned_audio_path.read_bytes()
             worker_log.info("event=chunk.upload.bytes_read size=%d", len(cleaned_bytes))
             
-            # Force GCS client re-init (Cloud Tasks runs in isolated context)
+            # CRITICAL: Chunks MUST be uploaded to GCS, not R2
+            # Use GCS directly with force_gcs=True to bypass STORAGE_BACKEND routing
             import infrastructure.gcs as gcs_module
             try:
                 cleaned_uri = gcs_module.upload_bytes(
@@ -523,7 +524,11 @@ def run_chunk_processing(payload_data: Dict[str, Any]) -> None:
                     cleaned_gcs_path,
                     cleaned_bytes,
                     content_type="audio/mpeg",
+                    force_gcs=True,  # Force GCS even if STORAGE_BACKEND=r2
+                    allow_fallback=False  # Chunks require GCS - no fallback allowed
                 )
+                if not cleaned_uri or not cleaned_uri.startswith("gs://"):
+                    raise RuntimeError(f"Chunk upload returned invalid URI: {cleaned_uri}")
                 worker_log.info("event=chunk.upload.success uri=%s", cleaned_uri)
             except Exception as upload_err:
                 worker_log.exception(

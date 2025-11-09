@@ -53,6 +53,27 @@ def _should_auto_fallback() -> bool:
         return False
 
 
+def _should_allow_inline_fallback() -> bool:
+    """Return True when inline fallback is allowed after worker dispatch fails.
+    
+    In production, this should be False to prevent Cloud Run from falling back
+    to inline processing when the worker times out. The worker will complete
+    asynchronously, and the episode status will be updated via polling.
+    """
+    try:
+        # Check explicit env var (defaults to False for safety)
+        raw = (os.getenv("ALLOW_ASSEMBLY_INLINE_FALLBACK") or "").strip().lower()
+        if raw in {"1", "true", "yes", "on"}:
+            return True
+        if raw in {"0", "false", "no", "off"}:
+            return False
+        # Default: only allow in dev environments
+        env = (os.getenv("APP_ENV") or "dev").strip().lower()
+        return env in {"dev", "development", "local"}
+    except Exception:
+        return False
+
+
 _INLINE_EXECUTOR = None
 
 
@@ -830,15 +851,44 @@ def assemble_or_queue(
                         
                         return {"mode": "worker-direct", "job_id": job_id, "episode_id": str(ep.id)}
                     else:
-                        # Non-2xx response: fall back to inline
+                        # Non-2xx response: check if inline fallback is allowed
                         log.warning("event=assemble.service.worker_direct_non_2xx episode_id=%s status=%s", str(ep.id), r.status_code)
-                        # Fall through to inline fallback
+                        # If status is 524 (timeout), the worker may still be processing
+                        # Don't fall back to inline unless explicitly enabled
+                        if r.status_code == 524:
+                            log.warning("event=assemble.service.worker_timeout episode_id=%s - Worker may still be processing. Inline fallback disabled by default.", str(ep.id))
+                        # Fall through to check if inline fallback is allowed
             except Exception as worker_err:
-                # Worker POST failed: fall back to inline
+                # Worker POST failed: check if inline fallback is allowed
                 log.warning("event=assemble.service.worker_direct_failed episode_id=%s error=%s", str(ep.id), str(worker_err))
-                # Fall through to inline fallback
+                # Fall through to check if inline fallback is allowed
         
-        # Final fallback: inline execution
+        # Final fallback: inline execution (only if explicitly allowed)
+        if not _should_allow_inline_fallback():
+            log.error("event=assemble.service.inline_fallback_disabled episode_id=%s - Worker dispatch failed but inline fallback is disabled. Episode will be processed by worker asynchronously. Check episode status via polling.", str(ep.id))
+            # Return immediately - worker will process asynchronously
+            # The frontend should poll for episode status
+            job_id = f"worker-async-{datetime.utcnow().isoformat()}"
+            try:
+                import json as _json
+                meta = {}
+                if getattr(ep, 'meta_json', None):
+                    try:
+                        meta = _json.loads(ep.meta_json or '{}')
+                    except Exception:
+                        meta = {}
+                meta['assembly_job_id'] = job_id
+                meta['assembly_mode'] = 'worker-async'
+                ep.meta_json = _json.dumps(meta)
+                session.add(ep)
+                session.commit()
+                session.refresh(ep)
+            except Exception as meta_err:
+                log.warning("event=assemble.service.metadata_save_failed episode_id=%s error=%s", str(ep.id), str(meta_err))
+                session.rollback()
+            return {"mode": "worker-async", "job_id": job_id, "episode_id": str(ep.id), "status": "dispatched"}
+        
+        # Inline fallback is allowed - proceed with inline execution
         log.info("event=assemble.service.falling_back_to_inline episode_id=%s", str(ep.id))
         inline_result = _run_inline_fallback(
             episode_id=ep.id,

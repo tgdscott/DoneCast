@@ -86,35 +86,59 @@ class ChunkMetadata:
 def should_use_chunking(audio_path: Path) -> bool:
     """Determine if an audio file should use chunked processing.
     
+    NOTE: Chunking is currently DISABLED by default. This function always returns False.
+    The code remains for potential future use, but chunking will not be used under any circumstances.
+    
+    To re-enable chunking in the future, uncomment the logic below and remove the early return.
+    
     Chunking requires:
     - DISABLE_CHUNKING env var not set to true/1/yes
     - STORAGE_BACKEND == 'gcs' (chunks require GCS for storage)
     - Audio duration > 10 minutes
+    - GCS client must be available (verified by attempting initialization)
     
     Returns False if any requirement is not met, ensuring safe fallback to direct processing.
     """
-    # Allow disabling chunking for testing/debugging
-    if os.getenv("DISABLE_CHUNKING", "").lower() in ("true", "1", "yes"):
-        log.info("[chunking] Chunking disabled via DISABLE_CHUNKING env var")
-        return False
+    # CHUNKING IS DISABLED - Always return False
+    # TODO: Re-enable chunking when ready by removing this early return
+    log.debug("[chunking] Chunking is disabled - returning False")
+    return False
     
-    # Require GCS backend for chunking (chunks must be uploaded to GCS)
-    storage_backend = os.getenv("STORAGE_BACKEND", "gcs").lower().strip()
-    if storage_backend != "gcs":
-        log.info(f"[chunking] Disabled: STORAGE_BACKEND != gcs (current: {storage_backend})")
-        return False
-    
-    try:
-        audio = AudioSegment.from_file(str(audio_path))
-        duration_ms = len(audio)
-        # Use chunking only for files >10 minutes
-        if duration_ms <= CHUNK_TARGET_MS:
-            log.info(f"[chunking] Disabled: audio duration {duration_ms}ms <= {CHUNK_TARGET_MS}ms (10 min)")
-            return False
-        return True
-    except Exception as e:
-        log.warning(f"[chunking] Failed to determine audio duration: {e}")
-        return False
+    # BELOW CODE IS DISABLED - Keep for future reference
+    # # Allow disabling chunking for testing/debugging
+    # if os.getenv("DISABLE_CHUNKING", "").lower() in ("true", "1", "yes"):
+    #     log.info("[chunking] Chunking disabled via DISABLE_CHUNKING env var")
+    #     return False
+    # 
+    # # Require GCS backend for chunking (chunks must be uploaded to GCS)
+    # storage_backend = os.getenv("STORAGE_BACKEND", "gcs").lower().strip()
+    # if storage_backend != "gcs":
+    #     log.info(f"[chunking] Disabled: STORAGE_BACKEND != gcs (current: {storage_backend})")
+    #     return False
+    # 
+    # # Verify GCS client is actually available (not just configured)
+    # # This prevents attempting chunking when GCS credentials are missing
+    # try:
+    #     from infrastructure.gcs import _get_gcs_client
+    #     gcs_client = _get_gcs_client(force=True)
+    #     if gcs_client is None:
+    #         log.warning("[chunking] Disabled: GCS client unavailable (credentials missing or invalid)")
+    #         return False
+    # except Exception as e:
+    #     log.warning(f"[chunking] Disabled: GCS client check failed: {e}")
+    #     return False
+    # 
+    # try:
+    #     audio = AudioSegment.from_file(str(audio_path))
+    #     duration_ms = len(audio)
+    #     # Use chunking only for files >10 minutes
+    #     if duration_ms <= CHUNK_TARGET_MS:
+    #         log.info(f"[chunking] Disabled: audio duration {duration_ms}ms <= {CHUNK_TARGET_MS}ms (10 min)")
+    #         return False
+    #     return True
+    # except Exception as e:
+    #     log.warning(f"[chunking] Failed to determine audio duration: {e}")
+    #     return False
 
 
 def find_split_points(audio: AudioSegment, target_chunk_ms: int = CHUNK_TARGET_MS) -> List[int]:
@@ -240,29 +264,46 @@ def split_audio_into_chunks(
         chunk_audio.export(str(chunk_path), format="wav")
         
         # Upload to GCS - must succeed or abort chunking
+        # CRITICAL: Do not create ChunkMetadata if upload fails
         gcs_path = f"{user_id}/chunks/{episode_id}/{chunk_filename}"
+        gcs_uri = None
         try:
             chunk_bytes = chunk_path.read_bytes()
             # Use force_gcs=True since chunks must be uploaded to GCS
+            # This will raise RuntimeError if GCS is unavailable
             gcs_uri = gcs.upload_bytes(
                 "ppp-media-us-west1", 
                 gcs_path, 
                 chunk_bytes, 
                 content_type="audio/wav",
-                force_gcs=True  # Force GCS even if STORAGE_BACKEND=r2
+                force_gcs=True,  # Force GCS even if STORAGE_BACKEND=r2
+                allow_fallback=False  # Explicitly disable fallback for chunks
             )
-            if not gcs_uri or gcs_uri is None:
-                raise RuntimeError(f"Upload returned None for chunk {idx}")
-            log.info(f"[chunking] Uploaded chunk {idx} to {gcs_uri}")
-        except Exception as e:
-            log.error(f"[chunking] Failed to upload chunk {idx}: {e}")
+            if not gcs_uri or gcs_uri is None or not gcs_uri.startswith("gs://"):
+                raise RuntimeError(f"Upload returned invalid URI for chunk {idx}: {gcs_uri}")
+            log.info(f"[chunking] ✅ Uploaded chunk {idx} to {gcs_uri}")
+        except RuntimeError as e:
+            # RuntimeError from gcs.upload_bytes means GCS is unavailable - abort immediately
+            log.error(f"[chunking] ❌ Failed to upload chunk {idx}: {e}")
             log.warning("[chunking] Aborting chunking and falling back to direct processing")
-            # Abort immediately - do not create chunks with None URIs
+            # Clean up any chunks we created so far (they won't be usable without GCS URIs)
+            log.info(f"[chunking] Created {len(chunks)} chunks before failure - they will be cleaned up")
+            # Re-raise to trigger fallback in orchestrator
             raise RuntimeError(
                 f"[chunking] Failed to upload chunk {idx} to GCS: {e}. "
+                "GCS is required for chunked processing. "
+                "Aborting chunking and falling back to direct processing."
+            ) from e
+        except Exception as e:
+            # Any other exception is also a fatal error for chunking
+            log.error(f"[chunking] ❌ Unexpected error uploading chunk {idx}: {e}", exc_info=True)
+            log.warning("[chunking] Aborting chunking and falling back to direct processing")
+            raise RuntimeError(
+                f"[chunking] Unexpected error uploading chunk {idx} to GCS: {e}. "
                 "Aborting chunking and falling back to direct processing."
             ) from e
         
+        # Only create ChunkMetadata if upload succeeded (gcs_uri is guaranteed non-None here)
         chunk_meta = ChunkMetadata(
             chunk_id=chunk_id,
             index=idx,
@@ -270,7 +311,7 @@ def split_audio_into_chunks(
             end_ms=end_ms,
             duration_ms=chunk_duration,
             audio_path=str(chunk_path),
-            gcs_audio_uri=gcs_uri,  # Guaranteed to be non-None
+            gcs_audio_uri=gcs_uri,  # Guaranteed to be non-None and valid gs:// URI
         )
         chunks.append(chunk_meta)
         

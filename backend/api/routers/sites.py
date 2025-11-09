@@ -5,6 +5,7 @@ Serves podcast websites by subdomain (e.g., cinema-irl.podcastplusplus.com).
 No authentication required - public access.
 """
 
+import os
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends
@@ -82,8 +83,23 @@ def _fetch_published_episodes(session: Session, podcast: Podcast, max_count: int
         if not audio_url:
             continue
         
-        # Use episode cover or fall back to podcast cover
-        cover_url = ep.cover_path or podcast.cover_path
+        # Use compute_cover_info to properly handle gcs_cover_path (R2 URLs)
+        from api.routers.episodes.common import compute_cover_info
+        cover_info = compute_cover_info(ep)
+        cover_url = cover_info.get("cover_url")
+        
+        # Fallback to podcast cover if episode has no cover
+        if not cover_url:
+            # For podcast cover, check if it's an R2 URL
+            if podcast.cover_path:
+                pod_cover_str = str(podcast.cover_path).strip()
+                if pod_cover_str.lower().startswith(("http://", "https://")):
+                    # Only use if it's not a Spreaker URL and looks like R2
+                    if "spreaker.com" not in pod_cover_str.lower() and ".r2.cloudflarestorage.com" in pod_cover_str.lower():
+                        cover_url = pod_cover_str
+                elif pod_cover_str:
+                    # Local path - could be served as static file
+                    cover_url = f"/static/media/{os.path.basename(pod_cover_str)}"
         
         episode_data.append(
             PublicEpisodeData(

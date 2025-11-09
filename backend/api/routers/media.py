@@ -366,7 +366,10 @@ async def delete_media_item(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
-    # --- THIS IS THE FIX ---
+    """Delete a media item and its associated files from storage."""
+    import logging
+    log = logging.getLogger("api.media.delete")
+    
     # Using a select statement to be more explicit, then fetching the single result.
     statement = select(MediaItem).where(MediaItem.id == media_id, MediaItem.user_id == current_user.id)
     media_item = session.exec(statement).one_or_none()
@@ -374,25 +377,118 @@ async def delete_media_item(
     if not media_item:
         raise HTTPException(status_code=404, detail="Media item not found or you don't have permission to delete it.")
 
+    filename = str(media_item.filename or "").strip()
+    log.info(f"[delete] Deleting media item {media_id}, filename: {filename}")
+
     # Delete related records first to avoid foreign key violations
+    # CRITICAL: Delete transcripts before media item to avoid foreign key constraint violations
+    # Use direct SQL DELETE for reliability and to ensure all transcripts are deleted atomically
     try:
-        # Delete any transcripts referencing this media item
         from ..models.transcription import MediaTranscript
+        
+        # First, check how many transcripts exist (for logging)
         transcript_stmt = select(MediaTranscript).where(MediaTranscript.media_item_id == media_id)
         transcripts = session.exec(transcript_stmt).all()
-        for transcript in transcripts:
-            session.delete(transcript)
-    except Exception:
-        pass  # Table might not exist in some environments
+        transcript_count = len(transcripts)
+        
+        if transcript_count > 0:
+            log.info(f"[delete] Found {transcript_count} transcript(s) to delete for media item {media_id}")
+            transcript_ids = [str(t.id) for t in transcripts]
+            log.info(f"[delete] Transcript IDs to delete: {', '.join(transcript_ids)}")
+            
+            # Use raw SQL DELETE to ensure all transcripts are deleted atomically
+            # This is more reliable than ORM deletes and ensures the deletion happens immediately
+            # Get the table name from the model (SQLModel converts CamelCase to snake_case)
+            table_name = MediaTranscript.__tablename__
+            delete_sql = _sa_text(
+                f"DELETE FROM {table_name} WHERE media_item_id = :media_item_id"
+            )
+            result = session.execute(delete_sql, {"media_item_id": str(media_id)})
+            deleted_count = result.rowcount
+            
+            # Flush to ensure the deletion is executed in the database
+            session.flush()
+            log.info(f"[delete] Successfully deleted {deleted_count} transcript(s) for media item {media_id}")
+            
+            if deleted_count != transcript_count:
+                log.warning(
+                    f"[delete] Mismatch: found {transcript_count} transcript(s) but deleted {deleted_count}. "
+                    f"This might indicate a race condition or duplicate transcripts."
+                )
+        else:
+            log.debug(f"[delete] No transcripts found for media item {media_id}")
+    except Exception as transcript_err:
+        # Table might not exist in some environments, or deletion failed
+        log.error(f"[delete] Error deleting transcripts: {transcript_err}", exc_info=True)
+        # Rollback and re-raise - we can't proceed if transcript deletion fails
+        # as it will cause a foreign key violation
+        session.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete related transcripts: {str(transcript_err)}"
+        )
 
-    # Delete the file from disk
-    file_path = MEDIA_DIR / media_item.filename
-    if file_path.exists():
-        file_path.unlink()
+    # Delete the file from storage (GCS or local)
+    try:
+        if filename.startswith("gs://"):
+            # Delete from GCS - media files are always stored in GCS, even if STORAGE_BACKEND=r2
+            log.info(f"[delete] Deleting from GCS: {filename}")
+            try:
+                # Use GCS client directly (like orchestrator cleanup) to ensure we can delete
+                # even if STORAGE_BACKEND=r2, since media files are always in GCS
+                from google.cloud import storage
+                path_part = filename[5:]  # Remove "gs://" prefix
+                bucket_name, _, key = path_part.partition('/')
+                if bucket_name and key:
+                    client = storage.Client()
+                    bucket = client.bucket(bucket_name)
+                    blob = bucket.blob(key)
+                    
+                    # Check if blob exists before deleting
+                    if blob.exists():
+                        blob.delete()
+                        log.info(f"[delete] Successfully deleted GCS object: gs://{bucket_name}/{key}")
+                    else:
+                        log.warning(f"[delete] GCS object does not exist: {filename} (may have been already deleted)")
+                else:
+                    log.warning(f"[delete] Invalid GCS URL format: {filename}")
+            except Exception as gcs_err:
+                # Don't block DB delete if GCS cleanup fails (file might already be deleted)
+                log.warning(f"[delete] Failed to delete GCS object {filename}: {gcs_err}", exc_info=True)
+        elif filename.startswith("https://") or filename.startswith("http://"):
+            # R2 or other HTTP URLs - log but don't try to delete (these are final products)
+            log.info(f"[delete] Skipping deletion of R2/HTTP URL (final product): {filename}")
+        else:
+            # Fallback for local files (development only)
+            log.info(f"[delete] Deleting local file: {filename}")
+            file_path = MEDIA_DIR / filename
+            if file_path.exists():
+                try:
+                    file_path.unlink()
+                    log.info(f"[delete] Successfully deleted local file: {file_path}")
+                except Exception as local_err:
+                    log.warning(f"[delete] Failed to delete local file {file_path}: {local_err}", exc_info=True)
+    except Exception as storage_err:
+        # Don't block DB delete if storage cleanup fails
+        log.warning(f"[delete] Error during storage cleanup: {storage_err}", exc_info=True)
     
-    # Now delete the media item
-    session.delete(media_item)
-    session.commit()
+    # Now delete the media item from database
+    # Transcripts have already been deleted and flushed, so this should succeed
+    try:
+        session.delete(media_item)
+        session.commit()
+        log.info(f"[delete] Successfully deleted media item {media_id} from database")
+    except Exception as db_err:
+        log.error(f"[delete] Failed to delete media item from database: {db_err}", exc_info=True)
+        session.rollback()
+        # Check if it's a foreign key violation - this shouldn't happen if we flushed transcripts
+        error_str = str(db_err).lower()
+        if "foreign key" in error_str or "foreignkey" in error_str:
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Failed to delete media item: foreign key constraint violation. This may indicate there are still references to this media item. Please contact support."
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to delete media item: {str(db_err)}")
     
     return None
 

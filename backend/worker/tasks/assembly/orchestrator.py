@@ -538,12 +538,26 @@ def _finalize_episode(
             }
             
             for chunk in chunks:
+                # VALIDATION: Ensure chunk has valid GCS URI before dispatching
+                if not chunk.gcs_audio_uri or not chunk.gcs_audio_uri.startswith("gs://"):
+                    logging.error(
+                        "[assemble] ❌ Cannot dispatch chunk %d: invalid gcs_audio_uri=%s. "
+                        "This should not happen - chunk upload should have failed before this point.",
+                        chunk.index, chunk.gcs_audio_uri
+                    )
+                    chunk.status = "failed"
+                    # This is a critical error - abort chunking and fall back
+                    raise RuntimeError(
+                        f"Chunk {chunk.index} has invalid gcs_audio_uri: {chunk.gcs_audio_uri}. "
+                        "Chunked processing cannot continue. Falling back to direct processing."
+                    )
+                
                 chunk_payload = {
                     "episode_id": str(episode.id),
                     "chunk_id": chunk.chunk_id,
                     "chunk_index": chunk.index,
                     "total_chunks": len(chunks),  # Used to detect last chunk for trailing silence trim
-                    "gcs_audio_uri": chunk.gcs_audio_uri,
+                    "gcs_audio_uri": chunk.gcs_audio_uri,  # Guaranteed to be valid gs:// URI
                     "gcs_transcript_uri": chunk.gcs_transcript_uri,
                     "cleanup_options": cleanup_options,
                     "user_id": str(media_context.user_id),
@@ -551,11 +565,16 @@ def _finalize_episode(
                 
                 try:
                     task_info = enqueue_http_task("/api/tasks/process-chunk", chunk_payload)
-                    logging.info("[assemble] Dispatched chunk %d task: %s", chunk.index, task_info)
+                    logging.info("[assemble] ✅ Dispatched chunk %d task: %s", chunk.index, task_info)
                 except Exception as e:
-                    logging.error("[assemble] Failed to dispatch chunk %d: %s", chunk.index, e)
+                    logging.error("[assemble] ❌ Failed to dispatch chunk %d: %s", chunk.index, e)
                     # Mark chunk as failed
                     chunk.status = "failed"
+                    # Dispatch failure is also critical - abort chunking
+                    raise RuntimeError(
+                        f"Failed to dispatch chunk {chunk.index}: {e}. "
+                        "Chunked processing cannot continue. Falling back to direct processing."
+                    ) from e
             
             # Wait for all chunks to complete
             import time

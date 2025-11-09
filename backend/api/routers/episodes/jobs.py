@@ -11,7 +11,7 @@ from api.core.database import get_session
 from api.services.episodes import jobs as _svc_jobs
 from api.models.podcast import Episode
 from uuid import UUID as _UUID
-from .common import _cover_url_for, _status_value, compute_playback_info
+from .common import _cover_url_for, _status_value, compute_playback_info, compute_cover_info
 
 logger = logging.getLogger("ppp.episodes.jobs")
 
@@ -110,10 +110,7 @@ def get_job_status(job_id: str, session: Session = Depends(get_session)):
             "proxy_playback_url": (
                 f"/api/episodes/{ep.id}/playback" if playback.get("playback_url") else None
             ),
-            "cover_url": (
-                _cover_url_for(getattr(ep, 'remote_cover_url', None)) or
-                _cover_url_for(ep.cover_path, gcs_path=getattr(ep, 'gcs_cover_path', None))
-            ),
+            "cover_url": compute_cover_info(ep).get("cover_url"),
             "status": _status_value(ep.status),
             "using_spreaker_audio": bool(playback.get("prefer_remote_audio")),
         }
@@ -170,10 +167,7 @@ def get_job_status(job_id: str, session: Session = Depends(get_session)):
                             if playback.get("playback_url")
                             else None
                         ),
-                        "cover_url": (
-                            _cover_url_for(getattr(target, 'remote_cover_url', None)) or
-                            _cover_url_for(target.cover_path, gcs_path=getattr(target, 'gcs_cover_path', None))
-                        ),
+                        "cover_url": compute_cover_info(target).get("cover_url"),
                         "status": _status_value(target.status),
                         "using_spreaker_audio": bool(playback.get("prefer_remote_audio")),
                     },

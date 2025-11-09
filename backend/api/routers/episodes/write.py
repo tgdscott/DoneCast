@@ -24,7 +24,7 @@ router = APIRouter(tags=["episodes"])  # parent provides prefix '/episodes'
 PROJECT_ROOT = APP_ROOT
 
 
-from .common import _cover_url_for, _status_value, compute_playback_info
+from .common import _cover_url_for, _status_value, compute_playback_info, compute_cover_info
 
 
 @router.patch("/{episode_id}", status_code=200)
@@ -170,13 +170,22 @@ def update_episode_metadata(
                     cover_exists = True
         except Exception:
             pass
+        # Use compute_cover_info to properly handle gcs_cover_path (R2 URLs)
+        cover_info = compute_cover_info(ep_obj)
+        cover_url = cover_info.get("cover_url")
+        cover_source = cover_info.get("cover_source", "none")
+        
+        # Update cover_exists based on whether we have a valid URL
+        if cover_url:
+            cover_exists = True
+        elif not cover_exists:
+            # Fallback: check if we have a gcs_cover_path (R2 URL) even if local file doesn't exist
+            gcs_cover_path = getattr(ep_obj, "gcs_cover_path", None)
+            if gcs_cover_path and str(gcs_cover_path).lower().startswith(("http://", "https://")):
+                cover_exists = True  # R2 URL exists even if local file doesn't
+        
         remote_cover = getattr(ep_obj, "remote_cover_url", None)
         preferred_cover = ep_obj.cover_path or remote_cover
-        cover_url = None
-        if cover_exists and ep_obj.cover_path:
-            cover_url = _cover_url_for(ep_obj.cover_path)
-        elif remote_cover:
-            cover_url = _cover_url_for(remote_cover)
         if (
             not cover_exists
             and ep_obj.cover_path

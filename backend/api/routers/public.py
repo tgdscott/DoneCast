@@ -44,11 +44,18 @@ def public_episodes(limit: int = Query(10, ge=1, le=50), session: Session = Depe
             else:
                 missing_audio_count += 1
         
-        cover_url = None
-        if e.cover_path:
+        # Use compute_cover_info to properly handle gcs_cover_path (R2 URLs)
+        from api.routers.episodes.common import compute_cover_info
+        cover_info = compute_cover_info(e)
+        cover_url = cover_info.get("cover_url")
+        
+        # Fallback: if no cover_url from compute_cover_info, try cover_path
+        if not cover_url and e.cover_path:
             cp = str(e.cover_path)
             if cp.lower().startswith(("http://", "https://")):
-                cover_url = cp
+                # Only use if it's not a Spreaker URL
+                if "spreaker.com" not in cp.lower() and "cdn.spreaker.com" not in cp.lower():
+                    cover_url = cp
             else:
                 cover_url = f"/static/media/{os.path.basename(cp)}"
 
