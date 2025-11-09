@@ -56,6 +56,7 @@ def _get_signing_credentials():
     # Try loading from GCS_SIGNER_KEY_JSON env var (Cloud Run with Secret Manager)
     signer_key_json = os.getenv("GCS_SIGNER_KEY_JSON")
     if signer_key_json:
+        logger.info(f"GCS_SIGNER_KEY_JSON is set (length: {len(signer_key_json)}, starts with: {signer_key_json[:50]}...)")
         try:
             # Cloud Run resolves secrets like "sm://project/secret" to the actual secret value
             # So signer_key_json should be the actual JSON content, not a path
@@ -64,30 +65,40 @@ def _get_signing_credentials():
                 logger.info(f"GCS_SIGNER_KEY_JSON appears to be a file path: {signer_key_json}")
                 credentials = service_account.Credentials.from_service_account_file(signer_key_json)
                 _SIGNING_CREDENTIALS = credentials
-                logger.info("Loaded signing credentials from GCS_SIGNER_KEY_JSON file")
+                logger.info("✅ Loaded signing credentials from GCS_SIGNER_KEY_JSON file")
                 return credentials
             
-            # Try to parse as JSON (Cloud Run secret should be JSON content)
-            try:
-                key_dict = json.loads(signer_key_json)
-                credentials = service_account.Credentials.from_service_account_info(key_dict)
-                _SIGNING_CREDENTIALS = credentials
-                logger.info("Loaded signing credentials from GCS_SIGNER_KEY_JSON env var (JSON)")
-                return credentials
-            except json.JSONDecodeError as json_err:
-                # If it's not valid JSON, it might be a base64-encoded string or have extra whitespace
-                logger.warning(f"Failed to parse GCS_SIGNER_KEY_JSON as JSON: {json_err}")
-                # Try stripping whitespace
+            # Check if it looks like a secret reference (Cloud Run might not resolve it in some cases)
+            if signer_key_json.startswith("sm://"):
+                logger.warning(f"GCS_SIGNER_KEY_JSON looks like a secret reference (sm://), not resolved JSON. Will try Secret Manager fallback.")
+            else:
+                # Try to parse as JSON (Cloud Run secret should be JSON content)
                 try:
-                    key_dict = json.loads(signer_key_json.strip())
-                    credentials = service_account.Credentials.from_service_account_info(key_dict)
-                    _SIGNING_CREDENTIALS = credentials
-                    logger.info("Loaded signing credentials from GCS_SIGNER_KEY_JSON env var (JSON, stripped)")
-                    return credentials
-                except Exception:
-                    logger.warning(f"GCS_SIGNER_KEY_JSON is set but not valid JSON or file path: {signer_key_json[:100]}...")
+                    key_dict = json.loads(signer_key_json)
+                    # Validate it's a service account key
+                    if "type" in key_dict and key_dict["type"] == "service_account":
+                        credentials = service_account.Credentials.from_service_account_info(key_dict)
+                        _SIGNING_CREDENTIALS = credentials
+                        logger.info("✅ Loaded signing credentials from GCS_SIGNER_KEY_JSON env var (JSON)")
+                        return credentials
+                    else:
+                        logger.warning(f"GCS_SIGNER_KEY_JSON JSON doesn't look like a service account key (missing 'type' field or wrong type)")
+                except json.JSONDecodeError as json_err:
+                    # If it's not valid JSON, it might be a base64-encoded string or have extra whitespace
+                    logger.warning(f"Failed to parse GCS_SIGNER_KEY_JSON as JSON: {json_err}")
+                    # Try stripping whitespace
+                    try:
+                        key_dict = json.loads(signer_key_json.strip())
+                        if "type" in key_dict and key_dict["type"] == "service_account":
+                            credentials = service_account.Credentials.from_service_account_info(key_dict)
+                            _SIGNING_CREDENTIALS = credentials
+                            logger.info("✅ Loaded signing credentials from GCS_SIGNER_KEY_JSON env var (JSON, stripped)")
+                            return credentials
+                    except Exception as strip_err:
+                        logger.warning(f"Failed to parse GCS_SIGNER_KEY_JSON even after stripping: {strip_err}")
+                        logger.warning(f"GCS_SIGNER_KEY_JSON value preview: {signer_key_json[:200]}...")
         except Exception as e:
-            logger.warning(f"Failed to load signing credentials from GCS_SIGNER_KEY_JSON: {e}", exc_info=True)
+            logger.error(f"❌ Failed to load signing credentials from GCS_SIGNER_KEY_JSON: {e}", exc_info=True)
     
     # Try loading from Secret Manager directly (fallback for Cloud Run only)
     # Skip Secret Manager in local dev to avoid CORS issues with presigned URLs
@@ -96,22 +107,30 @@ def _get_signing_credentials():
     
     if not is_local_dev:
         try:
+            logger.info("Attempting to load signing credentials from Secret Manager (fallback)")
             from google.cloud import secretmanager
             
             client = secretmanager.SecretManagerServiceClient()
-            project_id = os.getenv("GCP_PROJECT", "podcast612")
+            project_id = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT") or "podcast612"
             secret_name = f"projects/{project_id}/secrets/gcs-signer-key/versions/latest"
             
+            logger.info(f"Accessing secret: {secret_name}")
             response = client.access_secret_version(request={"name": secret_name})
             key_json = response.payload.data.decode("UTF-8")
+            logger.info(f"Retrieved secret from Secret Manager (length: {len(key_json)})")
+            
             key_dict = json.loads(key_json)
+            # Validate it's a service account key
+            if "type" not in key_dict or key_dict["type"] != "service_account":
+                logger.error(f"Secret from Secret Manager doesn't look like a service account key")
+                return None
             
             credentials = service_account.Credentials.from_service_account_info(key_dict)
             _SIGNING_CREDENTIALS = credentials
-            logger.info("Loaded signing credentials from Secret Manager")
+            logger.info("✅ Loaded signing credentials from Secret Manager")
             return credentials
         except Exception as e:
-            logger.warning(f"Failed to load signing credentials from Secret Manager: {e}")
+            logger.error(f"❌ Failed to load signing credentials from Secret Manager: {e}", exc_info=True)
             return None
     else:
         logger.info("Skipping Secret Manager in local development - presigned uploads disabled")
@@ -342,6 +361,7 @@ def _generate_signed_url(
     expires: timedelta,
     method: str = "GET",
     content_type: Optional[str] = None,
+    headers: Optional[dict] = None,
 ) -> Optional[str]:
     """Generate a signed URL, using service account credentials or IAM-based signing.
     
@@ -349,15 +369,57 @@ def _generate_signed_url(
     1. Try using loaded service account credentials (from env var or Secret Manager)
     2. Try using default client credentials
     3. Fall back to IAM-based signing for Cloud Run
+    
+    Args:
+        bucket_name: GCS bucket name
+        key: Object key/path
+        expires: URL expiration time
+        method: HTTP method (GET, POST, PUT, etc.)
+        content_type: Optional MIME type for POST/PUT
+        headers: Optional headers to include in the signed URL (e.g., {"x-goog-resumable": "start"})
+    
+    Note: This function ALWAYS requires GCS client for signing, even if STORAGE_BACKEND=r2.
+    Transcripts and direct uploads must use GCS, not R2.
     """
-    client = _get_gcs_client()
+    # CRITICAL: For signing URLs, we ALWAYS need GCS client, even if STORAGE_BACKEND=r2
+    # Direct uploads and transcripts require GCS, not R2
+    # Create GCS client directly, bypassing STORAGE_BACKEND check
+    client = None
+    storage_backend = (os.getenv("STORAGE_BACKEND") or "").strip().lower()
+    logger.info("Generating signed URL (STORAGE_BACKEND=%s, but GCS client required for signing)", storage_backend)
+    
+    try:
+        from google.cloud import storage
+        # Create client with Application Default Credentials (works in Cloud Run)
+        # This bypasses the _get_gcs_client() check that returns None when STORAGE_BACKEND=r2
+        logger.debug("Creating GCS client directly (bypassing STORAGE_BACKEND=%s check)", storage_backend)
+        client = storage.Client()
+        logger.info("✅ Created GCS client for signed URL generation (bypassed STORAGE_BACKEND check)")
+    except Exception as client_err:
+        logger.warning("Direct GCS client creation failed: %s (will try with force=True)", client_err)
+        # Try the standard client getter with force=True as fallback
+        # This bypasses the STORAGE_BACKEND check
+        try:
+            logger.debug("Trying _get_gcs_client(force=True) as fallback")
+            client = _get_gcs_client(force=True)
+            if client:
+                logger.info("✅ Created GCS client using _get_gcs_client(force=True)")
+            else:
+                logger.error("❌ GCS client not available even with force=True - cannot generate signed URL")
+                return None
+        except Exception as force_err:
+            logger.error("❌ Failed to create GCS client even with force=True: %s", force_err, exc_info=True)
+            return None
+    
     if not client:
+        logger.error("❌ GCS client is None after all attempts - cannot generate signed URL")
         return None
 
     # Try using signing credentials from Secret Manager or env var first
     signing_creds = _get_signing_credentials()
     if signing_creds:
         try:
+            logger.debug("Attempting to generate signed URL with loaded service account credentials")
             bucket = client.bucket(bucket_name)
             blob = bucket.blob(key)
             kwargs = {
@@ -369,13 +431,19 @@ def _generate_signed_url(
             
             if content_type and method.upper() in {"POST", "PUT"}:
                 kwargs["content_type"] = content_type
+            
+            # Add custom headers if provided (e.g., for resumable uploads)
+            if headers:
+                kwargs["headers"] = headers
                 
             signed_url = blob.generate_signed_url(**kwargs)
-            logger.debug("Generated signed URL using loaded service account credentials")
+            logger.info("✅ Generated signed URL using loaded service account credentials")
             return signed_url
         except Exception as e:
-            logger.warning(f"Failed to generate signed URL with loaded credentials: {e}")
+            logger.warning(f"Failed to generate signed URL with loaded credentials: {e}", exc_info=True)
             # Fall through to try other methods
+    else:
+        logger.warning("No signing credentials available - will try default client credentials or IAM-based signing")
 
     # Try standard signing with client credentials
     try:
@@ -393,9 +461,13 @@ def _generate_signed_url(
             
         if content_type and method.upper() in {"POST", "PUT"}:
             kwargs["content_type"] = content_type
+        
+        # Add custom headers if provided
+        if headers:
+            kwargs["headers"] = headers
             
         signed_url = blob.generate_signed_url(**kwargs)
-        logger.debug("Generated signed URL using default client credentials")
+        logger.info("✅ Generated signed URL using default client credentials")
         return signed_url
     except (AttributeError, ValueError) as e:
         # Cloud Run uses Compute Engine credentials without private keys
@@ -422,20 +494,40 @@ def _generate_signed_url(
                     # Generate signed URL using the IAM signer
                     from google.cloud.storage._signing import generate_signed_url_v4
                     
+                    # Build headers dict - include Content-Type and any custom headers
+                    url_headers = {}
+                    if content_type:
+                        url_headers["Content-Type"] = content_type
+                    if headers:
+                        url_headers.update(headers)
+                    
                     signed_url = generate_signed_url_v4(
                         credentials=signer,
                         resource=f"/{bucket_name}/{key}",
                         expiration=expires,
                         api_access_endpoint="https://storage.googleapis.com",
                         method=method,
-                        headers={"Content-Type": content_type} if content_type else None,
+                        headers=url_headers if url_headers else None,
                     )
                     
+                    logger.info("✅ Generated signed URL using IAM-based signing")
                     return signed_url
                     
                 except Exception as iam_err:
                     logger.error("IAM-based signing failed: %s", iam_err, exc_info=True)
-                    raise RuntimeError(f"Cannot generate signed {method} URL without private key or IAM access") from iam_err
+                    # For PUT/POST operations, we MUST have signing - don't fall back to public URLs
+                    # Raise a clear error so the caller can return 501 and fall back to standard upload
+                    error_msg = str(iam_err).lower()
+                    if "permission" in error_msg or "403" in error_msg or "denied" in error_msg:
+                        raise RuntimeError(
+                            f"Cannot generate signed {method} URL: IAM permissions missing. "
+                            f"Service account needs 'iam.serviceAccountTokenCreator' role. "
+                            f"Error: {iam_err}"
+                        ) from iam_err
+                    else:
+                        raise RuntimeError(
+                            f"Cannot generate signed {method} URL without private key or IAM access: {iam_err}"
+                        ) from iam_err
             else:
                 # For GET operations, return None to trigger fallback handling
                 logger.warning("No private key available for GET request; will use fallback")

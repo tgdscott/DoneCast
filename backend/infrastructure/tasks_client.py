@@ -329,7 +329,32 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
 
 
 def enqueue_http_task(path: str, body: dict) -> dict:
+    """Enqueue an HTTP task via the centralized dispatch system.
+    
+    This is the ONLY entry point for task dispatch. All task dispatch must
+    go through this function.
+    
+    Args:
+        path: Task endpoint path (e.g., "/api/tasks/transcribe")
+        body: Task payload as a dictionary
+        
+    Returns:
+        Dictionary with "name" key containing task identifier
+        
+    Raises:
+        ImportError: If google-cloud-tasks is required but not installed
+        ValueError: If required configuration is missing
+        Exception: Any error during task creation (no silent fallbacks)
+    """
     log.info("event=tasks.enqueue_http_task.start path=%s", path)
+    
+    # Check for dry-run mode first
+    tasks_dry_run_raw = os.getenv("TASKS_DRY_RUN", "false")
+    tasks_dry_run = tasks_dry_run_raw and tasks_dry_run_raw.lower().strip() in {"true", "1", "yes", "on"}
+    if tasks_dry_run:
+        task_id = f"dry-run-{datetime.utcnow().isoformat()}"
+        log.info("event=tasks.dry_run path=%s task_id=%s", path, task_id)
+        return {"name": task_id}
     
     if not should_use_cloud_tasks():
         log.info("event=tasks.enqueue_http_task.using_local_dispatch path=%s", path)
@@ -337,15 +362,36 @@ def enqueue_http_task(path: str, body: dict) -> dict:
 
     log.info("event=tasks.enqueue_http_task.using_cloud_tasks path=%s", path)
     
+    # Validate Cloud Tasks availability - no silent fallbacks
     if tasks_v2 is None:
-        raise ImportError("google-cloud-tasks is not installed")
-    client = tasks_v2.CloudTasksClient()
+        error_msg = "google-cloud-tasks is not installed but Cloud Tasks is required"
+        log.error("event=tasks.enqueue_http_task.cloud_tasks_unavailable path=%s error=%s", path, error_msg)
+        raise ImportError(error_msg)
+    
+    try:
+        client = tasks_v2.CloudTasksClient()
+    except Exception as e:
+        error_msg = f"Failed to create CloudTasksClient: {e}"
+        log.error("event=tasks.enqueue_http_task.cloud_tasks_client_failed path=%s error=%s", path, error_msg)
+        raise RuntimeError(error_msg) from e
+    
+    # Validate required configuration - no silent fallbacks
     project = os.getenv("GOOGLE_CLOUD_PROJECT")
     location = os.getenv("TASKS_LOCATION")
     queue = os.getenv("TASKS_QUEUE")
     if not project or not location or not queue:
-        raise ValueError("Missing required Cloud Tasks configuration: GOOGLE_CLOUD_PROJECT, TASKS_LOCATION, TASKS_QUEUE")
-    parent = client.queue_path(project, location, queue)
+        missing = [k for k, v in [("GOOGLE_CLOUD_PROJECT", project), ("TASKS_LOCATION", location), ("TASKS_QUEUE", queue)] if not v]
+        error_msg = f"Missing required Cloud Tasks configuration: {', '.join(missing)}"
+        log.error("event=tasks.enqueue_http_task.config_missing path=%s missing=%s", path, missing)
+        raise ValueError(error_msg)
+    
+    try:
+        parent = client.queue_path(project, location, queue)
+    except Exception as e:
+        error_msg = f"Failed to build queue path: {e}"
+        log.error("event=tasks.enqueue_http_task.queue_path_failed path=%s project=%s location=%s queue=%s error=%s", 
+                 path, project, location, queue, error_msg)
+        raise ValueError(error_msg) from e
     
     # Route heavy tasks to dedicated worker service for isolation
     if "/assemble" in path or "/process-chunk" in path:
@@ -356,12 +402,14 @@ def enqueue_http_task(path: str, body: dict) -> dict:
         log.info("event=tasks.enqueue_http_task.using_tasks_url path=%s tasks_url_base=%s", path, base_url)
 
     if not base_url:
-        raise ValueError("Missing TASKS_URL_BASE (and WORKER_URL_BASE for worker-bound tasks)")
+        error_msg = "Missing TASKS_URL_BASE (and WORKER_URL_BASE for worker-bound tasks)"
+        log.error("event=tasks.enqueue_http_task.base_url_missing path=%s error=%s", path, error_msg)
+        raise ValueError(error_msg)
     
     base_url = base_url.rstrip("/")
     url = f"{base_url}{path}"
     
-    # Check TASKS_AUTH
+    # Validate TASKS_AUTH - warn but don't fail (some environments may not require it)
     tasks_auth = os.getenv("TASKS_AUTH")
     if not tasks_auth:
         log.warning("event=tasks.enqueue_http_task.tasks_auth_missing path=%s", path)
@@ -369,12 +417,17 @@ def enqueue_http_task(path: str, body: dict) -> dict:
         log.info("event=tasks.enqueue_http_task.tasks_auth_set path=%s auth_length=%d", path, len(tasks_auth))
     
     # Build HTTP request
-    http_request = tasks_v2.HttpRequest(
-        http_method=tasks_v2.HttpMethod.POST,
-        url=url,
-        headers={"Content-Type": "application/json", "X-Tasks-Auth": tasks_auth},
-        body=json.dumps(body).encode(),
-    )
+    try:
+        http_request = tasks_v2.HttpRequest(
+            http_method=tasks_v2.HttpMethod.POST,
+            url=url,
+            headers={"Content-Type": "application/json", "X-Tasks-Auth": tasks_auth or ""},
+            body=json.dumps(body).encode(),
+        )
+    except Exception as e:
+        error_msg = f"Failed to build HTTP request: {e}"
+        log.error("event=tasks.enqueue_http_task.http_request_build_failed path=%s url=%s error=%s", path, url, error_msg)
+        raise ValueError(error_msg) from e
     
     # Build task with dispatch deadline
     # Transcription: Up to 30 minutes for long audio files (Cloud Tasks max is 1800s)
@@ -382,21 +435,30 @@ def enqueue_http_task(path: str, body: dict) -> dict:
     # Chunk Processing: Up to 30 minutes for large chunk downloads and processing
     # Default Cloud Tasks timeout is only 30s, which causes premature retries
     # dispatch_deadline is set on the Task object, not HttpRequest
-    if "/transcribe" in path or "/assemble" in path or "/process-chunk" in path:
-        from google.protobuf import duration_pb2
-        deadline = duration_pb2.Duration()
-        deadline.seconds = 1800  # 30 minutes (max allowed by Cloud Tasks)
-        task = tasks_v2.Task(http_request=http_request, dispatch_deadline=deadline)
-    else:
-        task = tasks_v2.Task(http_request=http_request)
+    try:
+        if "/transcribe" in path or "/assemble" in path or "/process-chunk" in path:
+            from google.protobuf import duration_pb2
+            deadline = duration_pb2.Duration()
+            deadline.seconds = 1800  # 30 minutes (max allowed by Cloud Tasks)
+            task = tasks_v2.Task(http_request=http_request, dispatch_deadline=deadline)
+        else:
+            task = tasks_v2.Task(http_request=http_request)
+    except Exception as e:
+        error_msg = f"Failed to build task: {e}"
+        log.error("event=tasks.enqueue_http_task.task_build_failed path=%s error=%s", path, error_msg)
+        raise ValueError(error_msg) from e
     
+    # Create task - raise on any error (no silent fallbacks)
     try:
         log.info("event=tasks.enqueue_http_task.creating_task path=%s url=%s", path, url)
         created = client.create_task(request={"parent": parent, "task": task})
-        log.info("event=tasks.cloud.enqueued path=%s url=%s task_name=%s deadline=%ds", path, url, created.name, 1800 if ("/transcribe" in path or "/assemble" in path or "/process-chunk" in path) else 30)
+        deadline_seconds = 1800 if ("/transcribe" in path or "/assemble" in path or "/process-chunk" in path) else 30
+        log.info("event=tasks.cloud.enqueued path=%s url=%s task_name=%s deadline=%ds", path, url, created.name, deadline_seconds)
         return {"name": created.name}
     except Exception as e:
-        log.exception("event=tasks.enqueue_http_task.create_task_failed path=%s url=%s error=%s", path, url, str(e))
-        raise
+        error_msg = f"Failed to create Cloud Task: {e}"
+        log.error("event=tasks.enqueue_http_task.create_task_failed path=%s url=%s error=%s", path, url, str(e))
+        # Re-raise with clear context - no silent fallbacks
+        raise RuntimeError(error_msg) from e
 
 

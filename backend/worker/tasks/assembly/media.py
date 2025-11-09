@@ -1145,11 +1145,52 @@ def resolve_media_context(
                     candidate_keys.append((candidate_key, f"{stem}{suffix}" if suffix else stem))
                     seen_keys.add(candidate_key)
 
+            # PRIORITY 1: Try to download directly from stored GCS URI first
+            # This ensures transcripts can be found even if environment uses different bucket
+            if bucket_from_gcs and key_from_gcs and not words_json_path:
+                try:
+                    from google.cloud import storage
+                    client = storage.Client()
+                    bucket_obj = client.bucket(bucket_from_gcs)
+                    blob = bucket_obj.blob(key_from_gcs)
+                    if blob.exists():
+                        data = blob.download_as_bytes()
+                        if data:
+                            safe_local_name = _sanitize(base_name_from_key) or _sanitize(Path(key_from_gcs).stem) or "transcript"
+                            local_path = (PROJECT_ROOT / "transcripts") / f"{safe_local_name}.json"
+                            try:
+                                local_path.parent.mkdir(parents=True, exist_ok=True)
+                                local_path.write_bytes(data)
+                                if local_path.exists() and local_path.stat().st_size > 0:
+                                    words_json_path = local_path
+                                    logging.info(
+                                        "[assemble] ✅ Downloaded transcript from stored GCS URI: gs://%s/%s -> %s",
+                                        bucket_from_gcs,
+                                        key_from_gcs,
+                                        local_path,
+                                    )
+                                else:
+                                    logging.warning("[assemble] Downloaded transcript from stored URI but file is empty: gs://%s/%s", bucket_from_gcs, key_from_gcs)
+                            except Exception as write_err:
+                                logging.warning("[assemble] Failed to write transcript from stored URI to %s: %s", local_path, write_err)
+                        else:
+                            logging.warning("[assemble] Stored GCS URI exists but returned empty data: gs://%s/%s", bucket_from_gcs, key_from_gcs)
+                    else:
+                        logging.warning("[assemble] Stored GCS URI does not exist (will try fallback): gs://%s/%s", bucket_from_gcs, key_from_gcs)
+                except Exception as direct_download_err:
+                    logging.warning(
+                        "[assemble] Failed to download from stored GCS URI gs://%s/%s: %s (will try fallback methods)",
+                        bucket_from_gcs,
+                        key_from_gcs,
+                        direct_download_err,
+                    )
+
             if key_from_gcs and key_from_gcs not in seen_keys:
                 candidate_keys.append((key_from_gcs, Path(key_from_gcs).stem))
                 seen_keys.add(key_from_gcs)
 
-            if bucket_name and candidate_keys:
+            # PRIORITY 2: Try environment-based lookup (only if stored URI didn't work)
+            if bucket_name and candidate_keys and not words_json_path:
                 try:
                     # CRITICAL: Use GCS client directly (NEVER use R2 for transcripts)
                     # Transcripts are intermediate files and must be in GCS, not R2

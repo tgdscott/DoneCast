@@ -671,82 +671,78 @@ async def presign_upload(
     log.info(f"Generating upload URL for: gs://{gcs_bucket}/{object_path}")
     
     # Generate upload URL for direct GCS upload
-    # Try resumable upload session first (works with ADC, no private key needed)
-    # Then fall back to signed URLs if needed
+    # Use the infrastructure helper which handles credential loading and signing
     try:
-        log.info("Generating upload URL for direct GCS upload (PUT method)")
+        log.info("Generating signed URL for resumable upload to GCS")
         
-        from google.cloud import storage
-        
-        # Method 1: Try resumable upload session (works with Application Default Credentials)
-        # This is the preferred method as it doesn't require private keys or IAM permissions
-        try:
-            log.info("Attempting to create resumable upload session")
-            client = storage.Client()  # Uses Application Default Credentials
-            bucket = client.bucket(gcs_bucket)
-            blob = bucket.blob(object_path)
-            
-            # Create resumable upload session - this works with ADC
-            upload_url = blob.create_resumable_upload_session(
-                content_type=request.content_type,
-            )
-            
-            if upload_url:
-                log.info(f"Successfully created resumable upload session for {object_path}")
-                return PresignResponse(
-                    upload_url=str(upload_url),
-                    object_path=object_path,
-                    headers={"Content-Type": request.content_type}
-                )
-            else:
-                log.warning("create_resumable_upload_session returned None")
-        except Exception as resumable_err:
-            log.warning(f"Resumable upload session failed: {resumable_err}, trying signed URL fallback")
-            # Fall through to signed URL method
-        
-        # Method 2: Try signed URL generation (requires private key or IAM permissions)
+        # First, verify credentials can be loaded
         from infrastructure import gcs as gcs_module
+        from infrastructure.gcs import _get_signing_credentials
         
-        log.info("Attempting to generate signed URL (requires credentials)")
+        log.info("Checking if signing credentials are available...")
+        signing_creds = _get_signing_credentials()
+        
+        if signing_creds:
+            log.info("✅ Signing credentials loaded successfully")
+            log.info(f"   Credentials type: {type(signing_creds).__name__}")
+            if hasattr(signing_creds, 'service_account_email'):
+                log.info(f"   Service account: {signing_creds.service_account_email}")
+        else:
+            log.warning("⚠️  No signing credentials available - will try IAM-based signing")
+        
+        # Use the infrastructure helper which tries multiple methods
+        # For direct uploads, we'll use PUT method (simpler than resumable)
+        # PUT signed URLs work for files up to ~5GB and are simpler for the frontend
         try:
+            log.info("Generating signed URL for direct PUT upload...")
             upload_url = gcs_module._generate_signed_url(
                 bucket_name=gcs_bucket,
                 key=object_path,
                 expires=timedelta(hours=1),
-                method="PUT",
+                method="PUT",  # PUT for direct upload (simpler than resumable)
                 content_type=request.content_type,
             )
+            
+            if upload_url:
+                log.info(f"✅ Successfully generated PUT upload URL for {object_path}")
+                return PresignResponse(
+                    upload_url=str(upload_url),
+                    object_path=object_path,
+                    headers={
+                        "Content-Type": request.content_type
+                    }
+                )
+            else:
+                log.error("❌ _generate_signed_url returned None")
+                raise ValueError("Signed URL generation returned None - check credentials and permissions")
+                
         except RuntimeError as runtime_err:
-            # IAM signing failed - log and re-raise as 501
-            log.error(f"Signed URL generation failed (likely IAM permissions issue): {runtime_err}")
+            # IAM-based signing failed or no credentials
+            error_msg = str(runtime_err).lower()
+            log.error(f"❌ Signed URL generation failed: {runtime_err}", exc_info=True)
+            
+            # Check what credentials we have
+            signer_key = os.getenv("GCS_SIGNER_KEY_JSON")
+            if signer_key:
+                log.error(f"   GCS_SIGNER_KEY_JSON is set (length: {len(signer_key)}, starts with: {signer_key[:50]}...)")
+            else:
+                log.error("   GCS_SIGNER_KEY_JSON is not set")
+            
+            if signing_creds:
+                log.error(f"   But signing credentials were loaded: {type(signing_creds).__name__}")
+            else:
+                log.error("   And no signing credentials were loaded")
+            
             raise HTTPException(
                 status_code=501,
-                detail="Direct upload not available (IAM permissions required). Files larger than 25MB may fail. Please contact support."
+                detail="Direct upload not available (signing credentials required). "
+                       "Files larger than 25MB may fail due to Cloud Run's 32MB limit. "
+                       "Please contact support to enable direct uploads."
             )
-        except Exception as sign_err:
-            # Other signing errors
-            log.error(f"Signed URL generation failed: {sign_err}", exc_info=True)
+        except Exception as url_err:
+            # Any other error
+            log.error(f"❌ Failed to generate upload URL: {url_err}", exc_info=True)
             raise
-        
-        # Validate the URL was generated
-        if not upload_url:
-            log.error("Signed URL generation returned None - this indicates a configuration issue")
-            raise HTTPException(
-                status_code=501,
-                detail="Direct upload not available (GCS client or credentials issue). Files larger than 25MB may fail. Please contact support."
-            )
-        
-        if not isinstance(upload_url, str) or len(upload_url.strip()) == 0:
-            log.error(f"Signed URL generation returned invalid value: {upload_url}")
-            raise ValueError("Signed URL generation returned empty or invalid value")
-        
-        log.info(f"Successfully generated signed URL for {object_path} (length: {len(upload_url)})")
-        
-        return PresignResponse(
-            upload_url=upload_url,
-            object_path=object_path,
-            headers={"Content-Type": request.content_type}
-        )
         
     except HTTPException as http_err:
         # Re-raise HTTP exceptions as-is (these are intentional)

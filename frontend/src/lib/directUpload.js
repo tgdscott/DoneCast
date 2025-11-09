@@ -194,11 +194,14 @@ export async function uploadMediaDirect({
   } catch (err) {
     // If presign endpoint returns 501 (Not Implemented), fall back to standard upload
     if (err?.response?.status === 501 || err?.status === 501) {
+      // For large files, warn that upload might fail
       if (preferDirectUpload) {
-        // For large files, direct upload is recommended - warn the user
-        const errorMsg = `Direct upload is not available. Files larger than ${LARGE_FILE_THRESHOLD_MB}MB may fail due to server limits. ` +
-                        `Your file is ${FILE_SIZE_MB.toFixed(1)}MB. Please contact support for assistance with large file uploads.`;
-        throw new Error(errorMsg);
+        console.warn(
+          `Direct upload not available for ${FILE_SIZE_MB.toFixed(1)}MB file. ` +
+          `Attempting standard upload, but files >${LARGE_FILE_THRESHOLD_MB}MB may fail due to Cloud Run's 32MB limit.`
+        );
+        // Don't throw error - let it try standard upload anyway
+        // Some files might still work if they're close to the limit
       }
       useDirectUpload = false;
     } else {
