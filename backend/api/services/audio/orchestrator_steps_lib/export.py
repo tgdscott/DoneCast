@@ -793,29 +793,54 @@ def build_template_and_final_mix_step(
 
     try:
         log.append(f"[MUSIC_RULES_START] Processing {len(template_background_music_rules or [])} background music rules...")
+        _py_log.info(f"[MUSIC_RULES_START] Processing {len(template_background_music_rules or [])} background music rules...")
         for rule_idx, rule in enumerate(template_background_music_rules or []):
-            log.append(f"[MUSIC_RULE_{rule_idx}] Starting rule {rule_idx + 1}/{len(template_background_music_rules)}")
             req_name = (rule.get("music_filename") or rule.get("music") or "")
+            apply_to_segments = rule.get("apply_to_segments") or []
+            log.append(f"[MUSIC_RULE_{rule_idx}] Starting rule {rule_idx + 1}/{len(template_background_music_rules)}: file='{req_name}', apply_to={apply_to_segments}")
+            _py_log.info(f"[MUSIC_RULE_{rule_idx}] Starting rule {rule_idx + 1}/{len(template_background_music_rules)}: file='{req_name}', apply_to={apply_to_segments}")
+            bg = None
             if req_name.startswith("gs://"):
                 import tempfile
-                from infrastructure import gcs
+                from google.cloud import storage as gcs_storage
 
                 temp_path = None
                 try:
-                    gcs_str = req_name[5:]
-                    bucket, key = gcs_str.split("/", 1)
-                    file_bytes = gcs.download_bytes(bucket, key)
-                    if not file_bytes:
-                        raise RuntimeError(f"Failed to download from GCS: {req_name}")
+                    gcs_str = req_name[5:]  # Remove "gs://"
+                    bucket_name, key = gcs_str.split("/", 1)
+                    _py_log.info(f"[MUSIC_RULE_GCS] Downloading background music: bucket={bucket_name}, key={key}")
+                    
+                    # Use GCS client directly (NEVER use R2 for intermediate files like background music)
+                    client = gcs_storage.Client()
+                    blob = client.bucket(bucket_name).blob(key)
+                    
+                    # Check if blob exists first
+                    if not blob.exists():
+                        _py_log.error(f"[MUSIC_RULE_GCS] Blob does not exist: gs://{bucket_name}/{key}")
+                        log.append(f"[MUSIC_RULE_GCS_ERROR] gcs={req_name} error=FileNotFoundError: Blob does not exist")
+                        continue
+                    
+                    # Download to temp file
                     temp_fd, temp_path = tempfile.mkstemp(suffix=".mp3")
                     os.close(temp_fd)
-                    with open(temp_path, "wb") as fh:
-                        fh.write(file_bytes)
+                    blob.download_to_filename(temp_path)
+                    
+                    # Verify file was downloaded
+                    if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
+                        raise RuntimeError(f"Downloaded file is empty or missing: {temp_path}")
+                    
+                    file_size = os.path.getsize(temp_path)
                     bg = AudioSegment.from_file(temp_path)
+                    _py_log.info(f"[MUSIC_RULE_GCS_OK] gcs={req_name} len_ms={len(bg)}, size={file_size} bytes")
                     log.append(
                         f"[MUSIC_RULE_GCS_OK] gcs={req_name} len_ms={len(bg)}"
                     )
+                except FileNotFoundError as e:
+                    _py_log.warning(f"[MUSIC_RULE_GCS_NOT_FOUND] gcs={req_name} - file not found in GCS, trying database lookup")
+                    log.append(f"[MUSIC_RULE_GCS_NOT_FOUND] gcs={req_name} - trying database lookup")
+                    bg = None  # Will try database lookup below
                 except Exception as e:
+                    _py_log.error(f"[MUSIC_RULE_GCS_ERROR] gcs={req_name} error={type(e).__name__}: {e}", exc_info=True)
                     log.append(
                         f"[MUSIC_RULE_GCS_ERROR] gcs={req_name} error={type(e).__name__}: {e}"
                     )
@@ -826,24 +851,181 @@ def build_template_and_final_mix_step(
                             os.remove(temp_path)
                         except Exception:
                             pass
-            else:
-                music_path = MEDIA_DIR / req_name
-                if not music_path.exists():
-                    altm = _resolve_media_file(req_name)
-                    if altm and altm.exists():
-                        music_path = altm
-                        log.append(
-                            f"[MUSIC_RULE_RESOLVED] requested={req_name} -> {music_path.name}"
-                        )
-                    else:
-                        log.append(f"[MUSIC_RULE_SKIP] missing_file={req_name}")
-                        continue
+            
+            # If GCS download failed or filename is not a GCS URL, try database lookup and local resolution
+            # CRITICAL: Always try database lookup if filename is provided (not just for GCS URLs)
+            # Template background music rules may store just the filename (e.g., "background-music.mp3")
+            # and we need to look up the MediaItem to get the GCS URL
+            if not bg and req_name:
+                _py_log.info(f"[MUSIC_RULE_DB_LOOKUP] Looking up MediaItem for background music: {req_name}")
+                log.append(f"[MUSIC_RULE_DB_LOOKUP] Looking up MediaItem for background music: {req_name}")
                 try:
-                    bg = AudioSegment.from_file(music_path)
-                    log.append(f"[MUSIC_RULE_LOADED] file={req_name} len_ms={len(bg)}")
-                except Exception as e:
-                    log.append(f"[MUSIC_RULE_LOAD_ERROR] file={req_name} error={type(e).__name__}: {e}")
-                    continue
+                    from api.models.podcast import MediaItem, MediaCategory
+                    from sqlmodel import select
+                    from api.core.database import session_scope
+                    from uuid import UUID
+                    
+                    # Get user_id from template (templates have user_id directly)
+                    user_id = None
+                    if template and hasattr(template, 'user_id'):
+                        try:
+                            user_id = UUID(str(template.user_id)) if template.user_id else None
+                            _py_log.info(f"[MUSIC_RULE_DB_LOOKUP] Template user_id: {user_id}")
+                        except Exception as uid_err:
+                            _py_log.warning(f"[MUSIC_RULE_DB_LOOKUP] Failed to parse template user_id: {uid_err}")
+                    
+                    if user_id:
+                        with session_scope() as db_session:
+                            # Get all MediaItems for this user with music category
+                            all_items = list(db_session.exec(
+                                select(MediaItem)
+                                .where(MediaItem.user_id == user_id)
+                                .where(MediaItem.category == MediaCategory.music)
+                            ).all())
+                            
+                            _py_log.info(f"[MUSIC_RULE_DB_LOOKUP] Found {len(all_items)} music MediaItems for user_id={user_id}")
+                            log.append(f"[MUSIC_RULE_DB_LOOKUP] Found {len(all_items)} music MediaItems for user_id={user_id}")
+                            
+                            media_item = None
+                            basename_only = Path(req_name).name
+                            # Also try to match against the full req_name (in case it's a full GCS URL or path)
+                            req_name_normalized = req_name.strip()
+                            
+                            # Try multiple matching strategies
+                            for item in all_items:
+                                filename = str(item.filename or "")
+                                if not filename:
+                                    continue
+                                
+                                # Strategy 1: Exact match (full filename or GCS URL)
+                                if filename == req_name_normalized or filename == req_name:
+                                    media_item = item
+                                    _py_log.info(f"[MUSIC_RULE_DB_LOOKUP] Matched by exact filename: '{filename}'")
+                                    break
+                                
+                                # Strategy 2: Filename ends with basename (for GCS URLs like gs://bucket/path/basename.mp3)
+                                if filename.endswith(basename_only):
+                                    media_item = item
+                                    _py_log.info(f"[MUSIC_RULE_DB_LOOKUP] Matched by ending: '{filename}' ends with '{basename_only}'")
+                                    break
+                                
+                                # Strategy 3: Filename contains req_name (for partial matches)
+                                if req_name_normalized in filename or basename_only in filename:
+                                    media_item = item
+                                    _py_log.info(f"[MUSIC_RULE_DB_LOOKUP] Matched by partial: '{req_name_normalized}' in '{filename}'")
+                                    break
+                                
+                                # Strategy 4: Extract basename from GCS URL and compare
+                                if filename.startswith("gs://"):
+                                    try:
+                                        gcs_basename = filename.split("/")[-1]
+                                        if gcs_basename == basename_only or gcs_basename == req_name_normalized:
+                                            media_item = item
+                                            _py_log.info(f"[MUSIC_RULE_DB_LOOKUP] Matched by GCS basename: '{gcs_basename}' == '{basename_only}'")
+                                            break
+                                    except Exception:
+                                        pass
+                            
+                            if media_item and media_item.filename:
+                                resolved_filename = media_item.filename
+                                _py_log.info(f"[MUSIC_RULE_DB_LOOKUP] Found MediaItem id={media_item.id}, filename='{resolved_filename}'")
+                                log.append(f"[MUSIC_RULE_DB_LOOKUP] Found MediaItem id={media_item.id}, filename='{resolved_filename}'")
+                                
+                                # Check if MediaItem filename is a GCS URL
+                                if resolved_filename.startswith("gs://"):
+                                    try:
+                                        import tempfile
+                                        from google.cloud import storage as gcs_storage
+                                        
+                                        gcs_str = resolved_filename[5:]  # Remove "gs://"
+                                        bucket_name, key = gcs_str.split("/", 1)
+                                        
+                                        _py_log.info(f"[MUSIC_RULE_DB_LOOKUP] Downloading from GCS: bucket={bucket_name}, key={key}")
+                                        
+                                        # Use GCS client directly (NEVER use R2 for intermediate files)
+                                        client = gcs_storage.Client()
+                                        blob = client.bucket(bucket_name).blob(key)
+                                        
+                                        # Check if blob exists
+                                        if not blob.exists():
+                                            _py_log.error(f"[MUSIC_RULE_DB_LOOKUP] MediaItem GCS blob does not exist: {resolved_filename}")
+                                            log.append(f"[MUSIC_RULE_DB_LOOKUP] MediaItem GCS blob does not exist: {resolved_filename}")
+                                            continue
+                                        
+                                        temp_fd, temp_path = tempfile.mkstemp(suffix=".mp3")
+                                        os.close(temp_fd)
+                                        blob.download_to_filename(temp_path)
+                                        
+                                        # Verify file was downloaded
+                                        if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
+                                            _py_log.error(f"[MUSIC_RULE_DB_LOOKUP] Downloaded file is empty or missing: {temp_path}")
+                                            log.append(f"[MUSIC_RULE_DB_LOOKUP] Downloaded file is empty or missing: {temp_path}")
+                                            try:
+                                                os.unlink(temp_path)
+                                            except Exception:
+                                                pass
+                                            continue
+                                        
+                                        file_size = os.path.getsize(temp_path)
+                                        bg = AudioSegment.from_file(temp_path)
+                                        _py_log.info(f"[MUSIC_RULE_DB_LOOKUP_OK] Downloaded from GCS via MediaItem: {resolved_filename} -> len_ms={len(bg)}, size={file_size} bytes")
+                                        log.append(f"[MUSIC_RULE_DB_LOOKUP_OK] Downloaded from GCS via MediaItem: {resolved_filename} ({file_size} bytes)")
+                                        
+                                        # Clean up temp file
+                                        try:
+                                            os.unlink(temp_path)
+                                        except Exception:
+                                            pass
+                                    except Exception as gcs_err:
+                                        _py_log.error(f"[MUSIC_RULE_DB_LOOKUP] Failed to download from GCS: {gcs_err}", exc_info=True)
+                                        log.append(f"[MUSIC_RULE_DB_LOOKUP] GCS download failed: {gcs_err}")
+                                elif resolved_filename.startswith("http"):
+                                    # MediaItem has R2 URL - skip it (intermediate files should be in GCS)
+                                    _py_log.warning(f"[MUSIC_RULE_DB_LOOKUP] MediaItem has R2 URL (intermediate files should be in GCS): '{resolved_filename}'. Skipping.")
+                                    log.append(f"[MUSIC_RULE_DB_LOOKUP] MediaItem has R2 URL - intermediate files should be in GCS, not R2")
+                                else:
+                                    # MediaItem has a filename but not GCS URL - file was never uploaded to GCS
+                                    _py_log.error(f"[MUSIC_RULE_DB_LOOKUP] MediaItem found but filename is not GCS URL: '{resolved_filename}'. File needs to be uploaded to GCS. Segment will be skipped.")
+                                    log.append(f"[MUSIC_RULE_DB_LOOKUP] MediaItem filename is not GCS URL: '{resolved_filename}'. File needs to be uploaded to GCS.")
+                            else:
+                                _py_log.warning(f"[MUSIC_RULE_DB_LOOKUP] No MediaItem found for user_id={user_id}, filename='{req_name}'")
+                                log.append(f"[MUSIC_RULE_DB_LOOKUP] No MediaItem found for filename='{req_name}'")
+                    else:
+                        _py_log.warning(f"[MUSIC_RULE_DB_LOOKUP] Cannot lookup MediaItem - template has no user_id")
+                        log.append(f"[MUSIC_RULE_DB_LOOKUP] Template has no user_id")
+                except ImportError as imp_err:
+                    _py_log.warning(f"[MUSIC_RULE_DB_LOOKUP] Database models not available: {imp_err}")
+                    log.append(f"[MUSIC_RULE_DB_LOOKUP] Database models not available")
+                except Exception as db_err:
+                    _py_log.error(f"[MUSIC_RULE_DB_LOOKUP] Failed to lookup MediaItem: {db_err}", exc_info=True)
+                    log.append(f"[MUSIC_RULE_DB_LOOKUP] Failed: {db_err}")
+                
+                # Try local file resolution
+                if not bg:
+                    music_path = MEDIA_DIR / req_name
+                    if not music_path.exists():
+                        altm = _resolve_media_file(req_name)
+                        if altm and altm.exists():
+                            music_path = altm
+                            log.append(
+                                f"[MUSIC_RULE_RESOLVED] requested={req_name} -> {music_path.name}"
+                            )
+                        else:
+                            log.append(f"[MUSIC_RULE_SKIP] missing_file={req_name}")
+                            continue
+                    try:
+                        bg = AudioSegment.from_file(music_path)
+                        log.append(f"[MUSIC_RULE_LOADED] file={req_name} len_ms={len(bg)}")
+                    except Exception as e:
+                        log.append(f"[MUSIC_RULE_LOAD_ERROR] file={req_name} error={type(e).__name__}: {e}")
+                        continue
+            
+            # If still no background music, skip this rule
+            if not bg:
+                _py_log.warning(f"[MUSIC_RULE_SKIP] ❌ Could not load background music file: {req_name}. Rule will be skipped.")
+                log.append(f"[MUSIC_RULE_SKIP] ❌ Could not load background music file: {req_name}. Rule will be skipped.")
+                log.append(f"[MUSIC_RULE_SKIP] Tried: GCS download, database lookup, local file resolution")
+                continue
 
             apply_to = [str(t).lower() for t in (rule.get("apply_to_segments") or [])]
             vol_db = float(
@@ -917,9 +1099,17 @@ def build_template_and_final_mix_step(
                         continue
     except MemoryError as e:
         log.append(f"[MUSIC_RULES_MEMORY_ERROR] Out of memory during music rule processing: {e}")
+        _py_log.error(f"[MUSIC_RULES_MEMORY_ERROR] Out of memory during music rule processing: {e}")
         raise RuntimeError(f"Music rules processing failed due to memory exhaustion: {e}")
     except Exception as e:
         log.append(f"[MUSIC_RULES_WARN] {type(e).__name__}: {e}")
+        _py_log.warning(f"[MUSIC_RULES_WARN] {type(e).__name__}: {e}", exc_info=True)
+    
+    # Log summary of background music rules processed
+    total_rules = len(template_background_music_rules or [])
+    if total_rules > 0:
+        _py_log.info(f"[MUSIC_RULES_SUMMARY] Finished processing {total_rules} background music rules")
+        log.append(f"[MUSIC_RULES_SUMMARY] Finished processing {total_rules} background music rules")
 
     # CRITICAL MIXING SECTION - Add defensive error handling for exit code -9 crashes
     try:

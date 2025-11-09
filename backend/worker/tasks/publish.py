@@ -7,7 +7,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 from typing import Optional
 from uuid import UUID
 
@@ -52,7 +52,8 @@ def publish_episode_to_spreaker_task(
             )
             return {"dropped": True, "reason": "no final audio", "episode_id": episode_id}
 
-        cover_candidate = getattr(episode, "cover_path", None)
+        # Check for cover image - priority: gcs_cover_path (R2 URL) > cover_path (local filename) > podcast cover
+        cover_candidate = getattr(episode, "gcs_cover_path", None) or getattr(episode, "cover_path", None)
         if not cover_candidate and getattr(episode, "podcast_id", None):
             pod = crud.get_podcast_by_id(session, episode.podcast_id)
             if pod and pod.cover_path:
@@ -64,9 +65,54 @@ def publish_episode_to_spreaker_task(
             if cover_candidate:
                 lower = cover_candidate.lower()
                 if lower.startswith(("http://", "https://")):
-                    # Already remote; nothing to upload but keep existing metadata
-                    image_file_path = None
-                else:
+                    # Cover is in R2 - download it for publishing
+                    logging.info("[publish] Cover image is in R2, downloading: %s", cover_candidate)
+                    try:
+                        import tempfile
+                        from infrastructure import r2 as r2_storage
+                        
+                        # Parse R2 URL to extract bucket and key (same logic as audio)
+                        try:
+                            url_path = cover_candidate.replace("https://", "").replace("http://", "")
+                            parts = url_path.split("/", 1)
+                            if len(parts) != 2:
+                                raise ValueError(f"Invalid R2 URL format: {cover_candidate}")
+                            
+                            domain_part = parts[0]
+                            key = unquote(parts[1])  # URL-decode the key (R2 URLs may be URL-encoded)
+                            
+                            domain_parts = domain_part.split(".")
+                            if len(domain_parts) < 5 or domain_parts[-4:] != ["r2", "cloudflarestorage", "com"]:
+                                raise ValueError(f"Invalid R2 URL domain format: {domain_part}")
+                            
+                            bucket_name = domain_parts[0]
+                            
+                            logging.info("[publish] Parsed R2 cover URL: bucket=%s, key=%s", bucket_name, key)
+                            
+                            # Download using R2 client
+                            file_bytes = r2_storage.download_bytes(bucket_name, key)
+                            if not file_bytes:
+                                raise RuntimeError(f"R2 download returned None for bucket={bucket_name}, key={key}")
+                            
+                            # Save to temp file
+                            temp_fd, temp_path = tempfile.mkstemp(suffix=".jpg")
+                            os.close(temp_fd)
+                            with open(temp_path, "wb") as f:
+                                f.write(file_bytes)
+                            
+                            # Ensure cover image constraints (size, format, etc.)
+                            image_file_path = ensure_cover_image_constraints(temp_path)
+                            logging.info("[publish] Downloaded and processed cover from R2: bucket=%s, key=%s (%d bytes)", 
+                                       bucket_name, key, os.path.getsize(image_file_path) if image_file_path else 0)
+                        except (ValueError, RuntimeError) as parse_err:
+                            logging.error("[publish] Failed to parse or download R2 cover URL: %s", parse_err, exc_info=True)
+                            # Fall through to local file lookup
+                    except Exception as cover_err:
+                        logging.warning("[publish] Failed to download cover from R2, trying local lookup: %s", cover_err)
+                        # Fall through to local file lookup
+                
+                # If not an R2 URL or download failed, try local file lookup
+                if not image_file_path:
                     candidates: list[Path] = []
                     raw_path = Path(cover_candidate)
                     if raw_path.is_file():
@@ -126,22 +172,52 @@ def publish_episode_to_spreaker_task(
         # Check if we have an R2 URL stored (final files are in R2)
         r2_audio_url = getattr(episode, 'gcs_audio_path', None) or getattr(episode, 'r2_audio_path', None)
         if r2_audio_url and (r2_audio_url.startswith("https://") or r2_audio_url.startswith("http://")):
-            # Audio is in R2 - download it for publishing
+            # Audio is in R2 - download it using R2 client (R2 URLs require authentication)
             logging.info("[publish] Audio is in R2, downloading: %s", r2_audio_url)
             try:
-                import requests
                 import tempfile
-                resp = requests.get(r2_audio_url, timeout=300)  # 5 minute timeout for large files
-                resp.raise_for_status()
+                from infrastructure import r2 as r2_storage
                 
-                # Save to temp file
-                temp_fd, temp_path = tempfile.mkstemp(suffix=".mp3")
-                os.close(temp_fd)
-                with open(temp_path, "wb") as f:
-                    f.write(resp.content)
-                
-                audio_path = temp_path
-                logging.info("[publish] Downloaded audio from R2: %s (%d bytes)", r2_audio_url, os.path.getsize(temp_path))
+                # Parse R2 URL to extract bucket and key
+                # Format: https://ppp-media.{account_id}.r2.cloudflarestorage.com/{key}
+                # Or: https://{bucket}.{account_id}.r2.cloudflarestorage.com/{key}
+                try:
+                    # Remove https:// prefix
+                    url_path = r2_audio_url.replace("https://", "").replace("http://", "")
+                    # Split by first /
+                    parts = url_path.split("/", 1)
+                    if len(parts) != 2:
+                        raise ValueError(f"Invalid R2 URL format: {r2_audio_url}")
+                    
+                    # Extract bucket from subdomain (format: bucket.account_id.r2.cloudflarestorage.com)
+                    domain_part = parts[0]
+                    key = unquote(parts[1])  # URL-decode the key (R2 URLs may be URL-encoded)
+                    
+                    # Parse bucket from domain (bucket.account_id.r2.cloudflarestorage.com)
+                    domain_parts = domain_part.split(".")
+                    if len(domain_parts) < 5 or domain_parts[-4:] != ["r2", "cloudflarestorage", "com"]:
+                        raise ValueError(f"Invalid R2 URL domain format: {domain_part}")
+                    
+                    bucket_name = domain_parts[0]
+                    
+                    logging.info("[publish] Parsed R2 audio URL: bucket=%s, key=%s", bucket_name, key)
+                    
+                    # Download using R2 client
+                    file_bytes = r2_storage.download_bytes(bucket_name, key)
+                    if not file_bytes:
+                        raise RuntimeError(f"R2 download returned None for bucket={bucket_name}, key={key}")
+                    
+                    # Save to temp file
+                    temp_fd, temp_path = tempfile.mkstemp(suffix=".mp3")
+                    os.close(temp_fd)
+                    with open(temp_path, "wb") as f:
+                        f.write(file_bytes)
+                    
+                    audio_path = temp_path
+                    logging.info("[publish] Downloaded audio from R2: bucket=%s, key=%s (%d bytes)", bucket_name, key, os.path.getsize(temp_path))
+                except Exception as parse_err:
+                    logging.error("[publish] Failed to parse R2 URL: %s", parse_err, exc_info=True)
+                    raise RuntimeError(f"Failed to parse R2 URL for downloading: {r2_audio_url}") from parse_err
             except Exception as r2_err:
                 logging.error("[publish] Failed to download audio from R2: %s", r2_err, exc_info=True)
                 raise RuntimeError(f"Failed to download audio from R2 for publishing: {r2_err}") from r2_err

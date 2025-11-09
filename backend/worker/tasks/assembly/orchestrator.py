@@ -1046,7 +1046,10 @@ def _finalize_episode(
     if cover_value:
         cover_str = str(cover_value)
         if cover_str.lower().startswith(("http://", "https://")):
+            # Cover is already a URL (likely R2) - store it in both fields
             episode.cover_path = cover_str
+            episode.gcs_cover_path = cover_str  # Store R2 URL in gcs_cover_path as well
+            logging.info("[assemble] ✅ Cover is already a URL (R2): %s", cover_str)
         else:
             try:
                 cover_path = Path(cover_str)
@@ -1086,7 +1089,10 @@ def _finalize_episode(
                         
                         # Store R2 URL in episode (covers go to R2, not GCS)
                         episode.gcs_cover_path = r2_cover_url  # Note: field name is gcs_cover_path but it stores R2 URL for final files
+                        # Also keep the local filename in cover_path for backwards compatibility
+                        episode.cover_path = cover_name
                         logging.info("[assemble] ✅ Cover uploaded to R2 (final storage): %s", r2_cover_url)
+                        logging.info("[assemble] ✅ Cover saved to episode: gcs_cover_path='%s', cover_path='%s'", r2_cover_url, cover_name)
                 except ImportError:
                     logging.error("[assemble] ❌ R2 storage not available - cannot upload cover to R2")
                     raise RuntimeError("[assemble] R2 storage is required for final cover upload but r2 module is not available")
