@@ -84,6 +84,11 @@ export default function useFileUpload({
       setStatusMessage('Uploading audio file...');
       setError('');
 
+      // Emit upload start event to reduce polling during upload
+      try {
+        window.dispatchEvent(new CustomEvent('ppp:upload:start'));
+      } catch {}
+
       try {
         // Upload to GCS via direct upload endpoint
         const entries = await uploadMediaDirect({
@@ -110,6 +115,12 @@ export default function useFileUpload({
 
         setStatusMessage('Upload successful!');
         setUploadProgress(100);
+
+        // Emit upload complete event to resume normal polling after cooldown
+        try {
+          window.dispatchEvent(new CustomEvent('ppp:upload:complete'));
+          localStorage.setItem('ppp_last_upload_time', Date.now().toString());
+        } catch {}
 
         // Notify parent of upload completion
         if (onUploadComplete) {

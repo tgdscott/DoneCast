@@ -86,19 +86,32 @@ class ChunkMetadata:
 def should_use_chunking(audio_path: Path) -> bool:
     """Determine if an audio file should use chunked processing.
     
-    Files longer than 10 minutes benefit from chunking.
-    Can be disabled via DISABLE_CHUNKING=true env var for testing.
+    Chunking requires:
+    - DISABLE_CHUNKING env var not set to true/1/yes
+    - STORAGE_BACKEND == 'gcs' (chunks require GCS for storage)
+    - Audio duration > 10 minutes
+    
+    Returns False if any requirement is not met, ensuring safe fallback to direct processing.
     """
     # Allow disabling chunking for testing/debugging
     if os.getenv("DISABLE_CHUNKING", "").lower() in ("true", "1", "yes"):
         log.info("[chunking] Chunking disabled via DISABLE_CHUNKING env var")
         return False
     
+    # Require GCS backend for chunking (chunks must be uploaded to GCS)
+    storage_backend = os.getenv("STORAGE_BACKEND", "gcs").lower().strip()
+    if storage_backend != "gcs":
+        log.info(f"[chunking] Disabled: STORAGE_BACKEND != gcs (current: {storage_backend})")
+        return False
+    
     try:
         audio = AudioSegment.from_file(str(audio_path))
         duration_ms = len(audio)
-        # Use chunking for files >10 minutes
-        return duration_ms > CHUNK_TARGET_MS
+        # Use chunking only for files >10 minutes
+        if duration_ms <= CHUNK_TARGET_MS:
+            log.info(f"[chunking] Disabled: audio duration {duration_ms}ms <= {CHUNK_TARGET_MS}ms (10 min)")
+            return False
+        return True
     except Exception as e:
         log.warning(f"[chunking] Failed to determine audio duration: {e}")
         return False
@@ -167,9 +180,36 @@ def split_audio_into_chunks(
 ) -> List[ChunkMetadata]:
     """Split audio file into chunks at silence boundaries.
     
+    Requires GCS to be available. If GCS client initialization fails or any chunk
+    upload fails, raises RuntimeError to trigger fallback to direct processing.
+    
     Returns list of ChunkMetadata objects describing each chunk.
+    All chunks will have valid gcs_audio_uri (never None).
+    
+    Raises:
+        RuntimeError: If GCS is unavailable or any chunk upload fails.
     """
     log.info(f"[chunking] Loading audio from {audio_path}")
+    
+    # Verify GCS client is available before starting chunking
+    # Use force_gcs=True since chunks must be uploaded to GCS
+    try:
+        # Try to get GCS client with force=True to verify availability
+        # Import the internal function to check client availability
+        from infrastructure.gcs import _get_gcs_client
+        gcs_client = _get_gcs_client(force=True)
+        if gcs_client is None:
+            log.warning("[chunking] Disabled: GCS client unavailable")
+            raise RuntimeError("[chunking] GCS client unavailable - cannot upload chunks. Falling back to direct processing.")
+    except RuntimeError as e:
+        # Re-raise RuntimeError from _get_gcs_client (credentials/config issues)
+        log.warning(f"[chunking] Disabled: GCS client unavailable: {e}")
+        raise RuntimeError("[chunking] GCS client unavailable - cannot upload chunks. Falling back to direct processing.") from e
+    except Exception as e:
+        # Other exceptions (e.g., import errors) also indicate GCS unavailable
+        log.warning(f"[chunking] Disabled: GCS client unavailable: {e}")
+        raise RuntimeError("[chunking] GCS client unavailable - cannot upload chunks. Falling back to direct processing.") from e
+    
     audio = AudioSegment.from_file(str(audio_path))
     duration_ms = len(audio)
     
@@ -199,15 +239,29 @@ def split_audio_into_chunks(
         chunk_path = output_dir / chunk_filename
         chunk_audio.export(str(chunk_path), format="wav")
         
-        # Upload to GCS
+        # Upload to GCS - must succeed or abort chunking
         gcs_path = f"{user_id}/chunks/{episode_id}/{chunk_filename}"
         try:
             chunk_bytes = chunk_path.read_bytes()
-            gcs_uri = gcs.upload_bytes("ppp-media-us-west1", gcs_path, chunk_bytes, content_type="audio/wav")
+            # Use force_gcs=True since chunks must be uploaded to GCS
+            gcs_uri = gcs.upload_bytes(
+                "ppp-media-us-west1", 
+                gcs_path, 
+                chunk_bytes, 
+                content_type="audio/wav",
+                force_gcs=True  # Force GCS even if STORAGE_BACKEND=r2
+            )
+            if not gcs_uri or gcs_uri is None:
+                raise RuntimeError(f"Upload returned None for chunk {idx}")
             log.info(f"[chunking] Uploaded chunk {idx} to {gcs_uri}")
         except Exception as e:
             log.error(f"[chunking] Failed to upload chunk {idx}: {e}")
-            gcs_uri = None
+            log.warning("[chunking] Aborting chunking and falling back to direct processing")
+            # Abort immediately - do not create chunks with None URIs
+            raise RuntimeError(
+                f"[chunking] Failed to upload chunk {idx} to GCS: {e}. "
+                "Aborting chunking and falling back to direct processing."
+            ) from e
         
         chunk_meta = ChunkMetadata(
             chunk_id=chunk_id,
@@ -216,13 +270,13 @@ def split_audio_into_chunks(
             end_ms=end_ms,
             duration_ms=chunk_duration,
             audio_path=str(chunk_path),
-            gcs_audio_uri=gcs_uri,
+            gcs_audio_uri=gcs_uri,  # Guaranteed to be non-None
         )
         chunks.append(chunk_meta)
         
         start_ms = end_ms
     
-    log.info(f"[chunking] Created {len(chunks)} chunks")
+    log.info(f"[chunking] Created {len(chunks)} chunks, all uploaded successfully")
     return chunks
 
 
@@ -304,6 +358,8 @@ def split_transcript_for_chunks(
         chunk.transcript_path = str(chunk_transcript_path)
         
         # Upload to GCS (extract user_id and episode_id from chunk_id)
+        # Note: Transcript upload failure is logged but doesn't abort chunking
+        # (transcripts are optional, but audio chunks are required)
         try:
             parts = chunk.chunk_id.split("_chunk_")
             if len(parts) == 2:
@@ -313,11 +369,22 @@ def split_transcript_for_chunks(
                     user_id_str = chunk.gcs_audio_uri.split("/")[3]  # gs://bucket/user_id/...
                     gcs_transcript_path = f"{user_id_str}/chunks/{episode_id_str}/transcripts/{transcript_filename}"
                     transcript_bytes = chunk_transcript_path.read_bytes()
-                    gcs_uri = gcs.upload_bytes("ppp-media-us-west1", gcs_transcript_path, transcript_bytes, content_type="application/json")
-                    chunk.gcs_transcript_uri = gcs_uri
-                    log.info(f"[chunking] Uploaded transcript for chunk {chunk.index} to {gcs_uri}")
+                    # Use force_gcs=True since chunks require GCS
+                    gcs_uri = gcs.upload_bytes(
+                        "ppp-media-us-west1", 
+                        gcs_transcript_path, 
+                        transcript_bytes, 
+                        content_type="application/json",
+                        force_gcs=True
+                    )
+                    if gcs_uri:
+                        chunk.gcs_transcript_uri = gcs_uri
+                        log.info(f"[chunking] Uploaded transcript for chunk {chunk.index} to {gcs_uri}")
+                    else:
+                        log.warning(f"[chunking] Transcript upload for chunk {chunk.index} returned None (non-fatal)")
         except Exception as e:
-            log.error(f"[chunking] Failed to upload transcript for chunk {chunk.index}: {e}")
+            # Transcript upload failure is non-fatal (chunks can be processed without transcripts)
+            log.warning(f"[chunking] Failed to upload transcript for chunk {chunk.index}: {e} (non-fatal)")
     
     log.info(f"[chunking] Split transcript into {len(chunks)} chunk transcripts")
 

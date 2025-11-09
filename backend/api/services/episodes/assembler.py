@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import time
+from datetime import datetime
 from importlib import import_module
 from math import ceil
 from pathlib import Path
@@ -736,47 +737,130 @@ def assemble_or_queue(
     
     # All task dispatch goes through tasks_client.enqueue_http_task()
     # This handles Cloud Tasks (production), worker routing (dev), and local dispatch (dev fallback)
+    # If Cloud Tasks is disabled or fails, attempt direct worker POST before falling back to inline
     try:
-        from infrastructure.tasks_client import enqueue_http_task  # type: ignore
+        from infrastructure.tasks_client import enqueue_http_task, should_use_cloud_tasks  # type: ignore
         
-        log.info("event=assemble.service.enqueueing_task episode_id=%s", str(ep.id))
-        task_info = enqueue_http_task("/api/tasks/assemble", payload)
-        task_name = task_info.get("name", "unknown")
-        log.info("event=assemble.service.task_enqueued episode_id=%s task_name=%s", str(ep.id), task_name)
+        # Check if Cloud Tasks should be used
+        use_cloud_tasks = should_use_cloud_tasks()
         
-        # Store job id in episode metadata for visibility
-        try:
-            import json as _json
-            meta = {}
-            if getattr(ep, 'meta_json', None):
+        if use_cloud_tasks:
+            log.info("event=assemble.service.enqueueing_task episode_id=%s", str(ep.id))
+            try:
+                task_info = enqueue_http_task("/api/tasks/assemble", payload)
+                task_name = task_info.get("name", "unknown")
+                log.info("event=assemble.service.task_enqueued episode_id=%s task_name=%s", str(ep.id), task_name)
+                
+                # Store job id in episode metadata for visibility
                 try:
-                    meta = _json.loads(ep.meta_json or '{}')
-                except Exception:
+                    import json as _json
                     meta = {}
-            meta['assembly_job_id'] = task_name
-            ep.meta_json = _json.dumps(meta)
-            session.add(ep)
-            session.commit()
-            session.refresh(ep)
-            log.info("event=assemble.service.metadata_saved episode_id=%s job_id=%s", str(ep.id), task_name)
-        except Exception as meta_err:
-            log.warning("event=assemble.service.metadata_save_failed episode_id=%s error=%s", str(ep.id), str(meta_err))
-            session.rollback()
-        
-        # Determine mode based on task name
-        if task_name.startswith("dry-run-"):
-            mode = "dry-run"
-        elif task_name.startswith("dev-worker-") or "worker" in task_name:
-            mode = "worker-dev"
-        elif "cloud" in task_name or "projects/" in task_name:
-            mode = "cloud-task"
+                    if getattr(ep, 'meta_json', None):
+                        try:
+                            meta = _json.loads(ep.meta_json or '{}')
+                        except Exception:
+                            meta = {}
+                    meta['assembly_job_id'] = task_name
+                    ep.meta_json = _json.dumps(meta)
+                    session.add(ep)
+                    session.commit()
+                    session.refresh(ep)
+                    log.info("event=assemble.service.metadata_saved episode_id=%s job_id=%s", str(ep.id), task_name)
+                except Exception as meta_err:
+                    log.warning("event=assemble.service.metadata_save_failed episode_id=%s error=%s", str(ep.id), str(meta_err))
+                    session.rollback()
+                
+                # Determine mode based on task name
+                if task_name.startswith("dry-run-"):
+                    mode = "dry-run"
+                elif task_name.startswith("dev-worker-") or "worker" in task_name:
+                    mode = "worker-dev"
+                elif "cloud" in task_name or "projects/" in task_name:
+                    mode = "cloud-task"
+                else:
+                    mode = "local-dispatch"
+                
+                return {"mode": mode, "job_id": task_name, "episode_id": str(ep.id)}
+            except Exception as cloud_tasks_err:
+                # Cloud Tasks failed - try direct worker POST before falling back
+                log.warning("event=assemble.service.cloud_tasks_failed episode_id=%s error=%s", str(ep.id), str(cloud_tasks_err))
+                # Fall through to direct worker POST attempt
         else:
-            mode = "local-dispatch"
+            log.info("event=assemble.service.cloud_tasks_disabled episode_id=%s", str(ep.id))
+            # Cloud Tasks disabled - try direct worker POST before falling back
+            # Fall through to direct worker POST attempt
         
-        return {"mode": mode, "job_id": task_name, "episode_id": str(ep.id)}
+        # Attempt direct worker POST if Cloud Tasks is disabled or failed
+        worker_url_base = os.getenv("WORKER_URL_BASE")
+        if worker_url_base:
+            import httpx
+            base_url = worker_url_base.rstrip("/")
+            url = f"{base_url}/api/tasks/assemble"
+            tasks_auth = os.getenv("TASKS_AUTH", "a-secure-local-secret")
+            headers = {"Content-Type": "application/json", "X-Tasks-Auth": tasks_auth}
+            timeout = 1800.0  # 30 minutes for assembly
+            
+            log.info("event=assemble.service.trying_worker_direct episode_id=%s url=%s", str(ep.id), url)
+            try:
+                with httpx.Client(timeout=timeout) as client:
+                    r = client.post(url, json=payload, headers=headers)
+                    if 200 <= r.status_code < 300:
+                        # Success: worker dispatched
+                        result = r.json() if r.content else {}
+                        log.info("event=assemble.service.worker_direct_dispatched episode_id=%s status=%s", str(ep.id), r.status_code)
+                        
+                        # Store job id in episode metadata
+                        job_id = f"worker-direct-{datetime.utcnow().isoformat()}"
+                        try:
+                            import json as _json
+                            meta = {}
+                            if getattr(ep, 'meta_json', None):
+                                try:
+                                    meta = _json.loads(ep.meta_json or '{}')
+                                except Exception:
+                                    meta = {}
+                            meta['assembly_job_id'] = job_id
+                            ep.meta_json = _json.dumps(meta)
+                            session.add(ep)
+                            session.commit()
+                            session.refresh(ep)
+                        except Exception as meta_err:
+                            log.warning("event=assemble.service.metadata_save_failed episode_id=%s error=%s", str(ep.id), str(meta_err))
+                            session.rollback()
+                        
+                        return {"mode": "worker-direct", "job_id": job_id, "episode_id": str(ep.id)}
+                    else:
+                        # Non-2xx response: fall back to inline
+                        log.warning("event=assemble.service.worker_direct_non_2xx episode_id=%s status=%s", str(ep.id), r.status_code)
+                        # Fall through to inline fallback
+            except Exception as worker_err:
+                # Worker POST failed: fall back to inline
+                log.warning("event=assemble.service.worker_direct_failed episode_id=%s error=%s", str(ep.id), str(worker_err))
+                # Fall through to inline fallback
+        
+        # Final fallback: inline execution
+        log.info("event=assemble.service.falling_back_to_inline episode_id=%s", str(ep.id))
+        inline_result = _run_inline_fallback(
+            episode_id=ep.id,
+            template_id=template_id,
+            main_content_filename=main_content_filename,
+            output_filename=output_filename,
+            tts_values=tts_values or {},
+            episode_details=episode_details or {},
+            user_id=getattr(current_user, "id", None),
+            podcast_id=getattr(ep, "podcast_id", None),
+            intents=intents,
+            use_auphonic=use_auphonic,
+        )
+        if inline_result:
+            inline_result["mode"] = "fallback-inline"
+            inline_result["job_id"] = inline_result.get("job_id") or "fallback-inline"
+            return inline_result
+        _raise_worker_unavailable()
+        
     except Exception as e:
-        # Task dispatch failed - raise error (no silent fallbacks)
-        error_msg = f"Failed to enqueue assembly task: {e}"
-        log.error(f"event=assemble.service.task_dispatch_failed episode_id={ep.id} error={error_msg}", exc_info=True)
+        # Unexpected error - log and raise
+        error_msg = f"Failed to dispatch assembly task: {e}"
+        log.error(f"event=assemble.service.task_dispatch_error episode_id={ep.id} error={error_msg}", exc_info=True)
         # Re-raise to trigger HTTP 5xx response
         raise RuntimeError(error_msg) from e

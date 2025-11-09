@@ -80,13 +80,16 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
     background thread immediately. An opt-in env var
     ``TASKS_FORCE_HTTP_LOOPBACK=true`` restores the old behavior for debugging.
     
-    In dev mode, if WORKER_URL_BASE is set and USE_WORKER_IN_DEV=true,
-    assembly and chunk processing tasks will be sent directly to the worker
-    server via HTTP instead of running locally. This allows testing the worker
-    server without deploying to production.
+    Worker server routing:
+    - Dev mode: If WORKER_URL_BASE is set and USE_WORKER_IN_DEV=true, assembly
+      and chunk processing tasks are sent directly to the worker server via HTTP.
+    - Production mode: If APP_ENV=production and WORKER_URL_BASE is set, assembly
+      and chunk processing tasks are sent directly to the worker server (no
+      USE_WORKER_IN_DEV required).
+    - On worker server success (HTTP 2xx): returns JSON response.
+    - On worker server failure: logs error and falls back to inline execution.
     """
     
-    # Check if we should use worker server in dev mode
     # Reload .env.local here to ensure we have the latest values
     try:
         from dotenv import load_dotenv
@@ -98,6 +101,9 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
     except (ImportError, Exception):
         pass
     
+    # Get environment variables
+    app_env = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "").strip().lower()
+    is_production = app_env == "production"
     use_worker_in_dev_raw = os.getenv("USE_WORKER_IN_DEV", "false")
     use_worker_in_dev = use_worker_in_dev_raw and use_worker_in_dev_raw.lower().strip() in {"true", "1", "yes", "on"}
     worker_url_base = os.getenv("WORKER_URL_BASE")
@@ -105,71 +111,91 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
     # For assembly and chunk processing, use worker server if configured
     is_worker_task = "/assemble" in path or "/process-chunk" in path
     
-    # Debug logging - ALWAYS print this so we can see what's happening
+    # Determine if we should use worker server
+    # Dev mode: requires USE_WORKER_IN_DEV=true AND WORKER_URL_BASE
+    # Production: requires APP_ENV=production AND WORKER_URL_BASE (no USE_WORKER_IN_DEV needed)
+    should_use_worker = False
+    if is_worker_task and worker_url_base:
+        if is_production:
+            should_use_worker = True
+        elif IS_DEV_ENV:
+            should_use_worker = use_worker_in_dev
+    
+    # Enhanced DEV/PROD banner - ALWAYS print this so we can see what's happening
     print("=" * 80)
-    print(f"DEV MODE WORKER CHECK:")
+    print(f"WORKER SERVER ROUTING DECISION:")
     print(f"  path={path}")
+    print(f"  APP_ENV={app_env} (is_production={is_production}, IS_DEV_ENV={IS_DEV_ENV})")
     print(f"  USE_WORKER_IN_DEV={use_worker_in_dev_raw} (parsed={use_worker_in_dev})")
     print(f"  WORKER_URL_BASE={worker_url_base}")
     print(f"  is_worker_task={is_worker_task} (path contains '/assemble' or '/process-chunk')")
-    print(f"  Condition check: use_worker_in_dev={use_worker_in_dev}, worker_url_base={bool(worker_url_base)}, is_worker_task={is_worker_task}")
-    print(f"  Will use worker: {use_worker_in_dev and bool(worker_url_base) and is_worker_task}")
+    print(f"  Decision: should_use_worker={should_use_worker}")
+    if should_use_worker:
+        print(f"  → Will POST directly to worker server")
+    else:
+        print(f"  → Will use inline/local execution")
     print("=" * 80)
     
-    log.info("event=tasks.dev.checking_worker_config path=%s use_worker_in_dev_raw=%s use_worker_in_dev=%s worker_url_base=%s is_worker_task=%s", 
-             path, use_worker_in_dev_raw, use_worker_in_dev, worker_url_base, is_worker_task)
+    log.info("event=tasks.worker_routing.decision path=%s app_env=%s is_production=%s use_worker_in_dev=%s worker_url_base=%s is_worker_task=%s should_use_worker=%s",
+             path, app_env, is_production, use_worker_in_dev, worker_url_base, is_worker_task, should_use_worker)
     
-    if use_worker_in_dev and worker_url_base and is_worker_task:
-        log.info("event=tasks.dev.worker_config_valid using_worker_server path=%s", path)
-        print(f"DEV MODE: Worker config valid - will use worker server for {path}")
+    # Attempt worker server dispatch if configured
+    if should_use_worker:
         import httpx
         base_url = worker_url_base.rstrip("/")
         url = f"{base_url}{path}"
         tasks_auth = os.getenv("TASKS_AUTH", "a-secure-local-secret")
         headers = {"Content-Type": "application/json", "X-Tasks-Auth": tasks_auth}
         
-        log.info("event=tasks.dev.using_worker_server path=%s url=%s", path, url)
-        print(f"DEV MODE: Sending {path} to worker server at {url}")
+        # Timeouts: 1800s for /assemble, 300s for /process-chunk
+        timeout = 1800.0 if "/assemble" in path else 300.0
         
-        def _call_worker():
-            try:
-                # Use a longer timeout for assembly tasks (30 minutes)
-                timeout = 1800.0 if "/assemble" in path else 300.0
-                with httpx.Client(timeout=timeout) as client:
-                    print(f"DEV MODE: POST {url} with timeout {timeout}s")
-                    r = client.post(url, json=body, headers=headers)
-                    r.raise_for_status()
-                    print(f"DEV MODE: Worker server responded with status {r.status_code}")
+        log.info("event=tasks.dev.using_worker_server path=%s url=%s timeout=%s", path, url, timeout)
+        if IS_DEV_ENV:
+            print(f"DEV MODE: Sending {path} to worker server at {url} with timeout {timeout}s")
+        else:
+            print(f"PROD MODE: Sending {path} to worker server at {url} with timeout {timeout}s")
+        
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                r = client.post(url, json=body, headers=headers)
+                if 200 <= r.status_code < 300:
+                    # Success: return JSON response
+                    result = r.json() if r.content else {}
                     log.info("event=tasks.dev.worker_success path=%s status=%s", path, r.status_code)
-                    return r.json() if r.content else {}
-            except httpx.TimeoutException as e:
-                error_msg = f"DEV MODE: Worker server timeout after {timeout}s: {e}"
-                print(error_msg)
-                log.error(f"event=tasks.dev.worker_timeout path={path} timeout={timeout} error={e}")
-                raise
-            except httpx.HTTPStatusError as e:
-                error_msg = f"DEV MODE: Worker server returned error {e.response.status_code}: {e.response.text}"
-                print(error_msg)
-                log.error(f"event=tasks.dev.worker_error path={path} status={e.response.status_code} error={e.response.text}")
-                raise
-            except Exception as e:
-                error_msg = f"DEV MODE: Worker server call failed: {e}"
-                print(error_msg)
-                log.exception(f"event=tasks.dev.worker_exception path={path} error={e}")
-                raise
-        
-        # Run in background thread to avoid blocking
-        threading.Thread(
-            target=_call_worker,
-            name=f"dev-worker-call-{path.replace('/', '-')}",
-            daemon=True,
-        ).start()
-        
-        return {"name": f"dev-worker-dispatch-{datetime.utcnow().isoformat()}"}
+                    if IS_DEV_ENV:
+                        print(f"DEV MODE: Worker server responded with status {r.status_code}")
+                    else:
+                        print(f"PROD MODE: Worker server responded with status {r.status_code}")
+                    return result
+                else:
+                    # Non-2xx response: log and fall back to inline
+                    error_msg = f"Worker server returned status {r.status_code}: {r.text}"
+                    log.warning("event=tasks.dev.worker_non_2xx path=%s status=%s response=%s", path, r.status_code, r.text[:200])
+                    print(f"Worker server returned non-2xx status {r.status_code}, falling back to inline execution")
+                    # Fall through to inline execution
+        except httpx.TimeoutException as e:
+            error_msg = f"Worker server timeout after {timeout}s: {e}"
+            log.error("event=tasks.dev.worker_timeout path=%s timeout=%s error=%s", path, timeout, str(e))
+            print(f"Worker server timeout after {timeout}s, falling back to inline execution")
+            # Fall through to inline execution
+        except httpx.HTTPStatusError as e:
+            error_msg = f"Worker server HTTP error {e.response.status_code}: {e.response.text}"
+            log.error("event=tasks.dev.worker_error path=%s status=%s error=%s", path, e.response.status_code, e.response.text[:200])
+            print(f"Worker server HTTP error {e.response.status_code}, falling back to inline execution")
+            # Fall through to inline execution
+        except Exception as e:
+            error_msg = f"Worker server call failed: {e}"
+            log.exception("event=tasks.dev.worker_exception path=%s error=%s", path, str(e))
+            print(f"Worker server call failed: {e}, falling back to inline execution")
+            # Fall through to inline execution
     else:
-        log.info("event=tasks.dev.worker_config_invalid falling_back_to_local path=%s use_worker_in_dev=%s worker_url_base=%s is_worker_task=%s",
-                 path, use_worker_in_dev, bool(worker_url_base), is_worker_task)
-        print(f"DEV MODE: Worker config invalid or not a worker task - will use local dispatch. use_worker_in_dev={use_worker_in_dev}, worker_url_base={bool(worker_url_base)}, is_worker_task={is_worker_task}")
+        log.info("event=tasks.worker_routing.skipped path=%s reason=%s",
+                 path, "not_worker_task" if not is_worker_task else "worker_url_base_missing" if not worker_url_base else "dev_mode_not_enabled" if IS_DEV_ENV else "unknown")
+        if IS_DEV_ENV:
+            print(f"DEV MODE: Worker routing skipped - will use local dispatch")
+        else:
+            print(f"PROD MODE: Worker routing skipped - will use local dispatch")
     
     def _dispatch_transcribe(payload: dict) -> None:
             filename = str(payload.get("filename") or "").strip()

@@ -495,11 +495,47 @@ export default function PodcastPlusDashboard() {
     return () => clearInterval(pollInterval);
   }, [token, currentView, preuploadItems, refreshPreuploads]);
   
-  // Fetch notifications with polling every 10 seconds
+  // Fetch notifications with adaptive polling to reduce DB load
+  // - Default: 30 seconds (reduced from 10s to lower connection pressure)
+  // - During upload/assembly: 60 seconds (reduce load during heavy operations)
+  // - After upload: 60 seconds for 2 minutes, then back to 30s
   useEffect(() => {
     if(!token) return;
     let cancelled = false;
+    let intervalId = null;
+    const UPLOAD_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutes after upload
+    const DEFAULT_INTERVAL = 30000; // 30 seconds
+    const SLOW_INTERVAL = 60000; // 60 seconds
+    
+    // Check for recent upload activity in localStorage
+    const checkRecentUpload = () => {
+      try {
+        const uploadTime = localStorage.getItem('ppp_last_upload_time');
+        if (uploadTime) {
+          const time = parseInt(uploadTime, 10);
+          if (Date.now() - time < UPLOAD_COOLDOWN_MS) {
+            return true;
+          }
+          localStorage.removeItem('ppp_last_upload_time');
+        }
+      } catch {}
+      return false;
+    };
+    
+    // Determine current polling interval based on state
+    const getPollInterval = () => {
+      const hasRecentUpload = checkRecentUpload();
+      const isInHeavyOperation = preuploadLoading || 
+        (currentView === 'createEpisode' && creatorMode !== 'preuploaded');
+      
+      if (hasRecentUpload || isInHeavyOperation) {
+        return SLOW_INTERVAL;
+      }
+      return DEFAULT_INTERVAL;
+    };
+    
     const load = async () => {
+      if (cancelled) return;
       try {
         const api = makeApi(token);
         const r = await api.get('/api/notifications/');
@@ -518,17 +554,53 @@ export default function PodcastPlusDashboard() {
       } catch {}
     };
     
+    // Function to restart polling with correct interval
+    const restartPolling = () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+      const interval = getPollInterval();
+      intervalId = setInterval(load, interval);
+    };
+    
     // Load immediately
     load();
     
-    // Then poll every 10 seconds
-    const interval = setInterval(load, 10000);
+    // Start polling with initial interval
+    restartPolling();
+    
+    // Listen for upload events to adjust polling
+    const handleUploadStart = () => {
+      restartPolling(); // Will use SLOW_INTERVAL if in heavy operation
+    };
+    
+    const handleUploadComplete = () => {
+      try {
+        localStorage.setItem('ppp_last_upload_time', Date.now().toString());
+      } catch {}
+      // Restart with slow interval (recent upload)
+      restartPolling();
+    };
+    
+    // Listen for custom events from upload components
+    window.addEventListener('ppp:upload:start', handleUploadStart);
+    window.addEventListener('ppp:upload:complete', handleUploadComplete);
+    
+    // Also restart polling when state changes
+    const stateCheckInterval = setInterval(() => {
+      if (!cancelled) {
+        restartPolling();
+      }
+    }, 10000); // Check every 10s and adjust if needed
     
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      if (intervalId) clearInterval(intervalId);
+      if (stateCheckInterval) clearInterval(stateCheckInterval);
+      window.removeEventListener('ppp:upload:start', handleUploadStart);
+      window.removeEventListener('ppp:upload:complete', handleUploadComplete);
     };
-  }, [token]);
+  }, [token, preuploadLoading, currentView, creatorMode]);
   // BroadcastChannel listener for checkout success -> refetch notifications
   useEffect(() => {
     let bc;

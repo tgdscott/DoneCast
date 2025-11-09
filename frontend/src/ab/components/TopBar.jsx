@@ -76,6 +76,7 @@ export default function TopBar({ onSwitch, active }) {
     if (!token) { setNotifications([]); return; }
     
     const fetchNotifications = async () => {
+      if (cancelled) return;
       try {
         const api = makeApi(token);
         const r = await api.get("/api/notifications/");
@@ -90,12 +91,28 @@ export default function TopBar({ onSwitch, active }) {
     // Fetch immediately
     fetchNotifications();
     
-    // Then poll every 10 seconds
-    const interval = setInterval(fetchNotifications, 10000);
+    // Poll every 30 seconds (reduced from 10s to lower DB connection pressure)
+    // During uploads, this will be automatically slowed by the upload event system
+    const interval = setInterval(fetchNotifications, 30000);
+    
+    // Listen for upload events to temporarily pause polling
+    const handleUploadStart = () => {
+      // Upload started - notifications can wait
+    };
+    
+    const handleUploadComplete = () => {
+      // Upload complete - fetch notifications once, then resume slower polling
+      fetchNotifications();
+    };
+    
+    window.addEventListener('ppp:upload:start', handleUploadStart);
+    window.addEventListener('ppp:upload:complete', handleUploadComplete);
     
     return () => { 
       cancelled = true; 
       clearInterval(interval);
+      window.removeEventListener('ppp:upload:start', handleUploadStart);
+      window.removeEventListener('ppp:upload:complete', handleUploadComplete);
     };
   }, [token]);
 

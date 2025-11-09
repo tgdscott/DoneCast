@@ -79,11 +79,12 @@ DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT", "5432")
 
 _POOL_KWARGS = {
-    # CRITICAL: Disable pool_pre_ping to avoid INTRANS errors
-    # pool_pre_ping tries to toggle autocommit during health check
-    # If connection is in INTRANS state, this raises ProgrammingError
-    # Instead, rely on pool_reset_on_return and aggressive pool_recycle
-    "pool_pre_ping": False,
+    # Configurable pool_pre_ping via DB_POOL_PRE_PING env var (default: False)
+    # When enabled, pool_pre_ping validates connections before use, but requires
+    # careful transaction state management. With pool_reset_on_return="rollback"
+    # and proper connection cleanup, pre_ping can help detect stale connections.
+    # Default to False for backward compatibility, but allow enabling via env var.
+    "pool_pre_ping": _is_truthy(os.getenv("DB_POOL_PRE_PING", "false")),
     # BALANCED FOR PERFORMANCE: Moderate pool per instance (10+10=20 total)
     # With max_connections=200 and superuser_reserved=3 → 197 available
     # Strategy: Balance between connection availability and instance count
@@ -93,12 +94,13 @@ _POOL_KWARGS = {
     #   - Sufficient connections for concurrent requests within instance
     #   - Reduced connection timeout errors
     #   - Better request throughput per instance
-    "pool_size": int(os.getenv("DB_POOL_SIZE", 10)),  # Increased from 2 to fix connection timeouts
-    "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", 10)),  # Increased from 3 to fix connection timeouts
-    # Aggressive recycle to avoid stale connections (3 minutes)
-    # Since we disabled pool_pre_ping, recycle connections more frequently
-    "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", 180)),  # 3 minutes
-    "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", 30)),
+    "pool_size": int(os.getenv("DB_POOL_SIZE", 10)),  # Default 10, production should use 20
+    "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", 10)),  # Default 10, production should use 20
+    # Recycle connections to avoid stale connections
+    # With pool_pre_ping enabled, can use longer recycle times (30 minutes)
+    # Without pool_pre_ping, shorter recycle times help (3 minutes default)
+    "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", 180)),  # Default 3 minutes, production should use 1800
+    "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", 30)),  # Default 30s, production should use 5-10s for fail-fast
     # CRITICAL: Force ROLLBACK on all connections returned to pool
     # This prevents INTRANS corruption by cleaning up uncommitted transactions
     "pool_reset_on_return": "rollback",

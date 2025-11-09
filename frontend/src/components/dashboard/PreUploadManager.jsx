@@ -159,6 +159,11 @@ export default function PreUploadManager({
     setUploadProgress(0);
     setError('');
     
+    // Emit upload start event to reduce polling during upload
+    try {
+      window.dispatchEvent(new CustomEvent('ppp:upload:start'));
+    } catch {}
+    
     try {
       await uploadMediaDirect({
         category: 'main_content',
@@ -175,6 +180,13 @@ export default function PreUploadManager({
       });
       
       setUploadProgress(100);
+      
+      // Emit upload complete event to resume normal polling after cooldown
+      try {
+        window.dispatchEvent(new CustomEvent('ppp:upload:complete'));
+        localStorage.setItem('ppp_last_upload_time', Date.now().toString());
+      } catch {}
+      
       toast({ title: 'Upload complete!', description: 'Transcription has started. We\'ll email you when it\'s ready.' });
       onUploaded();
       

@@ -35,6 +35,12 @@ export default function EpisodeAssembler({ templates, onBack, token }) {
     setError('');
     setAssembledEpisode(null);
     setStatusMessage('Step 1/2: Uploading main content audio...');
+    
+    // Emit upload start event to reduce polling during upload
+    try {
+      window.dispatchEvent(new CustomEvent('ppp:upload:start'));
+    } catch {}
+    
     try {
       const api = makeApi(token);
       const uploadResult = await uploadMediaDirect({
@@ -47,6 +53,13 @@ export default function EpisodeAssembler({ templates, onBack, token }) {
       if (!uploadedFilename) {
         throw new Error('Upload incomplete. Please try again or contact support if this continues.');
       }
+      
+      // Emit upload complete event (assembly will continue, but upload is done)
+      try {
+        window.dispatchEvent(new CustomEvent('ppp:upload:complete'));
+        localStorage.setItem('ppp_last_upload_time', Date.now().toString());
+      } catch {}
+      
       setStatusMessage(`Step 2/2: Creating your episode... This may take a moment.`);
       const assembleResult = await api.post('/api/episodes/assemble', {
         template_id: selectedTemplateId,
