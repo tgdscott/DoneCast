@@ -121,6 +121,17 @@ def build_template_and_final_mix_step(
     cover_image_path: Optional[str],
     log: List[str],
 ) -> Tuple[Path, List[Tuple[dict, AudioSegment, int, int]]]:
+    # CRITICAL: Log template status immediately (also to Python logger for visibility)
+    import logging as _py_logging
+    _py_log = _py_logging.getLogger(__name__)
+    
+    if template is None:
+        _py_log.error("[TEMPLATE_MIX] ❌ CRITICAL: Template is None - template mixing will be skipped!")
+        log.append("[TEMPLATE_MIX] ❌ CRITICAL: Template is None - template mixing will be skipped!")
+    else:
+        _py_log.info(f"[TEMPLATE_MIX] ✅ Template provided: id={getattr(template, 'id', 'unknown')}, type={type(template)}")
+        log.append(f"[TEMPLATE_MIX] ✅ Template provided: id={getattr(template, 'id', 'unknown')}")
+    
     if len(cleaned_audio) == 1:
         log.append(
             f"[MIX] Detected placeholder audio, loading from cleaned_path: {cleaned_path}"
@@ -129,14 +140,22 @@ def build_template_and_final_mix_step(
         log.append(f"[MIX] Loaded cleaned audio: {len(cleaned_audio)}ms")
 
     try:
-        template_segments = json.loads(getattr(template, "segments_json", "[]"))
-    except Exception:
+        template_segments = json.loads(getattr(template, "segments_json", "[]")) if template else []
+        _py_log.info(f"[TEMPLATE_MIX] Parsed template_segments: count={len(template_segments)}")
+        if template_segments:
+            for i, seg in enumerate(template_segments):
+                seg_type = seg.get("segment_type", "unknown") if isinstance(seg, dict) else "unknown"
+                _py_log.info(f"[TEMPLATE_MIX] Segment {i}: type={seg_type}, source={seg.get('source', {}).get('source_type', 'none') if isinstance(seg, dict) else 'none'}")
+    except Exception as e:
+        _py_log.error(f"[TEMPLATE_MIX] Failed to parse template_segments: {e}", exc_info=True)
         template_segments = []
     try:
         template_background_music_rules = json.loads(
             getattr(template, "background_music_rules_json", "[]")
-        )
-    except Exception:
+        ) if template else []
+        _py_log.info(f"[TEMPLATE_MIX] Parsed background_music_rules: count={len(template_background_music_rules)}")
+    except Exception as e:
+        _py_log.error(f"[TEMPLATE_MIX] Failed to parse background_music_rules: {e}", exc_info=True)
         template_background_music_rules = []
     try:
         template_timing = (
@@ -144,16 +163,23 @@ def build_template_and_final_mix_step(
             if template
             else {}
         )
-    except Exception:
+        _py_log.info(f"[TEMPLATE_MIX] Parsed template_timing: keys={list(template_timing.keys())}")
+    except Exception as e:
+        _py_log.error(f"[TEMPLATE_MIX] Failed to parse template_timing: {e}", exc_info=True)
         template_timing = {}
-    try:
-        log.append(
-            f"[TEMPLATE_PARSE] segments={len(template_segments)} "
-            f"bg_rules={len(template_background_music_rules)} "
-            f"timing_keys={list((template_timing or {}).keys())}"
-        )
-    except Exception:
-        pass
+    
+    # ALWAYS log template parsing results (both to log list and Python logger)
+    log_msg = (
+        f"[TEMPLATE_PARSE] segments={len(template_segments)} "
+        f"bg_rules={len(template_background_music_rules)} "
+        f"timing_keys={list((template_timing or {}).keys())}"
+    )
+    log.append(log_msg)
+    _py_log.info(f"[TEMPLATE_PARSE] {log_msg}")
+    
+    if not template_segments:
+        _py_log.warning("[TEMPLATE_MIX] ⚠️ WARNING: Template has no segments! Template mixing will produce content-only output.")
+        log.append("[TEMPLATE_MIX] ⚠️ WARNING: Template has no segments!")
 
     media_roots: List[Path] = []
     try:
@@ -193,20 +219,29 @@ def build_template_and_final_mix_step(
             return None
 
     processed_segments: List[Tuple[dict, AudioSegment]] = []
-    for seg in template_segments:
+    for seg_idx, seg in enumerate(template_segments):
         audio = None
         seg_type = str(
             (seg.get("segment_type") if isinstance(seg, dict) else None) or "content"
         ).lower()
         source = seg.get("source") if isinstance(seg, dict) else None
+        seg_id = seg.get("id") if isinstance(seg, dict) else f"seg_{seg_idx}"
+        
+        _py_log.info(f"[TEMPLATE_SEG_{seg_idx}] Processing segment: id={seg_id}, type={seg_type}, source_type={source.get('source_type') if source else 'none'}")
+        log.append(f"[TEMPLATE_SEG_{seg_idx}] Processing segment: id={seg_id}, type={seg_type}")
+        
         if seg_type == "content":
             audio = match_target_dbfs(cleaned_audio)
             try:
-                log.append(f"[TEMPLATE_CONTENT] len_ms={len(audio)}")
-            except Exception:
-                pass
+                _py_log.info(f"[TEMPLATE_CONTENT] seg_id={seg_id} len_ms={len(audio)}")
+                log.append(f"[TEMPLATE_CONTENT] seg_id={seg_id} len_ms={len(audio)}")
+            except Exception as e:
+                _py_log.error(f"[TEMPLATE_CONTENT] Failed to log: {e}")
         elif source and source.get("source_type") == "static":
             raw_name = source.get("filename") or ""
+            _py_log.info(f"[TEMPLATE_STATIC] seg_id={seg_id} filename={raw_name}")
+            log.append(f"[TEMPLATE_STATIC] seg_id={seg_id} filename={raw_name}")
+            
             if raw_name.startswith("gs://"):
                 import tempfile
                 from infrastructure import gcs
@@ -215,6 +250,7 @@ def build_template_and_final_mix_step(
                 try:
                     gcs_str = raw_name[5:]
                     bucket, key = gcs_str.split("/", 1)
+                    _py_log.info(f"[TEMPLATE_STATIC_GCS] Downloading: bucket={bucket}, key={key}")
                     file_bytes = gcs.download_bytes(bucket, key)
                     if not file_bytes:
                         raise RuntimeError(f"Failed to download from GCS: {raw_name}")
@@ -223,10 +259,12 @@ def build_template_and_final_mix_step(
                     with open(temp_path, "wb") as fh:
                         fh.write(file_bytes)
                     audio = AudioSegment.from_file(temp_path)
+                    _py_log.info(f"[TEMPLATE_STATIC_GCS_OK] seg_id={seg_id} gcs={raw_name} len_ms={len(audio)}")
                     log.append(
-                        f"[TEMPLATE_STATIC_GCS_OK] seg_id={seg.get('id')} gcs={raw_name} len_ms={len(audio)}"
+                        f"[TEMPLATE_STATIC_GCS_OK] seg_id={seg_id} gcs={raw_name} len_ms={len(audio)}"
                     )
                 except Exception as e:
+                    _py_log.error(f"[TEMPLATE_STATIC_GCS_ERROR] seg_id={seg_id} gcs={raw_name} error={type(e).__name__}: {e}", exc_info=True)
                     log.append(
                         f"[TEMPLATE_STATIC_GCS_ERROR] seg_id={seg.get('id')} gcs={raw_name} error={type(e).__name__}: {e}"
                     )
@@ -238,30 +276,169 @@ def build_template_and_final_mix_step(
                         except Exception:
                             pass
             else:
+                # Filename is not a GCS URL - try to resolve it
+                # First, check if it's a local file
                 static_path = MEDIA_DIR / raw_name
+                _py_log.info(f"[TEMPLATE_STATIC_LOCAL] Checking: {static_path} (exists: {static_path.exists()})")
                 if static_path.exists():
-                    audio = AudioSegment.from_file(static_path)
                     try:
+                        audio = AudioSegment.from_file(static_path)
+                        _py_log.info(f"[TEMPLATE_STATIC_OK] seg_id={seg_id} file={static_path.name} len_ms={len(audio)}")
                         log.append(
                             f"[TEMPLATE_STATIC_OK] seg_id={seg.get('id')} file={static_path.name} len_ms={len(audio)}"
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        _py_log.error(f"[TEMPLATE_STATIC_LOAD_ERROR] seg_id={seg_id} file={static_path.name} error={e}", exc_info=True)
+                        log.append(f"[TEMPLATE_STATIC_LOAD_ERROR] seg_id={seg_id} file={static_path.name} error={e}")
                 else:
+                    # File not found locally - try alternative resolution (fuzzy match)
+                    _py_log.info(f"[TEMPLATE_STATIC_NOT_FOUND] Trying alternative resolution for: {raw_name}")
                     alt = _resolve_media_file(raw_name)
                     if alt and alt.exists():
                         try:
                             audio = AudioSegment.from_file(alt)
+                            _py_log.info(f"[TEMPLATE_STATIC_RESOLVED] seg_id={seg_id} requested={raw_name} -> {alt.name} len_ms={len(audio)}")
                             log.append(
                                 f"[TEMPLATE_STATIC_RESOLVED] seg_id={seg.get('id')} requested={raw_name} -> {alt.name} len_ms={len(audio)}"
                             )
                         except Exception as e:
+                            _py_log.error(f"[TEMPLATE_STATIC_RESOLVE_ERROR] seg_id={seg_id} error={e}", exc_info=True)
                             log.append(
                                 f"[TEMPLATE_STATIC_RESOLVE_ERROR] {type(e).__name__}: {e}"
                             )
+                    
+                    # CRITICAL: If still not found, try to look up MediaItem in database to get GCS URL
+                    # This handles cases where template stores filename but file is actually in GCS
                     if not audio:
+                        _py_log.info(f"[TEMPLATE_STATIC_DB_LOOKUP] File not found locally, looking up MediaItem for: {raw_name}")
+                        try:
+                            from api.models.podcast import MediaItem, MediaCategory
+                            from sqlmodel import select
+                            from api.core.database import session_scope
+                            from uuid import UUID
+                            
+                            # Get user_id from template (templates have user_id directly)
+                            user_id = None
+                            if template and hasattr(template, 'user_id'):
+                                try:
+                                    user_id = UUID(str(template.user_id)) if template.user_id else None
+                                    _py_log.info(f"[TEMPLATE_STATIC_DB_LOOKUP] Template user_id: {user_id}")
+                                except Exception as uid_err:
+                                    _py_log.warning(f"[TEMPLATE_STATIC_DB_LOOKUP] Failed to parse template user_id: {uid_err}")
+                            
+                            if user_id:
+                                # Look up MediaItem by filename and user_id
+                                # Fetch all MediaItems for user and filter in Python (more reliable than SQL LIKE)
+                                with session_scope() as db_session:
+                                    # Get all MediaItems for this user (intro, outro, music, sfx, etc.)
+                                    # We need to check all categories, not just main_content
+                                    all_items = list(db_session.exec(
+                                        select(MediaItem)
+                                        .where(MediaItem.user_id == user_id)
+                                    ).all())
+                                    
+                                    _py_log.info(f"[TEMPLATE_STATIC_DB_LOOKUP] Found {len(all_items)} MediaItems for user_id={user_id}")
+                                    
+                                    media_item = None
+                                    basename_only = Path(raw_name).name
+                                    
+                                    # Try multiple matching strategies (same as media.py)
+                                    for item in all_items:
+                                        filename = str(item.filename or "")
+                                        if not filename:
+                                            continue
+                                        
+                                        # Strategy 1: Exact match
+                                        if filename == raw_name:
+                                            media_item = item
+                                            _py_log.info(f"[TEMPLATE_STATIC_DB_LOOKUP] Matched by exact filename: '{filename}'")
+                                            break
+                                        
+                                        # Strategy 2: Filename ends with basename (for GCS URLs like gs://bucket/path/basename.mp3)
+                                        if filename.endswith(basename_only):
+                                            media_item = item
+                                            _py_log.info(f"[TEMPLATE_STATIC_DB_LOOKUP] Matched by ending: '{filename}' ends with '{basename_only}'")
+                                            break
+                                        
+                                        # Strategy 3: Filename contains raw_name (for partial matches)
+                                        if raw_name in filename:
+                                            media_item = item
+                                            _py_log.info(f"[TEMPLATE_STATIC_DB_LOOKUP] Matched by partial: '{raw_name}' in '{filename}'")
+                                            break
+                                        
+                                        # Strategy 4: Extract basename from GCS URL and compare
+                                        if filename.startswith("gs://"):
+                                            try:
+                                                gcs_basename = filename.split("/")[-1]
+                                                if gcs_basename == basename_only or gcs_basename == raw_name:
+                                                    media_item = item
+                                                    _py_log.info(f"[TEMPLATE_STATIC_DB_LOOKUP] Matched by GCS basename: '{gcs_basename}' == '{basename_only}'")
+                                                    break
+                                            except Exception:
+                                                pass
+                                    
+                                    if media_item:
+                                        resolved_filename = media_item.filename
+                                        _py_log.info(f"[TEMPLATE_STATIC_DB_LOOKUP] Found MediaItem id={media_item.id}, filename='{resolved_filename}'")
+                                        
+                                        # Check if MediaItem filename is a GCS URL
+                                        if resolved_filename and resolved_filename.startswith("gs://"):
+                                            # Download from GCS using direct GCS client (bypass storage abstraction)
+                                            _py_log.info(f"[TEMPLATE_STATIC_DB_LOOKUP] MediaItem has GCS URL, downloading: {resolved_filename}")
+                                            try:
+                                                import tempfile
+                                                from google.cloud import storage as gcs_storage
+                                                
+                                                gcs_str = resolved_filename[5:]  # Remove "gs://"
+                                                bucket_name, key = gcs_str.split("/", 1)
+                                                
+                                                # Use GCS client directly (NEVER use R2 for intermediate files)
+                                                client = gcs_storage.Client()
+                                                blob = client.bucket(bucket_name).blob(key)
+                                                
+                                                temp_fd, temp_path = tempfile.mkstemp(suffix=".mp3")
+                                                os.close(temp_fd)
+                                                blob.download_to_filename(temp_path)
+                                                
+                                                audio = AudioSegment.from_file(temp_path)
+                                                file_size = os.path.getsize(temp_path)
+                                                _py_log.info(f"[TEMPLATE_STATIC_DB_LOOKUP_OK] Downloaded from GCS via MediaItem: {resolved_filename} -> len_ms={len(audio)}, size={file_size} bytes")
+                                                log.append(f"[TEMPLATE_STATIC_DB_LOOKUP_OK] Downloaded from GCS via MediaItem: {resolved_filename} ({file_size} bytes)")
+                                                
+                                                # Clean up temp file
+                                                try:
+                                                    os.unlink(temp_path)
+                                                except Exception:
+                                                    pass
+                                            except Exception as gcs_err:
+                                                _py_log.error(f"[TEMPLATE_STATIC_DB_LOOKUP] Failed to download from GCS: {gcs_err}", exc_info=True)
+                                                log.append(f"[TEMPLATE_STATIC_DB_LOOKUP] GCS download failed: {gcs_err}")
+                                        elif resolved_filename and resolved_filename.startswith("http"):
+                                            # MediaItem has R2 URL - skip it (intermediate files should be in GCS)
+                                            _py_log.warning(f"[TEMPLATE_STATIC_DB_LOOKUP] MediaItem has R2 URL (intermediate files should be in GCS): '{resolved_filename}'. Skipping.")
+                                            log.append(f"[TEMPLATE_STATIC_DB_LOOKUP] MediaItem has R2 URL - intermediate files should be in GCS, not R2")
+                                        else:
+                                            # MediaItem has a filename but not GCS URL - file was never uploaded to GCS
+                                            # This is a data issue - the file needs to be uploaded to GCS
+                                            _py_log.error(f"[TEMPLATE_STATIC_DB_LOOKUP] MediaItem found but filename is not GCS URL: '{resolved_filename}'. File needs to be uploaded to GCS. Segment will be skipped.")
+                                            log.append(f"[TEMPLATE_STATIC_DB_LOOKUP] MediaItem filename is not GCS URL: '{resolved_filename}'. File needs to be uploaded to GCS.")
+                                    else:
+                                        _py_log.warning(f"[TEMPLATE_STATIC_DB_LOOKUP] No MediaItem found for user_id={user_id}, filename='{raw_name}'")
+                                        log.append(f"[TEMPLATE_STATIC_DB_LOOKUP] No MediaItem found for filename='{raw_name}'")
+                            else:
+                                _py_log.warning(f"[TEMPLATE_STATIC_DB_LOOKUP] Cannot lookup MediaItem - template has no user_id")
+                                log.append(f"[TEMPLATE_STATIC_DB_LOOKUP] Template has no user_id")
+                        except ImportError as imp_err:
+                            _py_log.warning(f"[TEMPLATE_STATIC_DB_LOOKUP] Database models not available: {imp_err}")
+                            log.append(f"[TEMPLATE_STATIC_DB_LOOKUP] Database models not available")
+                        except Exception as db_err:
+                            _py_log.error(f"[TEMPLATE_STATIC_DB_LOOKUP] Failed to lookup MediaItem: {db_err}", exc_info=True)
+                            log.append(f"[TEMPLATE_STATIC_DB_LOOKUP] Failed: {db_err}")
+                    
+                    if not audio:
+                        _py_log.warning(f"[TEMPLATE_STATIC_MISSING] seg_id={seg_id} file={raw_name} - not found locally, in MEDIA_DIR, via resolution, or in database. Segment will be skipped.")
                         log.append(
-                            f"[TEMPLATE_STATIC_MISSING] seg_id={seg.get('id')} file={raw_name}"
+                            f"[TEMPLATE_STATIC_MISSING] seg_id={seg.get('id')} file={raw_name} - CRITICAL: File not found anywhere. Template should store GCS URLs (gs://...) for segment files."
                         )
         elif source and source.get("source_type") == "tts":
             script = tts_overrides.get(str(seg.get("id")), source.get("script") or "")
@@ -331,6 +508,11 @@ def build_template_and_final_mix_step(
             if seg_type != "content":
                 audio = match_target_dbfs(audio)
             processed_segments.append((seg, audio))
+            _py_log.info(f"[TEMPLATE_SEG_{seg_idx}_ADDED] seg_id={seg_id} type={seg_type} len_ms={len(audio)}")
+            log.append(f"[TEMPLATE_SEG_{seg_idx}_ADDED] seg_id={seg_id} type={seg_type} len_ms={len(audio)}")
+        else:
+            _py_log.warning(f"[TEMPLATE_SEG_{seg_idx}_SKIPPED] seg_id={seg_id} type={seg_type} - audio is None (segment will be omitted from mix)")
+            log.append(f"[TEMPLATE_SEG_{seg_idx}_SKIPPED] seg_id={seg_id} type={seg_type} - audio is None")
 
     try:
         by_type: Dict[str, int] = {}

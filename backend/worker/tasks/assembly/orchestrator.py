@@ -769,10 +769,25 @@ def _finalize_episode(
     # Standard audio processing (for short files or chunking fallback)
     # CRITICAL SECTION: This is where exit code -9 crashes have been occurring
     try:
-        logging.info("[assemble] Starting audio processor with audio_input_path=%s, mix_only=True", audio_input_path)
+        # CRITICAL: Verify template is available before calling audio processor
+        template_obj = media_context.template
+        if template_obj is None:
+            logging.error("[assemble] ❌ CRITICAL: Template is None in media_context - template mixing will fail!")
+        else:
+            template_id = getattr(template_obj, 'id', 'unknown')
+            template_segments_json = getattr(template_obj, 'segments_json', None)
+            try:
+                import json
+                segments_count = len(json.loads(template_segments_json or "[]"))
+                logging.info("[assemble] ✅ Template verified: id=%s, segments_count=%d", template_id, segments_count)
+            except Exception as e:
+                logging.warning("[assemble] ⚠️ Failed to parse template segments_json: %s", e)
+        
+        logging.info("[assemble] Starting audio processor with audio_input_path=%s, mix_only=%s, template_id=%s", 
+                    audio_input_path, True, getattr(template_obj, 'id', 'None') if template_obj else 'None')
         
         final_path, log_data, ai_note_additions = audio_processor.process_and_assemble_episode(
-            template=media_context.template,
+            template=template_obj,  # Use verified template object
             main_content_filename=audio_input_path,
             output_filename=output_filename,
             cleanup_options=cleanup_opts,
