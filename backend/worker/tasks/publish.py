@@ -82,8 +82,11 @@ def publish_episode_to_spreaker_task(
                             key = unquote(parts[1])  # URL-decode the key (R2 URLs may be URL-encoded)
                             
                             domain_parts = domain_part.split(".")
-                            if len(domain_parts) < 5 or domain_parts[-4:] != ["r2", "cloudflarestorage", "com"]:
-                                raise ValueError(f"Invalid R2 URL domain format: {domain_part}")
+                            # R2 URL format: {bucket}.{account_id}.r2.cloudflarestorage.com
+                            # Split by . gives: [bucket, account_id, r2, cloudflarestorage, com]
+                            # Check last 3 parts are: r2, cloudflarestorage, com
+                            if len(domain_parts) < 5 or domain_parts[-3:] != ["r2", "cloudflarestorage", "com"]:
+                                raise ValueError(f"Invalid R2 URL domain format: {domain_part} (expected: bucket.account_id.r2.cloudflarestorage.com, got {len(domain_parts)} parts: {domain_parts})")
                             
                             bucket_name = domain_parts[0]
                             
@@ -194,9 +197,12 @@ def publish_episode_to_spreaker_task(
                     key = unquote(parts[1])  # URL-decode the key (R2 URLs may be URL-encoded)
                     
                     # Parse bucket from domain (bucket.account_id.r2.cloudflarestorage.com)
+                    # R2 URL format: {bucket}.{account_id}.r2.cloudflarestorage.com
+                    # Split by . gives: [bucket, account_id, r2, cloudflarestorage, com]
+                    # Check last 3 parts are: r2, cloudflarestorage, com
                     domain_parts = domain_part.split(".")
-                    if len(domain_parts) < 5 or domain_parts[-4:] != ["r2", "cloudflarestorage", "com"]:
-                        raise ValueError(f"Invalid R2 URL domain format: {domain_part}")
+                    if len(domain_parts) < 5 or domain_parts[-3:] != ["r2", "cloudflarestorage", "com"]:
+                        raise ValueError(f"Invalid R2 URL domain format: {domain_part} (expected: bucket.account_id.r2.cloudflarestorage.com, got {len(domain_parts)} parts: {domain_parts})")
                     
                     bucket_name = domain_parts[0]
                     

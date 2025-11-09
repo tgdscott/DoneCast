@@ -27,13 +27,13 @@ def _final_url_for(path: Optional[str]) -> Optional[str]:
 
 
 def _cover_url_for(path: Optional[str], *, gcs_path: Optional[str] = None) -> Optional[str]:
-    """Generate cover URL with priority: GCS > remote > local.
+    """Generate cover URL with priority: GCS/R2 > remote > local.
     
     Args:
         path: Local path or remote URL (legacy)
-        gcs_path: GCS path (gs://...) if available
+        gcs_path: GCS path (gs://...) or R2 URL (https://...) if available
     """
-    # Priority 1: GCS URL (survives container restarts)
+    # Priority 1: GCS URL (gs://) - generate signed URL
     if gcs_path and str(gcs_path).startswith("gs://"):
         try:
             from infrastructure.gcs import get_signed_url
@@ -49,6 +49,11 @@ def _cover_url_for(path: Optional[str], *, gcs_path: Optional[str] = None) -> Op
             logger = get_logger("api.episodes.common")
             logger.warning("GCS URL generation failed for %s: %s", gcs_path, e)
             # Fall through to path-based resolution
+    
+    # Priority 1b: R2 URL (https://) - use directly (R2 URLs are already public/signed)
+    if gcs_path and str(gcs_path).lower().startswith(("http://", "https://")):
+        # R2 URLs stored in gcs_cover_path are already public URLs, use them directly
+        return str(gcs_path)
     
     # Priority 2: Remote URL (Spreaker hosted)
     if not path:
@@ -260,11 +265,21 @@ def compute_cover_info(episode: Any, *, now: Optional[datetime] = None) -> dict[
     cover_url = None
     cover_source = "none"
     
-    # Try GCS first within 7-day window
-    if within_7days and gcs_cover_path:
-        cover_url = _cover_url_for(None, gcs_path=gcs_cover_path)
-        if cover_url:
-            cover_source = "gcs"
+    # Try gcs_cover_path (GCS or R2)
+    # R2 URLs (https://) are always valid, use them regardless of 7-day window
+    # GCS URLs (gs://) are only valid within 7-day window for published episodes (retention policy)
+    # For unpublished episodes, always use gcs_cover_path if available
+    if gcs_cover_path:
+        gcs_cover_str = str(gcs_cover_path)
+        is_r2_url = gcs_cover_str.lower().startswith(("http://", "https://"))
+        is_published = status_str in ("published", "scheduled")
+        
+        # Always use R2 URLs
+        # For GCS URLs: use if unpublished, or if published and within 7-day window
+        if is_r2_url or (not is_published) or (is_published and within_7days):
+            cover_url = _cover_url_for(None, gcs_path=gcs_cover_path)
+            if cover_url:
+                cover_source = "r2" if is_r2_url else "gcs"
     
     # Try local/remote cover_path
     if not cover_url and cover_path:
