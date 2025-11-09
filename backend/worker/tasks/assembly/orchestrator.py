@@ -692,33 +692,51 @@ def _finalize_episode(
         # This ensures the audio processor can find the file that was downloaded from GCS
         if media_context.source_audio_path:
             source_path = Path(str(media_context.source_audio_path))
-            # Verify the file exists and use the absolute path
-            if source_path.exists():
-                audio_input_path = str(source_path.absolute())
-                logging.info("[assemble] ✅ Using resolved source_audio_path: %s (exists: True, size: %d bytes)", 
-                           audio_input_path, source_path.stat().st_size)
+            # CRITICAL: Resolve to absolute path and verify file exists
+            try:
+                source_path = source_path.resolve()
+            except Exception as resolve_err:
+                logging.warning("[assemble] Failed to resolve path %s: %s", source_path, resolve_err)
+            
+            # Verify the file exists at the resolved path
+            if source_path.exists() and source_path.is_file():
+                audio_input_path = str(source_path)
+                file_size = source_path.stat().st_size
+                logging.info("[assemble] ✅ Using resolved source_audio_path: %s (exists: True, size: %d bytes, absolute: %s)", 
+                           audio_input_path, file_size, source_path.is_absolute())
             else:
-                # File doesn't exist at resolved path - try to find it in MEDIA_DIR or other locations
-                logging.warning("[assemble] ⚠️ Resolved source_audio_path doesn't exist: %s", source_path)
-                # Try MEDIA_DIR with just the filename
+                # File doesn't exist at resolved path - this is a CRITICAL error
+                logging.error("[assemble] ❌ CRITICAL: Resolved source_audio_path doesn't exist: %s (is_file: %s, exists: %s)", 
+                            source_path, source_path.is_file() if source_path.exists() else False, source_path.exists())
+                
+                # Try MEDIA_DIR with just the filename as fallback
                 filename_only = source_path.name
                 media_dir_path = MEDIA_DIR / filename_only
-                project_media_path = PROJECT_ROOT / "media_uploads" / filename_only
                 
-                # Check multiple possible locations
-                if media_dir_path.exists():
-                    audio_input_path = str(media_dir_path.absolute())
-                    logging.info("[assemble] ✅ Found file in MEDIA_DIR: %s", audio_input_path)
-                elif project_media_path.exists():
-                    audio_input_path = str(project_media_path.absolute())
-                    logging.info("[assemble] ✅ Found file in PROJECT_ROOT/media_uploads: %s", audio_input_path)
+                # Check if file exists in MEDIA_DIR
+                if media_dir_path.exists() and media_dir_path.is_file():
+                    audio_input_path = str(media_dir_path.resolve())
+                    file_size = media_dir_path.stat().st_size
+                    logging.warning("[assemble] ⚠️ Using fallback path in MEDIA_DIR: %s (size: %d bytes)", audio_input_path, file_size)
                 else:
+                    # CRITICAL ERROR: File not found anywhere
+                    logging.error("[assemble] ❌ CRITICAL: File not found at any location:")
+                    logging.error("[assemble]   - Original resolved path: %s (exists: %s)", source_path, source_path.exists())
+                    logging.error("[assemble]   - MEDIA_DIR fallback: %s (exists: %s)", media_dir_path, media_dir_path.exists())
+                    logging.error("[assemble]   - MEDIA_DIR value: %s", MEDIA_DIR)
+                    logging.error("[assemble]   - PROJECT_ROOT value: %s", PROJECT_ROOT)
+                    
+                    # Try to list files in MEDIA_DIR for debugging
+                    try:
+                        if MEDIA_DIR.exists():
+                            files_in_media_dir = list(MEDIA_DIR.glob("*"))
+                            logging.error("[assemble]   - Files in MEDIA_DIR: %s", [f.name for f in files_in_media_dir[:10]])
+                    except Exception as list_err:
+                        logging.error("[assemble]   - Failed to list MEDIA_DIR: %s", list_err)
+                    
                     # Last resort: use the resolved path anyway (will fail with clear error)
-                    audio_input_path = str(source_path.absolute())
-                    logging.error("[assemble] ❌ File not found at any location:")
-                    logging.error("[assemble]   - Resolved path: %s", source_path)
-                    logging.error("[assemble]   - MEDIA_DIR: %s", media_dir_path)
-                    logging.error("[assemble]   - PROJECT_ROOT/media_uploads: %s", project_media_path)
+                    audio_input_path = str(source_path)
+                    logging.error("[assemble] ❌ Using non-existent path (will fail): %s", audio_input_path)
         else:
             # Fallback to working_audio_name or main_content_filename
             # If working_audio_name is just a filename, it should be relative to MEDIA_DIR

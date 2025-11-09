@@ -219,13 +219,12 @@ def _maybe_generate_transcript(
         return val in {"1", "true", "yes", "on"}
 
     def _attempt_download_from_bucket(stem: str) -> Optional[Path]:
-        backend = (os.getenv("STORAGE_BACKEND") or "").strip().lower()
-        if backend == "r2":
-            bucket = (os.getenv("TRANSCRIPTS_BUCKET") or os.getenv("R2_BUCKET") or "").strip()
-        else:
-            bucket = (os.getenv("TRANSCRIPTS_BUCKET") or os.getenv("MEDIA_BUCKET") or "").strip()
-        if not bucket or not _storage_download or not stem:
+        # CRITICAL: Transcripts are ALWAYS in GCS, never R2 (even if STORAGE_BACKEND=r2)
+        # R2 is only for final files (assembled episodes), not intermediate files like transcripts
+        bucket = (os.getenv("TRANSCRIPTS_BUCKET") or os.getenv("MEDIA_BUCKET") or "").strip()
+        if not bucket or not stem:
             return None
+        
         variants = [
             f"{stem}.json",
             f"{stem}.words.json",
@@ -235,16 +234,30 @@ def _maybe_generate_transcript(
             f"{stem}.final.words.json",
             f"{stem}.nopunct.json",
         ]
+        
+        # Use GCS client directly (NEVER use R2 for transcripts)
+        try:
+            from google.cloud import storage
+            client = storage.Client()
+            bucket_obj = client.bucket(bucket)
+        except Exception as gcs_err:
+            logging.warning("[assemble] Failed to initialize GCS client for transcript download: %s", gcs_err)
+            return None
+        
         for v in variants:
             key = f"transcripts/{v}"
             try:
-                data = _storage_download(bucket, key)  # type: ignore[misc]
-                if data:
-                    out = target_dir / v
-                    out.parent.mkdir(parents=True, exist_ok=True)
-                    out.write_bytes(data)
-                    return out
-            except Exception:
+                blob = bucket_obj.blob(key)
+                if blob.exists():
+                    data = blob.download_as_bytes()
+                    if data:
+                        out = target_dir / v
+                        out.parent.mkdir(parents=True, exist_ok=True)
+                        out.write_bytes(data)
+                        logging.info("[assemble] ✅ Downloaded transcript from GCS: gs://%s/%s -> %s", bucket, key, out)
+                        return out
+            except Exception as download_err:
+                logging.debug("[assemble] Failed to download transcript from GCS gs://%s/%s: %s", bucket, key, download_err)
                 continue
         return None
 
@@ -333,16 +346,36 @@ def _maybe_generate_transcript(
     # Respect the kill-switch to avoid new transcription during assembly.
     if not _transcribe_allowed():
         logging.warning(
-            "[assemble] transcript JSON not found for %s and assembly is configured to not transcribe (ALLOW_ASSEMBLY_TRANSCRIBE=0); proceeding without cleanup",
-            basename,
+            "[assemble] ⚠️ TRANSCRIPT NOT FOUND for %s and assembly is configured to NOT transcribe (ALLOW_ASSEMBLY_TRANSCRIBE=0). "
+            "This means transcription should have happened during upload. Check: "
+            "1. Was the file transcribed on upload? "
+            "2. Is the transcript in GCS at transcripts/%s.json? "
+            "3. Is TRANSCRIPTS_BUCKET configured correctly? "
+            "Proceeding without cleanup/transcript.",
+            basename, Path(basename).stem,
         )
         return None
+
+    # CRITICAL: Transcription during assembly should be RARE
+    # It should only happen if:
+    # 1. ALLOW_ASSEMBLY_TRANSCRIBE=true (explicitly enabled)
+    # 2. Transcript was not found in GCS (download failed or doesn't exist)
+    # This is a FALLBACK - transcription should happen on upload, not during assembly
+    logging.warning(
+        "[assemble] ⚠️ WARNING: Generating NEW transcript during assembly for %s. "
+        "This should be RARE - transcription should happen on upload. "
+        "This will charge the user again for transcription. "
+        "Check why transcript wasn't found/downloaded from GCS.",
+        basename
+    )
 
     words_list = None
     try:
         # Prefer the helper that reuses any existing JSON before contacting providers
-        words_list = trans.transcribe_media_file(basename)
-    except Exception:
+        logging.info("[assemble] Attempting transcription via transcribe_media_file with basename: %s", basename)
+        words_list = trans.transcribe_media_file(basename, user_id=user_id)
+    except Exception as transcribe_err:
+        logging.warning("[assemble] Transcription with basename failed: %s, trying GCS URI", transcribe_err)
         try:
             gcs_uri = None
             query = select(MediaItem).where(MediaItem.user_id == UUID(user_id)).where(
@@ -354,10 +387,16 @@ def _maybe_generate_transcript(
                     gcs_uri = filename
                     break
             if gcs_uri:
-                words_list = trans.transcribe_media_file(gcs_uri)
+                logging.info("[assemble] Attempting transcription via transcribe_media_file with GCS URI: %s", gcs_uri)
+                words_list = trans.transcribe_media_file(gcs_uri, user_id=user_id)
+            else:
+                logging.error("[assemble] No GCS URI found for basename %s, cannot transcribe", basename)
         except Exception as exc:
-            logging.warning(
-                "[assemble] transcript fallback failed for %s: %s", basename, exc
+            logging.error(
+                "[assemble] ❌ TRANSCRIPTION FAILED during assembly for %s: %s. "
+                "This should not happen - transcription should occur on upload. "
+                "Check transcription service configuration and GCS access.",
+                basename, exc, exc_info=True
             )
 
     if words_list is None:
@@ -796,6 +835,15 @@ def prepare_transcript_context(
             try:
                 filename = str(episode.working_audio_name or "")
                 if filename:
+                    # CRITICAL: This is a fallback for precut files that don't have transcripts
+                    # This should be RARE - transcripts should exist from upload
+                    # get_word_timestamps will attempt transcription if no transcript exists
+                    logging.warning(
+                        "[assemble] ⚠️ WARNING: Calling get_word_timestamps for precut file %s. "
+                        "This may trigger transcription if transcript doesn't exist. "
+                        "This should be RARE - check why transcript wasn't found.",
+                        filename
+                    )
                     words_list = trans.get_word_timestamps(filename)
                     tr_dir = PROJECT_ROOT / "transcripts"
                     tr_dir.mkdir(parents=True, exist_ok=True)

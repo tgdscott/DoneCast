@@ -756,65 +756,63 @@ def resolve_media_context(
             logging.info("[assemble] downloading main content from GCS: %s", gcs_uri)
             try:
                 download = _resolve_media_file(gcs_uri)
-                if download and Path(str(download)).exists():
-                    # _resolve_media_file already downloads to MEDIA_DIR and returns the path
-                    # _ensure_media_dir_copy should just verify/return the same path
-                    promoted = _ensure_media_dir_copy(Path(str(download)))
-                    if promoted and promoted.exists():
-                        source_audio_path = promoted
-                        base_audio_name = promoted.name
-                        file_size = promoted.stat().st_size
-                        logging.info("[assemble] ✅ File downloaded and copied to MEDIA_DIR: %s (exists: True, size: %d bytes)", 
-                                   source_audio_path, file_size)
-                    else:
-                        # Use original download path if copy failed
-                        source_audio_path = Path(str(download))
-                        base_audio_name = source_audio_path.name
-                        if source_audio_path.exists():
+                if download:
+                    download_path = Path(str(download))
+                    # CRITICAL: Verify file exists immediately after download
+                    if download_path.exists():
+                        # Ensure the file is in MEDIA_DIR (persistent location)
+                        # _ensure_media_dir_copy will copy it if needed, or return the same path if already in MEDIA_DIR
+                        promoted = _ensure_media_dir_copy(download_path)
+                        
+                        # CRITICAL: Verify the promoted path exists and is absolute
+                        if promoted and promoted.exists():
+                            # Use absolute path to avoid any relative path issues
+                            source_audio_path = promoted.resolve()
+                            base_audio_name = source_audio_path.name
                             file_size = source_audio_path.stat().st_size
-                            logging.warning("[assemble] ⚠️ Using original download path (copy to MEDIA_DIR may have failed): %s (size: %d bytes)", source_audio_path, file_size)
+                            
+                            # CRITICAL: Double-check file still exists before setting
+                            if not source_audio_path.exists():
+                                raise RuntimeError(f"File disappeared after copy: {source_audio_path}")
+                            
+                            logging.info("[assemble] ✅ File downloaded and verified in MEDIA_DIR: %s (exists: True, size: %d bytes, absolute: %s)", 
+                                       source_audio_path, file_size, source_audio_path.is_absolute())
                         else:
-                            logging.error("[assemble] ❌ File doesn't exist at download path: %s", source_audio_path)
-                            # Try to find it in MEDIA_DIR by filename
-                            filename_only = source_audio_path.name
-                            media_dir_file = MEDIA_DIR / filename_only
-                            if media_dir_file.exists():
-                                source_audio_path = media_dir_file
-                                base_audio_name = filename_only
-                                logging.info("[assemble] ✅ Found file in MEDIA_DIR: %s", source_audio_path)
+                            # Fallback: use the download path directly if promotion failed
+                            if download_path.exists():
+                                source_audio_path = download_path.resolve()
+                                base_audio_name = source_audio_path.name
+                                file_size = source_audio_path.stat().st_size
+                                logging.warning("[assemble] ⚠️ Using download path directly (promotion may have failed): %s (size: %d bytes)", 
+                                              source_audio_path, file_size)
                             else:
-                                logging.error("[assemble] ❌ File not found in MEDIA_DIR either: %s", media_dir_file)
-                    try:
-                        episode.working_audio_name = base_audio_name
-                        session.add(episode)
-                        session.commit()
-                    except Exception:
-                        session.rollback()
-                    logging.info("[assemble] Successfully downloaded main content from GCS to: %s", source_audio_path)
+                                raise FileNotFoundError(f"Downloaded file does not exist: {download_path}")
+                    else:
+                        raise FileNotFoundError(f"Download returned path that doesn't exist: {download_path}")
                 else:
-                    logging.error("[assemble] ❌ Failed to download from GCS: %s (download returned: %s)", gcs_uri, download)
-                    # Try direct GCS download as last resort
-                    if gcs_uri.startswith("gs://"):
-                        try:
-                            without_scheme = gcs_uri[len("gs://"):]
-                            bucket_name, key = without_scheme.split("/", 1)
-                            base = Path(key).name
-                            destination = MEDIA_DIR / base
-                            MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-                            from google.cloud import storage
-                            client = storage.Client()
-                            blob = client.bucket(bucket_name).blob(key)
-                            blob.download_to_filename(str(destination))
-                            if destination.exists():
-                                source_audio_path = destination
-                                base_audio_name = base
-                                logging.info("[assemble] ✅ Successfully downloaded via direct GCS client: %s", destination)
-                            else:
-                                logging.error("[assemble] ❌ Direct GCS download completed but file doesn't exist: %s", destination)
-                        except Exception as direct_err:
-                            logging.error("[assemble] ❌ Direct GCS download also failed: %s", direct_err, exc_info=True)
+                    raise RuntimeError(f"Download returned None for: {gcs_uri}")
+                
+                # Save the base_audio_name to the episode
+                try:
+                    episode.working_audio_name = base_audio_name
+                    session.add(episode)
+                    session.commit()
+                    logging.info("[assemble] Saved working_audio_name to episode: %s", base_audio_name)
+                except Exception as save_err:
+                    session.rollback()
+                    logging.warning("[assemble] Failed to save working_audio_name: %s", save_err)
+                
+                # CRITICAL: Final verification before returning
+                if not source_audio_path or not source_audio_path.exists():
+                    raise FileNotFoundError(f"File does not exist at final path: {source_audio_path}")
+                
+                logging.info("[assemble] ✅ Successfully downloaded and verified main content: %s (size: %d bytes)", 
+                           source_audio_path, source_audio_path.stat().st_size)
             except Exception as e:
                 logging.error("[assemble] ❌ Exception downloading from GCS %s: %s", gcs_uri, e, exc_info=True)
+                # Don't set source_audio_path if download failed - let it fall through to error handling
+                source_audio_path = None
+                base_audio_name = None
 
     # Final fallback: try local paths (but these should rarely be needed if GCS download worked)
     if (not source_audio_path) or (not Path(str(source_audio_path)).exists()):
@@ -978,6 +976,12 @@ def resolve_media_context(
 
             if gcs_json and isinstance(gcs_json, str):
                 normalized = gcs_json.strip()
+                # CRITICAL: Skip R2 URLs - transcripts are ALWAYS in GCS, not R2
+                if normalized.startswith("r2://") or "r2.cloudflarestorage.com" in normalized:
+                    logging.warning("[assemble] Skipping R2 URL for transcript (transcripts must be in GCS): %s", normalized)
+                    gcs_json = None  # Clear so we use bucket fallback instead
+                    normalized = ""
+                
                 try:
                     if normalized.startswith("gs://"):
                         without_scheme = normalized[len("gs://"):]
@@ -993,6 +997,8 @@ def resolve_media_context(
                         bucket_from_gcs, key_from_gcs = without_scheme.split("/", 1)
                     except Exception:
                         bucket_from_gcs, key_from_gcs = None, None
+                else:
+                    bucket_from_gcs, key_from_gcs = None, None
 
             if key_from_gcs:
                 try:
@@ -1071,14 +1077,24 @@ def resolve_media_context(
 
             if bucket_name and candidate_keys:
                 try:
-                    from infrastructure import gcs as gcs_utils  # type: ignore
+                    # CRITICAL: Use GCS client directly (NEVER use R2 for transcripts)
+                    # Transcripts are intermediate files and must be in GCS, not R2
+                    from google.cloud import storage
+                    client = storage.Client()
+                    bucket_obj = client.bucket(bucket_name)
 
                     attempted_keys: list[str] = []
                     for candidate_key, stem_with_suffix in candidate_keys:
                         attempted_keys.append(candidate_key)
                         try:
-                            data = gcs_utils.download_gcs_bytes(bucket_name, candidate_key)
-                        except Exception:
+                            blob = bucket_obj.blob(candidate_key)
+                            if blob.exists():
+                                data = blob.download_as_bytes()
+                            else:
+                                continue
+                        except Exception as download_err:
+                            logging.debug("[assemble] Failed to download transcript from GCS gs://%s/%s: %s", 
+                                        bucket_name, candidate_key, download_err)
                             continue
                         if not data:
                             continue
@@ -1087,14 +1103,16 @@ def resolve_media_context(
                         try:
                             local_path.parent.mkdir(parents=True, exist_ok=True)
                             local_path.write_bytes(data)
-                        except Exception:
+                        except Exception as write_err:
+                            logging.warning("[assemble] Failed to write transcript to %s: %s", local_path, write_err)
                             continue
                         if local_path.exists() and local_path.stat().st_size > 0:
                             words_json_path = local_path
                             logging.info(
-                                "[assemble] downloaded transcript JSON from bucket=%s key=%s",
+                                "[assemble] ✅ Downloaded transcript JSON from GCS: gs://%s/%s -> %s",
                                 bucket_name,
                                 candidate_key,
+                                local_path,
                             )
                             break
                     else:
@@ -1123,7 +1141,10 @@ def resolve_media_context(
         bucket_guess = (os.getenv("TRANSCRIPTS_BUCKET") or os.getenv("MEDIA_BUCKET") or "").strip()
         if bucket_guess:
             try:
-                from infrastructure import gcs as gcs_utils  # type: ignore
+                # CRITICAL: Use GCS client directly (NEVER use R2 for transcripts)
+                from google.cloud import storage
+                client = storage.Client()
+                bucket_obj = client.bucket(bucket_guess)
 
                 candidate_stems: list[str] = []
                 for stem in base_stems:
@@ -1137,24 +1158,36 @@ def resolve_media_context(
 
                 for candidate in candidate_stems:
                     key = f"transcripts/{candidate}.json"
-                    data = gcs_utils.download_gcs_bytes(bucket_guess, key)
+                    try:
+                        blob = bucket_obj.blob(key)
+                        if blob.exists():
+                            data = blob.download_as_bytes()
+                        else:
+                            continue
+                    except Exception as download_err:
+                        logging.debug("[assemble] Failed to download transcript from GCS gs://%s/%s: %s", 
+                                    bucket_guess, key, download_err)
+                        continue
                     if not data:
                         continue
                     local_path = (PROJECT_ROOT / "transcripts") / f"{sanitize_filename(candidate)}.json"
                     try:
                         local_path.parent.mkdir(parents=True, exist_ok=True)
                         local_path.write_bytes(data)
-                    except Exception:
+                    except Exception as write_err:
+                        logging.warning("[assemble] Failed to write transcript to %s: %s", local_path, write_err)
                         continue
                     if local_path.exists() and local_path.stat().st_size > 0:
                         words_json_path = local_path
                         logging.info(
-                            "[assemble] downloaded transcript JSON from bucket=%s key=%s", bucket_guess, key
+                            "[assemble] ✅ Downloaded transcript JSON from GCS: gs://%s/%s -> %s", 
+                            bucket_guess, key, local_path
                         )
                         break
-            except Exception:
+            except Exception as gcs_err:
                 logging.warning(
-                    "[assemble] Unable to download transcript JSON from configured bucket", exc_info=True
+                    "[assemble] Unable to download transcript JSON from configured GCS bucket %s: %s", 
+                    bucket_guess, gcs_err, exc_info=True
                 )
 
     # Extract scalar values to avoid DetachedInstanceError when session closes
@@ -1175,10 +1208,8 @@ def resolve_media_context(
             cover_image_path=cover_image_path,
             cleanup_settings=cleanup_settings,
             preferred_tts_provider=preferred_tts_provider,
-            base_audio_name=base_audio_name,
-            source_audio_path=Path(str(source_audio_path))
-            if source_audio_path
-            else None,
+            base_audio_name=base_audio_name or "",  # Ensure not None
+            source_audio_path=Path(str(source_audio_path)).resolve() if source_audio_path else None,
             base_stems=base_stems,
             search_dirs=search_dirs,
         ),
