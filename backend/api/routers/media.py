@@ -790,17 +790,56 @@ async def register_upload(
     
     for upload_item in request.uploads:
         try:
-            # Verify object exists in GCS
-            object_exists = gcs.blob_exists(gcs_bucket, upload_item.object_path)
-            if not object_exists:
-                log.warning(f"Object not found in GCS: {upload_item.object_path}")
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Upload verification failed: file not found at {upload_item.object_path}"
-                )
+            # CRITICAL: Verify object exists in GCS directly (not through storage abstraction)
+            # Direct uploads always go to GCS, even when STORAGE_BACKEND=r2
+            # We need to check GCS directly, not through the storage backend abstraction
+            # Also handle eventual consistency with retries
+            import time
+            from google.cloud import storage
             
-            # Use provided file size (we don't have a get_size function)
+            client = storage.Client()
+            bucket = client.bucket(gcs_bucket)
+            blob = bucket.blob(upload_item.object_path)
+            
+            # Retry up to 3 times with delays for eventual consistency
+            object_exists = False
             file_size = upload_item.size or 0
+            max_retries = 3
+            retry_delay = 1.0  # seconds
+            
+            for attempt in range(max_retries):
+                try:
+                    object_exists = blob.exists()
+                    if object_exists:
+                        # Get file size and metadata
+                        blob.reload()
+                        file_size = blob.size or upload_item.size or 0
+                        log.info(f"✅ Verified upload in GCS: {upload_item.object_path} (size: {file_size} bytes, attempt {attempt + 1})")
+                        break
+                    else:
+                        if attempt < max_retries - 1:
+                            log.debug(f"Object not found in GCS (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s...")
+                            time.sleep(retry_delay)
+                            retry_delay *= 2  # Exponential backoff
+                        else:
+                            log.warning(f"Object not found in GCS after {max_retries} attempts: {upload_item.object_path}")
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Upload verification failed: file not found at {upload_item.object_path} after {max_retries} attempts. The upload may still be processing - please wait a moment and try again."
+                            )
+                except HTTPException:
+                    raise
+                except Exception as verify_err:
+                    if attempt < max_retries - 1:
+                        log.warning(f"Failed to verify upload (attempt {attempt + 1}/{max_retries}): {verify_err}, retrying...")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2
+                    else:
+                        log.error(f"Failed to verify upload in GCS after {max_retries} attempts: {verify_err}", exc_info=True)
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Failed to verify upload: {str(verify_err)}"
+                        )
             
             # Create MediaItem record
             gcs_url = f"gs://{gcs_bucket}/{upload_item.object_path}"
