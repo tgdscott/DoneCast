@@ -20,11 +20,10 @@ stripe.api_key = settings.STRIPE_SECRET_KEY
 router = APIRouter(prefix="/billing", tags=["Billing"])
 
 PRICE_MAP = {
-    "pro": {
-        "monthly": os.getenv("PRICE_PRO_MONTHLY", "price_pro_monthly_placeholder"),
-        "annual": os.getenv("PRICE_PRO_ANNUAL", "price_pro_annual_placeholder"),
+    "starter": {
+        "monthly": os.getenv("PRICE_STARTER_MONTHLY", "price_starter_monthly_placeholder"),
+        "annual": os.getenv("PRICE_STARTER_ANNUAL", "price_starter_annual_placeholder"),
     },
-    # Renamed from 'premium' to 'creator'; fall back to legacy env vars if new ones missing
     "creator": {
         "monthly": (
             os.getenv("PRICE_CREATOR_MONTHLY")
@@ -36,6 +35,14 @@ PRICE_MAP = {
             or os.getenv("PRICE_PREMIUM_ANNUAL")
             or "price_creator_annual_placeholder"
         ),
+    },
+    "pro": {
+        "monthly": os.getenv("PRICE_PRO_MONTHLY", "price_pro_monthly_placeholder"),
+        "annual": os.getenv("PRICE_PRO_ANNUAL", "price_pro_annual_placeholder"),
+    },
+    "executive": {
+        "monthly": os.getenv("PRICE_EXECUTIVE_MONTHLY", "price_executive_monthly_placeholder"),
+        "annual": os.getenv("PRICE_EXECUTIVE_ANNUAL", "price_executive_annual_placeholder"),
     },
 }
 

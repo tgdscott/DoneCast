@@ -10,8 +10,9 @@ const standardTiers = [
     name: "Starter",
     monthly: 19,
     annual: null, // no annual for Starter
-    processing: "120 (2 hrs)",
-    extraRate: "$6/hr",
+    credits: "28,800",
+    maxEpisodeLength: "40 min",
+    queuePriority: "Low",
     queue: "2 hrs, held 7 days",
     features: {
       uploadRecord: true,
@@ -21,7 +22,7 @@ const standardTiers = [
       intern: false,
       advancedIntern: false,
       sfxTemplates: false,
-      analytics: false,
+      analytics: "Basic",
       multiUser: false,
       priorityQueue: false,
       premiumSupport: false,
@@ -33,8 +34,9 @@ const standardTiers = [
     name: "Creator",
     monthly: 39,
     annual: 31,
-    processing: "600 (10 hrs)",
-    extraRate: "$5/hr",
+    credits: "72,000",
+    maxEpisodeLength: "80 min",
+    queuePriority: "Medium",
     queue: "10 hrs, held 14 days",
     features: {
       uploadRecord: true,
@@ -44,7 +46,7 @@ const standardTiers = [
       intern: true,
       advancedIntern: false,
       sfxTemplates: false,
-      analytics: false,
+      analytics: "Advanced",
       multiUser: false,
       priorityQueue: false,
       premiumSupport: false,
@@ -58,8 +60,9 @@ const standardTiers = [
     name: "Pro",
     monthly: 79,
     annual: 63,
-    processing: "1500 (25 hrs)",
-    extraRate: "$4/hr",
+    credits: "172,800",
+    maxEpisodeLength: "120 min",
+    queuePriority: "High",
     queue: "25 hrs, held 30 days",
     features: {
       uploadRecord: true,
@@ -69,7 +72,7 @@ const standardTiers = [
       intern: true,
       advancedIntern: true,
       sfxTemplates: true,
-      analytics: true,
+      analytics: "Full",
       multiUser: false,
       priorityQueue: false,
       premiumSupport: false,
@@ -77,13 +80,14 @@ const standardTiers = [
     cta: { label: "Go Pro", href: "https://app.podcastpro.plus/signup?plan=pro" },
   },
   {
-    key: "enterprise",
-    name: "Enterprise",
-    monthly: null,
-    annual: null,
-    processing: "3600 (60 hrs)",
-    extraRate: "$3/hr",
-    queue: "60 hrs, held 60 days",
+    key: "executive",
+    name: "Executive",
+    monthly: 129,
+    annual: 107,
+    credits: "288,000",
+    maxEpisodeLength: "240 min*",
+    queuePriority: "Highest",
+    queue: "50 hrs, held 60 days",
     features: {
       uploadRecord: true,
       basicCleanup: true,
@@ -92,7 +96,31 @@ const standardTiers = [
       intern: true,
       advancedIntern: true,
       sfxTemplates: true,
-      analytics: true,
+      analytics: "Full",
+      multiUser: "Coming soon",
+      priorityQueue: true,
+      premiumSupport: true,
+    },
+    cta: { label: "Go Executive", href: "https://app.podcastpro.plus/signup?plan=executive" },
+  },
+  {
+    key: "enterprise",
+    name: "Enterprise",
+    monthly: null,
+    annual: null,
+    credits: "Custom",
+    maxEpisodeLength: "Custom",
+    queuePriority: "Highest",
+    queue: "Custom",
+    features: {
+      uploadRecord: true,
+      basicCleanup: true,
+      manualPublish: true,
+      flubber: true,
+      intern: true,
+      advancedIntern: true,
+      sfxTemplates: true,
+      analytics: "Full",
       multiUser: true,
       priorityQueue: true,
       premiumSupport: true,
@@ -108,8 +136,9 @@ const earlyAccessTiers = [
     name: "Starter",
     monthly: 19,
     annual: null,
-    processing: "120 (2 hrs)",
-    extraRate: "$6/hr",
+    credits: "28,800",
+    maxEpisodeLength: "40 min",
+    queuePriority: "Low",
     queue: "2 hrs, held 7 days",
     features: {
       uploadRecord: true,
@@ -119,7 +148,7 @@ const earlyAccessTiers = [
       intern: false,
       advancedIntern: false,
       sfxTemplates: false,
-      analytics: false,
+      analytics: "Basic",
       multiUser: false,
       priorityQueue: false,
       premiumSupport: false,
@@ -138,8 +167,9 @@ const earlyAccessTiers = [
     name: "Creator",
     monthly: 39,
     annual: 31,
-    processing: "600 (10 hrs)",
-    extraRate: "$5/hr",
+    credits: "72,000",
+    maxEpisodeLength: "80 min",
+    queuePriority: "Medium",
     queue: "10 hrs, held 14 days",
     features: {
       uploadRecord: true,
@@ -149,7 +179,7 @@ const earlyAccessTiers = [
       intern: true,
       advancedIntern: false,
       sfxTemplates: false,
-      analytics: false,
+      analytics: "Advanced",
       multiUser: false,
       priorityQueue: false,
       premiumSupport: false,
@@ -180,8 +210,9 @@ const earlyAccessTiers = [
     name: "Pro",
     monthly: 79,
     annual: 63,
-    processing: "1500 (25 hrs)",
-    extraRate: "$4/hr",
+    credits: "172,800",
+    maxEpisodeLength: "120 min",
+    queuePriority: "High",
     queue: "25 hrs, held 30 days",
     features: {
       uploadRecord: true,
@@ -191,7 +222,7 @@ const earlyAccessTiers = [
       intern: true,
       advancedIntern: true,
       sfxTemplates: true,
-      analytics: true,
+      analytics: "Full",
       multiUser: false,
       priorityQueue: false,
       premiumSupport: false,
@@ -216,13 +247,14 @@ const earlyAccessTiers = [
     cta: { label: "Go Pro", href: "https://app.podcastpro.plus/signup?plan=pro" },
   },
   {
-    key: "enterprise",
-    name: "Enterprise",
-    monthly: null,
-    annual: null,
-    processing: "3600 (60 hrs)",
-    extraRate: "$3/hr",
-    queue: "60 hrs, held 60 days",
+    key: "executive",
+    name: "Executive",
+    monthly: 129,
+    annual: 107,
+    credits: "288,000",
+    maxEpisodeLength: "240 min*",
+    queuePriority: "Highest",
+    queue: "50 hrs, held 60 days",
     features: {
       uploadRecord: true,
       basicCleanup: true,
@@ -231,7 +263,38 @@ const earlyAccessTiers = [
       intern: true,
       advancedIntern: true,
       sfxTemplates: true,
-      analytics: true,
+      analytics: "Full",
+      multiUser: "Coming soon",
+      priorityQueue: true,
+      premiumSupport: true,
+    },
+    earlyOffers: [
+      {
+        title: "Standard Launch",
+        price: "$129/mo",
+        note: "Available Nov 1",
+      },
+    ],
+    cta: { label: "Go Executive", href: "https://app.podcastpro.plus/signup?plan=executive" },
+  },
+  {
+    key: "enterprise",
+    name: "Enterprise",
+    monthly: null,
+    annual: null,
+    credits: "Custom",
+    maxEpisodeLength: "Custom",
+    queuePriority: "Highest",
+    queue: "Custom",
+    features: {
+      uploadRecord: true,
+      basicCleanup: true,
+      manualPublish: true,
+      flubber: true,
+      intern: true,
+      advancedIntern: true,
+      sfxTemplates: true,
+      analytics: "Full",
       multiUser: true,
       priorityQueue: true,
       premiumSupport: true,
@@ -250,8 +313,9 @@ const earlyAccessTiers = [
 
 const rows = [
   { key: "price", label: "Price" },
-  { key: "processing", label: "Processing minutes / mo" },
-  { key: "extraRate", label: "Extra minutes (rollover)" },
+  { key: "credits", label: "Monthly credits" },
+  { key: "maxEpisodeLength", label: "Max episode length" },
+  { key: "queuePriority", label: "Queue priority" },
   { key: "queue", label: "Queue storage (unprocessed audio)" },
   { key: "uploadRecord", label: "Upload & record" },
   { key: "basicCleanup", label: "Basic cleanup (noise, trim)" },
@@ -531,10 +595,13 @@ export default function PricingPage() {
                   {visibleTiers.map(t => (
                     <td key={t.key} className="p-3 text-sm">
                       {row.key === "price" && renderPriceCell(t)}
-                      {row.key === "processing" && t.processing}
-                      {row.key === "extraRate" && t.extraRate}
+                      {row.key === "credits" && t.credits}
+                      {row.key === "maxEpisodeLength" && t.maxEpisodeLength}
+                      {row.key === "queuePriority" && t.queuePriority}
                       {row.key === "queue" && t.queue}
-                      {row.key !== "price" && row.key !== "processing" && row.key !== "extraRate" && row.key !== "queue" && (
+                      {row.key === "analytics" && (typeof t.features[row.key] === "string" ? t.features[row.key] : <Check on={!!t.features[row.key]} />)}
+                      {row.key === "multiUser" && (typeof t.features[row.key] === "string" ? t.features[row.key] : <Check on={!!t.features[row.key]} />)}
+                      {row.key !== "price" && row.key !== "credits" && row.key !== "maxEpisodeLength" && row.key !== "queuePriority" && row.key !== "queue" && row.key !== "analytics" && row.key !== "multiUser" && (
                         <Check on={!!t.features[row.key]} />
                       )}
                     </td>
@@ -547,13 +614,16 @@ export default function PricingPage() {
         {/* Notes / Future-proof */}
         <div className="mt-10 text-xs text-muted-foreground space-y-2">
           <p>
-            Minutes: monthly plans are “use it or lose it.” A la carte minutes roll over until used. Queue storage is plan-gated; no add-ons.
+            Credits: Monthly credits reset each billing period. Up to 10% of unused monthly credits roll over to the next period. Purchased credits never expire.
           </p>
           <p>
-            Early access deals vanish forever after Sept 30. Lifetime seats are capped at 20 and will show as sold out when they’re gone.
+            *Executive plan allows manual override of max episode length on request. Contact support for details.
           </p>
           <p>
-            We’re building more—this table is ready for future add-ons (social posting, clip generation, and more).
+            Early access deals vanish forever after Sept 30. Lifetime seats are capped at 20 and will show as sold out when they're gone.
+          </p>
+          <p>
+            We're building more—this table is ready for future add-ons (social posting, clip generation, and more).
           </p>
         </div>
       </section>

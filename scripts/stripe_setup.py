@@ -27,11 +27,13 @@ import stripe
 PRODUCTS = {
     "starter": {
         "name": "Podcast Plus Plus Starter",
-        "description": "Get started with AI-powered podcasting - 120 minutes/month",
+        "description": "Get started with AI-powered podcasting - 28,800 credits/month (40 min max episode)",
         "features": [
-            "120 minutes per month (2 hrs)",
+            "28,800 credits per month",
+            "Max episode length: 40 minutes",
             "Upload & record",
             "Basic cleanup (noise, trim)",
+            "Basic analytics",
             "Manual publish",
             "Queue storage: 2 hrs, held 7 days"
         ],
@@ -50,12 +52,14 @@ PRODUCTS = {
     },
     "creator": {
         "name": "Podcast Plus Plus Creator",
-        "description": "Most popular - 600 minutes/month (10 hrs)",
+        "description": "Most popular - 72,000 credits/month (80 min max episode)",
         "features": [
-            "600 minutes per month (10 hrs)",
+            "72,000 credits per month",
+            "Max episode length: 80 minutes",
             "Auto-publish to Spreaker",
             "Flubber (filler removal)",
             "Intern (spoken edits)",
+            "Advanced analytics",
             "Queue storage: 10 hrs, held 14 days"
         ],
         "prices": {
@@ -73,12 +77,13 @@ PRODUCTS = {
     },
     "pro": {
         "name": "Podcast Plus Plus Pro",
-        "description": "Professional tier - 1500 minutes/month (25 hrs)",
+        "description": "Professional tier - 172,800 credits/month (120 min max episode)",
         "features": [
-            "1500 minutes per month (25 hrs)",
+            "172,800 credits per month",
+            "Max episode length: 120 minutes",
             "Advanced Intern (multi-step edits)",
             "Sound Effects & templates",
-            "Analytics via Spreaker API",
+            "Full analytics",
             "Queue storage: 25 hrs, held 30 days"
         ],
         "prices": {
@@ -91,6 +96,30 @@ PRODUCTS = {
                 "amount": 79000,  # $790.00 in cents (save ~17%)
                 "interval": "year",
                 "lookup_key": "pro_annual"
+            }
+        }
+    },
+    "executive": {
+        "name": "Podcast Plus Plus Executive",
+        "description": "Executive tier - 288,000 credits/month (240 min max episode, manual override allowed)",
+        "features": [
+            "288,000 credits per month",
+            "Max episode length: 240 minutes (manual override allowed)",
+            "All Pro features",
+            "Full analytics",
+            "Priority queue processing",
+            "Queue storage: 50 hrs, held 60 days"
+        ],
+        "prices": {
+            "monthly": {
+                "amount": 12900,  # $129.00 in cents (YOUR ACTUAL PRICE)
+                "interval": "month",
+                "lookup_key": "executive_monthly"
+            },
+            "annual": {
+                "amount": 128500,  # $1,285.00/year (save ~17%, equivalent to ~$107/month)
+                "interval": "year",
+                "lookup_key": "executive_annual"
             }
         }
     }

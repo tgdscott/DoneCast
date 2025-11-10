@@ -135,15 +135,28 @@ Should see:
 
 ## 📊 Products & Pricing
 
-### Pro Plan
+### Starter Plan
 - **Monthly**: $19/month
 - **Annual**: $190/year (save ~17%)
-- Features: Unlimited episodes, AI enhancement, priority processing, custom branding, analytics
+- Features: 28,800 credits/month, 40 min max episode, basic analytics
 
 ### Creator Plan
-- **Monthly**: $49/month
-- **Annual**: $490/year (save ~17%)
-- Features: Everything in Pro + unlimited minutes, AI voice training, white-label, support, API
+- **Monthly**: $39/month
+- **Annual**: $390/year (save ~17%)
+- Features: 72,000 credits/month, 80 min max episode, advanced analytics
+
+### Pro Plan
+- **Monthly**: $79/month
+- **Annual**: $790/year (save ~17%)
+- Features: 172,800 credits/month, 120 min max episode, full analytics
+
+### Executive Plan
+- **Monthly**: $129/month
+- **Annual**: $1,285/year (save ~17%)
+- Features: 288,000 credits/month, 240 min max episode (override allowed), full analytics, priority queue
+
+### Enterprise Plan
+- **Contact Only** - Custom pricing and features
 
 ---
 

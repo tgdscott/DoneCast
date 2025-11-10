@@ -17,8 +17,33 @@ from api.routers.auth import get_current_user
 from api.models.user import User
 from api.services.op3_analytics import OP3Analytics, OP3ShowStats, OP3EpisodeStats
 from api.services.op3_historical_data import get_historical_data
+from api.billing.plans import can_access_analytics, get_analytics_level
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+
+
+def assert_analytics_access(user: User, required_level: str = "basic") -> None:
+    """
+    Assert user has access to analytics at required level.
+    
+    Raises HTTPException(403) if access denied.
+    
+    Args:
+        user: User object
+        required_level: Required analytics level ("basic", "advanced", "full")
+    """
+    plan_key = getattr(user, 'tier', 'free') or 'free'
+    
+    if not can_access_analytics(plan_key, required_level):
+        plan_level = get_analytics_level(plan_key)
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Analytics access denied. Your plan ({plan_key}) provides "
+                f"{plan_level} analytics, but {required_level} is required. "
+                f"Please upgrade your plan."
+            )
+        )
 
 
 @router.get("/podcast/{podcast_id}/downloads")
@@ -56,6 +81,9 @@ async def get_podcast_downloads(
             status_code=403,
             detail="Not authorized to view analytics for this podcast"
         )
+    
+    # Check analytics access (full analytics required for comprehensive stats)
+    assert_analytics_access(current_user, "full")
     
     # Construct RSS feed URL for OP3 lookup
     from api.core.config import settings
@@ -195,6 +223,9 @@ async def get_episode_downloads(
             detail="Not authorized to view analytics for this episode"
         )
     
+    # Check analytics access (full analytics required for episode stats)
+    assert_analytics_access(current_user, "full")
+    
     # Get the episode's audio URL (OP3-prefixed, same as RSS feed)
     # OP3 tracks by the enclosure URL in the RSS feed
     if not episode.gcs_audio_path:
@@ -259,6 +290,9 @@ async def get_podcast_episodes_summary(
             status_code=403,
             detail="Not authorized to view analytics for this podcast"
         )
+    
+    # Check analytics access (advanced analytics required for episode summaries)
+    assert_analytics_access(current_user, "advanced")
     
     # Return empty for now - frontend should use top_episodes from main analytics endpoint
     # TODO: Remove this endpoint entirely after frontend migration complete

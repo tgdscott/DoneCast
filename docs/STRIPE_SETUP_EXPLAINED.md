@@ -15,8 +15,9 @@ You still need to manually add the generated price IDs to Google Cloud Secret Ma
 
 **Subscription Plans:**
 - ✅ Starter (monthly + annual)
-- ✅ Pro (monthly + annual)
 - ✅ Creator (monthly + annual)
+- ✅ Pro (monthly + annual)
+- ✅ Executive (monthly + annual)
 
 **Add-ons (one-time purchases):**
 - ✅ Additional Hour - Starter ($5)
@@ -39,8 +40,8 @@ python scripts/stripe_setup.py --mode live
 - No Google Cloud involved yet
 
 **Step 2: Script Creates/Updates Products in Stripe**
-- Creates 3 subscription products (Starter, Pro, Creator)
-- Creates 6 subscription prices (monthly + annual for each)
+- Creates 4 subscription products (Starter, Creator, Pro, Executive)
+- Creates 8 subscription prices (monthly + annual for each)
 - Creates 3 add-on products (additional hours)
 - Creates 3 one-time prices for add-ons
 
@@ -56,19 +57,24 @@ python scripts/stripe_setup.py --mode live
 ### 📦 Subscription Products
 
 #### 1. Starter Plan
-- **Monthly**: $9/month (`PRICE_STARTER_MONTHLY`)
-- **Annual**: $90/year (`PRICE_STARTER_ANNUAL`)
-- Features: 10 episodes/month, basic AI, standard processing
+- **Monthly**: $19/month (`PRICE_STARTER_MONTHLY`)
+- **Annual**: $190/year (`PRICE_STARTER_ANNUAL`)
+- Features: 28,800 credits/month, 40 min max episode, basic analytics
 
-#### 2. Pro Plan
-- **Monthly**: $19/month (`PRICE_PRO_MONTHLY`)
-- **Annual**: $190/year (`PRICE_PRO_ANNUAL`)
-- Features: Unlimited episodes, advanced AI, priority processing
+#### 2. Creator Plan
+- **Monthly**: $39/month (`PRICE_CREATOR_MONTHLY`)
+- **Annual**: $390/year (`PRICE_CREATOR_ANNUAL`)
+- Features: 72,000 credits/month, 80 min max episode, advanced analytics
 
-#### 3. Creator Plan
-- **Monthly**: $49/month (`PRICE_CREATOR_MONTHLY`)
-- **Annual**: $490/year (`PRICE_CREATOR_ANNUAL`)
-- Features: Everything + unlimited minutes, custom AI, white-label
+#### 3. Pro Plan
+- **Monthly**: $79/month (`PRICE_PRO_MONTHLY`)
+- **Annual**: $790/year (`PRICE_PRO_ANNUAL`)
+- Features: 172,800 credits/month, 120 min max episode, full analytics
+
+#### 4. Executive Plan
+- **Monthly**: $129/month (`PRICE_EXECUTIVE_MONTHLY`)
+- **Annual**: $1,285/year (`PRICE_EXECUTIVE_ANNUAL`)
+- Features: 288,000 credits/month, 240 min max episode (override allowed), full analytics, priority queue
 
 ### 🎁 Add-on Products (One-time Purchases)
 
@@ -156,14 +162,16 @@ echo "price_yz567" | gcloud secrets create PRICE_ADDON_HOUR_CREATOR --data-file=
 
 After running the script, you'll need to add these to Google Cloud:
 
-### Subscription Plans (6 total)
+### Subscription Plans (8 total)
 ```bash
-PRICE_STARTER_MONTHLY     # $9/month
-PRICE_STARTER_ANNUAL      # $90/year
-PRICE_PRO_MONTHLY         # $19/month
-PRICE_PRO_ANNUAL          # $190/year
-PRICE_CREATOR_MONTHLY     # $49/month
-PRICE_CREATOR_ANNUAL      # $490/year
+PRICE_STARTER_MONTHLY     # $19/month
+PRICE_STARTER_ANNUAL      # $190/year
+PRICE_CREATOR_MONTHLY     # $39/month
+PRICE_CREATOR_ANNUAL      # $390/year
+PRICE_PRO_MONTHLY         # $79/month
+PRICE_PRO_ANNUAL          # $790/year
+PRICE_EXECUTIVE_MONTHLY   # $129/month
+PRICE_EXECUTIVE_ANNUAL    # $1,285/year
 ```
 
 ### Add-ons (3 total)
@@ -180,7 +188,7 @@ STRIPE_PUBLISHABLE_KEY
 STRIPE_WEBHOOK_SECRET
 ```
 
-**Total: 12 new environment variables** (9 prices + 3 Stripe keys)
+**Total: 14 new environment variables** (11 prices + 3 Stripe keys)
 
 ---
 
@@ -225,4 +233,4 @@ This creates everything in Stripe's **test mode** so you can verify it works.
 4. ✅ Deploy your app
 5. ✅ Test billing page
 
-**Questions?** The script is now updated with all 9 products/prices!
+**Questions?** The script is now updated with all 4 subscription plans (8 prices) plus add-ons!

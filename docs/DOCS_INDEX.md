@@ -190,6 +190,7 @@
 **Stripe Integration:**
 - [Stripe Index](STRIPE_INDEX.md) - Overview and links
 - [Stripe Setup](STRIPE_SETUP_EXPLAINED.md) - Initial configuration
+- [Stripe Executive Tier Update](STRIPE_EXECUTIVE_TIER_UPDATE.md) - Executive tier setup
 - [Stripe Keys Guide](STRIPE_KEYS_GUIDE.md) - Managing API keys
 - [Stripe Migration Guide](STRIPE_LIVE_MIGRATION_GUIDE.md) - Test to live
 - [Stripe Quick Reference](STRIPE_QUICK_REFERENCE.md) - Common tasks

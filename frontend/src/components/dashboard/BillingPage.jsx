@@ -194,43 +194,57 @@ export default function BillingPage({ token, onBack }) {
     return iso;
   };
 
-  // Pricing data (Creator & Pro only for in-app billing)
+  // Pricing data
   const tiers = useMemo(() => ([
     {
       key: 'starter', name: 'Starter', monthly: 19, annual: null,
-      processing: '120 (2 hrs)', extraRate: '$6/hr', queue: '2 hrs, held 7 days',
+      credits: '28,800', maxEpisodeLength: '40 min', queuePriority: 'Low',
+      queue: '2 hrs, held 7 days',
       features: {
         uploadRecord: true, basicCleanup: true, manualPublish: true,
         flubber: false, intern: false, advancedIntern: false,
-        sfxTemplates: false, analytics: false, multiUser: false, priorityQueue: false, premiumSupport: false,
+        sfxTemplates: false, analytics: 'Basic', multiUser: false, priorityQueue: false, premiumSupport: false,
       }
     },
     {
       key: 'creator', name: 'Creator', monthly: 39, annual: 31,
-      processing: '600 (10 hrs)', extraRate: '$5/hr', queue: '10 hrs, held 14 days',
+      credits: '72,000', maxEpisodeLength: '80 min', queuePriority: 'Medium',
+      queue: '10 hrs, held 14 days',
       features: {
         uploadRecord: true, basicCleanup: true, manualPublish: true,
         flubber: true, intern: true, advancedIntern: false,
-        sfxTemplates: false, analytics: false, multiUser: false, priorityQueue: false, premiumSupport: false,
+        sfxTemplates: false, analytics: 'Advanced', multiUser: false, priorityQueue: false, premiumSupport: false,
       },
       popular: true, badge: 'Most Popular',
     },
     {
       key: 'pro', name: 'Pro', monthly: 79, annual: 63,
-      processing: '1500 (25 hrs)', extraRate: '$4/hr', queue: '25 hrs, held 30 days',
+      credits: '172,800', maxEpisodeLength: '120 min', queuePriority: 'High',
+      queue: '25 hrs, held 30 days',
       features: {
         uploadRecord: true, basicCleanup: true, manualPublish: true,
         flubber: true, intern: true, advancedIntern: true,
-        sfxTemplates: true, analytics: true, multiUser: false, priorityQueue: false, premiumSupport: false,
+        sfxTemplates: true, analytics: 'Full', multiUser: false, priorityQueue: false, premiumSupport: false,
+      },
+    },
+    {
+      key: 'executive', name: 'Executive', monthly: 129, annual: 107,
+      credits: '288,000', maxEpisodeLength: '240 min*', queuePriority: 'Highest',
+      queue: '50 hrs, held 60 days',
+      features: {
+        uploadRecord: true, basicCleanup: true, manualPublish: true,
+        flubber: true, intern: true, advancedIntern: true,
+        sfxTemplates: true, analytics: 'Full', multiUser: 'Coming soon', priorityQueue: true, premiumSupport: true,
       },
     },
     {
       key: 'enterprise', name: 'Enterprise', monthly: null, annual: null,
-      processing: '3600 (60 hrs)', extraRate: '$3/hr', queue: '60 hrs, held 60 days',
+      credits: 'Custom', maxEpisodeLength: 'Custom', queuePriority: 'Highest',
+      queue: 'Custom',
       features: {
         uploadRecord: true, basicCleanup: true, manualPublish: true,
         flubber: true, intern: true, advancedIntern: true,
-        sfxTemplates: true, analytics: true, multiUser: true, priorityQueue: true, premiumSupport: true,
+        sfxTemplates: true, analytics: 'Full', multiUser: true, priorityQueue: true, premiumSupport: true,
       },
       contact: true,
     },
@@ -238,8 +252,9 @@ export default function BillingPage({ token, onBack }) {
 
   const rows = useMemo(() => ([
     { key: 'price', label: 'Price' },
-    { key: 'processing', label: 'Processing minutes / mo' },
-    { key: 'extraRate', label: 'Extra minutes (rollover)' },
+    { key: 'credits', label: 'Monthly credits' },
+    { key: 'maxEpisodeLength', label: 'Max episode length' },
+    { key: 'queuePriority', label: 'Queue priority' },
     { key: 'queue', label: 'Queue storage (unprocessed audio)' },
     { key: 'uploadRecord', label: 'Upload & record' },
     { key: 'basicCleanup', label: 'Basic cleanup (noise, trim)' },
@@ -342,13 +357,22 @@ export default function BillingPage({ token, onBack }) {
                   )}
                   <div className="text-2xl font-bold">{priceFor(t)}</div>
                   <div className="space-y-2 pt-2 border-t">
-                    <div className="text-sm"><span className="font-medium">Processing:</span> {t.processing}</div>
-                    <div className="text-sm"><span className="font-medium">Extra Rate:</span> {t.extraRate}</div>
+                    <div className="text-sm"><span className="font-medium">Credits:</span> {t.credits}</div>
+                    <div className="text-sm"><span className="font-medium">Max Episode:</span> {t.maxEpisodeLength}</div>
+                    <div className="text-sm"><span className="font-medium">Queue Priority:</span> {t.queuePriority}</div>
                     <div className="text-sm"><span className="font-medium">Queue:</span> {t.queue}</div>
-                    {rows.filter(r => r.key !== 'price' && r.key !== 'processing' && r.key !== 'extraRate' && r.key !== 'queue').map(row => (
+                    {rows.filter(r => r.key !== 'price' && r.key !== 'credits' && r.key !== 'maxEpisodeLength' && r.key !== 'queuePriority' && r.key !== 'queue').map(row => (
                       <div key={row.key} className="flex items-center justify-between text-sm">
                         <span>{row.label}</span>
-                        <Check on={!!t.features[row.key]} />
+                        {row.key === 'analytics' || row.key === 'multiUser' ? (
+                          typeof t.features[row.key] === 'string' ? (
+                            <span className="text-xs text-muted-foreground">{t.features[row.key]}</span>
+                          ) : (
+                            <Check on={!!t.features[row.key]} />
+                          )
+                        ) : (
+                          <Check on={!!t.features[row.key]} />
+                        )}
                       </div>
                     ))}
                   </div>
@@ -417,10 +441,13 @@ export default function BillingPage({ token, onBack }) {
                             </div>
                           </div>
                         )}
-                        {row.key === 'processing' && t.processing}
-                        {row.key === 'extraRate' && t.extraRate}
+                        {row.key === 'credits' && t.credits}
+                        {row.key === 'maxEpisodeLength' && t.maxEpisodeLength}
+                        {row.key === 'queuePriority' && t.queuePriority}
                         {row.key === 'queue' && t.queue}
-                        {row.key !== 'price' && row.key !== 'processing' && row.key !== 'extraRate' && row.key !== 'queue' && (
+                        {row.key === 'analytics' && (typeof t.features[row.key] === 'string' ? t.features[row.key] : <Check on={!!t.features[row.key]} />)}
+                        {row.key === 'multiUser' && (typeof t.features[row.key] === 'string' ? t.features[row.key] : <Check on={!!t.features[row.key]} />)}
+                        {row.key !== 'price' && row.key !== 'credits' && row.key !== 'maxEpisodeLength' && row.key !== 'queuePriority' && row.key !== 'queue' && row.key !== 'analytics' && row.key !== 'multiUser' && (
                           <Check on={!!t.features[row.key]} />
                         )}
                       </td>
