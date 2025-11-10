@@ -65,3 +65,17 @@ class PasswordReset(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     ip: Optional[str] = Field(default=None, max_length=64)
     user_agent: Optional[str] = Field(default=None, max_length=300)
+
+
+class PhoneVerification(SQLModel, table=True):
+    """One-time phone verification code for SMS notifications."""
+    __tablename__: ClassVar[str] = "phoneverification"
+    __table_args__ = {"extend_existing": True}
+    id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
+    user_id: UUID = Field(foreign_key="user.id", index=True)
+    phone_number: str = Field(max_length=20, index=True)
+    code: str = Field(max_length=6, index=True)
+    expires_at: datetime
+    verified_at: Optional[datetime] = Field(default=None)
+    used: bool = Field(default=False, index=True, description="Set true once successfully applied (single-use guard)")
+    created_at: datetime = Field(default_factory=datetime.utcnow)

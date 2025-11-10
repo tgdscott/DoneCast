@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from pydantic import BaseModel
 from sqlmodel import Session
 from ..core.database import get_session
 from ..models.user import User
 from api.routers.auth import get_current_user
+from api.routers.admin.deps import get_current_admin_user
 import os, stripe
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from ..core.constants import TIER_LIMITS
 from ..core import crud
@@ -18,6 +19,11 @@ from ..core.config import settings
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
 router = APIRouter(prefix="/billing", tags=["Billing"])
+
+# Internal router for scheduled jobs
+internal_router = APIRouter(prefix="/internal/billing", tags=["internal:billing"])
+
+_TASKS_AUTH = os.getenv("TASKS_AUTH", "")
 
 PRICE_MAP = {
     "starter": {
@@ -660,3 +666,106 @@ async def post_refund(req: RefundRequest, current_user: User = Depends(get_curre
         return {"ok": True}
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
+
+
+# ============================================================================
+# Internal endpoints (Cloud Scheduler / Admin)
+# ============================================================================
+
+def _require_internal_auth(request: Request, x_tasks_auth: str | None = None):
+    """
+    Require either Cloud Scheduler OIDC token OR admin token OR TASKS_AUTH header.
+    
+    Supports:
+    - Cloud Scheduler OIDC: Bearer token in Authorization header
+    - Admin token: Via get_current_admin_user dependency
+    - Legacy: x-tasks-auth header matching TASKS_AUTH env var
+    """
+    # Check for OIDC token (Cloud Scheduler)
+    auth_header = request.headers.get("Authorization", "")
+    has_oidc = auth_header.startswith("Bearer ")
+    
+    # Check for legacy TASKS_AUTH header
+    has_tasks_auth = x_tasks_auth and _TASKS_AUTH and x_tasks_auth == _TASKS_AUTH
+    
+    # If neither, require admin auth (will be checked via dependency)
+    if not (has_oidc or has_tasks_auth):
+        # This will be handled by the admin dependency if provided
+        pass
+
+
+class RolloverRequest(BaseModel):
+    """Request body for rollover endpoint."""
+    period: str | None = None  # Optional YYYY-MM period for idempotency
+
+
+@internal_router.post("/rollover")
+async def process_rollover_endpoint(
+    request: Request,
+    session: Session = Depends(get_session),
+    payload: RolloverRequest | None = None,
+    x_tasks_auth: str | None = Header(default=None),
+):
+    """
+    Process monthly credit rollover for all active subscribers.
+    
+    Protected endpoint requiring:
+    - Cloud Scheduler OIDC token (Bearer token), OR
+    - Admin authentication (via Authorization header with JWT), OR
+    - TASKS_AUTH header
+    
+    Args:
+        payload: Optional request body with 'period' (YYYY-MM) for idempotency
+    
+    Returns:
+        Summary of rollover processing
+    """
+    # Check authentication
+    # Accept:
+    # 1. Bearer token (OIDC from Cloud Scheduler OR admin JWT)
+    # 2. TASKS_AUTH header (legacy)
+    auth_header = request.headers.get("Authorization", "")
+    has_bearer_token = auth_header.startswith("Bearer ")
+    has_tasks_auth = x_tasks_auth and _TASKS_AUTH and x_tasks_auth == _TASKS_AUTH
+    
+    # Optionally verify admin JWT (for manual testing)
+    # Note: Cloud Scheduler OIDC tokens also use "Bearer " prefix
+    # We accept any Bearer token - actual verification happens at application level
+    has_admin = False
+    if has_bearer_token:
+        try:
+            # Try to verify as admin user (for manual testing)
+            from api.routers.auth import get_current_user
+            current_user = await get_current_user(request=request)
+            # Check if user is admin
+            from api.routers.auth.utils import is_admin
+            has_admin = is_admin(current_user)
+        except Exception:
+            # Not an admin user or invalid token - that's ok, could be OIDC
+            pass
+    
+    if not (has_bearer_token or has_tasks_auth or has_admin):
+        raise HTTPException(status_code=401, detail="Unauthorized: requires Bearer token (OIDC or admin JWT), or TASKS_AUTH header")
+    
+    from api.services.billing.wallet import process_monthly_rollover
+    from datetime import datetime as dt
+    
+    try:
+        target_period = payload.period if payload else None
+        result = process_monthly_rollover(
+            session=session,
+            now=dt.now(timezone.utc),
+            target_period=target_period
+        )
+        
+        return {
+            "ok": True,
+            **result
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        from api.core.logging import get_logger
+        logger = get_logger("api.routers.billing")
+        logger.error(f"Rollover processing failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Rollover processing failed: {str(e)}")

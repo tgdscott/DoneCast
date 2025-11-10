@@ -44,6 +44,9 @@ def run_one_time_migrations() -> dict[str, bool]:
     results["auto_migrate_terms_versions"] = run_migration_once("auto_migrate_terms_versions", _auto_migrate_terms_versions)
     results["add_ledgerreason_enum_values"] = run_migration_once("add_ledgerreason_enum_values", _add_ledgerreason_enum_values)
     results["add_transcription_error_field"] = run_migration_once("add_transcription_error_field", _add_transcription_error_field)
+    results["add_episode_priority"] = run_migration_once("add_episode_priority", _add_episode_priority)
+    results["add_sms_notification_fields"] = run_migration_once("add_sms_notification_fields", _add_sms_notification_fields)
+    results["add_phone_verification_table"] = run_migration_once("add_phone_verification_table", _add_phone_verification_table)
     
     # Check for pending migrations
     pending = get_pending_migrations()
@@ -419,5 +422,71 @@ def _add_transcription_error_field() -> bool:
         return True
     except Exception as e:
         log.warning("[migrate] Could not add mediaitem.transcription_error column: %s", e)
+        return False
+
+
+def _add_episode_priority() -> bool:
+    """Add priority column to episode table (migration 033)."""
+    import importlib.util
+    import os
+    from sqlmodel import Session
+    from api.core.database import engine
+    
+    try:
+        migration_path_033 = os.path.join(os.path.dirname(__file__), '033_add_episode_priority.py')
+        spec_033 = importlib.util.spec_from_file_location('migration_033', migration_path_033)
+        if spec_033 and spec_033.loader:
+            module_033 = importlib.util.module_from_spec(spec_033)
+            spec_033.loader.exec_module(module_033)
+            with Session(engine) as session:
+                module_033.run_migration(session)
+        log.debug("[migrate] Episode priority column verified")
+        return True
+    except Exception as e:
+        log.warning("[migrate] Episode priority migration failed: %s", e)
+        return False
+
+
+def _add_sms_notification_fields() -> bool:
+    """Add SMS notification fields to user table (migration 035)."""
+    import importlib.util
+    import os
+    from sqlmodel import Session
+    from api.core.database import engine
+    
+    try:
+        migration_path_035 = os.path.join(os.path.dirname(__file__), '035_add_sms_notification_fields.py')
+        spec_035 = importlib.util.spec_from_file_location('migration_035', migration_path_035)
+        if spec_035 and spec_035.loader:
+            module_035 = importlib.util.module_from_spec(spec_035)
+            spec_035.loader.exec_module(module_035)
+            with Session(engine) as session:
+                module_035.run_migration(session)
+        log.debug("[migrate] SMS notification fields verified")
+        return True
+    except Exception as e:
+        log.warning("[migrate] SMS notification fields migration failed: %s", e)
+        return False
+
+
+def _add_phone_verification_table() -> bool:
+    """Add phone verification table (migration 036)."""
+    import importlib.util
+    import os
+    from sqlmodel import Session
+    from api.core.database import engine
+    
+    try:
+        migration_path_036 = os.path.join(os.path.dirname(__file__), '036_add_phone_verification_table.py')
+        spec_036 = importlib.util.spec_from_file_location('migration_036', migration_path_036)
+        if spec_036 and spec_036.loader:
+            module_036 = importlib.util.module_from_spec(spec_036)
+            spec_036.loader.exec_module(module_036)
+            with Session(engine) as session:
+                module_036.run_migration(session)
+        log.debug("[migrate] Phone verification table verified")
+        return True
+    except Exception as e:
+        log.warning("[migrate] Phone verification table migration failed: %s", e)
         return False
 

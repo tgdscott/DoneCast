@@ -12,7 +12,9 @@ from api.core import database as db
 from api.models.notification import Notification
 from api.models.podcast import MediaItem
 from api.models.transcription import TranscriptionWatch
+from api.models.user import User
 from api.services.mailer import mailer
+from api.services.sms import sms_service
 
 log = logging.getLogger("transcription.watchers")
 
@@ -207,6 +209,25 @@ def notify_watchers_processed(filename: str) -> None:
 
                 )
                 session.add(note)
+
+                # Send SMS notification if user has opted in
+                try:
+                    user = session.get(User, watch.user_id)
+                    # Use getattr() to safely access SMS fields (may not exist if migration hasn't run)
+                    sms_enabled = getattr(user, 'sms_notifications_enabled', False) if user else False
+                    sms_transcription = getattr(user, 'sms_notify_transcription_ready', False) if user else False
+                    phone_number = getattr(user, 'phone_number', None) if user else None
+                    
+                    if user and sms_enabled and sms_transcription and phone_number:
+                        sms_service.send_transcription_ready_notification(
+                            phone_number=phone_number,
+                            episode_name=friendly_text,
+                            user_id=str(user.id)
+                        )
+                        log.info("[transcribe] SMS notification sent to user %s for episode %s", user.id, friendly_text)
+                except Exception as sms_err:
+                    # Don't fail the entire notification flow if SMS fails (or if columns don't exist yet)
+                    log.warning("[transcribe] SMS notification failed for user %s: %s", watch.user_id, sms_err, exc_info=True)
 
                 watch.notified_at = datetime.utcnow()
                 watch.last_status = status

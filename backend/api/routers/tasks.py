@@ -23,6 +23,8 @@ from pydantic import BaseModel, ValidationError
 from starlette.requests import ClientDisconnect
 
 from api.core.paths import MEDIA_DIR
+from api.core.database import get_session
+from api.services.episodes.queue_retry import retry_queued_episodes
 from worker.tasks.assembly.chunk_worker import (
     ProcessChunkPayload,
     run_chunk_processing,
@@ -844,4 +846,42 @@ async def maintenance_purge_episode_mirrors(
         "removed_local": removed_local,
         "removed_remote": removed_remote
     }
+
+
+# -------------------- Retry Queued Episodes --------------------
+
+@router.post("/retry-queued-episodes")
+async def retry_queued_episodes_task(request: Request, x_tasks_auth: str | None = Header(default=None)):
+    """Retry queued episodes when worker server comes back online.
+    
+    This endpoint should be called periodically (every 1-10 minutes) to check for
+    queued episodes and retry them when the worker server is available.
+    
+    Polling schedule:
+    - First hour: every 1 minute
+    - After first hour: every 10 minutes
+    
+    Can be called by Cloud Scheduler or a background task.
+    """
+    if not _IS_DEV:
+        # Accept either Cloud Scheduler OIDC token OR legacy TASKS_AUTH header
+        auth_header = request.headers.get("Authorization", "")
+        has_oidc = auth_header.startswith("Bearer ")
+        has_tasks_auth = x_tasks_auth and x_tasks_auth == _TASKS_AUTH
+        
+        if not (has_oidc or has_tasks_auth):
+            raise HTTPException(status_code=401, detail="unauthorized")
+    
+    try:
+        session_gen = get_session()
+        session = next(session_gen)
+        try:
+            result = retry_queued_episodes(session)
+            log.info("event=retry_queued_episodes.completed result=%s", result)
+            return {"ok": True, **result}
+        finally:
+            session.close()
+    except Exception as exc:
+        log.exception("event=retry_queued_episodes.error err=%s", exc)
+        raise HTTPException(status_code=500, detail=f"Failed to retry queued episodes: {exc}")
 

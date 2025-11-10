@@ -12,6 +12,7 @@ from api.models.user import User
 from api.models.podcast import Episode, Podcast
 from api.services.episodes import repo as _svc_repo
 from api.services.episodes import publisher as _svc_publisher
+from api.services.sms import sms_service
 from uuid import UUID as _UUID
 
 logger = logging.getLogger("ppp.episodes.publish")
@@ -167,7 +168,35 @@ def publish_episode_endpoint(
             session.commit()
         except Exception:
             session.rollback()
+    
+    # Refresh episode to get latest state
+    session.refresh(ep)
     _pa = getattr(ep, 'publish_at', None)
+    
+    # Send SMS notification if user has opted in (for Spreaker path, RSS path handles it in service)
+    # Only send if not already sent in RSS path
+    if derived_show_id:  # Spreaker path
+        try:
+            user = session.get(User, current_user.id)
+            # Use getattr() to safely access SMS fields (may not exist if migration hasn't run)
+            sms_enabled = getattr(user, 'sms_notifications_enabled', False) if user else False
+            sms_publish = getattr(user, 'sms_notify_publish', False) if user else False
+            phone_number = getattr(user, 'phone_number', None) if user else None
+            
+            if user and sms_enabled and sms_publish and phone_number:
+                episode_name = ep.title or "Untitled Episode"
+                publish_date = _pa if _pa else datetime.now(timezone.utc)
+                sms_service.send_publish_notification(
+                    phone_number=phone_number,
+                    episode_name=episode_name,
+                    publish_date=publish_date,
+                    user_id=str(user.id)
+                )
+                logger.info("[publish] SMS notification sent to user %s for episode %s (Spreaker)", user.id, episode_name)
+        except Exception as sms_err:
+            # Don't fail the publish if SMS fails (or if columns don't exist yet)
+            logger.warning("[publish] SMS notification failed for user %s: %s", current_user.id, sms_err, exc_info=True)
+    
     return {
         "message": "Publish scheduled with Spreaker" if auto_publish_iso else "Publish request submitted to Spreaker.",
         "job_id": async_result["job_id"],

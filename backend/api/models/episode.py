@@ -38,6 +38,9 @@ class Episode(SQLModel, table=True):
     image_crop: Optional[str] = Field(default=None, description="Crop rectangle 'x1,y1,x2,y2' for square extraction when pushing to Spreaker")
     
     status: EpisodeStatus = Field(default=EpisodeStatus.pending)
+    # Queue priority based on user tier (higher = more priority)
+    # Starter=1, Creator=2, Pro=3, Executive=4, Enterprise=5, Unlimited=6
+    priority: int = Field(default=1, description="Queue priority for processing (higher = more priority)")
     final_audio_path: Optional[str] = Field(default=None)
     spreaker_episode_id: Optional[str] = Field(default=None)
     is_published_to_spreaker: bool = Field(default=False)

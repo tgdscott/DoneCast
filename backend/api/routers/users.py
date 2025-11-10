@@ -55,6 +55,20 @@ class AudioCleanupSettingsUpdate(BaseModel):
 class AudioCleanupSettingsPublic(BaseModel):
     settings: Dict[str, Any]
 
+class SMSNotificationPreferencesUpdate(BaseModel):
+    # Note: phone_number cannot be set via this endpoint - it must be verified via /api/auth/verify-phone first
+    sms_notifications_enabled: bool | None = None
+    sms_notify_transcription_ready: bool | None = None
+    sms_notify_publish: bool | None = None
+    sms_notify_worker_down: bool | None = None
+
+class SMSNotificationPreferencesPublic(BaseModel):
+    phone_number: str | None = None
+    sms_notifications_enabled: bool = False
+    sms_notify_transcription_ready: bool = False
+    sms_notify_publish: bool = False
+    sms_notify_worker_down: bool = False
+
 @router.get("/me", response_model=UserPublic)
 async def read_users_me(
     response: Response,
@@ -253,3 +267,92 @@ async def get_user_capabilities(
         'has_google_tts': bool(has_google_tts),
         'has_any_sfx_triggers': bool(has_any_sfx_triggers),
     }
+
+@router.get("/me/sms-preferences", response_model=SMSNotificationPreferencesPublic)
+async def get_sms_preferences(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Get current user's SMS notification preferences."""
+    return SMSNotificationPreferencesPublic(
+        phone_number=getattr(current_user, 'phone_number', None),
+        sms_notifications_enabled=getattr(current_user, 'sms_notifications_enabled', False),
+        sms_notify_transcription_ready=getattr(current_user, 'sms_notify_transcription_ready', False),
+        sms_notify_publish=getattr(current_user, 'sms_notify_publish', False),
+        sms_notify_worker_down=getattr(current_user, 'sms_notify_worker_down', False),
+    )
+
+@router.put("/me/sms-preferences", response_model=SMSNotificationPreferencesPublic)
+async def update_sms_preferences(
+    preferences: SMSNotificationPreferencesUpdate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Update current user's SMS notification preferences.
+    
+    Note: Phone number must be verified separately using /api/auth/verify-phone endpoint
+    before it can be used for SMS notifications. Phone number is set automatically when verified.
+    """
+    changed = False
+    
+    # Check if SMS columns exist (safe migration handling)
+    try:
+        from sqlalchemy import inspect as sql_inspect
+        inspector = sql_inspect(session.get_bind())
+        user_columns = {col['name'] for col in inspector.get_columns('user')}
+        has_sms_columns = all(col in user_columns for col in [
+            'sms_notifications_enabled', 'sms_notify_transcription_ready', 
+            'sms_notify_publish', 'sms_notify_worker_down', 'phone_number'
+        ])
+    except Exception:
+        # If we can't check, assume columns don't exist and return error
+        has_sms_columns = False
+    
+    if not has_sms_columns:
+        raise HTTPException(
+            status_code=503,
+            detail="SMS notifications are not yet available. Database migration is pending."
+        )
+    
+    # Update notification preferences (only if columns exist)
+    if preferences.sms_notifications_enabled is not None:
+        phone_number = getattr(current_user, 'phone_number', None)
+        if preferences.sms_notifications_enabled and not phone_number:
+            raise HTTPException(
+                status_code=400,
+                detail="Phone number must be verified before enabling SMS notifications. Please verify your phone number first using /api/auth/verify-phone"
+            )
+        setattr(current_user, 'sms_notifications_enabled', preferences.sms_notifications_enabled)
+        changed = True
+    
+    if preferences.sms_notify_transcription_ready is not None:
+        setattr(current_user, 'sms_notify_transcription_ready', preferences.sms_notify_transcription_ready)
+        changed = True
+    
+    if preferences.sms_notify_publish is not None:
+        setattr(current_user, 'sms_notify_publish', preferences.sms_notify_publish)
+        changed = True
+    
+    # Only allow admins to enable worker down notifications
+    if preferences.sms_notify_worker_down is not None:
+        from api.routers.auth.utils import is_admin
+        if preferences.sms_notify_worker_down and not is_admin(current_user):
+            raise HTTPException(
+                status_code=403,
+                detail="Only admins can enable worker down notifications"
+            )
+        setattr(current_user, 'sms_notify_worker_down', preferences.sms_notify_worker_down)
+        changed = True
+    
+    if changed:
+        session.add(current_user)
+        session.commit()
+        session.refresh(current_user)
+    
+    return SMSNotificationPreferencesPublic(
+        phone_number=getattr(current_user, 'phone_number', None),
+        sms_notifications_enabled=getattr(current_user, 'sms_notifications_enabled', False),
+        sms_notify_transcription_ready=getattr(current_user, 'sms_notify_transcription_ready', False),
+        sms_notify_publish=getattr(current_user, 'sms_notify_publish', False),
+        sms_notify_worker_down=getattr(current_user, 'sms_notify_worker_down', False),
+    )

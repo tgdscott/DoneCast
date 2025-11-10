@@ -124,19 +124,68 @@ def _create_engine():
     if _engine is not None:
         return _engine
     
+    # Log current configuration state (without exposing sensitive data)
+    log.info("[db] Checking database configuration...")
+    has_database_url = bool(_DATABASE_URL)
+    has_instance_name = bool(_INSTANCE_CONNECTION_NAME)
+    has_discrete_config = _HAS_DISCRETE_DB_CONFIG
+    has_db_host = bool(DB_HOST)
+    
+    log.info(
+        "[db] Config state: DATABASE_URL=%s, INSTANCE_CONNECTION_NAME=%s, "
+        "HAS_DISCRETE_CONFIG=%s, DB_HOST=%s",
+        "set" if has_database_url else "not set",
+        "set" if has_instance_name else "not set",
+        has_discrete_config,
+        DB_HOST if has_db_host else "not set",
+    )
+    
     if _DATABASE_URL:
         try:
             parsed_url = make_url(_DATABASE_URL)
             backend_name = parsed_url.get_backend_name()
         except Exception as e:
+            log.error("[db] Invalid DATABASE_URL format: %s", e)
             raise RuntimeError(f"Invalid DATABASE_URL format: {e}") from e
 
         if backend_name != "postgresql":
+            log.error("[db] Only PostgreSQL is supported, got: %s", backend_name)
             raise RuntimeError(f"Only PostgreSQL is supported, got: {backend_name}. DATABASE_URL must start with postgresql://")
         
+        # Mask password in logs for security
+        safe_url = str(parsed_url)
+        if parsed_url.password:
+            safe_url = safe_url.replace(parsed_url.password, "***", 1)
+        
+        host = parsed_url.host or "unknown"
+        port = parsed_url.port or "unknown"
+        database = parsed_url.database or "unknown"
+        
+        log.info(
+            "[db] Using DATABASE_URL for engine (driver=%s, host=%s, port=%s, database=%s)",
+            parsed_url.drivername,
+            host,
+            port,
+            database,
+        )
+        
+        # Validate that we have required components
+        if host == "unknown" or database == "unknown":
+            log.error(
+                "[db] DATABASE_URL is missing required components: host=%s, database=%s. "
+                "Format: postgresql+psycopg://USER:PASSWORD@HOST:PORT/DATABASE",
+                host, database
+            )
+        
+        # Warn if connecting to localhost/127.0.0.1 (might need Cloud SQL Proxy)
+        if host in ("localhost", "127.0.0.1"):
+            log.info(
+                "[db] Connecting to localhost - ensure database is running or Cloud SQL Proxy is active on port %s",
+                port
+            )
+        
         _engine = create_engine(_DATABASE_URL, **_POOL_KWARGS)
-        driver = parsed_url.drivername if parsed_url is not None else "unknown"
-        log.info("[db] Using DATABASE_URL for engine (driver=%s)", driver)
+        log.info("[db] Database engine created successfully (connection will be tested on first use)")
         return _engine
 
     elif _INSTANCE_CONNECTION_NAME and _HAS_DISCRETE_DB_CONFIG:
@@ -147,33 +196,57 @@ def _create_engine():
         password = quote_plus(db_pass)
 
         if DB_HOST:
+            connection_url = f"postgresql+psycopg://{db_user}:***@{DB_HOST}:{DB_PORT}/{db_name}"
+            log.info(
+                "[db] Using Cloud SQL via TCP %s:%s for instance %s (user=%s, db=%s)",
+                DB_HOST, DB_PORT, instance_connection, db_user, db_name
+            )
             _engine = create_engine(
                 f"postgresql+psycopg://{db_user}:{password}@{DB_HOST}:{DB_PORT}/{db_name}",
                 **_POOL_KWARGS,
             )
-            log.info(
-                "[db] Using Cloud SQL via TCP %s:%s for instance %s", DB_HOST, DB_PORT, instance_connection
-            )
+            log.info("[db] Database engine created successfully")
             return _engine
         else:
             db_socket_dir = os.getenv("DB_SOCKET_DIR", "/cloudsql")
             socket_path = f"{db_socket_dir}/{instance_connection}"
+            log.info(
+                "[db] Using Cloud SQL via Unix socket %s (user=%s, db=%s)",
+                socket_path, db_user, db_name
+            )
             _engine = create_engine(
                 f"postgresql+psycopg://{db_user}:{password}@/{db_name}?host={socket_path}&port=5432",
                 **_POOL_KWARGS,
             )
-            log.info("[db] Using Cloud SQL via Unix socket %s", socket_path)
+            log.info("[db] Database engine created successfully")
             return _engine
     else:
         # Don't raise during import - allow app to start and fail on first DB use
-        log.warning(
-            "[db] PostgreSQL database configuration missing! "
+        # But log a clear error and create a validator that will fail fast
+        log.error(
+            "[db] ⚠️  PostgreSQL database configuration missing! "
             "Set DATABASE_URL or provide INSTANCE_CONNECTION_NAME + DB_USER + DB_PASS + DB_NAME. "
             "Database operations will fail until configured."
         )
+        log.error(
+            "[db] For local development with Cloud SQL Proxy: "
+            "1. Start Cloud SQL Proxy: scripts/start_sql_proxy.ps1 "
+            "2. Set DATABASE_URL=postgresql+psycopg://USER:PASS@localhost:5433/DBNAME"
+        )
+        log.error(
+            "[db] Configuration check: DATABASE_URL=%s, INSTANCE_CONNECTION_NAME=%s, "
+            "DB_USER=%s, DB_PASS=%s, DB_NAME=%s, DB_HOST=%s",
+            "not set" if not _DATABASE_URL else "set (but invalid or unreachable)",
+            "not set" if not _INSTANCE_CONNECTION_NAME else "set",
+            "not set" if not getattr(settings, "DB_USER", "") else "set",
+            "not set" if not getattr(settings, "DB_PASS", "") else "set",
+            "not set" if not getattr(settings, "DB_NAME", "") else "set",
+            "not set" if not DB_HOST else DB_HOST,
+        )
         # Create a dummy engine that will fail on first use with a clear error
+        # Use a connection string that will fail immediately with a clear error
         # This allows the app to start and serve health checks
-        _engine = create_engine("postgresql+psycopg://invalid/invalid", **_POOL_KWARGS)
+        _engine = create_engine("postgresql+psycopg://nonexistent:invalid@127.0.0.1:1/invalid", **_POOL_KWARGS)
         return _engine
 
 # Create engine immediately (but with better error handling)
@@ -284,9 +357,91 @@ def _wait_for_db_connection(
             return
         except Exception as exc:  # pragma: no cover - exercised in deployment envs
             if not _should_retry_db_error(exc) or attempt >= max_attempts:
+                error_msg = str(exc).lower()
                 log.error(
                     "[db] Database connection attempt %s/%s failed: %s", attempt, max_attempts, exc
                 )
+                
+                # Provide helpful diagnostic messages for common errors
+                if "timeout" in error_msg or "connection timeout" in error_msg:
+                    log.error(
+                        "[db] Connection timeout detected. Troubleshooting steps:"
+                    )
+                    if _DATABASE_URL:
+                        try:
+                            parsed = make_url(_DATABASE_URL)
+                            log.error(
+                                "  1. Verify database is reachable at %s:%s",
+                                parsed.host or "unknown",
+                                parsed.port or "unknown",
+                            )
+                            if (parsed.host or "").startswith("localhost") or (parsed.host or "").startswith("127.0.0.1"):
+                                log.error(
+                                    "  2. For local development, ensure Cloud SQL Proxy is running:"
+                                )
+                                log.error(
+                                    "     Run: scripts/start_sql_proxy.ps1"
+                                )
+                                log.error(
+                                    "     Or check if proxy is running on port %s",
+                                    parsed.port or "5433",
+                                )
+                        except Exception:
+                            pass
+                        log.error(
+                            "  3. Check firewall/network settings"
+                        )
+                        log.error(
+                            "  4. Verify DATABASE_URL is correct in .env.local or environment"
+                        )
+                    elif _INSTANCE_CONNECTION_NAME:
+                        log.error(
+                            "  1. For Cloud SQL, ensure DB_HOST is set correctly"
+                        )
+                        if DB_HOST:
+                            log.error(
+                                "  2. Verify database is reachable at %s:%s",
+                                DB_HOST, DB_PORT
+                            )
+                            if DB_HOST.startswith("localhost") or DB_HOST.startswith("127.0.0.1"):
+                                log.error(
+                                    "  3. For local development, ensure Cloud SQL Proxy is running:"
+                                )
+                                log.error(
+                                    "     Run: scripts/start_sql_proxy.ps1"
+                                )
+                        else:
+                            log.error(
+                                "  2. Set DB_HOST environment variable (e.g., localhost:5433 for Cloud SQL Proxy)"
+                            )
+                    else:
+                        log.error(
+                            "  1. Set DATABASE_URL or configure INSTANCE_CONNECTION_NAME + DB_USER + DB_PASS + DB_NAME"
+                        )
+                        log.error(
+                            "  2. For local development with Cloud SQL Proxy:"
+                        )
+                        log.error(
+                            "     - Start proxy: scripts/start_sql_proxy.ps1"
+                        )
+                        log.error(
+                            "     - Set: DATABASE_URL=postgresql+psycopg://USER:PASS@localhost:5433/DBNAME"
+                        )
+                elif "connection refused" in error_msg or "could not connect" in error_msg:
+                    log.error(
+                        "[db] Connection refused. Verify database is running and accessible."
+                    )
+                    if _DATABASE_URL:
+                        try:
+                            parsed = make_url(_DATABASE_URL)
+                            if (parsed.host or "").startswith("localhost") or (parsed.host or "").startswith("127.0.0.1"):
+                                log.error(
+                                    "  For local development, ensure Cloud SQL Proxy is running on port %s",
+                                    parsed.port or "5433",
+                                )
+                        except Exception:
+                            pass
+                
                 raise
 
             sleep_for = min(max(delay, 0.0), max_delay)
@@ -323,10 +478,35 @@ def get_session():
     This prevents INTRANS state leakage that causes "can't change autocommit" errors
     when exceptions occur during request processing.
     """
+    # Validate database configuration before creating session
+    if not _DATABASE_URL and not (_INSTANCE_CONNECTION_NAME and _HAS_DISCRETE_DB_CONFIG):
+        error_msg = (
+            "Database configuration missing. "
+            "Set DATABASE_URL or provide INSTANCE_CONNECTION_NAME + DB_USER + DB_PASS + DB_NAME. "
+            "For local development: 1) Start Cloud SQL Proxy (scripts/start_sql_proxy.ps1), "
+            "2) Set DATABASE_URL=postgresql+psycopg://USER:PASS@localhost:5433/DBNAME"
+        )
+        log.error("[db] %s", error_msg)
+        from fastapi import HTTPException, status
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=error_msg,
+        )
+    
     session = Session(engine, expire_on_commit=False)
     try:
         yield session
-    except Exception:
+    except Exception as exc:
+        # Check if it's a connection error and provide helpful diagnostics
+        error_str = str(exc).lower()
+        if "timeout" in error_str or "connection" in error_str:
+            log.error(
+                "[db] Database connection error: %s. "
+                "Check: 1) DATABASE_URL is correct, 2) Database is reachable, "
+                "3) Cloud SQL Proxy is running (if using local dev), "
+                "4) Firewall/network settings allow connection",
+                exc,
+            )
         # Always rollback on exception to clean transaction state
         try:
             session.rollback()

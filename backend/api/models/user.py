@@ -29,6 +29,12 @@ class UserBase(SQLModel):
     timezone: Optional[str] = Field(default=None, description="IANA timezone string for scheduling display")
     # Role field for admin/superadmin access (distinct from tier which is for billing)
     role: Optional[str] = Field(default=None, max_length=50, description="User role: 'admin', 'superadmin', or None for regular users")
+    # SMS notification preferences
+    phone_number: Optional[str] = Field(default=None, max_length=20, description="User phone number for SMS notifications (E.164 format)")
+    sms_notifications_enabled: bool = Field(default=False, description="Master toggle for SMS notifications")
+    sms_notify_transcription_ready: bool = Field(default=False, description="Notify user when episode is ready to assemble (after transcription)")
+    sms_notify_publish: bool = Field(default=False, description="Notify user when episode is published or scheduled")
+    sms_notify_worker_down: bool = Field(default=False, description="Notify admin when worker server is down")
 
 class User(UserBase, table=True):
     """The database model for a User."""

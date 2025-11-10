@@ -83,11 +83,13 @@ This document summarizes the implementation of new plan tiers, credit system, an
      - TTS generation hooks
    - Need to add overlength surcharge calls at upload/job start
 
-4. **Period Rollover Job**
-   - Need to create scheduled job to:
-     - Process rollover from previous period
-     - Reset monthly_credits for new period
-     - Run at start of each billing period
+4. **Period Rollover Job** ✅
+   - Created `process_monthly_rollover()` in `api.services.billing.wallet`
+   - HTTP endpoint: `POST /internal/billing/rollover`
+   - Protected with OIDC token, admin auth, or TASKS_AUTH header
+   - Idempotency via `WalletPeriodProcessed` table
+   - Cloud Scheduler: Run monthly at 00:05 UTC on 1st of month
+   - See Cloud Scheduler setup below
 
 5. **Auphonic Add-on**
    - Note: Auphonic Pro Path will move to yes/no question on upload
@@ -164,4 +166,27 @@ Purchased credits never expire and are transferable.
 7. Test end-to-end credit flow
 8. Run `stripe_setup.py --mode live` to create Executive products in Stripe
 9. Add Executive price IDs to Google Cloud Secret Manager
+10. Set up Cloud Scheduler for monthly rollover (see below)
+
+## Cloud Scheduler Setup for Monthly Rollover
+
+The monthly credit rollover job runs automatically via Cloud Scheduler. Set it up with:
+
+```bash
+gcloud scheduler jobs create http credit-rollover \
+  --schedule="5 0 1 * *" \
+  --uri="https://api.podcastplusplus.com/internal/billing/rollover" \
+  --http-method=POST \
+  --oidc-service-account-email=<scheduler-sa>@<project>.iam.gserviceaccount.com \
+  --oidc-token-audience="https://api.podcastplusplus.com" \
+  --location=us-west1
+```
+
+**Schedule**: `5 0 1 * *` means "5 minutes past midnight UTC on the 1st of every month"
+
+**Authentication**: Uses OIDC service account token. The endpoint also accepts:
+- Admin JWT tokens (for manual testing)
+- `X-Tasks-Auth` header (legacy, matches `TASKS_AUTH` env var)
+
+**Idempotency**: The endpoint automatically prevents double-processing the same period. If a period has already been processed, it returns `{"status": "already_processed"}`.
 

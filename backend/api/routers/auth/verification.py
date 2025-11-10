@@ -17,10 +17,11 @@ from api.core.database import get_session
 from api.core.ip_utils import get_client_ip
 from api.core.security import get_password_hash
 from api.models.user import User, UserPublic
-from api.models.verification import EmailVerification, PasswordReset
+from api.models.verification import EmailVerification, PasswordReset, PhoneVerification
 from api.services.mailer import mailer
+from api.services.sms import sms_service
 
-from .utils import create_access_token, limiter, to_user_public
+from .utils import create_access_token, limiter, to_user_public, get_current_user
 
 router = APIRouter()
 
@@ -184,6 +185,178 @@ async def resend_verification(
     except Exception:
         pass
     return {"status": "ok"}
+
+
+class SendPhoneVerificationPayload(BaseModel):
+    phone_number: str
+
+
+class VerifyPhonePayload(BaseModel):
+    phone_number: str
+    code: str
+
+
+@router.post("/send-phone-verification")
+async def send_phone_verification(
+    request: Request,
+    payload: SendPhoneVerificationPayload,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Send a verification code to a phone number via SMS."""
+    import re
+    from sqlalchemy import inspect as sql_inspect
+    
+    # Check if phone verification table exists
+    try:
+        inspector = sql_inspect(session.get_bind())
+        tables = inspector.get_table_names()
+        if 'phoneverification' not in tables:
+            raise HTTPException(
+                status_code=503,
+                detail="Phone verification is not yet available. Database migration is pending."
+            )
+    except Exception as check_err:
+        raise HTTPException(
+            status_code=503,
+            detail="Phone verification is not yet available. Database migration is pending."
+        )
+    
+    phone = payload.phone_number.strip()
+    if not phone:
+        raise HTTPException(status_code=400, detail="Phone number is required")
+    
+    # Basic validation
+    digits = re.sub(r'\D', '', phone)
+    if len(digits) < 10:
+        raise HTTPException(status_code=400, detail="Phone number must contain at least 10 digits")
+    
+    # Generate 6-digit code
+    code = f"{secrets.randbelow(900000) + 100000}"
+    
+    # Normalize phone number for storage
+    normalized_phone = sms_service.normalize_phone_number(phone)
+    if not normalized_phone:
+        raise HTTPException(status_code=400, detail="Invalid phone number format")
+    
+    # Mark old verifications as used
+    try:
+        old_verifications = session.exec(
+            select(PhoneVerification).where(
+                PhoneVerification.user_id == current_user.id,
+                PhoneVerification.phone_number == normalized_phone,
+                PhoneVerification.verified_at == None,  # noqa: E711
+            )
+        ).all()
+        for old in old_verifications:
+            old.used = True
+            session.add(old)
+        session.commit()
+    except Exception:
+        session.rollback()
+    
+    # Create new verification
+    expires_at = datetime.utcnow() + timedelta(minutes=10)  # 10 minute expiry for phone codes
+    pv = PhoneVerification(
+        user_id=current_user.id,
+        phone_number=normalized_phone,
+        code=code,
+        expires_at=expires_at,
+    )
+    session.add(pv)
+    session.commit()
+    
+    # Send SMS with verification code
+    message = f"Your Podcast Plus Plus verification code is: {code}. This code expires in 10 minutes."
+    try:
+        sms_service.send_sms(normalized_phone, message, str(current_user.id))
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to send phone verification SMS: {e}")
+        # Don't fail the request if SMS fails, but log it
+        # The code is still saved in DB, user can request another one
+    
+    return {"status": "ok", "message": "Verification code sent"}
+
+
+@router.post("/verify-phone")
+async def verify_phone(
+    request: Request,
+    payload: VerifyPhonePayload,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Verify a phone number with a code."""
+    from sqlalchemy import inspect as sql_inspect
+    
+    # Check if phone verification table and user phone_number column exist
+    try:
+        inspector = sql_inspect(session.get_bind())
+        tables = inspector.get_table_names()
+        user_columns = {col['name'] for col in inspector.get_columns('user')}
+        
+        if 'phoneverification' not in tables:
+            raise HTTPException(
+                status_code=503,
+                detail="Phone verification is not yet available. Database migration is pending."
+            )
+        if 'phone_number' not in user_columns:
+            raise HTTPException(
+                status_code=503,
+                detail="Phone verification is not yet available. Database migration is pending."
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="Phone verification is not yet available. Database migration is pending."
+        )
+    
+    phone = payload.phone_number.strip()
+    code = payload.code.strip()
+    
+    if not phone or not code:
+        raise HTTPException(status_code=400, detail="Phone number and code are required")
+    
+    # Normalize phone number
+    normalized_phone = sms_service.normalize_phone_number(phone)
+    if not normalized_phone:
+        raise HTTPException(status_code=400, detail="Invalid phone number format")
+    
+    # Find verification record
+    now = datetime.utcnow()
+    pv = session.exec(
+        select(PhoneVerification).where(
+            PhoneVerification.user_id == current_user.id,
+            PhoneVerification.phone_number == normalized_phone,
+            PhoneVerification.code == code,
+            PhoneVerification.used == False,  # noqa: E712
+        )
+    ).first()
+    
+    if not pv:
+        raise HTTPException(status_code=400, detail="Invalid or expired code")
+    
+    if pv.expires_at < now:
+        raise HTTPException(status_code=400, detail="Verification code has expired")
+    
+    if pv.used:
+        raise HTTPException(status_code=400, detail="Verification code already used")
+    
+    # Mark as verified and used
+    pv.verified_at = now
+    pv.used = True
+    
+    # Update user's phone number (use setattr to be safe)
+    setattr(current_user, 'phone_number', normalized_phone)
+    
+    session.add(pv)
+    session.add(current_user)
+    session.commit()
+    
+    return {"status": "ok", "message": "Phone number verified successfully"}
 
 
 class UpdatePendingEmailPayload(BaseModel):

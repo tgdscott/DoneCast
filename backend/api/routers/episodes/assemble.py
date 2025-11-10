@@ -69,12 +69,23 @@ async def assemble_episode(
             "message": "Episode assembled synchronously.",
             "result": svc_result.get("result"),
         }
-    else:
+    elif svc_result.get("mode") == "queued":
+        # Episode was queued because worker is down - return friendly message
         log.info("event=assemble.endpoint.returning_queued episode_id=%s job_id=%s", 
                 svc_result.get("episode_id"), svc_result.get("job_id"))
         return {
             "job_id": svc_result.get("job_id"),
             "status": "queued",
             "episode_id": svc_result.get("episode_id"),
-            "message": "Episode assembly has been queued."
+            "message": svc_result.get("message", "Your episode has been queued for processing. You will receive a notification once it has been published.")
+        }
+    else:
+        # Normal queued/dispatched response
+        log.info("event=assemble.endpoint.returning_dispatched episode_id=%s job_id=%s mode=%s", 
+                svc_result.get("episode_id"), svc_result.get("job_id"), svc_result.get("mode"))
+        return {
+            "job_id": svc_result.get("job_id"),
+            "status": svc_result.get("status", "queued"),
+            "episode_id": svc_result.get("episode_id"),
+            "message": svc_result.get("message", "Episode assembly has been queued.")
         }

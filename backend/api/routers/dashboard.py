@@ -135,6 +135,12 @@ def dashboard_stats(
         base_stats, local_last_30d = _compute_local_episode_stats(session, current_user.id)
     except Exception as e:
         logger.error(f"Failed to compute local episode stats: {e}", exc_info=True)
+        # CRITICAL: Rollback the session if a database error occurred
+        # This prevents "transaction is aborted" errors on subsequent queries
+        try:
+            session.rollback()
+        except Exception as rollback_exc:
+            logger.warning(f"Failed to rollback session after error: {rollback_exc}")
         # If local aggregation fails, degrade gracefully
         base_stats, local_last_30d = ({
             "total_episodes": 0,
@@ -216,6 +222,15 @@ def dashboard_stats(
     except Exception as e:
         # OP3 fetch failed - log but don't crash dashboard
         logger.error(f"Failed to fetch OP3 analytics: {e}", exc_info=True)
+        # CRITICAL: Rollback the session if a database error occurred
+        # This prevents "transaction is aborted" errors on subsequent queries
+        error_str = str(e).lower()
+        if "transaction" in error_str or "aborted" in error_str or "database" in error_str:
+            try:
+                session.rollback()
+                logger.info("Rolled back session after database error in OP3 fetch")
+            except Exception as rollback_exc:
+                logger.warning(f"Failed to rollback session after OP3 error: {rollback_exc}")
         op3_error_message = f"API error: {str(e)}"
         logger.info("Falling back to local episode counts")
     

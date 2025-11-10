@@ -66,5 +66,22 @@ class CreditWallet(SQLModel, table=True):
         return max(0.0, total - self.used_monthly_rollover)
 
 
-__all__ = ["CreditWallet"]
+class WalletPeriodProcessed(SQLModel, table=True):
+    """
+    Tracks which billing periods have been processed for rollover.
+    
+    Used for idempotency - prevents double-processing the same period.
+    """
+    id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
+    period: str = Field(unique=True, index=True, description="Billing period in YYYY-MM format")
+    processed_at: datetime = Field(default_factory=datetime.utcnow)
+    processed_count: int = Field(default=0, description="Number of users processed")
+    rollover_total: float = Field(default=0.0, description="Total credits rolled over")
+    
+    __table_args__ = (
+        UniqueConstraint("period", name="uq_wallet_period_processed"),
+    )
+
+
+__all__ = ["CreditWallet", "WalletPeriodProcessed"]
 

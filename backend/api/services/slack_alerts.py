@@ -99,6 +99,95 @@ def alert_worker_down():
         "🔴 Local processing worker is DOWN! Falling back to Cloud Run (slower, memory constrained).",
         severity="critical"
     )
+    
+    # Send SMS notifications to admins who have opted in
+    try:
+        from api.services.sms import sms_service
+        from api.core.database import session_scope, engine
+        from api.models.user import User
+        from sqlmodel import select
+        
+        # Check if SMS columns exist before querying (safe migration handling)
+        try:
+            from sqlalchemy import inspect as sql_inspect
+            inspector = sql_inspect(engine)
+            user_columns = {col['name'] for col in inspector.get_columns('user')}
+            has_sms_columns = all(col in user_columns for col in [
+                'sms_notifications_enabled', 'sms_notify_worker_down', 'phone_number'
+            ])
+            
+            if not has_sms_columns:
+                logger.debug("[SlackAlert] SMS columns not found in user table, skipping SMS alerts (migration may not have run)")
+                return
+        except Exception as check_err:
+            # If we can't check columns, skip SMS (don't break worker monitoring)
+            logger.debug("[SlackAlert] Could not check for SMS columns, skipping SMS alerts: %s", check_err)
+            return
+        
+        # Use proper session context manager
+        try:
+            with session_scope() as session:
+                # Find all admin users who have SMS notifications enabled for worker down alerts
+                admin_users = session.exec(
+                    select(User).where(
+                        User.role.in_(["admin", "superadmin"]),
+                        User.sms_notifications_enabled == True,  # noqa: E712
+                        User.sms_notify_worker_down == True,  # noqa: E712
+                        User.phone_number != None  # noqa: E711
+                    )
+                ).all()
+                
+                # Also check legacy is_admin flag and ADMIN_EMAIL
+                from api.core.config import settings
+                admin_email = getattr(settings, "ADMIN_EMAIL", "").lower() if hasattr(settings, "ADMIN_EMAIL") else ""
+                
+                legacy_admins = session.exec(
+                    select(User).where(
+                        User.is_admin == True,  # noqa: E712
+                        User.sms_notifications_enabled == True,  # noqa: E712
+                        User.sms_notify_worker_down == True,  # noqa: E712
+                        User.phone_number != None  # noqa: E711
+                    )
+                ).all()
+                
+                # Combine and deduplicate
+                all_admins = {user.id: user for user in admin_users}
+                for user in legacy_admins:
+                    if user.id not in all_admins:
+                        all_admins[user.id] = user
+                
+                # Also check ADMIN_EMAIL match
+                if admin_email:
+                    email_match = session.exec(
+                        select(User).where(
+                            User.email.ilike(f"%{admin_email}%"),
+                            User.sms_notifications_enabled == True,  # noqa: E712
+                            User.sms_notify_worker_down == True,  # noqa: E712
+                            User.phone_number != None  # noqa: E711
+                        )
+                    ).first()
+                    if email_match and email_match.id not in all_admins:
+                        all_admins[email_match.id] = email_match
+                
+                # Send SMS to all admins (outside of session context to avoid connection issues)
+                admin_list = list(all_admins.values())
+            
+            # Send SMS notifications outside of database session
+            for admin in admin_list:
+                phone_number = getattr(admin, 'phone_number', None)
+                if phone_number:
+                    admin_name = getattr(admin, 'first_name', None) or getattr(admin, 'email', None) or "Admin"
+                    sms_service.send_worker_down_notification(
+                        phone_number=phone_number,
+                        admin_name=admin_name
+                    )
+                    logger.info("[SlackAlert] SMS worker down alert sent to admin %s (%s)", admin.email, phone_number)
+        except Exception as query_err:
+            # If columns don't exist or query fails, log and continue (don't break worker monitoring)
+            logger.debug("[SlackAlert] Could not send SMS alerts (query may have failed): %s", query_err)
+    except Exception as e:
+        # Don't fail the alert if SMS fails
+        logger.warning("[SlackAlert] Failed to send SMS worker down alerts: %s", e, exc_info=True)
 
 
 def alert_worker_up():

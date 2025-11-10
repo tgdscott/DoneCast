@@ -87,7 +87,8 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
       and chunk processing tasks are sent directly to the worker server (no
       USE_WORKER_IN_DEV required).
     - On worker server success (HTTP 2xx): returns JSON response.
-    - On worker server failure: logs error and falls back to inline execution.
+    - On worker server failure: raises RuntimeError. Inline processing is NEVER allowed.
+    - For assembly/chunk tasks: Worker server is REQUIRED. If not configured, raises RuntimeError.
     """
     
     # Reload .env.local here to ensure we have the latest values
@@ -121,6 +122,17 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
         elif IS_DEV_ENV:
             should_use_worker = use_worker_in_dev
     
+    # CRITICAL: For assembly tasks, inline processing is NEVER allowed
+    # If worker server is not configured for an assembly task, raise an error
+    if is_worker_task and not should_use_worker:
+        error_msg = (
+            f"Worker server is required for {path} but not configured. "
+            f"Set WORKER_URL_BASE and USE_WORKER_IN_DEV=true (dev) or APP_ENV=production (prod). "
+            f"Inline processing is disabled."
+        )
+        log.error(f"event=tasks.worker_required path={path} error={error_msg}")
+        raise RuntimeError(error_msg)
+    
     # Enhanced DEV/PROD banner - ALWAYS print this so we can see what's happening
     print("=" * 80)
     print(f"WORKER SERVER ROUTING DECISION:")
@@ -133,7 +145,7 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
     if should_use_worker:
         print(f"  → Will POST directly to worker server")
     else:
-        print(f"  → Will use inline/local execution")
+        print(f"  → Will use local dispatch (transcription only - assembly requires worker)")
     print("=" * 80)
     
     log.info("event=tasks.worker_routing.decision path=%s app_env=%s is_production=%s use_worker_in_dev=%s worker_url_base=%s is_worker_task=%s should_use_worker=%s",
@@ -169,33 +181,29 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
                         print(f"PROD MODE: Worker server responded with status {r.status_code}")
                     return result
                 else:
-                    # Non-2xx response: log and fall back to inline
+                    # Non-2xx response: worker failed, inline processing is disabled
                     error_msg = f"Worker server returned status {r.status_code}: {r.text}"
-                    log.warning("event=tasks.dev.worker_non_2xx path=%s status=%s response=%s", path, r.status_code, r.text[:200])
-                    print(f"Worker server returned non-2xx status {r.status_code}, falling back to inline execution")
-                    # Fall through to inline execution
+                    log.error("event=tasks.dev.worker_non_2xx path=%s status=%s response=%s", path, r.status_code, r.text[:200])
+                    print(f"Worker server returned non-2xx status {r.status_code}. Inline processing is disabled.")
+                    raise RuntimeError(error_msg)
         except httpx.TimeoutException as e:
             error_msg = f"Worker server timeout after {timeout}s: {e}"
             log.error("event=tasks.dev.worker_timeout path=%s timeout=%s error=%s", path, timeout, str(e))
-            print(f"Worker server timeout after {timeout}s, falling back to inline execution")
-            # Fall through to inline execution
+            print(f"Worker server timeout after {timeout}s. Inline processing is disabled.")
+            raise RuntimeError(error_msg) from e
         except httpx.HTTPStatusError as e:
             error_msg = f"Worker server HTTP error {e.response.status_code}: {e.response.text}"
             log.error("event=tasks.dev.worker_error path=%s status=%s error=%s", path, e.response.status_code, e.response.text[:200])
-            print(f"Worker server HTTP error {e.response.status_code}, falling back to inline execution")
-            # Fall through to inline execution
+            print(f"Worker server HTTP error {e.response.status_code}. Inline processing is disabled.")
+            raise RuntimeError(error_msg) from e
+        except RuntimeError:
+            # Re-raise RuntimeError (worker unavailable) - don't wrap it
+            raise
         except Exception as e:
             error_msg = f"Worker server call failed: {e}"
             log.exception("event=tasks.dev.worker_exception path=%s error=%s", path, str(e))
-            print(f"Worker server call failed: {e}, falling back to inline execution")
-            # Fall through to inline execution
-    else:
-        log.info("event=tasks.worker_routing.skipped path=%s reason=%s",
-                 path, "not_worker_task" if not is_worker_task else "worker_url_base_missing" if not worker_url_base else "dev_mode_not_enabled" if IS_DEV_ENV else "unknown")
-        if IS_DEV_ENV:
-            print(f"DEV MODE: Worker routing skipped - will use local dispatch")
-        else:
-            print(f"PROD MODE: Worker routing skipped - will use local dispatch")
+            print(f"Worker server call failed: {e}. Inline processing is disabled.")
+            raise RuntimeError(error_msg) from e
     
     def _dispatch_transcribe(payload: dict) -> None:
             filename = str(payload.get("filename") or "").strip()
@@ -312,6 +320,8 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
             print(f"DEV MODE chunk processing dispatched for chunk {chunk_id}")
 
         # Allow forcing legacy loopback for debugging perf of the tasks endpoint
+        # NOTE: This still routes through the API's /api/tasks endpoints, which require worker server
+        # It does NOT do inline processing - it's just a different HTTP path
     if os.getenv("TASKS_FORCE_HTTP_LOOPBACK"):
             import httpx
             base = (os.getenv("TASKS_URL_BASE") or os.getenv("APP_BASE_URL") or f"http://127.0.0.1:{os.getenv('API_PORT','8000')}").rstrip("/")
@@ -328,25 +338,33 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
                     print("DEV MODE loopback call successful.")
                     return {"name": f"local-loopback-{datetime.utcnow().isoformat()}"}
             except Exception as e:  # pragma: no cover
-                print(f"DEV MODE loopback failed ({e}); falling back to direct thread dispatch")
-                if "/assemble" in path:
-                    _dispatch_assemble(body)
-                elif "/process-chunk" in path:
-                    _dispatch_process_chunk(body)
-                else:
-                    _dispatch_transcribe(body)
+                # Loopback failed - for assembly/chunk tasks, raise error (inline processing disabled)
+                # For transcription, can fall back to local dispatch
+                if "/assemble" in path or "/process-chunk" in path:
+                    error_msg = f"Loopback to API endpoint failed for {path}: {e}. Inline processing is disabled."
+                    log.error(f"event=tasks.loopback_failed path={path} error={error_msg}")
+                    raise RuntimeError(error_msg) from e
+                print(f"DEV MODE loopback failed ({e}); falling back to direct thread dispatch for transcription")
+                _dispatch_transcribe(body)
                 return {"name": "local-loopback-failed"}
 
     # Only do local dispatch if we didn't already use the worker server
     # (The worker server path returns early, so if we get here, we should use local dispatch)
     
-    # Default: immediate background dispatch based on path (non-loopback dev mode)
-    if "/assemble" in path:
-        _dispatch_assemble(body)
-    elif "/process-chunk" in path:
-        _dispatch_process_chunk(body)
-    else:
-        _dispatch_transcribe(body)
+    # CRITICAL: Assembly and chunk processing tasks MUST use worker server
+    # If we get here for an assembly/chunk task, it means worker server was not configured
+    # This should never happen because we check earlier, but add a safeguard
+    if "/assemble" in path or "/process-chunk" in path:
+        error_msg = (
+            f"Worker server is required for {path} but dispatch failed. "
+            f"This should not happen - worker server should be configured. "
+            f"Inline processing is disabled."
+        )
+        log.error(f"event=tasks.inline_dispatch_blocked path={path} error={error_msg}")
+        raise RuntimeError(error_msg)
+    
+    # Only transcription tasks can use local dispatch
+    _dispatch_transcribe(body)
     try:
         log.info("event=tasks.dev.dispatch path=%s body_keys=%s", path, list(body.keys()))
     except Exception:
@@ -476,10 +494,20 @@ def enqueue_http_task(path: str, body: dict) -> dict:
     
     # Create task - raise on any error (no silent fallbacks)
     try:
-        log.info("event=tasks.enqueue_http_task.creating_task path=%s url=%s", path, url)
+        # Extract priority from payload if present (for logging)
+        priority = body.get("priority") if isinstance(body, dict) else None
+        episode_id = body.get("episode_id") if isinstance(body, dict) else None
+        user_id = body.get("user_id") if isinstance(body, dict) else None
+        
+        log.info("event=tasks.enqueue_http_task.creating_task path=%s url=%s priority=%s episode_id=%s", path, url, priority, episode_id)
         created = client.create_task(request={"parent": parent, "task": task})
         deadline_seconds = 1800 if ("/transcribe" in path or "/assemble" in path or "/process-chunk" in path) else 30
-        log.info("event=tasks.cloud.enqueued path=%s url=%s task_name=%s deadline=%ds", path, url, created.name, deadline_seconds)
+        
+        # Log with priority information
+        if priority is not None:
+            log.info("event=[QUEUE] enqueue job=%s priority=%s episode_id=%s user_id=%s path=%s", created.name, priority, episode_id, user_id, path)
+        else:
+            log.info("event=tasks.cloud.enqueued path=%s url=%s task_name=%s deadline=%ds", path, url, created.name, deadline_seconds)
         return {"name": created.name}
     except Exception as e:
         error_msg = f"Failed to create Cloud Task: {e}"

@@ -40,6 +40,125 @@ def _raise_worker_unavailable() -> None:
     )
 
 
+def _queue_episode_for_worker(
+    session: Session,
+    episode: Episode,
+    payload: Dict[str, Any],
+    worker_url_base: Optional[str],
+    estimated_minutes: Optional[int],
+    current_user: Any,
+) -> Dict[str, Any]:
+    """Queue an episode for processing when worker server comes back online.
+    
+    Sets episode status to 'pending', stores queue metadata, sends admin alert,
+    and returns a friendly success message to the user.
+    """
+    log = logging.getLogger("assemble")
+    
+    try:
+        from api.models.podcast import EpisodeStatus as _EpStatus
+        episode.status = _EpStatus.pending  # type: ignore[assignment]
+    except Exception:
+        try:
+            episode.status = "pending"  # type: ignore[assignment]
+        except Exception:
+            pass
+    
+    # Store queue metadata in episode.meta_json
+    import json as _json
+    from datetime import datetime as _dt, timezone as _tz
+    
+    meta = {}
+    if getattr(episode, 'meta_json', None):
+        try:
+            meta = _json.loads(episode.meta_json or '{}')
+        except Exception:
+            meta = {}
+    
+    # Store queue information
+    meta['queued_for_worker'] = True
+    meta['queued_at'] = _dt.now(_tz.utc).isoformat()
+    meta['queued_worker_url'] = worker_url_base
+    meta['retry_count'] = 0
+    meta['last_retry_at'] = None
+    meta['assembly_payload'] = payload  # Store full payload for retry
+    meta['estimated_minutes'] = estimated_minutes
+    
+    episode.meta_json = _json.dumps(meta)
+    session.add(episode)
+    session.commit()
+    session.refresh(episode)
+    
+    log.info(
+        "event=assemble.service.episode_queued episode_id=%s worker_url=%s - "
+        "Episode queued for processing when worker comes back online",
+        str(episode.id), worker_url_base
+    )
+    
+    # Send SMS alert to admin (rate-limited to avoid spam)
+    # Only send if we haven't sent one in the last 5 minutes
+    try:
+        from api.services.sms import sms_service
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        
+        admin_phone = "951-662-1100"  # Admin phone number
+        last_alert_key = "last_worker_down_sms_alert"
+        
+        # Check if we've sent an alert recently (within last 5 minutes)
+        should_send_sms = True
+        try:
+            # Try to get last alert time from a simple cache or database
+            # For simplicity, we'll check if there are other recently queued episodes
+            # If an episode was queued in the last 5 minutes, skip SMS (already alerted)
+            from sqlmodel import select
+            five_min_ago = _dt.now(_tz.utc) - _td(minutes=5)
+            
+            # Check if any episode was queued in the last 5 minutes (besides this one)
+            recent_queued = session.exec(
+                select(Episode).where(
+                    Episode.status == "pending",  # type: ignore
+                    Episode.id != episode.id  # type: ignore
+                )
+            ).all()
+            
+            for other_ep in recent_queued:
+                if not getattr(other_ep, 'meta_json', None):
+                    continue
+                try:
+                    other_meta = _json.loads(other_ep.meta_json or '{}')
+                    if other_meta.get('queued_for_worker'):
+                        other_queued_at_str = other_meta.get('queued_at')
+                        if other_queued_at_str:
+                            other_queued_at = _dt.fromisoformat(other_queued_at_str.replace('Z', '+00:00'))
+                            if other_queued_at > five_min_ago:
+                                # Another episode was queued recently - skip SMS to avoid spam
+                                should_send_sms = False
+                                log.info("event=assemble.service.admin_sms_skipped episode_id=%s reason=recent_alert", str(episode.id))
+                                break
+                except Exception:
+                    continue
+        except Exception as check_err:
+            # If check fails, send SMS anyway (better to over-alert than miss an alert)
+            log.warning("event=assemble.service.admin_sms_check_failed episode_id=%s error=%s", str(episode.id), str(check_err))
+            should_send_sms = True
+        
+        if should_send_sms:
+            sms_service.send_worker_down_critical(admin_phone)
+            log.info("event=assemble.service.admin_sms_sent episode_id=%s phone=%s", str(episode.id), admin_phone)
+    except Exception as sms_err:
+        # Don't fail if SMS fails - log and continue
+        log.warning("event=assemble.service.admin_sms_failed episode_id=%s error=%s", str(episode.id), str(sms_err), exc_info=True)
+    
+    # Return friendly success message to user
+    return {
+        "mode": "queued",
+        "job_id": f"queued-{episode.id}",
+        "episode_id": str(episode.id),
+        "status": "queued",
+        "message": "Your episode has been queued for processing. You will receive a notification once it has been published.",
+    }
+
+
 def _should_auto_fallback() -> bool:
     """Return True when the environment should execute assembly inline."""
 
@@ -59,15 +178,35 @@ def _should_allow_inline_fallback() -> bool:
     In production, this should be False to prevent Cloud Run from falling back
     to inline processing when the worker times out. The worker will complete
     asynchronously, and the episode status will be updated via polling.
+    
+    CRITICAL: If a worker server is configured, NEVER allow inline fallback.
+    The user has explicitly set up a worker server and expects all processing
+    to happen there, not inline.
     """
     try:
+        # CRITICAL: If worker server is configured, NEVER allow inline fallback
+        worker_url_base = os.getenv("WORKER_URL_BASE")
+        app_env = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower()
+        is_production = app_env == "production"
+        use_worker_in_dev_raw = os.getenv("USE_WORKER_IN_DEV", "false")
+        use_worker_in_dev = use_worker_in_dev_raw and use_worker_in_dev_raw.lower().strip() in {"true", "1", "yes", "on"}
+        worker_server_configured = worker_url_base and (is_production or use_worker_in_dev)
+        
+        if worker_server_configured:
+            # Worker server is configured - NEVER allow inline fallback
+            logging.getLogger("assemble").info(
+                "event=assemble.service.inline_fallback_disabled_worker_configured worker_url=%s - Worker server is configured, inline fallback disabled",
+                worker_url_base
+            )
+            return False
+        
         # Check explicit env var (defaults to False for safety)
         raw = (os.getenv("ALLOW_ASSEMBLY_INLINE_FALLBACK") or "").strip().lower()
         if raw in {"1", "true", "yes", "on"}:
             return True
         if raw in {"0", "false", "no", "off"}:
             return False
-        # Default: only allow in dev environments
+        # Default: only allow in dev environments (and only if worker server is NOT configured)
         env = (os.getenv("APP_ENV") or "dev").strip().lower()
         return env in {"dev", "development", "local"}
     except Exception:
@@ -461,13 +600,23 @@ def assemble_or_queue(
     intents: Optional[Dict[str, Any]] = None,
     use_auphonic: bool = False,
 ) -> Dict[str, Any]:
-    # NOTE: Duplicate numbering check REMOVED - never block episode creation
-    # Conflicts should be resolved AFTER assembly, not before
-    # Users should always be able to create episodes
+    """
+    Assemble an episode or queue it for processing.
     
-    auto_fallback = _should_auto_fallback()
-    inline_available = _can_run_inline()
-
+    Processing MUST go through a worker server or Cloud Tasks. Inline processing is NEVER allowed.
+    
+    Processing priority:
+    1. Worker server (if WORKER_URL_BASE is set and USE_WORKER_IN_DEV=true or APP_ENV=production)
+    2. Cloud Tasks (if configured for production)
+    3. Direct worker POST (if worker server is configured but Cloud Tasks is disabled)
+    
+    If none of these are available, the function will raise an error. Inline processing is disabled.
+    
+    NOTE: Duplicate numbering check REMOVED - never block episode creation
+    Conflicts should be resolved AFTER assembly, not before
+    Users should always be able to create episodes
+    """
+    
     # Quota check (same logic as router but service-level)
     # Admin and SuperAdmin users have unlimited processing minutes
     user_role = getattr(current_user, "role", None)
@@ -477,6 +626,13 @@ def assemble_or_queue(
     else:
         tier = getattr(current_user, 'tier', 'free')
     
+    # Get priority for this tier
+    try:
+        from api.billing.plans import get_plan_priority
+        priority = get_plan_priority(tier)
+    except Exception:
+        priority = 1  # Default to lowest priority if lookup fails
+    
     limits = TIER_LIMITS.get(tier, TIER_LIMITS['free'])
     max_eps = limits.get('max_episodes_month')
     if max_eps is not None:
@@ -485,8 +641,32 @@ def assemble_or_queue(
             from fastapi import HTTPException
             raise HTTPException(status_code=402, detail="Monthly episode quota reached for your tier")
 
-    # Ensure the inline fallback is available before performing DB writes.
-    if not inline_available:
+    # Check if worker server or Cloud Tasks is configured
+    # If worker_url_base is set, we can queue episodes even if worker is down
+    worker_url_base = os.getenv("WORKER_URL_BASE")
+    app_env = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower()
+    is_production = app_env == "production"
+    use_worker_in_dev_raw = os.getenv("USE_WORKER_IN_DEV", "false")
+    use_worker_in_dev = use_worker_in_dev_raw and use_worker_in_dev_raw.lower().strip() in {"true", "1", "yes", "on"}
+    worker_server_configured = worker_url_base and (is_production or use_worker_in_dev)
+    
+    # Check if Cloud Tasks is available
+    try:
+        from infrastructure.tasks_client import should_use_cloud_tasks
+        cloud_tasks_available = should_use_cloud_tasks()
+    except Exception:
+        cloud_tasks_available = False
+    
+    # If neither worker server URL nor Cloud Tasks is configured, fail immediately
+    # We need at least worker_url_base to queue episodes (even if worker is down)
+    if not worker_url_base and not cloud_tasks_available:
+        log = logging.getLogger("assemble")
+        log.error(
+            "event=assemble.service.no_worker_configured - "
+            "Neither WORKER_URL_BASE nor Cloud Tasks is configured. "
+            "Episode assembly requires WORKER_URL_BASE (for queueing) or Cloud Tasks. "
+            "Inline processing is disabled."
+        )
         _raise_worker_unavailable()
 
     # Prepare metadata and admin test-mode overrides
@@ -590,6 +770,7 @@ def assemble_or_queue(
         "episode_number": int(en_input) if (isinstance(en_input, (int, str)) and str(en_input).isdigit()) else None,
         "processed_at": _dt.utcnow(),
         "created_at": _dt.utcnow(),
+        "priority": priority,  # Set priority based on user tier
     }
     if podcast_id is not None:
         ep_kwargs["podcast_id"] = podcast_id
@@ -698,13 +879,12 @@ def assemble_or_queue(
     except Exception:
         session.rollback()
 
-    # Check if we should use worker server in dev mode (even if CELERY_EAGER is set)
     # All task dispatch goes through tasks_client.enqueue_http_task()
     # This ensures consistent routing, logging, and error handling.
     # tasks_client handles:
     # - Cloud Tasks (production)
-    # - Worker server routing (dev mode with USE_WORKER_IN_DEV)
-    # - Local thread dispatch (dev mode fallback)
+    # - Worker server routing (dev mode with USE_WORKER_IN_DEV, or production with WORKER_URL_BASE)
+    # Inline processing is NEVER used
     log = logging.getLogger("assemble")
     
     # Build payload for task dispatch
@@ -719,46 +899,12 @@ def assemble_or_queue(
         "podcast_id": str(getattr(ep, 'podcast_id', '') or ''),
         "intents": cast(Dict[str, Any], intents or {}),
         "use_auphonic": bool(use_auphonic),
+        "priority": priority,  # Include priority in payload for logging
     }
     
-    # Check for CELERY_EAGER mode (inline execution)
-    if os.getenv("CELERY_EAGER", "").strip().lower() in {"1","true","yes","on"}:
-        # EAGER path: charge immediately using source duration and inline correlation id
-        try:
-            minutes = estimated_minutes or _estimate_processing_minutes(main_content_filename) or 1
-            corr = f"inline:{str(ep.id)}:{int(time.time())}"
-            usage_svc.post_debit(
-                session=session,
-                user_id=current_user.id,
-                minutes=minutes,
-                episode_id=ep.id,
-                reason="PROCESS_AUDIO",
-                correlation_id=corr,
-                notes="charge at eager start",
-            )
-        except Exception:
-            pass
-        inline_result = _run_inline_fallback(
-            episode_id=ep.id,
-            template_id=template_id,
-            main_content_filename=main_content_filename,
-            output_filename=output_filename,
-            tts_values=tts_values or {},
-            episode_details=episode_details or {},
-            user_id=getattr(current_user, "id", None),
-            podcast_id=getattr(ep, "podcast_id", None),
-            intents=intents,
-            use_auphonic=use_auphonic,
-        )
-        if inline_result:
-            inline_result["mode"] = "eager-inline"
-            inline_result["job_id"] = inline_result.get("job_id") or "eager-inline"
-            return inline_result
-        _raise_worker_unavailable()
-    
     # All task dispatch goes through tasks_client.enqueue_http_task()
-    # This handles Cloud Tasks (production), worker routing (dev), and local dispatch (dev fallback)
-    # If Cloud Tasks is disabled or fails, attempt direct worker POST before falling back to inline
+    # This handles Cloud Tasks (production) and worker routing (dev)
+    # Inline processing is NEVER used - if dispatch fails, raise an error
     try:
         from infrastructure.tasks_client import enqueue_http_task, should_use_cloud_tasks  # type: ignore
         
@@ -766,11 +912,11 @@ def assemble_or_queue(
         use_cloud_tasks = should_use_cloud_tasks()
         
         if use_cloud_tasks:
-            log.info("event=assemble.service.enqueueing_task episode_id=%s", str(ep.id))
+            log.info("event=assemble.service.enqueueing_task episode_id=%s priority=%s tier=%s", str(ep.id), priority, tier)
             try:
                 task_info = enqueue_http_task("/api/tasks/assemble", payload)
                 task_name = task_info.get("name", "unknown")
-                log.info("event=assemble.service.task_enqueued episode_id=%s task_name=%s", str(ep.id), task_name)
+                log.info("event=assemble.service.task_enqueued episode_id=%s task_name=%s priority=%s tier=%s", str(ep.id), task_name, priority, tier)
                 
                 # Store job id in episode metadata for visibility
                 try:
@@ -803,12 +949,12 @@ def assemble_or_queue(
                 
                 return {"mode": mode, "job_id": task_name, "episode_id": str(ep.id)}
             except Exception as cloud_tasks_err:
-                # Cloud Tasks failed - try direct worker POST before falling back
+                # Cloud Tasks failed - try direct worker POST, or queue if worker_url_base is set
                 log.warning("event=assemble.service.cloud_tasks_failed episode_id=%s error=%s", str(ep.id), str(cloud_tasks_err))
-                # Fall through to direct worker POST attempt
+                # Fall through to direct worker POST attempt, or queue if that also fails
         else:
             log.info("event=assemble.service.cloud_tasks_disabled episode_id=%s", str(ep.id))
-            # Cloud Tasks disabled - try direct worker POST before falling back
+            # Cloud Tasks disabled - try direct worker POST, or queue if worker_url_base is set
             # Fall through to direct worker POST attempt
         
         # Attempt direct worker POST if Cloud Tasks is disabled or failed
@@ -851,62 +997,41 @@ def assemble_or_queue(
                         
                         return {"mode": "worker-direct", "job_id": job_id, "episode_id": str(ep.id)}
                     else:
-                        # Non-2xx response: check if inline fallback is allowed
-                        log.warning("event=assemble.service.worker_direct_non_2xx episode_id=%s status=%s", str(ep.id), r.status_code)
-                        # If status is 524 (timeout), the worker may still be processing
-                        # Don't fall back to inline unless explicitly enabled
-                        if r.status_code == 524:
-                            log.warning("event=assemble.service.worker_timeout episode_id=%s - Worker may still be processing. Inline fallback disabled by default.", str(ep.id))
-                        # Fall through to check if inline fallback is allowed
+                        # Non-2xx response: worker failed, inline processing is disabled
+                        log.error("event=assemble.service.worker_direct_non_2xx episode_id=%s status=%s - Worker server returned error", str(ep.id), r.status_code)
+                        # Fall through to raise error - inline processing is disabled
             except Exception as worker_err:
-                # Worker POST failed: check if inline fallback is allowed
-                log.warning("event=assemble.service.worker_direct_failed episode_id=%s error=%s", str(ep.id), str(worker_err))
-                # Fall through to check if inline fallback is allowed
+                # Worker POST failed: inline processing is disabled
+                log.error("event=assemble.service.worker_direct_failed episode_id=%s error=%s - Worker server unavailable", str(ep.id), str(worker_err))
+                # Fall through to raise error - inline processing is disabled
         
-        # Final fallback: inline execution (only if explicitly allowed)
-        if not _should_allow_inline_fallback():
-            log.error("event=assemble.service.inline_fallback_disabled episode_id=%s - Worker dispatch failed but inline fallback is disabled. Episode will be processed by worker asynchronously. Check episode status via polling.", str(ep.id))
-            # Return immediately - worker will process asynchronously
-            # The frontend should poll for episode status
-            job_id = f"worker-async-{datetime.utcnow().isoformat()}"
-            try:
-                import json as _json
-                meta = {}
-                if getattr(ep, 'meta_json', None):
-                    try:
-                        meta = _json.loads(ep.meta_json or '{}')
-                    except Exception:
-                        meta = {}
-                meta['assembly_job_id'] = job_id
-                meta['assembly_mode'] = 'worker-async'
-                ep.meta_json = _json.dumps(meta)
-                session.add(ep)
-                session.commit()
-                session.refresh(ep)
-            except Exception as meta_err:
-                log.warning("event=assemble.service.metadata_save_failed episode_id=%s error=%s", str(ep.id), str(meta_err))
-                session.rollback()
-            return {"mode": "worker-async", "job_id": job_id, "episode_id": str(ep.id), "status": "dispatched"}
+        # If we get here, worker dispatch failed - queue the episode for later processing if worker_url_base is set
+        # Otherwise, fail (can't queue without a worker URL)
+        worker_url_base_for_queue = os.getenv("WORKER_URL_BASE")
         
-        # Inline fallback is allowed - proceed with inline execution
-        log.info("event=assemble.service.falling_back_to_inline episode_id=%s", str(ep.id))
-        inline_result = _run_inline_fallback(
-            episode_id=ep.id,
-            template_id=template_id,
-            main_content_filename=main_content_filename,
-            output_filename=output_filename,
-            tts_values=tts_values or {},
-            episode_details=episode_details or {},
-            user_id=getattr(current_user, "id", None),
-            podcast_id=getattr(ep, "podcast_id", None),
-            intents=intents,
-            use_auphonic=use_auphonic,
-        )
-        if inline_result:
-            inline_result["mode"] = "fallback-inline"
-            inline_result["job_id"] = inline_result.get("job_id") or "fallback-inline"
-            return inline_result
-        _raise_worker_unavailable()
+        if worker_url_base_for_queue:
+            # Queue the episode for later processing
+            log.warning(
+                "event=assemble.service.worker_dispatch_failed episode_id=%s - "
+                "Worker dispatch failed. Queueing episode for processing when worker comes back online.",
+                str(ep.id)
+            )
+            return _queue_episode_for_worker(
+                session=session,
+                episode=ep,
+                payload=payload,
+                worker_url_base=worker_url_base_for_queue,
+                estimated_minutes=estimated_minutes,
+                current_user=current_user,
+            )
+        else:
+            # No worker URL to queue for - fail with error
+            log.error(
+                "event=assemble.service.worker_dispatch_failed_no_queue episode_id=%s - "
+                "Worker dispatch failed and no WORKER_URL_BASE configured for queueing. Cannot queue episode.",
+                str(ep.id)
+            )
+            _raise_worker_unavailable()
         
     except Exception as e:
         # Unexpected error - log and raise
