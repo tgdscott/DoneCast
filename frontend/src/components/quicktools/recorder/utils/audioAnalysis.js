@@ -40,8 +40,8 @@ export const analyzeMicCheckLevels = (peakLevels, currentGain) => {
     suggestion = 'We can barely hear you.\n\n• In Windows Sound Settings, increase microphone volume to 70-80%\n• Speak closer to the microphone\n• Make sure you\'re using the right microphone input\n• Speak louder and more clearly';
     requireRedo = true;
   }
-  // Clipping: Too many samples hitting the ceiling (RELAXED - was 0.3/0.95, now 0.5/0.98)
-  else if (samplesAbove50 > peakLevels.length * 0.5 || max > 0.98) {
+  // Clipping: Too many samples hitting the ceiling (RELAXED - was 0.3/0.95, then 0.5/0.98, now 0.7/0.99 for less strict top end)
+  else if (samplesAbove50 > peakLevels.length * 0.7 || max > 0.99) {
     status = 'clipping';
     message = '⚠️ Audio is too loud (distorting)';
     suggestion = 'Your audio is clipping and will sound distorted.\n\n• In Windows Sound Settings, reduce microphone volume to 40-60%\n• Move back from the microphone\n• Speak a bit more softly';

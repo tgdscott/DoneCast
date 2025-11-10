@@ -285,11 +285,12 @@ def get_public_audio_url(
     """Generate signed URL for audio playback.
     
     Detects storage backend from path format:
-    - Starts with "r2://" or contains R2 bucket name → use R2
+    - Starts with "r2://" or contains R2 bucket name or ".r2.cloudflarestorage.com" → use R2
     - Starts with "gs://" or contains GCS bucket name → use GCS
     
     Args:
-        path: Storage path (e.g., "gs://bucket/file.mp3" or "r2://bucket/file.mp3")
+        path: Storage path (e.g., "gs://bucket/file.mp3", "r2://bucket/file.mp3", 
+              or "https://bucket.account.r2.cloudflarestorage.com/key")
         expiration_days: Number of days until URL expires
     
     Returns:
@@ -299,7 +300,15 @@ def get_public_audio_url(
         return None
     
     # Auto-detect backend from path
-    if path.startswith("r2://") or os.getenv("R2_BUCKET", "").strip() in path:
+    # Check for R2 indicators: r2:// prefix, R2 bucket name, or R2 domain
+    r2_bucket = os.getenv("R2_BUCKET", "").strip()
+    is_r2 = (
+        path.startswith("r2://") 
+        or (r2_bucket and r2_bucket in path)
+        or ".r2.cloudflarestorage.com" in path.lower()
+    )
+    
+    if is_r2:
         logger.debug(f"[storage] Generating R2 audio URL for {path}")
         return r2.get_public_audio_url(path, expiration_days, **kwargs)
     else:

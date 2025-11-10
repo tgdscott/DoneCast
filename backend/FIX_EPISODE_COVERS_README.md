@@ -92,3 +92,4 @@ The script will log:
 2025-01-XX 12:05:00 - INFO -   Total: 217
 ```
 
+

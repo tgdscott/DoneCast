@@ -404,14 +404,25 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
         ) : !micCheck.micCheckCompleted && !isMicCheckSessionValid() && !recorder.hasPreview ? (
           /* Show prominent mic check button before first use (unless session cache valid) */
           <div className="min-h-[600px] flex flex-col items-center justify-center space-y-8">
-            <div className="text-center space-y-6">
+            <div className="text-center space-y-6 w-full max-w-2xl">
               <div className="text-4xl font-bold text-foreground">
                 🎙️ Make Sure Your Mic Is Working
               </div>
-              <p className="text-xl text-muted-foreground max-w-2xl">
+              <p className="text-xl text-muted-foreground">
                 Let's do a quick mic check to make sure your audio levels are perfect.
                 It only takes 5 seconds!
               </p>
+              
+              {/* Microphone selector - shown before mic check */}
+              <div className="w-full max-w-md mx-auto py-4">
+                <DeviceSelector
+                  devices={deviceSelection.devices}
+                  selectedDeviceId={deviceSelection.selectedDeviceId}
+                  onDeviceChange={onChangeDevice}
+                  disabled={micCheck.isMicChecking}
+                />
+              </div>
+              
               <Button
                 onClick={micCheck.handleMicCheck}
                 size="lg"
@@ -487,41 +498,6 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
                   levelPct={audioGraph.levelPct}
                   levelColor={audioGraph.levelColor}
                 />
-              </div>
-            )}
-
-            {/* Microphone select - only shown after mic check */}
-            {micCheck.micCheckCompleted && (
-              <div className="max-w-3xl mx-auto w-full">
-                <div className="flex items-center gap-2 mb-2">
-                  <Label htmlFor="micSelect2" className="flex items-center gap-2">
-                    Microphone
-                  </Label>
-                  <button 
-                    onClick={micCheck.handleMicCheck} 
-                    className="text-xs text-blue-600 hover:text-blue-800 underline"
-                    title="Run mic check again"
-                  >
-                    Run mic check again
-                  </button>
-                </div>
-                <Select 
-                  value={deviceSelection.selectedDeviceId || undefined} 
-                  onValueChange={onChangeDevice} 
-                  disabled={recorder.isRecording}
-                  aria-label="Select microphone"
-                >
-                  <SelectTrigger id="micSelect2">
-                    <SelectValue placeholder="Select microphone" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {deviceSelection.devices.map((d) => (
-                      <SelectItem key={d.deviceId} value={d.deviceId}>
-                        {d.label || `Microphone ${d.deviceId.slice(0, 8)}...`}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
               </div>
             )}
           </>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from '@/hooks/use-toast';
-import { makeApi } from '@/lib/apiClient';
+import { makeApi, isApiError } from '@/lib/apiClient';
 
 /**
  * Manages episode publishing workflow
@@ -165,14 +165,63 @@ export default function usePublishing({
           }
         } catch {}
       } catch (e) {
+        console.error('[AUTOPUBLISH] handlePublishInternal error:', e);
+        console.error('[AUTOPUBLISH] Error details:', {
+          status: e?.status,
+          detail: e?.detail,
+          error: e?.error,
+          message: e?.message,
+          fullError: e,
+        });
+        
+        // Extract error message from API error object
+        let errorMessage = 'Publish failed';
+        if (isApiError(e)) {
+          // FastAPI errors have 'detail' field, other API errors might have 'error' or 'message'
+          if (typeof e.detail === 'string' && e.detail) {
+            errorMessage = e.detail;
+          } else if (typeof e.error === 'string' && e.error) {
+            errorMessage = e.error;
+          } else if (typeof e.error === 'object' && e.error?.message) {
+            errorMessage = String(e.error.message);
+          } else if (typeof e.message === 'string' && e.message) {
+            errorMessage = e.message;
+          } else if (e.detail && typeof e.detail === 'object') {
+            // Sometimes detail is an object with message/code
+            errorMessage = e.detail.message || e.detail.detail || JSON.stringify(e.detail);
+          } else {
+            // Last resort: try to stringify the error
+            try {
+              errorMessage = JSON.stringify(e);
+            } catch {
+              errorMessage = String(e);
+            }
+          }
+        } else if (e instanceof Error) {
+          errorMessage = e.message;
+        } else if (typeof e === 'string') {
+          errorMessage = e;
+        } else {
+          try {
+            errorMessage = JSON.stringify(e);
+          } catch {
+            errorMessage = String(e);
+          }
+        }
+        
+        // Set error state so it displays in UI
+        setError(errorMessage);
+        setStatusMessage('');
+        
+        // Also show toast notification
         toast({
           variant: 'destructive',
           title: 'Publish failed',
-          description: e.message || String(e),
+          description: errorMessage,
         });
       }
     },
-    [token, selectedTemplate, assembledEpisode, publishVisibility, setStatusMessage]
+    [token, selectedTemplate, assembledEpisode, publishVisibility, setStatusMessage, setError]
   );
 
   // Manual publish handler (user clicks "Publish" button)
@@ -269,12 +318,53 @@ export default function usePublishing({
         
         setCurrentStep(6);
       } catch (err) {
-        const friendly = err && err.message
-          ? err.message
-          : (typeof err === 'string' ? err : 'Publish failed');
-        setError(friendly);
+        console.error('[PUBLISH] handlePublish error:', err);
+        console.error('[PUBLISH] Error details:', {
+          status: err?.status,
+          detail: err?.detail,
+          error: err?.error,
+          message: err?.message,
+          fullError: err,
+        });
+        
+        // Extract error message from API error object
+        let errorMessage = 'Publish failed';
+        if (isApiError(err)) {
+          // FastAPI errors have 'detail' field, other API errors might have 'error' or 'message'
+          if (typeof err.detail === 'string' && err.detail) {
+            errorMessage = err.detail;
+          } else if (typeof err.error === 'string' && err.error) {
+            errorMessage = err.error;
+          } else if (typeof err.error === 'object' && err.error?.message) {
+            errorMessage = String(err.error.message);
+          } else if (typeof err.message === 'string' && err.message) {
+            errorMessage = err.message;
+          } else if (err.detail && typeof err.detail === 'object') {
+            // Sometimes detail is an object with message/code
+            errorMessage = err.detail.message || err.detail.detail || JSON.stringify(err.detail);
+          } else {
+            // Last resort: try to stringify the error
+            try {
+              errorMessage = JSON.stringify(err);
+            } catch {
+              errorMessage = String(err);
+            }
+          }
+        } else if (err instanceof Error) {
+          errorMessage = err.message;
+        } else if (typeof err === 'string') {
+          errorMessage = err;
+        } else {
+          try {
+            errorMessage = JSON.stringify(err);
+          } catch {
+            errorMessage = String(err);
+          }
+        }
+        
+        setError(errorMessage);
         setStatusMessage('');
-        toast({ variant: 'destructive', title: 'Error', description: friendly });
+        toast({ variant: 'destructive', title: 'Error', description: errorMessage });
       } finally {
         setIsPublishing(false);
       }

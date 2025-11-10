@@ -121,8 +121,11 @@ def upload_fileobj(
         
         # Return public R2 URL
         # Format: https://ppp-media.{account_id}.r2.cloudflarestorage.com/path/to/file.mp3
+        # URL-encode the key to handle any special characters
         account_id = os.getenv("R2_ACCOUNT_ID", "").strip()
-        url = f"https://{bucket_name}.{account_id}.r2.cloudflarestorage.com/{key}"
+        # URL-encode each path segment separately to preserve slashes
+        encoded_key = "/".join(quote(segment, safe="") for segment in key.split("/"))
+        url = f"https://{bucket_name}.{account_id}.r2.cloudflarestorage.com/{encoded_key}"
         
         logger.info(f"[R2] Uploaded {key} to bucket {bucket_name}")
         return url
@@ -369,7 +372,8 @@ def get_public_audio_url(
     This mirrors the GCS get_public_audio_url() function for drop-in replacement.
     
     Args:
-        r2_path: R2 path in format "bucket/path/to/file.mp3" or None
+        r2_path: R2 path in format "bucket/path/to/file.mp3", "r2://bucket/key", 
+                 or "https://bucket.account.r2.cloudflarestorage.com/key"
         expiration_days: Number of days until URL expires (default 7)
     
     Returns:
@@ -379,9 +383,34 @@ def get_public_audio_url(
         return None
     
     # Parse bucket and key from path
-    # Format: "ppp-media/audio/episode123.mp3" or "https://..."
+    # Format: "ppp-media/audio/episode123.mp3", "r2://bucket/key", or "https://..."
     if r2_path.startswith("http"):
-        # Already a URL, return as-is (for backward compatibility)
+        # R2 HTTPS URL - parse and generate signed URL (R2 buckets are NOT public by default)
+        if ".r2.cloudflarestorage.com" in r2_path.lower():
+            try:
+                from urllib.parse import unquote
+                # Remove protocol
+                url_without_proto = r2_path.replace("https://", "").replace("http://", "")
+                # Split on first slash to separate host from path
+                if "/" in url_without_proto:
+                    host_part, key_part = url_without_proto.split("/", 1)
+                    # Extract bucket name (first part before first dot)
+                    bucket_name = host_part.split(".")[0]
+                    # URL-decode the key
+                    key = unquote(key_part)
+                    # Generate signed URL with expiration
+                    expiration_seconds = expiration_days * 24 * 60 * 60
+                    signed_url = generate_signed_url(bucket_name, key, expiration=expiration_seconds)
+                    if signed_url:
+                        return signed_url
+                    else:
+                        logger.warning(f"Failed to generate signed URL for R2 URL: {r2_path}")
+                        # Fall through to return original URL as fallback
+                else:
+                    logger.warning(f"Invalid R2 HTTPS URL format: {r2_path}")
+            except Exception as e:
+                logger.warning(f"Error parsing R2 HTTPS URL {r2_path}: {e}")
+        # For other HTTPS URLs (non-R2), return as-is (backward compatibility)
         return r2_path
     
     # Remove r2:// prefix if present

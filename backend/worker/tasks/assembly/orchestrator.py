@@ -8,6 +8,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+from typing import List
 from uuid import UUID
 
 from sqlmodel import select
@@ -1034,6 +1035,119 @@ def _finalize_episode(
         logging.info("[assemble] Audio duration: %d ms (%.1f minutes)", episode.duration_ms, episode.duration_ms / 1000 / 60)
     except Exception as dur_err:
         raise RuntimeError(f"[assemble] Could not get audio duration: {dur_err}") from dur_err
+    
+    # ========== AUDIO NORMALIZATION (Non-Pro tiers only) ==========
+    # Apply program-loudness normalization for non-Pro users
+    # Pro users use Auphonic which already handles normalization
+    try:
+        from api.core.config import settings
+        from api.services.auphonic_helper import should_use_auphonic
+        from api.services.audio.normalizer import run_loudnorm_two_pass
+        import tempfile
+        
+        # Check if normalization is enabled
+        normalize_enabled = getattr(settings, 'AUDIO_NORMALIZE_ENABLED', True)
+        
+        # Get user to check tier
+        user = session.get(User, episode.user_id)
+        use_auphonic = should_use_auphonic(user, episode) if user else False
+        
+        # Skip normalization if:
+        # 1. Normalization is disabled via config
+        # 2. User is Pro tier (uses Auphonic)
+        # 3. Episode was processed via Auphonic
+        should_normalize = (
+            normalize_enabled 
+            and not use_auphonic 
+            and not auphonic_processed
+        )
+        
+        if should_normalize:
+            logging.info("[assemble] [AUDIO_NORM] Starting loudness normalization for non-Pro user")
+            
+            target_lufs = getattr(settings, 'AUDIO_NORMALIZE_TARGET_LUFS', -16.0)
+            tp_ceil = getattr(settings, 'AUDIO_NORMALIZE_TP_CEILING_DBTP', -1.0)
+            
+            # Create temp file for normalized output
+            with tempfile.NamedTemporaryFile(
+                suffix='.mp3',
+                delete=False,
+                dir=str(audio_src.parent)
+            ) as tmp_norm:
+                normalized_path = Path(tmp_norm.name)
+            
+            try:
+                # Run normalization
+                norm_log: List[str] = []
+                run_loudnorm_two_pass(
+                    input_path=audio_src,
+                    output_path=normalized_path,
+                    target_lufs=target_lufs,
+                    tp_ceil=tp_ceil,
+                    log_lines=norm_log,
+                )
+                
+                # Log normalization results
+                for log_line in norm_log:
+                    logging.info(f"[assemble] {log_line}")
+                
+                # Validate normalized file exists and has content
+                if normalized_path.exists() and normalized_path.stat().st_size > 0:
+                    # Replace audio_src with normalized file
+                    old_audio_src = audio_src
+                    audio_src = normalized_path
+                    logging.info(
+                        "[assemble] [AUDIO_NORM] ✅ Normalization complete: "
+                        f"original={old_audio_src.name}, normalized={normalized_path.name}"
+                    )
+                    
+                    # Clean up old file if it was a temp file
+                    try:
+                        if old_audio_src != final_path_obj and old_audio_src.name.startswith('._tmp_'):
+                            old_audio_src.unlink()
+                    except Exception:
+                        pass
+                else:
+                    logging.warning(
+                        "[assemble] [AUDIO_NORM] ⚠️ Normalized file invalid, using original audio"
+                    )
+                    try:
+                        normalized_path.unlink()
+                    except Exception:
+                        pass
+                    
+            except Exception as norm_err:
+                logging.error(
+                    "[assemble] [AUDIO_NORM] ❌ Normalization failed (non-fatal): %s",
+                    norm_err,
+                    exc_info=True
+                )
+                # Clean up temp file on error
+                try:
+                    if normalized_path.exists():
+                        normalized_path.unlink()
+                except Exception:
+                    pass
+                # Continue with original audio - normalization failure should not block assembly
+        else:
+            skip_reason = []
+            if not normalize_enabled:
+                skip_reason.append("disabled in config")
+            if use_auphonic:
+                skip_reason.append("Pro tier (uses Auphonic)")
+            if auphonic_processed:
+                skip_reason.append("processed via Auphonic")
+            logging.info(
+                f"[assemble] [AUDIO_NORM] Skipping normalization: {', '.join(skip_reason)}"
+            )
+    except Exception as norm_check_err:
+        # If normalization check fails, log but don't block assembly
+        logging.warning(
+            "[assemble] [AUDIO_NORM] Failed to check normalization requirements (non-fatal): %s",
+            norm_check_err,
+            exc_info=True
+        )
+    # ========== END AUDIO NORMALIZATION ==========
     
     # Upload to cloud storage (GCS or R2) - if this fails, the entire assembly fails
     gcs_audio_key = f"{user_id}/episodes/{episode_id}/audio/{final_basename}"

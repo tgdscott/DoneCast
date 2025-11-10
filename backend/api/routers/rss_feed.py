@@ -489,44 +489,33 @@ def _generate_podcast_rss(
         # Priority 1: gcs_cover_path (contains R2 URLs for new episodes)
         if episode.gcs_cover_path:
             gcs_cover_str = str(episode.gcs_cover_path).strip()
-            # If it's already an R2 HTTPS URL, use it directly
-            if gcs_cover_str.lower().startswith(("http://", "https://")):
-                # Reject Spreaker URLs (safety check)
-                if "spreaker.com" not in gcs_cover_str.lower() and "cdn.spreaker.com" not in gcs_cover_str.lower():
-                    episode_image = gcs_cover_str
-                else:
-                    logger.warning(
-                        "RSS Feed: Episode %s gcs_cover_path contains Spreaker URL; rejecting: %s",
-                        episode.id,
-                        gcs_cover_str[:50],
-                    )
-            else:
-                # GCS path or R2 path format - resolve using _resolve_storage_asset
+            # Reject Spreaker URLs (safety check)
+            if "spreaker.com" not in gcs_cover_str.lower() and "cdn.spreaker.com" not in gcs_cover_str.lower():
+                # Always resolve through _resolve_storage_asset to generate signed URLs
+                # This handles both R2 URLs (https://) and R2 paths (r2://, bucket/key)
                 episode_image = _resolve_storage_asset(
                     episode.gcs_cover_path,
                     asset_kind="cover",
+                    expiration_days=14,  # 14-day expiration for RSS feeds
+                )
+            else:
+                logger.warning(
+                    "RSS Feed: Episode %s gcs_cover_path contains Spreaker URL; rejecting: %s",
+                    episode.id,
+                    gcs_cover_str[:50],
                 )
         
         # Priority 2: cover_path if it's a URL (but not Spreaker)
         if not episode_image and episode.cover_path:
             cover_path_str = str(episode.cover_path).strip()
-            if cover_path_str.lower().startswith(("http://", "https://")):
-                # Reject Spreaker URLs
-                if "spreaker.com" not in cover_path_str.lower() and "cdn.spreaker.com" not in cover_path_str.lower():
-                    # Only use if it looks like an R2 URL
-                    if ".r2.cloudflarestorage.com" in cover_path_str.lower():
-                        episode_image = cover_path_str
-                    else:
-                        logger.warning(
-                            "RSS Feed: Episode %s cover_path contains external URL (not R2); rejecting: %s",
-                            episode.id,
-                            cover_path_str[:50],
-                        )
-            else:
-                # Local path - try to resolve as R2 asset
+            # Reject Spreaker URLs
+            if "spreaker.com" not in cover_path_str.lower() and "cdn.spreaker.com" not in cover_path_str.lower():
+                # Always resolve through _resolve_storage_asset to generate signed URLs
+                # This handles both R2 URLs (https://) and R2 paths (r2://, bucket/key)
                 episode_image = _resolve_storage_asset(
                     episode.cover_path,
                     asset_kind="cover",
+                    expiration_days=14,  # 14-day expiration for RSS feeds
                 )
         
         # Explicitly ignore remote_cover_url - it contains Spreaker URLs which we never serve

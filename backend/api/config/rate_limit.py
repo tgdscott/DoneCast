@@ -21,16 +21,18 @@ def configure_rate_limiting(app: FastAPI) -> None:
     try:
         from slowapi.middleware import SlowAPIMiddleware
         from slowapi.errors import RateLimitExceeded
+        from api.core.cors import add_cors_headers_to_response
         if not RL_DISABLED and getattr(limiter, "limit", None):
             app.state.limiter = limiter
             app.add_middleware(SlowAPIMiddleware)
 
             async def _rate_limit_handler(request, exc):  # type: ignore
-                return JSONResponse(
+                response = JSONResponse(
                     status_code=429, 
                     content={"detail": "Too many requests"}, 
                     headers={"Retry-After": "60"}
                 )
+                return add_cors_headers_to_response(response, request)
             app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)  # type: ignore
     except Exception:  # pragma: no cover
         pass

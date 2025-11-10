@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     
     # --- Auphonic API (Professional Audio Processing) ---
     AUPHONIC_API_KEY: str = ""
+    
+    # --- Audio Normalization (Non-Pro tiers) ---
+    AUDIO_NORMALIZE_ENABLED: bool = Field(default=True, description="Enable program-loudness normalization for non-Pro tiers")
+    AUDIO_NORMALIZE_TARGET_LUFS: float = Field(default=-16.0, description="Target loudness in LUFS (podcast standard)")
+    AUDIO_NORMALIZE_TP_CEILING_DBTP: float = Field(default=-1.0, description="True-peak ceiling in dBTP")
 
     # --- Spreaker API ---
     SPREAKER_API_TOKEN: str = ""

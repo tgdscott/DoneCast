@@ -1,11 +1,12 @@
 import os
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Body, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session
 from sqlmodel import select
+from starlette.requests import Request
 
 from api.core.database import get_session
 from api.routers.auth import get_current_user
@@ -28,12 +29,13 @@ from .common import _cover_url_for, _status_value, compute_playback_info, comput
 
 
 @router.patch("/{episode_id}", status_code=200)
-def update_episode_metadata(
+async def update_episode_metadata(
     episode_id: str,
-    payload: Dict[str, Any],
+    request: Request,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
+    """Update episode metadata. Accepts JSON body with optional fields."""
     try:
         eid = _UUID(str(episode_id))
     except Exception:
@@ -41,34 +43,64 @@ def update_episode_metadata(
     ep = _svc_repo.get_episode_by_id(session, eid, user_id=current_user.id)
     if not ep:
         raise HTTPException(status_code=404, detail="Episode not found")
-
+    
+    # Parse JSON body manually to avoid Pydantic validation issues
+    try:
+        import json
+        body_bytes = await request.body()
+        if not body_bytes:
+            payload_dict = {}
+        else:
+            payload_dict = json.loads(body_bytes)
+            if not isinstance(payload_dict, dict):
+                raise HTTPException(status_code=400, detail="Request body must be a JSON object")
+    except json.JSONDecodeError as e:
+        logger.warning(f"Invalid JSON in request body for episode {episode_id}: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid JSON in request body: {e}")
+    except Exception as e:
+        logger.error(f"Error parsing request body for episode {episode_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Failed to parse request body")
+    
+    logger.info(f"Updating episode {episode_id}: payload keys={list(payload_dict.keys())}, cover_image_path={payload_dict.get('cover_image_path')}")
+    
     changed = False
-    title = payload.get("title")
+    
+    title = payload_dict.get("title")
     if title is not None and title.strip() and title != ep.title:
         ep.title = title.strip()
         changed = True
-    description = payload.get("description")
+    description = payload_dict.get("description")
     if description is not None and description != ep.show_notes:
         ep.show_notes = description
         changed = True
-    if "cover_image_path" in payload:
-        cover_image_path = payload.get("cover_image_path")
+    if "cover_image_path" in payload_dict:
+        cover_image_path = payload_dict.get("cover_image_path")
         if cover_image_path and cover_image_path != getattr(ep, 'cover_path', None):
             ep.cover_path = cover_image_path
-            # When switching to a freshly uploaded cover, prefer the local path until publish sync updates remote.
+            # If cover_image_path is an R2 URL (https://), also set gcs_cover_path
+            # This ensures covers uploaded from Episode History are properly stored and served
+            if cover_image_path and str(cover_image_path).lower().startswith(("http://", "https://")):
+                if ".r2.cloudflarestorage.com" in str(cover_image_path).lower():
+                    # R2 URL - store in gcs_cover_path for proper serving
+                    if hasattr(ep, 'gcs_cover_path'):
+                        ep.gcs_cover_path = cover_image_path
+            # When switching to a freshly uploaded cover, clear remote_cover_url
             if hasattr(ep, 'remote_cover_url'):
                 ep.remote_cover_url = None
             changed = True
         elif cover_image_path is None and getattr(ep, 'cover_path', None):
             ep.cover_path = None
+            # Also clear gcs_cover_path if clearing cover
+            if hasattr(ep, 'gcs_cover_path'):
+                ep.gcs_cover_path = None
             if hasattr(ep, 'remote_cover_url'):
                 ep.remote_cover_url = None
             changed = True
-    publish_state = payload.get("publish_state")
+    publish_state = payload_dict.get("publish_state")
     if publish_state is not None:
         changed = True
-    if "tags" in payload:
-        tags = payload.get("tags") or []
+    if "tags" in payload_dict:
+        tags = payload_dict.get("tags") or []
         try:
             existing_tags = ep.tags() if hasattr(ep, 'tags') else []
         except Exception:
@@ -81,13 +113,13 @@ def update_episode_metadata(
                 import json as _json
                 ep.tags_json = _json.dumps(norm)
             changed = True
-    if "is_explicit" in payload:
-        val = bool(payload.get("is_explicit"))
+    if "is_explicit" in payload_dict:
+        val = bool(payload_dict.get("is_explicit"))
         if val != bool(getattr(ep, 'is_explicit', False)):
             ep.is_explicit = val
             changed = True
-    if "image_crop" in payload:
-        val = payload.get("image_crop") or None
+    if "image_crop" in payload_dict:
+        val = payload_dict.get("image_crop") or None
         if val != getattr(ep, 'image_crop', None):
             if val:
                 parts = [p.strip() for p in str(val).split(',')]
@@ -100,8 +132,8 @@ def update_episode_metadata(
                     raise HTTPException(status_code=400, detail="image_crop must have four comma-separated numbers")
             ep.image_crop = val
             changed = True
-    if "season_number" in payload:
-        raw = payload.get("season_number")
+    if "season_number" in payload_dict:
+        raw = payload_dict.get("season_number")
         new_val = None
         if raw not in (None, ""):
             try:
@@ -113,8 +145,8 @@ def update_episode_metadata(
         if new_val != getattr(ep, 'season_number', None):
             ep.season_number = new_val
             changed = True
-    if "episode_number" in payload:
-        raw = payload.get("episode_number")
+    if "episode_number" in payload_dict:
+        raw = payload_dict.get("episode_number")
         new_val = None
         if raw not in (None, ""):
             try:
@@ -126,7 +158,7 @@ def update_episode_metadata(
         if new_val != getattr(ep, 'episode_number', None):
             ep.episode_number = new_val
             changed = True
-    if changed and ("season_number" in payload or "episode_number" in payload):
+    if changed and ("season_number" in payload_dict or "episode_number" in payload_dict):
         try:
             if ep.podcast_id and ep.season_number is not None and ep.episode_number is not None:
                 # Check for duplicates but DON'T block - just flag for warning
@@ -290,13 +322,13 @@ def update_episode_metadata(
                 publish_state,
                 bool(img_path),
             )
-            send_title = 'title' in payload and title is not None
-            send_description = 'description' in payload and description is not None
+            send_title = 'title' in payload_dict and title is not None
+            send_description = 'description' in payload_dict and description is not None
             send_publish_state = publish_state is not None
-            send_tags = ('tags' in payload)
-            send_explicit = ('is_explicit' in payload)
-            send_season = ('season_number' in payload) and getattr(ep, 'season_number', None) is not None
-            send_episode = ('episode_number' in payload) and getattr(ep, 'episode_number', None) is not None
+            send_tags = ('tags' in payload_dict)
+            send_explicit = ('is_explicit' in payload_dict)
+            send_season = ('season_number' in payload_dict) and getattr(ep, 'season_number', None) is not None
+            send_episode = ('episode_number' in payload_dict) and getattr(ep, 'episode_number', None) is not None
             tags_arg = None
             if send_tags:
                 try:

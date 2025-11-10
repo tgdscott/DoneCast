@@ -50,7 +50,7 @@ def _cover_url_for(path: Optional[str], *, gcs_path: Optional[str] = None) -> Op
             logger.warning("GCS URL generation failed for %s: %s", gcs_path, e)
             # Fall through to path-based resolution
     
-    # Priority 1b: R2 URL (https://) - use directly (R2 URLs are already public/signed)
+    # Priority 1b: R2 URL (https://) - generate signed URL (R2 buckets are NOT public by default)
     # BUT reject Spreaker URLs (push-only relationship)
     if gcs_path and str(gcs_path).lower().startswith(("http://", "https://")):
         gcs_path_str = str(gcs_path).lower()
@@ -60,7 +60,32 @@ def _cover_url_for(path: Optional[str], *, gcs_path: Optional[str] = None) -> Op
             logger = get_logger("api.episodes.common")
             logger.warning("Rejecting Spreaker URL in gcs_path: %s", str(gcs_path)[:100])
             return None
-        # R2 URLs stored in gcs_cover_path are already public URLs, use them directly
+        # R2 URLs need signed URLs - parse and generate presigned URL
+        if ".r2.cloudflarestorage.com" in gcs_path_str:
+            try:
+                import os
+                from urllib.parse import unquote
+                from infrastructure.r2 import generate_signed_url
+                
+                # Remove protocol
+                url_without_proto = str(gcs_path).replace("https://", "").replace("http://", "")
+                # Split on first slash to separate host from path
+                if "/" in url_without_proto:
+                    host_part, key_part = url_without_proto.split("/", 1)
+                    # Extract bucket name (first part before first dot)
+                    bucket_name = host_part.split(".")[0]
+                    # URL-decode the key
+                    key = unquote(key_part)
+                    # Generate signed URL (24 hour expiration for covers)
+                    signed_url = generate_signed_url(bucket_name, key, expiration=86400)
+                    if signed_url:
+                        return signed_url
+            except Exception as e:
+                from api.core.logging import get_logger
+                logger = get_logger("api.episodes.common")
+                logger.warning("Failed to generate signed URL for R2 cover: %s", e)
+                # Fall through to return original URL as fallback (may not work if bucket is private)
+        # For other HTTPS URLs (non-R2, non-Spreaker), return as-is
         return str(gcs_path)
     
     # Priority 2: Remote URL - but REJECT Spreaker URLs (push-only relationship)
@@ -335,12 +360,71 @@ def compute_cover_info(episode: Any, *, now: Optional[datetime] = None) -> dict[
     # Try local/remote cover_path
     if not cover_url and cover_path:
         logger.debug("[compute_cover_info] episode_id=%s trying cover_path: %s", episode_id, cover_path)
-        cover_url = _cover_url_for(cover_path)
-        if cover_url:
-            cover_source = "local"
-            logger.debug("[compute_cover_info] episode_id=%s ✅ resolved cover_url from cover_path: %s", episode_id, cover_url)
+        cover_path_str = str(cover_path)
+        
+        # First check if it's a URL (R2, HTTPS, etc.)
+        if cover_path_str.lower().startswith(("http://", "https://")):
+            # It's a URL - let _cover_url_for handle it
+            cover_url = _cover_url_for(cover_path)
+            if cover_url:
+                cover_source = "r2" if ".r2.cloudflarestorage.com" in cover_path_str.lower() else "remote"
+                logger.debug("[compute_cover_info] episode_id=%s ✅ resolved cover_url from cover_path URL: %s", episode_id, cover_url)
         else:
-            logger.debug("[compute_cover_info] episode_id=%s ❌ _cover_url_for returned None for cover_path: %s", episode_id, cover_path)
+            # It's a local filename - check if file exists locally first
+            cover_url = _cover_url_for(cover_path)
+            if cover_url:
+                cover_source = "local"
+                logger.debug("[compute_cover_info] episode_id=%s ✅ resolved cover_url from cover_path (local): %s", episode_id, cover_url)
+            else:
+                # Local file doesn't exist - try to find it in R2 as fallback
+                # This handles episodes that haven't been migrated yet
+                # NOTE: This R2 lookup is expensive (multiple HTTP calls), so it's only done as fallback
+                logger.debug("[compute_cover_info] episode_id=%s local file not found, searching R2 for cover_path: %s", episode_id, cover_path)
+                try:
+                    import os
+                    from infrastructure.r2 import blob_exists
+                    user_id = getattr(episode, "user_id", None)
+                    # Convert UUID to hex string if needed
+                    if user_id:
+                        user_id_str = user_id.hex if hasattr(user_id, 'hex') else str(user_id)
+                    else:
+                        user_id_str = None
+                    r2_bucket = os.getenv("R2_BUCKET", "ppp-media").strip()
+                    
+                    if user_id_str and r2_bucket:
+                        # Try multiple R2 paths where the cover might be
+                        cover_filename = os.path.basename(cover_path_str)
+                        episode_id_str = str(episode_id) if episode_id else None
+                        r2_candidates = []
+                        
+                        # Build candidate paths (only if we have the necessary IDs)
+                        if episode_id_str:
+                            r2_candidates.extend([
+                                f"covers/episode/{episode_id_str}/{cover_filename}",
+                                f"{user_id_str}/episodes/{episode_id_str}/cover/{cover_filename}",
+                            ])
+                        if user_id_str:
+                            r2_candidates.extend([
+                                f"covers/{user_id_str}/{cover_filename}",
+                                f"{user_id_str}/covers/{cover_filename}",
+                            ])
+                        
+                        # Check each candidate (stop at first match to avoid unnecessary calls)
+                        for r2_key in r2_candidates:
+                            if blob_exists(r2_bucket, r2_key):
+                                # Found in R2 - generate signed URL
+                                from infrastructure.r2 import generate_signed_url
+                                signed_url = generate_signed_url(r2_bucket, r2_key, expiration=86400)
+                                if signed_url:
+                                    cover_url = signed_url
+                                    cover_source = "r2"
+                                    logger.info("[compute_cover_info] episode_id=%s ✅ found cover in R2 at %s", episode_id, r2_key)
+                                    break
+                except Exception as r2_err:
+                    logger.debug("[compute_cover_info] episode_id=%s R2 lookup failed: %s", episode_id, r2_err)
+                
+                if not cover_url:
+                    logger.debug("[compute_cover_info] episode_id=%s ❌ cover_path not found locally or in R2: %s", episode_id, cover_path)
     
     # CRITICAL: Push-only relationship with Spreaker - NEVER use Spreaker URLs
     # DO NOT fall back to remote_cover_url - it contains Spreaker URLs which we never serve

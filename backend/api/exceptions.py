@@ -5,6 +5,7 @@ from pydantic import ValidationError
 import traceback
 import uuid
 from api.core.logging import get_logger
+from api.core.cors import add_cors_headers_to_response
 
 def error_payload(code: str, message: str, details=None, request: Request | None = None, error_id: str | None = None):
     out = {"error": {"code": code, "message": message, "details": details}}
@@ -24,10 +25,11 @@ def install_exception_handlers(app):
             request.method, request.url.path, exc.status_code, exc.detail,
             extra={"request_id": getattr(getattr(request, "state", None), "request_id", None)}
         )
-        return JSONResponse(
+        response = JSONResponse(
             error_payload("http_error", exc.detail, {"status_code": exc.status_code}, request),
             status_code=exc.status_code
         )
+        return add_cors_headers_to_response(response, request)
 
     @app.exception_handler(ValidationError)
     async def validation_exc_handler(request: Request, exc: ValidationError):
@@ -36,10 +38,11 @@ def install_exception_handlers(app):
             request.method, request.url.path,
             extra={"request_id": getattr(getattr(request, "state", None), "request_id", None), "errors": exc.errors()}
         )
-        return JSONResponse(
+        response = JSONResponse(
             error_payload("validation_error", "Validation failed", exc.errors(), request),
             status_code=422
         )
+        return add_cors_headers_to_response(response, request)
 
     @app.exception_handler(Exception)
     async def unhandled_exc_handler(request: Request, exc: Exception):
@@ -51,7 +54,8 @@ def install_exception_handlers(app):
             err_id, request.method, request.url.path, tb,
             extra={"request_id": rid}
         )
-        return JSONResponse(
+        response = JSONResponse(
             error_payload("internal_error", "Something went wrong", None, request, error_id=err_id),
             status_code=500
         )
+        return add_cors_headers_to_response(response, request)

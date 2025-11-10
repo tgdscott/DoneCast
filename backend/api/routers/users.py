@@ -71,8 +71,23 @@ async def read_users_me(
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     
-    # Refresh from database to ensure we have latest committed data
-    session.refresh(current_user)
+    # Always re-query user from database to ensure we have latest committed data
+    # get_current_user may return a cached (detached) user instance, so we need
+    # to fetch a fresh instance attached to this session to avoid session errors
+    try:
+        from sqlmodel import select
+        from api.models.user import User
+        # Get user ID (should always be accessible even from detached instances)
+        user_id = current_user.id
+        # Re-query user from database to get fresh, attached instance
+        refreshed_user = session.exec(select(User).where(User.id == user_id)).first()
+        if refreshed_user:
+            current_user = refreshed_user
+    except Exception as e:
+        # If re-query fails, log and use current_user as-is (shouldn't happen in normal operation)
+        from api.core.logging import get_logger
+        logger = get_logger("api.routers.users")
+        logger.warning("Failed to re-query user in /me endpoint: %s", e)
     return _to_user_public(current_user)
 
 @router.get("/me/stats", response_model=Dict[str, Any])
