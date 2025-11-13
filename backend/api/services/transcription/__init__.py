@@ -421,31 +421,35 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
                         raise FileNotFoundError(f"Audio file not found: {audio_path}")
                     
                     audio = AudioSegment.from_file(str(audio_path))
-                    duration_minutes = len(audio) / 1000 / 60
+                    # charge_for_transcription expects SECONDS, not minutes!
+                    duration_seconds = len(audio) / 1000.0  # pydub length is in milliseconds
                     
                     # Check if user is Pro tier (Auphonic) or other tiers (AssemblyAI)
                     use_auphonic_flag = should_use_auphonic(user)
                     
                     logging.info(
-                        "[transcription] 💳 Charging credits: user=%s, duration=%.2f min, auphonic=%s",
+                        "[transcription] 💳 Charging credits: user=%s, duration=%.2f seconds (%.2f min), auphonic=%s",
                         user.id,
-                        duration_minutes,
+                        duration_seconds,
+                        duration_seconds / 60.0,
                         use_auphonic_flag
                     )
                     
                     ledger_entry, cost_breakdown = credits.charge_for_transcription(
                         session=session,
                         user=user,
-                        duration_minutes=duration_minutes,
+                        duration_seconds=duration_seconds,
                         use_auphonic=use_auphonic_flag,
+                        episode_id=None,  # Transcription happens before episode is created
                         correlation_id=f"transcription_{filename}_{uuid.uuid4().hex[:8]}",
                     )
                     
                     logging.info(
-                        "[transcription] ✅ Credits charged: %.2f credits (pipeline=%s, multiplier=%.2fx)",
+                        "[transcription] ✅ Credits charged: %.2f credits (duration=%.2fs, rate=%.2f credits/sec, auphonic=%s)",
                         cost_breakdown['total_credits'],
-                        cost_breakdown['pipeline'],
-                        cost_breakdown['multiplier']
+                        cost_breakdown['duration_seconds'],
+                        cost_breakdown['processing_rate_per_sec'],
+                        use_auphonic_flag
                     )
                     
                 except Exception as audio_err:

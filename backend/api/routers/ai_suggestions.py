@@ -31,6 +31,9 @@ from api.services.transcripts import (
 from api.services.audio.transcript_io import load_transcript_json
 from api.services.intent_detection import analyze_intents, get_user_commands
 from api.utils.error_mapping import map_ai_error
+from api.services.billing import credits as billing_credits
+from api.services.ai_content.client_router import get_provider
+from uuid import UUID
 try:
     from api.limits import limiter as _limiter
 except Exception:
@@ -64,9 +67,48 @@ def _gather_user_sfx_entries(session: Session, current_user: User) -> Iterable[D
         return []
 @router.post("/title", response_model=SuggestTitleOut)
 @(_limiter.limit("10/minute") if _limiter and hasattr(_limiter, "limit") else (lambda f: f))
-def post_title(request: Request, inp: SuggestTitleIn, session: Session = Depends(get_session)) -> SuggestTitleOut:
+def post_title(
+    request: Request,
+    inp: SuggestTitleIn,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+) -> SuggestTitleOut:
+    # Check if stub mode (don't charge in stub mode)
+    is_stub_mode = os.getenv("AI_STUB_MODE") == "1" or _is_dev_env()
+    
+    # Convert episode_id to UUID if needed
+    episode_uuid = None
+    if inp.episode_id:
+        if isinstance(inp.episode_id, UUID):
+            episode_uuid = inp.episode_id
+        else:
+            try:
+                episode_uuid = UUID(str(inp.episode_id))
+            except (ValueError, TypeError):
+                pass
+    
     try:
-        return generate_title(inp, session)
+        result = generate_title(inp, session)
+        
+        # Charge credits only on successful generation and not in stub mode
+        if not is_stub_mode:
+            try:
+                provider = get_provider()
+                notes = f"AI title generation: {result.title[:50]}"
+                billing_credits.charge_for_ai_metadata(
+                    session=session,
+                    user=current_user,
+                    metadata_type="title",
+                    episode_id=episode_uuid,
+                    notes=notes,
+                    provider=provider
+                )
+                session.commit()
+            except Exception as charge_error:
+                # Log but don't fail the request if charging fails
+                _log.warning("[ai_title] Failed to charge credits: %s", charge_error, exc_info=True)
+        
+        return result
     except RuntimeError as e:
         msg = str(e)
         if msg == "TRANSCRIPT_NOT_READY":
@@ -75,14 +117,59 @@ def post_title(request: Request, inp: SuggestTitleIn, session: Session = Depends
         raise HTTPException(status_code=mapped["status"], detail=mapped)
     except Exception as e:
         _log.exception("[ai_title] unexpected error: %s", e)
-        if os.getenv("AI_STUB_MODE") == "1" or _is_dev_env():
+        if is_stub_mode:
             return SuggestTitleOut(title="Stub Title (error fallback)")
         raise HTTPException(status_code=500, detail={"error": "AI_INTERNAL_ERROR"})
 @router.post("/notes", response_model=SuggestNotesOut)
 @(_limiter.limit("10/minute") if _limiter and hasattr(_limiter, "limit") else (lambda f: f))
-def post_notes(request: Request, inp: SuggestNotesIn, session: Session = Depends(get_session)) -> SuggestNotesOut:
+def post_notes(
+    request: Request,
+    inp: SuggestNotesIn,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+) -> SuggestNotesOut:
+    # Check if stub mode (don't charge in stub mode)
+    is_stub_mode = os.getenv("AI_STUB_MODE") == "1" or _is_dev_env()
+    
+    # Convert episode_id to UUID if needed
+    episode_uuid = None
+    if inp.episode_id:
+        if isinstance(inp.episode_id, UUID):
+            episode_uuid = inp.episode_id
+        else:
+            try:
+                episode_uuid = UUID(str(inp.episode_id))
+            except (ValueError, TypeError):
+                pass
+    
     try:
-        return generate_notes(inp, session)
+        result = generate_notes(inp, session)
+        
+        # Check if content was blocked (don't charge for blocked content)
+        content_blocked = (
+            "Due to the nature of the content in this podcast" in result.description
+            or "unable to generate a description automatically" in result.description
+        )
+        
+        # Charge credits only on successful generation, not in stub mode, and not if content was blocked
+        if not is_stub_mode and not content_blocked:
+            try:
+                provider = get_provider()
+                notes = f"AI description/notes generation: {result.description[:50]}"
+                billing_credits.charge_for_ai_metadata(
+                    session=session,
+                    user=current_user,
+                    metadata_type="description",  # Use "description" for notes endpoint
+                    episode_id=episode_uuid,
+                    notes=notes,
+                    provider=provider
+                )
+                session.commit()
+            except Exception as charge_error:
+                # Log but don't fail the request if charging fails
+                _log.warning("[ai_notes] Failed to charge credits: %s", charge_error, exc_info=True)
+        
+        return result
     except RuntimeError as e:
         msg = str(e)
         if msg == "TRANSCRIPT_NOT_READY":
@@ -91,14 +178,54 @@ def post_notes(request: Request, inp: SuggestNotesIn, session: Session = Depends
         raise HTTPException(status_code=mapped["status"], detail=mapped)
     except Exception as e:
         _log.exception("[ai_notes] unexpected error: %s", e)
-        if os.getenv("AI_STUB_MODE") == "1" or _is_dev_env():
+        if is_stub_mode:
             return SuggestNotesOut(description="Stub Notes (error fallback)", bullets=["stub", "notes"])
         raise HTTPException(status_code=500, detail={"error": "AI_INTERNAL_ERROR"})
 @router.post("/tags", response_model=SuggestTagsOut)
 @(_limiter.limit("10/minute") if _limiter and hasattr(_limiter, "limit") else (lambda f: f))
-def post_tags(request: Request, inp: SuggestTagsIn, session: Session = Depends(get_session)) -> SuggestTagsOut:
+def post_tags(
+    request: Request,
+    inp: SuggestTagsIn,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+) -> SuggestTagsOut:
+    # Check if stub mode (don't charge in stub mode)
+    is_stub_mode = os.getenv("AI_STUB_MODE") == "1" or _is_dev_env()
+    
+    # Convert episode_id to UUID if needed
+    episode_uuid = None
+    if inp.episode_id:
+        if isinstance(inp.episode_id, UUID):
+            episode_uuid = inp.episode_id
+        else:
+            try:
+                episode_uuid = UUID(str(inp.episode_id))
+            except (ValueError, TypeError):
+                pass
+    
     try:
-        return generate_tags(inp, session)
+        result = generate_tags(inp, session)
+        
+        # Charge credits only on successful generation and not in stub mode
+        if not is_stub_mode:
+            try:
+                provider = get_provider()
+                tags_str = ", ".join(result.tags[:5])  # First 5 tags for notes
+                notes = f"AI tags generation: {tags_str}"
+                billing_credits.charge_for_ai_metadata(
+                    session=session,
+                    user=current_user,
+                    metadata_type="tags",
+                    episode_id=episode_uuid,
+                    notes=notes,
+                    provider=provider
+                )
+                session.commit()
+            except Exception as charge_error:
+                # Log but don't fail the request if charging fails
+                _log.warning("[ai_tags] Failed to charge credits: %s", charge_error, exc_info=True)
+        
+        return result
     except RuntimeError as e:
         msg = str(e)
         if msg == "TRANSCRIPT_NOT_READY":
@@ -107,7 +234,7 @@ def post_tags(request: Request, inp: SuggestTagsIn, session: Session = Depends(g
         raise HTTPException(status_code=mapped["status"], detail=mapped)
     except Exception as e:
         _log.exception("[ai_tags] unexpected error: %s", e)
-        if os.getenv("AI_STUB_MODE") == "1" or _is_dev_env():
+        if is_stub_mode:
             return SuggestTagsOut(tags=["stub", "tags"])
         raise HTTPException(status_code=500, detail={"error": "AI_INTERNAL_ERROR"})
 @router.get("/dev-status")

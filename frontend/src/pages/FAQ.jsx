@@ -80,6 +80,35 @@ const faqs = [
     ],
   },
   {
+    category: 'Credits & Billing',
+    questions: [
+      {
+        q: 'How does the credit system work?',
+        a: 'We like to keep things simple and transparent — you always know what you\'re getting and what it costs. Every second of audio you record or upload uses 1 credit. When you\'re ready to assemble your final episode, final audio assembly costs 3 credits per second — covering your intros, outros, and all the polishing that makes your episode shine.',
+      },
+      {
+        q: 'How many credits do I get with each plan?',
+        a: 'Starter: 28,800 credits = about 2 hours of finished audio. Creator: 72,000 credits = about 5 hours. Pro: 172,800 credits = about 12 hours. Executive: 288,000 credits = about 20 hours.',
+      },
+      {
+        q: 'What is premium processing and how much does it cost?',
+        a: 'Our premium processing automatically upgrades lower-quality recordings (like from webcams or phones) to studio-quality sound for just 1 extra credit per second.',
+      },
+      {
+        q: 'How much do optional features cost?',
+        a: 'AI Titles, Descriptions & Tags: 1–3 credits each — perfect for quick content creation. Intern Feature: 1 credit per answer — your built-in helper. Text-to-Speech: 12–15 credits per second — natural, studio-grade voices for intros, outros, or responses.',
+      },
+      {
+        q: 'Can I get credits back if I delete an episode?',
+        a: 'Yes! You can undo and get credits back: Delete within 24 hours → refund of 2 out of every 3 credits. Delete within 7 days → refund of 1 out of every 3 credits. After 7 days, refunds close automatically.',
+      },
+      {
+        q: 'What if something goes wrong with my subscription?',
+        a: 'We\'re still in alpha, which means we\'re improving fast and keeping things fair. If something goes wrong, just request a refund in your subscription page — we\'ll make it right.',
+      },
+    ],
+  },
+  {
     category: 'Technical Details',
     questions: [
       {

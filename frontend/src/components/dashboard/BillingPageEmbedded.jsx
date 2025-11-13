@@ -391,6 +391,12 @@ export default function BillingPageEmbedded({ token, onBack }) {
                           <span className="font-medium">{usage.credits_breakdown.storage.toFixed(1)} credits</span>
                         </div>
                       )}
+                      {usage.credits_breakdown.ai_metadata > 0 && (
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-600">AI Metadata</span>
+                          <span className="font-medium">{usage.credits_breakdown.ai_metadata.toFixed(1)} credits</span>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

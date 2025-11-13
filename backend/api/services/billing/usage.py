@@ -32,10 +32,15 @@ def post_debit(
     log and return None (idempotent no-op)."""
     _validate_minutes(minutes)
     try:
+        # Set credits = minutes * 1.0 for backward compatibility (legacy 1 min = 1 credit)
+        # New code should use credits.charge_credits() instead of this function
+        credits_value = float(minutes) * 1.0
+        
         rec = ProcessingMinutesLedger(
             user_id=user_id,
             episode_id=episode_id,
             minutes=int(minutes),
+            credits=credits_value,  # Set credits for backward compatibility
             direction=LedgerDirection.DEBIT,
             reason=LedgerReason(reason) if isinstance(reason, str) else reason,
             correlation_id=correlation_id,
@@ -79,10 +84,15 @@ def post_credit(
     notes: str = "",
 ) -> ProcessingMinutesLedger:
     _validate_minutes(minutes)
+    # Set credits = minutes * 1.0 for backward compatibility (legacy 1 min = 1 credit)
+    # New code should use credits.refund_credits() instead of this function
+    credits_value = float(minutes) * 1.0
+    
     rec = ProcessingMinutesLedger(
         user_id=user_id,
         episode_id=episode_id,
         minutes=int(minutes),
+        credits=credits_value,  # Set credits for backward compatibility
         direction=LedgerDirection.CREDIT,
         reason=LedgerReason(reason) if isinstance(reason, str) else reason,
         correlation_id=correlation_id,
@@ -177,7 +187,7 @@ def month_credits_breakdown(
     """
     Get breakdown of credits used this month by action type.
     
-    Returns dict with keys: total, tts_generation, transcription, assembly, storage, auphonic_processing
+    Returns dict with keys: total, tts_generation, transcription, assembly, storage, auphonic_processing, ai_metadata
     """
     norm_start = _normalize_to_utc(period_start)
     norm_end = _normalize_to_utc(period_end)
@@ -195,6 +205,7 @@ def month_credits_breakdown(
         'assembly': 0.0,
         'storage': 0.0,
         'auphonic_processing': 0.0,
+        'ai_metadata': 0.0,
     }
     
     for r in rows:
@@ -205,30 +216,51 @@ def month_credits_breakdown(
         if ts_utc < norm_start or ts_utc > norm_end:
             continue
         
-        # Only count DEBIT entries (charges)
-        if r.direction != LedgerDirection.DEBIT:
-            continue
-        
         # Get credits value (fallback to minutes * 1.0 if credits column not yet populated)
-        credits_used = getattr(r, 'credits', None)
-        if credits_used is None:
+        credits_amount = getattr(r, 'credits', None)
+        if credits_amount is None:
             # Legacy records without credits field (1 minute = 1 credit)
-            credits_used = r.minutes * 1.0
+            credits_amount = r.minutes * 1.0
+        
+        # DEBIT entries add to usage, CREDIT entries (refunds) subtract from usage
+        if r.direction == LedgerDirection.DEBIT:
+            multiplier = 1.0
+        elif r.direction == LedgerDirection.CREDIT:
+            # Refunds reduce usage, but only if they're refunds of charges from this month
+            # For now, we'll subtract all CREDIT entries in the period (refunds reduce usage)
+            multiplier = -1.0
+        else:
+            continue
         
         # Map reason to category
         reason_str = r.reason.value if hasattr(r.reason, 'value') else str(r.reason)
         
-        if reason_str == 'TTS_GENERATION':
-            breakdown['tts_generation'] += credits_used
+        # For refunds, we need to map them back to the original category if possible
+        # For REFUND_ERROR, we'll subtract from total but not from specific categories
+        # (since we don't know which category the original charge was)
+        if reason_str == 'REFUND_ERROR' or reason_str == 'MANUAL_ADJUST':
+            # Refunds reduce total usage but we can't attribute to specific categories
+            breakdown['total'] += credits_amount * multiplier
+        elif reason_str == 'TTS_GENERATION':
+            breakdown['tts_generation'] += credits_amount * multiplier
+            breakdown['total'] += credits_amount * multiplier
         elif reason_str == 'TRANSCRIPTION':
-            breakdown['transcription'] += credits_used
+            breakdown['transcription'] += credits_amount * multiplier
+            breakdown['total'] += credits_amount * multiplier
         elif reason_str == 'ASSEMBLY':
-            breakdown['assembly'] += credits_used
+            breakdown['assembly'] += credits_amount * multiplier
+            breakdown['total'] += credits_amount * multiplier
         elif reason_str == 'STORAGE':
-            breakdown['storage'] += credits_used
+            breakdown['storage'] += credits_amount * multiplier
+            breakdown['total'] += credits_amount * multiplier
         elif reason_str == 'AUPHONIC_PROCESSING':
-            breakdown['auphonic_processing'] += credits_used
-        
-        breakdown['total'] += credits_used
+            breakdown['auphonic_processing'] += credits_amount * multiplier
+            breakdown['total'] += credits_amount * multiplier
+        elif reason_str == 'AI_METADATA_GENERATION':
+            breakdown['ai_metadata'] += credits_amount * multiplier
+            breakdown['total'] += credits_amount * multiplier
+        else:
+            # Other reasons (like PROCESS_AUDIO) just add to total
+            breakdown['total'] += credits_amount * multiplier
     
     return breakdown

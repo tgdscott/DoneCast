@@ -357,8 +357,21 @@ export default function PodcastPlusDashboard() {
     setShouldRunTour(true);
   }, []);
 
-  const fetchData = async () => {
+  // Track if we're currently fetching to prevent concurrent calls
+  const fetchingRef = useRef(false);
+  
+  const fetchData = useCallback(async () => {
     if (!token) return;
+    
+    // Prevent concurrent fetches
+    if (fetchingRef.current) {
+      console.log('[Dashboard] Skipping fetchData - already fetching');
+      return;
+    }
+    
+    fetchingRef.current = true;
+    console.log('[Dashboard] Starting fetchData', { timestamp: Date.now() });
+    
     try {
       setStatsError(null);
       const api = makeApi(token);
@@ -388,10 +401,19 @@ export default function PodcastPlusDashboard() {
         setTemplates([]);
       }
 
-      // Podcasts
+      // Podcasts - only update if the data actually changed to prevent re-renders
       if (podcastsRes.status === 'fulfilled') {
         const podcastList = coerceArray(podcastsRes.value);
-        setPodcasts(podcastList);
+        // Only update if the array reference or content changed
+        setPodcasts(prevPodcasts => {
+          const prevIds = prevPodcasts.map(p => p.id).sort().join(',');
+          const newIds = podcastList.map(p => p.id).sort().join(',');
+          if (prevIds === newIds && prevPodcasts.length === podcastList.length) {
+            // Same podcasts, return previous to avoid re-render
+            return prevPodcasts;
+          }
+          return podcastList;
+        });
       } else {
         const reason = podcastsRes.reason || {};
         if (reason.status === 401) {
@@ -427,11 +449,24 @@ export default function PodcastPlusDashboard() {
       } else {
         setStatsError('Failed to load dashboard data.');
       }
+    } finally {
+      fetchingRef.current = false;
+      console.log('[Dashboard] Finished fetchData', { timestamp: Date.now() });
     }
-  };
+  }, [token, logout]);
 
   // Initial load + token change: fetch other data (user already fetched by AuthContext)
-  useEffect(() => { if (token) { fetchData(); } }, [token, logout]);
+  // Use ref to avoid including fetchData in deps (it's stable via useCallback)
+  const fetchDataRef = useRef(fetchData);
+  useEffect(() => {
+    fetchDataRef.current = fetchData;
+  }, [fetchData]);
+  
+  useEffect(() => { 
+    if (token) { 
+      fetchDataRef.current(); 
+    } 
+  }, [token]); // Only depend on token, not fetchData
   useEffect(() => {
     if (!token) return;
     if (currentView === 'episodeStart' || currentView === 'preuploadUpload') {
@@ -469,7 +504,7 @@ export default function PodcastPlusDashboard() {
     if (token && currentView === 'dashboard') {
       fetchData();
     }
-  }, [token, currentView]);
+  }, [token, currentView, fetchData]);
   
   // Initial fetch of preuploaded items when dashboard loads
   useEffect(() => {
@@ -658,13 +693,12 @@ export default function PodcastPlusDashboard() {
     setCurrentView('editTemplate');
   };
 
-  const handleBackToDashboard = () => {
+  const handleBackToDashboard = useCallback(() => {
     setSelectedTemplateId(null);
     setCreatorMode('standard');
     setCurrentView('dashboard');
-    // Ensure counts (podcasts/templates/stats) are fresh when returning
-    try { fetchData(); } catch {}
-  };
+    // Don't call fetchData here - the useEffect will handle it when currentView changes to 'dashboard'
+  }, []);
   
   const handleBackToTemplateManager = () => {
       setSelectedTemplateId(null);
@@ -687,6 +721,35 @@ export default function PodcastPlusDashboard() {
     }
   }
   };
+
+  // Memoize targetPodcast for websiteBuilder to prevent re-renders
+  // Use podcast IDs string to detect actual changes, not array reference
+  const podcastsIdsString = useMemo(() => {
+    if (!podcasts || podcasts.length === 0) return '';
+    return podcasts.map(p => p.id).sort().join(',');
+  }, [podcasts]);
+  
+  // Create a stable map that only updates when podcast IDs actually change
+  const podcastsMapRef = useRef(new Map());
+  const lastPodcastsIdsStringRef = useRef('');
+  
+  if (podcastsIdsString !== lastPodcastsIdsStringRef.current) {
+    // Podcasts actually changed, rebuild the map
+    podcastsMapRef.current.clear();
+    podcasts?.forEach(p => podcastsMapRef.current.set(p.id, p));
+    lastPodcastsIdsStringRef.current = podcastsIdsString;
+  }
+  
+  const targetPodcastForBuilder = useMemo(() => {
+    if (currentView !== 'websiteBuilder') return null;
+    if (!podcastsIdsString || podcastsMapRef.current.size === 0) return null;
+    
+    // Get first podcast ID from the map if no selection
+    const firstPodcastId = selectedPodcastId || Array.from(podcastsMapRef.current.keys())[0];
+    if (!firstPodcastId) return null;
+    
+    return podcastsMapRef.current.get(firstPodcastId) || null;
+  }, [currentView, selectedPodcastId, podcastsIdsString]); // Only depend on IDs string, not array
 
   const renderCurrentView = () => {
     switch (currentView) {
@@ -781,6 +844,7 @@ export default function PodcastPlusDashboard() {
                 setCurrentView('preuploadUpload');
               }}
               userTimezone={resolvedTimezone}
+              onViewHistory={() => setCurrentView('episodeHistory')}
             />
           </Suspense>
         );
@@ -796,9 +860,21 @@ export default function PodcastPlusDashboard() {
             <EpisodeHistory onBack={handleBackToDashboard} token={token} />
           </Suspense>
         );
-      case 'websiteBuilder':
-        // Use VisualEditor with the first podcast as default if none selected
-        const targetPodcast = podcasts?.find(p => p.id === selectedPodcastId) || podcasts?.[0];
+      case 'websiteBuilder': {
+        // Use memoized targetPodcast to prevent re-renders
+        const targetPodcast = targetPodcastForBuilder;
+        
+        // Debug: Log when targetPodcast changes (using closure to track previous)
+        if (targetPodcast) {
+          console.log('[Dashboard] Rendering websiteBuilder', {
+            targetPodcastId: targetPodcast.id,
+            targetPodcastName: targetPodcast.name,
+            podcastsLength: podcasts?.length,
+            selectedPodcastId,
+            timestamp: Date.now()
+          });
+        }
+        
         if (!targetPodcast) {
           return (
             <div className="p-8 text-center">
@@ -810,12 +886,14 @@ export default function PodcastPlusDashboard() {
         return (
           <Suspense fallback={<ComponentLoader />}>
             <VisualEditor
+              key={targetPodcast.id}
               token={token}
               podcast={targetPodcast}
               onBack={handleBackToDashboard}
             />
           </Suspense>
         );
+      }
       case 'podcastManager':
         return (
           <Suspense fallback={<ComponentLoader />}>
@@ -1038,6 +1116,25 @@ export default function PodcastPlusDashboard() {
                         )}
                       </div>
                     )}
+                    
+                    {/* Recent Episodes Section */}
+                    {Array.isArray(stats?.recent_episodes) && stats.recent_episodes.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-3">Most Recent Episodes</div>
+                        {stats.recent_episodes.map((ep, idx) => (
+                          <div key={ep.episode_id || idx} className="p-3 rounded border bg-white flex items-center justify-between">
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <span className="text-[11px] tracking-wide text-gray-700 font-medium truncate" title={ep.title}>{ep.title}</span>
+                            </div>
+                            <div className="text-right ml-3 flex flex-col items-end">
+                              <div className="text-base font-bold text-gray-900">{ep.downloads_all_time?.toLocaleString() || 0}</div>
+                              <div className="text-[9px] text-gray-500">{formatRelative(ep.publish_at)}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    
                     <p className="text-[11px] text-gray-400">Analytics powered by OP3 (Open Podcast Prefix Project). Updates every 3 hours.</p>
                     {stats?.op3_enabled && (stats?.plays_7d === 0 && stats?.plays_30d === 0 && stats?.plays_all_time === 0) && (
                       <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">

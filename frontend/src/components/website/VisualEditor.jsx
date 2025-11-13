@@ -3,442 +3,227 @@
  * Combines section palette, canvas, and configuration
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { ArrowLeft, Save, Loader2, Eye, Plus, Palette, RotateCcw, Sparkles } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { ArrowLeft, Loader2, Palette, RotateCcw, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { useToast } from "@/hooks/use-toast";
-import { makeApi, isApiError } from "@/lib/apiClient";
 import SectionPalette from "./SectionPalette";
 import SectionCanvas from "./SectionCanvas";
 import SectionConfigModal from "./SectionConfigModal";
 import CSSEditorDialog from "@/components/dashboard/CSSEditorDialog";
 import ResetConfirmDialog from "@/components/dashboard/ResetConfirmDialog";
+import { useAvailableSections, useWebsiteSections, useWebsiteGeneration } from "@/hooks/useVisualEditor";
+import { useWebsiteBuilder, useWebsiteCSS } from "@/hooks/useWebsiteBuilder";
 
 export default function VisualEditor({ token, podcast, onBack }) {
-  const { toast } = useToast();
-  const api = useMemo(() => makeApi(token), [token]);
-
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [refining, setRefining] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [regenerating, setRegenerating] = useState(false);
-  
-  // Section library (available sections from API)
-  const [availableSections, setAvailableSections] = useState([]);
-  const [availableSectionDefs, setAvailableSectionDefs] = useState({});
-  
-  // Website state
-  const [website, setWebsite] = useState(null);
-  const [sections, setSections] = useState([]); // Ordered array of {id}
-  const [sectionsConfig, setSectionsConfig] = useState({});
-  const [sectionsEnabled, setSectionsEnabled] = useState({});
+  // Debug: Track renders
+  const renderCountRef = useRef(0);
+  renderCountRef.current += 1;
+  if (renderCountRef.current <= 10 || renderCountRef.current % 10 === 0) {
+    console.log(`[VisualEditor] Render #${renderCountRef.current}`, {
+      podcastId: podcast?.id,
+      podcastName: podcast?.name,
+      timestamp: Date.now()
+    });
+  }
   
   // UI state
   const [editingSection, setEditingSection] = useState(null);
-  const [viewMode, setViewMode] = useState("editor"); // "editor" | "preview"
   const [showCSSEditor, setShowCSSEditor] = useState(false);
-  const [cssEditorLoading, setCSSEditorLoading] = useState(false);
   const [showResetDialog, setShowResetDialog] = useState(false);
+  const [refining, setRefining] = useState(false);
 
-  // Load available sections from API
-  const loadAvailableSections = useCallback(async () => {
-    try {
-      const data = await api.get("/api/website-sections");
-      setAvailableSections(data);
-      
-      // Create lookup map
-      const defsMap = {};
-      data.forEach((section) => {
-        defsMap[section.id] = section;
-      });
-      setAvailableSectionDefs(defsMap);
-    } catch (err) {
-      console.error("Failed to load sections", err);
-      toast({
-        title: "Error",
-        description: "Failed to load available sections",
-        variant: "destructive",
-      });
-    }
-  }, [api, toast]);
+  // Load available sections
+  const { availableSections, availableSectionDefs, loading: sectionsLoading } = useAvailableSections(token);
 
-  // Load website and its section configuration
-  const loadWebsite = useCallback(async () => {
-    setLoading(true);
-    try {
-      // Load website data
-      const websiteData = await api.get(`/api/podcasts/${podcast.id}/website`);
-      setWebsite(websiteData);
-
-      // Load section configuration
-      const sectionsData = await api.get(`/api/podcasts/${podcast.id}/website/sections`);
-      
-      const order = sectionsData.sections_order || [];
-      const config = sectionsData.sections_config || {};
-      const enabled = sectionsData.sections_enabled || {};
-
-      setSections(order.map((id) => ({ id })));
-      setSectionsConfig(config);
-      setSectionsEnabled(enabled);
-    } catch (err) {
-      if (err?.status === 404) {
-        // No website yet - initialize with defaults
-        const defaultSections = availableSections
-          .filter((s) => s.default_enabled)
-          .map((s) => ({ id: s.id }));
-        
-        setSections(defaultSections);
-        
-        const defaultEnabled = {};
-        defaultSections.forEach((s) => {
-          defaultEnabled[s.id] = true;
-        });
-        setSectionsEnabled(defaultEnabled);
-      } else {
-        console.error("Failed to load website", err);
-        toast({
-          title: "Error",
-          description: "Failed to load website configuration",
-          variant: "destructive",
-        });
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [api, podcast.id, availableSections, toast]);
-
-  // Initial load
+  // Load website data - only initialize hook once podcast is stable
+  const podcastIdRef = useRef(podcast.id);
+  if (podcastIdRef.current !== podcast.id) {
+    podcastIdRef.current = podcast.id;
+  }
+  
+  const {
+    website,
+    loading: websiteLoading,
+    loadWebsite,
+    resetWebsite,
+  } = useWebsiteBuilder(token, podcastIdRef.current);
+  
+  // Track if we've done initial load to prevent loops
+  const initialLoadDoneRef = useRef(false);
+  
+  // Debug: Log when loadWebsite changes
+  const loadWebsiteRefPrev = useRef(loadWebsite);
   useEffect(() => {
-    loadAvailableSections();
-  }, [loadAvailableSections]);
-
-  useEffect(() => {
-    if (availableSections.length > 0) {
-      loadWebsite();
+    if (loadWebsiteRefPrev.current !== loadWebsite) {
+      console.log('[VisualEditor] loadWebsite function changed', {
+        podcastId: podcast.id,
+        prev: loadWebsiteRefPrev.current?.toString().substring(0, 50),
+        new: loadWebsite?.toString().substring(0, 50)
+      });
+      loadWebsiteRefPrev.current = loadWebsite;
     }
-  }, [availableSections, loadWebsite]);
+  }, [loadWebsite, podcast.id]);
 
-  // Save section order
+  // Load and manage sections
+  const {
+    sections,
+    sectionsConfig,
+    sectionsEnabled,
+    loading: sectionsDataLoading,
+    loadSections,
+    reorderSections,
+    toggleSection,
+    saveSectionConfig,
+    addSection,
+    deleteSection,
+    refineSection: refineSectionWithAI,
+  } = useWebsiteSections(token, podcast.id, availableSections);
+
+  // Use refs to avoid recreating callbacks when loadWebsite/loadSections change
+  const loadWebsiteRef = useRef(loadWebsite);
+  const loadSectionsRef = useRef(loadSections);
+  
+  useEffect(() => {
+    loadWebsiteRef.current = loadWebsite;
+  }, [loadWebsite]);
+  
+  useEffect(() => {
+    loadSectionsRef.current = loadSections;
+  }, [loadSections]);
+  
+  // Create stable callbacks for updates
+  const handleWebsiteAndSectionsUpdate = useCallback(async () => {
+    await loadWebsiteRef.current();
+    await loadSectionsRef.current();
+  }, []); // Empty deps - uses refs
+
+  const handleWebsiteUpdate = useCallback(async () => {
+    await loadWebsiteRef.current();
+  }, []); // Empty deps - uses ref
+
+  // Website generation operations
+  const {
+    generating,
+    regenerating,
+    regeneratingTheme,
+    generateWebsite,
+    regenerateWebsite,
+    regenerateTheme,
+  } = useWebsiteGeneration(token, podcast.id, handleWebsiteAndSectionsUpdate);
+
+  // CSS operations
+  const {
+    cssEditorLoading,
+    saveCSS,
+    generateAICSS,
+  } = useWebsiteCSS(token, podcast.id, handleWebsiteUpdate);
+
+  // Track if we've loaded sections to prevent loops
+  const sectionsLoadedRef = useRef(false);
+  const lastWebsiteIdRef = useRef(null);
+  const lastPodcastIdRef = useRef(null);
+  
+  // Reset refs when podcast changes
+  useEffect(() => {
+    if (lastPodcastIdRef.current !== podcast.id) {
+      console.log('[VisualEditor] Podcast ID changed', {
+        from: lastPodcastIdRef.current,
+        to: podcast.id
+      });
+      lastPodcastIdRef.current = podcast.id;
+      initialLoadDoneRef.current = false;
+      sectionsLoadedRef.current = false;
+      lastWebsiteIdRef.current = null;
+    }
+  }, [podcast.id]);
+  
+  // Initial load (only once when sections are available and website is loaded)
+  useEffect(() => {
+    const websiteId = website?.id;
+    if (availableSections.length > 0 && website && 
+        (!sectionsLoadedRef.current || lastWebsiteIdRef.current !== websiteId)) {
+      console.log('[VisualEditor] Loading sections', {
+        websiteId,
+        sectionsCount: availableSections.length,
+        wasLoaded: sectionsLoadedRef.current,
+        lastWebsiteId: lastWebsiteIdRef.current
+      });
+      sectionsLoadedRef.current = true;
+      lastWebsiteIdRef.current = websiteId;
+      loadSectionsRef.current().catch(err => {
+        console.error('[VisualEditor] Failed to load sections', err);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availableSections.length, website?.id]); // Only depend on website ID, not entire object
+
+  // Handlers
   const handleReorder = async (newSections) => {
-    setSections(newSections);
-    
-    // Optimistic update, save in background
-    try {
-      await api.patch(`/api/podcasts/${podcast.id}/website/sections/order`, {
-        section_ids: newSections.map((s) => s.id),
-      });
-    } catch (err) {
-      console.error("Failed to save order", err);
-      toast({
-        title: "Error",
-        description: "Failed to save section order",
-        variant: "destructive",
-      });
-      // Reload to get server state
-      loadWebsite();
-    }
+    await reorderSections(newSections);
   };
 
-  // Toggle section visibility
   const handleToggleSection = async (sectionId, enabled) => {
-    console.log(`[VisualEditor] Toggling section ${sectionId} to ${enabled}`);
-    
-    // Optimistic update
-    setSectionsEnabled((prev) => {
-      const newState = {
-        ...prev,
-        [sectionId]: enabled,
-      };
-      console.log(`[VisualEditor] Updated sectionsEnabled state:`, newState);
-      return newState;
-    });
-
-    try {
-      const response = await api.patch(`/api/podcasts/${podcast.id}/website/sections/${sectionId}/toggle`, {
-        enabled,
-      });
-      console.log(`[VisualEditor] Toggle API response:`, response);
-      
-      toast({
-        title: "Success",
-        description: `Section ${enabled ? 'shown' : 'hidden'}`,
-      });
-    } catch (err) {
-      console.error("[VisualEditor] Failed to toggle section", err);
-      const errorMsg = err?.response?.data?.detail || err?.message || "Unknown error";
-      toast({
-        title: "Error",
-        description: `Failed to update section visibility: ${errorMsg}`,
-        variant: "destructive",
-      });
-      // Revert
-      setSectionsEnabled((prev) => ({
-        ...prev,
-        [sectionId]: !enabled,
-      }));
-    }
+    await toggleSection(sectionId, enabled);
   };
 
-  // Save section configuration
   const handleSaveConfig = async (sectionId, config) => {
-    // Optimistic update
-    setSectionsConfig((prev) => ({
-      ...prev,
-      [sectionId]: config,
-    }));
-    
     setEditingSection(null);
-
-    try {
-      await api.patch(`/api/podcasts/${podcast.id}/website/sections/${sectionId}/config`, {
-        config,
-      });
-      
-      toast({
-        title: "Saved",
-        description: "Section configuration updated",
-      });
-    } catch (err) {
-      console.error("Failed to save config", err);
-      toast({
-        title: "Error",
-        description: "Failed to save section configuration",
-        variant: "destructive",
-      });
-      // Reload to get server state
-      loadWebsite();
-    }
+    await saveSectionConfig(sectionId, config);
   };
 
-  // AI refinement for a section
   const handleRefineSection = async (sectionId, instruction) => {
     setRefining(true);
     try {
-      const response = await api.post(
-        `/api/podcasts/${podcast.id}/website/sections/${sectionId}/refine`,
-        { instruction }
-      );
-      
-      // Update with AI-generated config
-      setSectionsConfig((prev) => ({
-        ...prev,
-        [sectionId]: response.config,
-      }));
-      
-      toast({
-        title: "Refined",
-        description: "AI has improved your section content",
-      });
-    } catch (err) {
-      console.error("Failed to refine section", err);
-      
-      // Check for 501 (not implemented yet)
-      if (err?.status === 501) {
-        toast({
-          title: "Coming Soon",
-          description: "AI section refinement is being implemented",
-          variant: "default",
-        });
-      } else {
-        toast({
-          title: "Error",
-          description: "Failed to refine section with AI",
-          variant: "destructive",
-        });
-      }
+      await refineSectionWithAI(sectionId, instruction);
     } finally {
       setRefining(false);
     }
   };
 
-  // Generate website for the first time
   const handleGenerateWebsite = async () => {
-    setGenerating(true);
-    try {
-      const websiteData = await api.post(`/api/podcasts/${podcast.id}/website`);
-      setWebsite(websiteData);
-      
-      // Reload to get the full website configuration
-      await loadWebsite();
-      
-      toast({
-        title: "Website Generated!",
-        description: "Your podcast website has been created with AI",
-      });
-    } catch (err) {
-      console.error("Failed to generate website", err);
-      const message = isApiError(err) 
-        ? (err.detail || err.message || err.error || "Unable to generate website") 
-        : "Unable to generate website";
-      toast({
-        title: "Error",
-        description: message,
-        variant: "destructive",
-      });
-    } finally {
-      setGenerating(false);
-    }
+    await generateWebsite();
+    await loadWebsite();
+    await loadSections();
   };
 
-  // Regenerate existing website with fresh data
   const handleRegenerateWebsite = async () => {
-    setRegenerating(true);
-    try {
-      // POST to same endpoint - backend will update existing website
-      const websiteData = await api.post(`/api/podcasts/${podcast.id}/website`);
-      setWebsite(websiteData);
-      
-      // Reload to get the full updated configuration
-      await loadWebsite();
-      
-      toast({
-        title: "Website Regenerated!",
-        description: "Your website has been refreshed with latest episodes and colors",
-      });
-    } catch (err) {
-      console.error("Failed to regenerate website", err);
-      const message = isApiError(err) 
-        ? (err.detail || err.message || err.error || "Unable to regenerate website") 
-        : "Unable to regenerate website";
-      toast({
-        title: "Error",
-        description: message,
-        variant: "destructive",
-      });
-    } finally {
-      setRegenerating(false);
-    }
+    await regenerateWebsite();
   };
 
-  // Add section from palette
-  const handleAddSection = (section) => {
-    const newSection = { id: section.id };
-    setSections((prev) => [...prev, newSection]);
-    setSectionsEnabled((prev) => ({
-      ...prev,
-      [section.id]: true,
-    }));
-
-    // Initialize with defaults
-    const defaultConfig = {};
-    [...section.required_fields, ...section.optional_fields].forEach((field) => {
-      if (field.default !== undefined) {
-        defaultConfig[field.name] = field.default;
-      }
-    });
-    
-    if (Object.keys(defaultConfig).length > 0) {
-      setSectionsConfig((prev) => ({
-        ...prev,
-        [section.id]: defaultConfig,
-      }));
-    }
-
-    // Save to server
-    handleReorder([...sections, newSection]);
-    handleToggleSection(section.id, true);
-
-    toast({
-      title: "Section added",
-      description: `${section.label} has been added to your website`,
-    });
+  const handleRegenerateTheme = async () => {
+    await regenerateTheme();
   };
 
-  // Delete section
-  const handleDeleteSection = (sectionId) => {
-    setSections((prev) => prev.filter((s) => s.id !== sectionId));
-    handleReorder(sections.filter((s) => s.id !== sectionId));
-    
-    toast({
-      title: "Section removed",
-      description: "Section has been removed from your website",
-    });
+  const handleAddSection = async (section) => {
+    await addSection(section);
   };
 
-  const existingSectionIds = sections.map((s) => s.id);
+  const handleDeleteSection = async (sectionId) => {
+    await deleteSection(sectionId);
+  };
 
-  // CSS Editor handlers
   const handleCSSsave = async (css) => {
-    if (!podcast?.id) return;
-    setCSSEditorLoading(true);
-    try {
-      await api.patch(`/api/podcasts/${podcast.id}/website/css`, { css });
-      await loadWebsite();
-      setShowCSSEditor(false);
-      toast({ 
-        title: "CSS updated", 
-        description: "Your custom styles have been saved." 
-      });
-    } catch (err) {
-      console.error("Failed to update CSS", err);
-      toast({ 
-        title: "Failed to update CSS", 
-        description: isApiError(err) ? (err.detail || err.error || "Unable to save CSS") : "Unable to save CSS",
-        variant: "destructive"
-      });
-    } finally {
-      setCSSEditorLoading(false);
-    }
+    await saveCSS(css);
+    setShowCSSEditor(false);
   };
 
   const handleAIGenerateCSS = async (prompt) => {
-    if (!podcast?.id || !prompt.trim()) return;
-    setCSSEditorLoading(true);
+    await generateAICSS(prompt);
+  };
+
+  const handleReset = async () => {
     try {
-      const result = await api.patch(`/api/podcasts/${podcast.id}/website/css`, { 
-        css: "", 
-        ai_prompt: prompt 
-      });
+      await resetWebsite();
+      setShowResetDialog(false);
       await loadWebsite();
-      toast({ 
-        title: "CSS generated", 
-        description: "AI has created custom styles for your website." 
-      });
-      // Update the website state with new CSS
-      if (website) {
-        setWebsite({...website, global_css: result.css});
-      }
+      await loadSections();
     } catch (err) {
-      console.error("Failed to generate CSS", err);
-      toast({ 
-        title: "Failed to generate CSS", 
-        description: isApiError(err) ? (err.detail || err.error || "Unable to generate CSS") : "Unable to generate CSS",
-        variant: "destructive"
-      });
-    } finally {
-      setCSSEditorLoading(false);
+      // Error already handled in hook
     }
   };
 
-  // Reset handler
-  const handleReset = async () => {
-    if (!podcast?.id) return;
-    setLoading(true);
-    try {
-      const data = await api.post(`/api/podcasts/${podcast.id}/website/reset`, { 
-        confirmation_phrase: "here comes the boom" 
-      });
-      setWebsite(data);
-      setShowResetDialog(false);
-      // Reload sections after reset
-      await loadWebsite();
-      toast({ 
-        title: "Website reset", 
-        description: "Your website has been reset to default settings." 
-      });
-    } catch (err) {
-      console.error("Failed to reset website", err);
-      toast({ 
-        title: "Failed to reset website", 
-        description: isApiError(err) ? (err.detail || err.error || "Unable to reset") : "Unable to reset",
-        variant: "destructive"
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+  const loading = websiteLoading || sectionsLoading || sectionsDataLoading;
 
   if (loading) {
     return (
@@ -468,11 +253,12 @@ export default function VisualEditor({ token, podcast, onBack }) {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Only show functional buttons */}
           <Button
             variant="outline"
             size="sm"
             onClick={() => setShowCSSEditor(true)}
-            disabled={loading}
+            disabled={loading || !website}
           >
             <Palette className="mr-2 h-4 w-4" />
             Customize CSS
@@ -482,22 +268,14 @@ export default function VisualEditor({ token, podcast, onBack }) {
             variant="outline"
             size="sm"
             onClick={() => setShowResetDialog(true)}
-            disabled={loading}
+            disabled={loading || !website}
             className="text-red-600 hover:text-red-700 hover:bg-red-50"
           >
             <RotateCcw className="mr-2 h-4 w-4" />
             Reset
           </Button>
           
-          <Button
-            variant={viewMode === "preview" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setViewMode(viewMode === "preview" ? "editor" : "preview")}
-          >
-            <Eye className="mr-2 h-4 w-4" />
-            {viewMode === "preview" ? "Edit" : "Preview"}
-          </Button>
-          
+          {/* Live Site Button - always shows when domain exists */}
           {website?.default_domain && (
             <Button
               variant="outline"
@@ -509,16 +287,108 @@ export default function VisualEditor({ token, podcast, onBack }) {
           )}
         </div>
       </div>
+      
+      {/* Warning banner about preview vs live site */}
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
+        <div className="text-amber-600 mt-0.5">
+          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+          </svg>
+        </div>
+        <div className="flex-1">
+          <p className="text-sm font-medium text-amber-800">
+            Preview Mode
+          </p>
+          <p className="text-xs text-amber-700 mt-0.5">
+            This is a simplified preview for editing. The live site will look different and include all features like the audio player and full styling.
+          </p>
+        </div>
+      </div>
+      
+      {/* Theme Description Display */}
+      {website && sectionsConfig && sectionsConfig["_theme_metadata"] && (
+        <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-2">
+                <Sparkles className="h-4 w-4 text-purple-600" />
+                <h3 className="text-sm font-semibold text-purple-900">AI Theme Description</h3>
+              </div>
+              <p className="text-sm text-purple-800">
+                {sectionsConfig["_theme_metadata"].description || "No theme description available."}
+              </p>
+              {sectionsConfig["_theme_metadata"].visual_motifs && sectionsConfig["_theme_metadata"].visual_motifs.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {sectionsConfig["_theme_metadata"].visual_motifs.map((motif, idx) => (
+                    <span key={idx} className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded">
+                      {motif}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRegenerateTheme}
+                disabled={regeneratingTheme || loading}
+                className="text-purple-700 border-purple-300 hover:bg-purple-100"
+                title="Generate a new AI theme (doesn't change structure)"
+              >
+                {regeneratingTheme ? (
+                  <>
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    Regenerating...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                    New Theme
+                  </>
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  // Open section config for _theme_metadata to edit
+                  setEditingSection("_theme_metadata");
+                }}
+                className="text-purple-700 hover:text-purple-900 hover:bg-purple-100"
+              >
+                Edit
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main editor area */}
       <div className="grid grid-cols-[320px_1fr] gap-6">
         {/* Left sidebar - Section palette */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Available Sections</CardTitle>
-            <CardDescription className="text-xs">
-              Add sections to build your website
-            </CardDescription>
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <CardTitle className="text-lg">Available Sections</CardTitle>
+                <CardDescription className="text-xs">
+                  Add sections to build your website
+                </CardDescription>
+              </div>
+              {website && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowCSSEditor(true)}
+                  disabled={loading}
+                  className="h-8"
+                  title="Edit custom CSS styles"
+                >
+                  <Palette className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             <SectionPalette
@@ -568,7 +438,7 @@ export default function VisualEditor({ token, podcast, onBack }) {
                       onClick={handleRegenerateWebsite}
                       disabled={regenerating || loading}
                       className="bg-purple-600 hover:bg-purple-700"
-                      title="Regenerate website with latest episodes and colors"
+                      title="Regenerate entire website with AI: updates layout, colors from cover art, and latest episodes. This may overwrite your customizations."
                     >
                       {regenerating ? (
                         <>
@@ -578,7 +448,27 @@ export default function VisualEditor({ token, podcast, onBack }) {
                       ) : (
                         <>
                           <Sparkles className="mr-2 h-4 w-4" />
-                          Regenerate
+                          Regenerate with AI
+                        </>
+                      )}
+                    </Button>
+                  )}
+                  {!website && (
+                    <Button
+                      size="sm"
+                      onClick={handleGenerateWebsite}
+                      disabled={generating}
+                      className="bg-purple-600 hover:bg-purple-700"
+                    >
+                      {generating ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Generating...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="mr-2 h-4 w-4" />
+                          Generate Website
                         </>
                       )}
                     </Button>
@@ -588,7 +478,7 @@ export default function VisualEditor({ token, podcast, onBack }) {
                     variant="outline"
                     onClick={() => loadWebsite()}
                     disabled={loading}
-                    title="Reload current website data from server"
+                    title="Reload website data from server (useful if you made changes elsewhere)"
                   >
                     {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Refresh"}
                   </Button>
@@ -636,6 +526,14 @@ export default function VisualEditor({ token, podcast, onBack }) {
                   onToggleSection={handleToggleSection}
                   onEditSection={(sectionId) => setEditingSection(sectionId)}
                   onDeleteSection={handleDeleteSection}
+                  podcast={{
+                    id: podcast.id,
+                    title: podcast.name,
+                    description: podcast.description,
+                    cover_url: website?.cover_url || podcast.cover_url,
+                    rss_url: podcast.rss_feed_url,
+                  }}
+                  episodes={website?.episodes || []}
                 />
               )}
             </CardContent>

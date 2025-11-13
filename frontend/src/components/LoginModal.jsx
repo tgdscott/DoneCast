@@ -99,6 +99,7 @@ export default function LoginModal({ onClose, initialMode = 'login' }) {
   const googleLoginUrl = useMemo(buildGoogleLoginUrl, []);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [promoCode, setPromoCode] = useState('');
   const [error, setError] = useState('');
   const [errorTone, setErrorTone] = useState('error');
   const [mode, setMode] = useState(initialMode); // 'login' | 'register' | 'verify'
@@ -115,6 +116,28 @@ export default function LoginModal({ onClose, initialMode = 'login' }) {
   const [termsInfo, setTermsInfo] = useState({ version: fallbackTermsVersion, url: '/terms' });
   const [termsLoading, setTermsLoading] = useState(false);
   const [registerSubmitting, setRegisterSubmitting] = useState(false);
+
+  // Check for referral code in URL query parameter
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const refCode = params.get('ref');
+      if (refCode) {
+        setPromoCode(refCode.toUpperCase());
+      }
+    }
+  }, []); // Only on mount
+
+  // Also check when switching to register mode (in case ref param was added after mount)
+  useEffect(() => {
+    if (mode === 'register' && typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const refCode = params.get('ref');
+      if (refCode) {
+        setPromoCode(refCode.toUpperCase());
+      }
+    }
+  }, [mode]);
 
   const showError = (message, tone = 'error') => {
     setError(message);
@@ -257,6 +280,7 @@ export default function LoginModal({ onClose, initialMode = 'login' }) {
           password,
           accept_terms: true,
           terms_version: versionToSend,
+          promo_code: promoCode.trim() || null,
         }),
         credentials: 'include',
       });
@@ -377,6 +401,20 @@ export default function LoginModal({ onClose, initialMode = 'login' }) {
                   </Button>
                 </div>
               </div>
+              {mode === 'register' && (
+                <div className="space-y-2">
+                  <Label htmlFor="promoCode">Promo Code (Optional)</Label>
+                  <Input
+                    id="promoCode"
+                    type="text"
+                    autoComplete="off"
+                    placeholder="Enter promo code"
+                    value={promoCode}
+                    onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+                    maxLength={50}
+                  />
+                </div>
+              )}
               <Button type="submit" className="w-full" disabled={submitDisabled}>
                 {submitText}
               </Button>

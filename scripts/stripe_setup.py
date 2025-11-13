@@ -43,11 +43,7 @@ PRODUCTS = {
                 "interval": "month",
                 "lookup_key": "starter_monthly"
             },
-            "annual": {
-                "amount": 19000,  # $190.00 in cents (save ~17%)
-                "interval": "year",
-                "lookup_key": "starter_annual"
-            }
+            # Starter does not have an annual plan
         }
     },
     "creator": {
@@ -69,7 +65,7 @@ PRODUCTS = {
                 "lookup_key": "creator_monthly"
             },
             "annual": {
-                "amount": 39000,  # $390.00 in cents (save ~17%)
+                "amount": 39900,  # $399.00/year
                 "interval": "year",
                 "lookup_key": "creator_annual"
             }
@@ -93,7 +89,7 @@ PRODUCTS = {
                 "lookup_key": "pro_monthly"
             },
             "annual": {
-                "amount": 79000,  # $790.00 in cents (save ~17%)
+                "amount": 79900,  # $799.00/year
                 "interval": "year",
                 "lookup_key": "pro_annual"
             }
@@ -117,7 +113,7 @@ PRODUCTS = {
                 "lookup_key": "executive_monthly"
             },
             "annual": {
-                "amount": 128500,  # $1,285.00/year (save ~17%, equivalent to ~$107/month)
+                "amount": 129900,  # $1,299.00/year
                 "interval": "year",
                 "lookup_key": "executive_annual"
             }
@@ -125,31 +121,52 @@ PRODUCTS = {
     }
 }
 
-# Add-on Products (rollover minutes - one-time purchases)
-# Note: These are "rollover" meaning unused minutes carry over
+# Add-on Products (10,000 credits - one-time purchases)
+# These credits never expire and can be used anytime
 ADD_ONS = {
-    "additional_hour_starter": {
-        "name": "Extra Minutes - Starter (60 min rollover)",
-        "description": "Add 60 minutes of processing time with rollover to your Starter plan",
+    "addon_credits_starter": {
+        "name": "Addon Credits - Starter (10,000 credits)",
+        "description": "Purchase 10,000 additional credits for your Starter plan. Credits never expire.",
         "price": {
-            "amount": 600,  # $6.00 in cents (YOUR ACTUAL PRICE)
-            "lookup_key": "addon_hour_starter"
+            "amount": 800,  # $8.00 in cents
+            "lookup_key": "addon_credits_starter",
+            "metadata": {"credits": "10000"}
         }
     },
-    "additional_hour_creator": {
-        "name": "Extra Minutes - Creator (60 min rollover)",
-        "description": "Add 60 minutes of processing time with rollover to your Creator plan",
+    "addon_credits_creator": {
+        "name": "Addon Credits - Creator (10,000 credits)",
+        "description": "Purchase 10,000 additional credits for your Creator plan. Credits never expire.",
         "price": {
-            "amount": 500,  # $5.00 in cents (YOUR ACTUAL PRICE)
-            "lookup_key": "addon_hour_creator"
+            "amount": 700,  # $7.00 in cents
+            "lookup_key": "addon_credits_creator",
+            "metadata": {"credits": "10000"}
         }
     },
-    "additional_hour_pro": {
-        "name": "Extra Minutes - Pro (60 min rollover)",
-        "description": "Add 60 minutes of processing time with rollover to your Pro plan",
+    "addon_credits_pro": {
+        "name": "Addon Credits - Pro (10,000 credits)",
+        "description": "Purchase 10,000 additional credits for your Pro plan. Credits never expire.",
         "price": {
-            "amount": 400,  # $4.00 in cents (YOUR ACTUAL PRICE)
-            "lookup_key": "addon_hour_pro"
+            "amount": 600,  # $6.00 in cents
+            "lookup_key": "addon_credits_pro",
+            "metadata": {"credits": "10000"}
+        }
+    },
+    "addon_credits_executive": {
+        "name": "Addon Credits - Executive (10,000 credits)",
+        "description": "Purchase 10,000 additional credits for your Executive plan. Credits never expire.",
+        "price": {
+            "amount": 500,  # $5.00 in cents
+            "lookup_key": "addon_credits_executive",
+            "metadata": {"credits": "10000"}
+        }
+    },
+    "addon_credits_enterprise": {
+        "name": "Addon Credits - Enterprise (10,000 credits)",
+        "description": "Purchase 10,000 additional credits for your Enterprise plan. Credits never expire.",
+        "price": {
+            "amount": 500,  # $5.00 in cents
+            "lookup_key": "addon_credits_enterprise",
+            "metadata": {"credits": "10000"}
         }
     }
 }
@@ -312,9 +329,12 @@ def setup_stripe_products(dry_run=False, verbose=True):
         price_config = addon_config['price']
         lookup_key = price_config['lookup_key']
         amount = price_config['amount']
+        metadata = price_config.get('metadata', {})
         
         print(f"\n   💰 Price: ${amount/100:.2f} (one-time)")
         print(f"      Lookup key: {lookup_key}")
+        if metadata.get('credits'):
+            print(f"      Credits: {metadata['credits']}")
         
         if dry_run:
             print(f"      ✓ Would create price")
@@ -335,11 +355,14 @@ def setup_stripe_products(dry_run=False, verbose=True):
                         unit_amount=amount,
                         currency='usd',
                         lookup_key=f"{lookup_key}_v2",
-                        metadata={"type": "addon", "addon_key": addon_key}
+                        metadata={"type": "addon", "addon_key": addon_key, **metadata}
                     )
                     print(f"      ✅ Created new price: {price.id} (lookup_key: {lookup_key}_v2)")
                     price_map[lookup_key] = price.id
                 else:
+                    # Update metadata if needed
+                    if metadata:
+                        stripe.Price.modify(price.id, metadata={"type": "addon", "addon_key": addon_key, **metadata})
                     price_map[lookup_key] = price.id
             else:
                 # Create new one-time price (no recurring parameter)
@@ -348,7 +371,7 @@ def setup_stripe_products(dry_run=False, verbose=True):
                     unit_amount=amount,
                     currency='usd',
                     lookup_key=lookup_key,
-                    metadata={"type": "addon", "addon_key": addon_key}
+                    metadata={"type": "addon", "addon_key": addon_key, **metadata}
                 )
                 print(f"      ✅ Created new price: {price.id}")
                 price_map[lookup_key] = price.id

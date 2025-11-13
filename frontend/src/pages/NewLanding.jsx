@@ -205,6 +205,10 @@ export default function NewLanding() {
   useEffect(() => {
     const shouldOpen = searchParams.get('login') === '1';
     setIsLoginModalOpen(shouldOpen);
+    // If opening modal and there's a ref parameter, ensure we're in register mode
+    if (shouldOpen && searchParams.get('ref')) {
+      setLoginModalMode('register');
+    }
   }, [searchParams]);
 
   const openLoginModal = () => {
@@ -257,6 +261,7 @@ export default function NewLanding() {
             </div>
             <div className="nl-nav-links">
               <Link to="/features">Features</Link>
+              <Link to="/pricing-public">Pricing</Link>
               <Link to="/faq">FAQ</Link>
               <Link to="/about">About</Link>
             </div>

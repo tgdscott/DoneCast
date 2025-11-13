@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from typing import Dict, Any
+from datetime import datetime
 from sqlmodel import Session
 
 from ..core.config import settings
@@ -16,32 +17,158 @@ router = APIRouter(
 )
 
 # --- helper: build a correct UserPublic without importing from auth ---
+def _parse_terms_version_date(version_str: str | None) -> datetime | None:
+    """Parse TERMS_VERSION string (e.g., '2025-10-22') as a date.
+    
+    Returns None if version_str is None or cannot be parsed.
+    """
+    if not version_str:
+        return None
+    try:
+        # TERMS_VERSION is in format 'YYYY-MM-DD', parse as date and convert to datetime at midnight UTC
+        from datetime import date
+        parsed_date = datetime.strptime(version_str.strip(), "%Y-%m-%d").date()
+        return datetime.combine(parsed_date, datetime.min.time()).replace(tzinfo=None)
+    except (ValueError, AttributeError):
+        return None
+
+
+def _terms_need_acceptance(user: User, current_terms_version: str | None) -> bool:
+    """Check if user needs to accept updated terms based on date comparison.
+    
+    Returns True if:
+    - Current terms version date is newer than user's terms_accepted_at date, OR
+    - User has never accepted terms (both terms_version_accepted and terms_accepted_at are None), OR
+    - Version strings don't match (fallback if date parsing fails or date is missing)
+    """
+    if not current_terms_version:
+        return False
+    
+    accepted_version = getattr(user, "terms_version_accepted", None)
+    user_accepted_at = getattr(user, "terms_accepted_at", None)
+    
+    # If user has never accepted any version, they need to accept
+    if not accepted_version and not user_accepted_at:
+        return True
+    
+    # Try date-based comparison first (most accurate)
+    current_terms_date = _parse_terms_version_date(current_terms_version)
+    if current_terms_date and user_accepted_at:
+        # Both dates are available - compare them
+        return current_terms_date > user_accepted_at.replace(tzinfo=None)
+    
+    # Fallback to version string comparison if:
+    # - Date parsing failed, OR
+    # - User has version but no date (legacy data)
+    if accepted_version:
+        return accepted_version != current_terms_version
+    
+    # If we get here, user has no version string but might have a date (unlikely)
+    # Default to requiring acceptance for safety
+    return True
+
+
 def _to_user_public(u: User) -> UserPublic:
-    admin_email = getattr(settings, "ADMIN_EMAIL", None)
-    is_admin_email = bool(
-        getattr(u, "email", None)
-        and admin_email
-        and str(u.email).lower() == str(admin_email).lower()
-    )
-    terms_required = getattr(settings, "TERMS_VERSION", None)
-    public = UserPublic.model_validate(u, from_attributes=True)
+    """Convert User model to UserPublic schema with defensive attribute access.
     
-    # Use the role from database (don't override it!)
-    db_role = getattr(u, "role", None)
-    public.role = db_role
+    This function safely accesses user attributes even if the user instance is detached
+    from the database session, handling potential DetachedInstanceError exceptions.
+    """
+    from api.core.logging import get_logger
+    logger = get_logger("api.routers.users")
     
-    # Set is_admin flag (legacy support) - true if they have any admin role OR match ADMIN_EMAIL
-    public.is_admin = is_admin_email or bool(getattr(u, "is_admin", False)) or db_role in ("admin", "superadmin")
-    
-    # Skip terms enforcement in dev mode (dev/prod share same DB, constant re-acceptance is annoying)
-    # CRITICAL: Don't wrap in str() - keep same type as settings (already a str)
-    # This ensures frontend comparison (required !== accepted) works consistently
-    env = (settings.APP_ENV or "dev").strip().lower()
-    if env in {"dev", "development", "local", "test", "testing"}:
-        public.terms_version_required = None
-    else:
-        public.terms_version_required = terms_required
-    return public
+    try:
+        admin_email = getattr(settings, "ADMIN_EMAIL", None)
+        
+        # Safely get email - handle detached instances
+        try:
+            user_email = getattr(u, "email", None)
+            if user_email:
+                user_email = str(user_email).lower()
+        except Exception as email_err:
+            logger.warning("Failed to access user email attribute: %s", email_err)
+            user_email = None
+        
+        is_admin_email = bool(
+            user_email
+            and admin_email
+            and user_email == str(admin_email).lower()
+        )
+        
+        terms_required = getattr(settings, "TERMS_VERSION", None)
+        
+        # Try to validate user model - this may fail if attributes are inaccessible
+        try:
+            public = UserPublic.model_validate(u, from_attributes=True)
+        except Exception as validate_err:
+            logger.error("Failed to validate UserPublic model: %s", validate_err, exc_info=True)
+            # Fallback: try to build UserPublic manually from accessible attributes
+            try:
+                user_id = getattr(u, "id", None)
+                if not user_id:
+                    raise ValueError("User ID is required but not accessible")
+                
+                # Build UserPublic with safe attribute access
+                public_data = {
+                    "id": user_id,
+                    "email": user_email or "",
+                    "is_active": getattr(u, "is_active", True),
+                    "tier": getattr(u, "tier", "free"),
+                    "created_at": getattr(u, "created_at", None),
+                    "last_login": getattr(u, "last_login", None),
+                    "terms_version_accepted": getattr(u, "terms_version_accepted", None),
+                    "terms_accepted_at": getattr(u, "terms_accepted_at", None),
+                    "role": getattr(u, "role", None),
+                }
+                public = UserPublic(**public_data)
+            except Exception as fallback_err:
+                logger.error("Failed to build UserPublic fallback: %s", fallback_err, exc_info=True)
+                raise ValueError(f"Unable to serialize user to UserPublic: {validate_err}") from validate_err
+        
+        # Use the role from database (don't override it!)
+        db_role = None
+        try:
+            db_role = getattr(u, "role", None)
+            if db_role is not None:
+                public.role = db_role
+        except Exception:
+            # If we can't access role, keep the value from model_validate
+            db_role = getattr(public, "role", None)
+        
+        # Set is_admin flag (legacy support) - true if they have any admin role OR match ADMIN_EMAIL
+        try:
+            user_is_admin = getattr(u, "is_admin", False)
+            public.is_admin = is_admin_email or bool(user_is_admin) or (db_role in ("admin", "superadmin") if db_role else False)
+        except Exception:
+            # If we can't access is_admin, use the value from model_validate or role-based check
+            public.is_admin = is_admin_email or (db_role in ("admin", "superadmin") if db_role else False)
+        
+        # Check if terms need acceptance based on date comparison
+        env = (settings.APP_ENV or "dev").strip().lower()
+        if env in {"dev", "development", "local", "test", "testing"}:
+            # Skip terms enforcement in dev mode
+            public.terms_version_required = None
+        elif terms_required:
+            try:
+                if _terms_need_acceptance(u, terms_required):
+                    # Terms need to be accepted - set required version
+                    public.terms_version_required = terms_required
+                else:
+                    # Terms are up to date
+                    public.terms_version_required = None
+            except Exception as terms_err:
+                # If terms check fails, don't require terms (safer default)
+                logger.warning("Failed to check terms acceptance: %s", terms_err)
+                public.terms_version_required = None
+        else:
+            # No terms version set
+            public.terms_version_required = None
+        
+        return public
+    except Exception as e:
+        logger.error("Critical error in _to_user_public: %s", e, exc_info=True)
+        # Re-raise as a more descriptive error
+        raise ValueError(f"Failed to convert user to UserPublic: {e}") from e
 
 class ElevenLabsAPIKeyUpdate(BaseModel):
     api_key: str
@@ -80,6 +207,9 @@ async def read_users_me(
     CRITICAL: Explicitly refresh user from database to ensure terms_version_accepted
     and other fields are current, preventing intermittent ToS re-acceptance bugs.
     """
+    from api.core.logging import get_logger
+    logger = get_logger("api.routers.users")
+    
     # Prevent HTTP caching of user profile data
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
     response.headers["Pragma"] = "no-cache"
@@ -97,12 +227,26 @@ async def read_users_me(
         refreshed_user = session.exec(select(User).where(User.id == user_id)).first()
         if refreshed_user:
             current_user = refreshed_user
+        else:
+            logger.error("User %s not found in database after authentication", user_id)
+            raise HTTPException(status_code=404, detail="User not found")
+    except HTTPException:
+        raise
     except Exception as e:
-        # If re-query fails, log and use current_user as-is (shouldn't happen in normal operation)
-        from api.core.logging import get_logger
-        logger = get_logger("api.routers.users")
-        logger.warning("Failed to re-query user in /me endpoint: %s", e)
-    return _to_user_public(current_user)
+        # If re-query fails, log and try to use current_user as-is
+        logger.error("Failed to re-query user in /me endpoint: %s", e, exc_info=True)
+        # Continue and try to serialize - if this also fails, the exception handler will catch it
+    
+    # Try to serialize user to UserPublic
+    try:
+        return _to_user_public(current_user)
+    except Exception as e:
+        logger.error("Failed to serialize user to UserPublic in /me endpoint: %s", e, exc_info=True)
+        # Re-raise as HTTPException so it's handled properly
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve user profile. Please try again or contact support if the issue persists."
+        )
 
 @router.get("/me/stats", response_model=Dict[str, Any])
 async def read_user_stats(

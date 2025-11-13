@@ -5,6 +5,7 @@ import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import { Textarea } from '../../ui/textarea';
 import { ArrowLeft, Loader2, Wand2, Lightbulb, ListChecks, AlertTriangle, RefreshCw } from 'lucide-react';
+import { TagInput } from '../AudioCleanupSettings';
 
 export default function StepEpisodeDetails({
   episodeDetails,
@@ -42,6 +43,7 @@ export default function StepEpisodeDetails({
   formatDuration = () => null,
   audioDurationSec: audioDurationSecProp = null,
   onRetryPrecheck = null,
+  aiGeneratedFields = { title: false, description: false, tags: false },
 }) {
   const audioDurationSec = audioDurationSecProp;
   const formatDurationSafe = typeof formatDuration === 'function' ? formatDuration : () => null;
@@ -191,6 +193,9 @@ export default function StepEpisodeDetails({
                 value={episodeDetails.title}
                 onChange={(event) => onDetailsChange('title', event.target.value)}
               />
+              {aiGeneratedFields.title && (
+                <p className="text-xs text-slate-500 mt-1">AI-suggested — click to edit or replace.</p>
+              )}
               <div className="mt-2 flex gap-2">
                 <Button
                   type="button"
@@ -230,16 +235,21 @@ export default function StepEpisodeDetails({
                 onChange={(event) => onDetailsChange('episodeNumber', event.target.value)}
               />
             </div>
-            <div className="flex items-center pt-6 gap-2">
-              <input
-                id="explicitFlag"
-                type="checkbox"
-                checked={!!episodeDetails.is_explicit}
-                onChange={(event) => onDetailsChange('is_explicit', event.target.checked)}
-              />
-              <Label htmlFor="explicitFlag" className="cursor-pointer">
-                Explicit
-              </Label>
+            <div className="flex flex-col pt-6 gap-2">
+              <div className="flex items-center gap-2">
+                <input
+                  id="explicitFlag"
+                  type="checkbox"
+                  checked={!!episodeDetails.is_explicit}
+                  onChange={(event) => onDetailsChange('is_explicit', event.target.checked)}
+                />
+                <Label htmlFor="explicitFlag" className="cursor-pointer">
+                  Explicit
+                </Label>
+              </div>
+              <p className="text-xs text-gray-500 ml-6">
+                Enable this option if your recording contains explicit content. This information is also exported to your RSS / iTunes feeds.
+              </p>
             </div>
           </div>
 
@@ -252,6 +262,9 @@ export default function StepEpisodeDetails({
               value={episodeDetails.description}
               onChange={(event) => onDetailsChange('description', event.target.value)}
             />
+            {aiGeneratedFields.description && (
+              <p className="text-xs text-slate-500 mt-1">AI-suggested — click to edit or replace.</p>
+            )}
             <div className="mt-2 flex gap-2">
               <Button
                 type="button"
@@ -280,14 +293,17 @@ export default function StepEpisodeDetails({
           </div>
 
           <div>
-            <Label htmlFor="tags">Tags (comma separated, max 20)</Label>
-            <Textarea
-              id="tags"
-              placeholder="tag1, tag2"
-              className="min-h-[64px]"
-              value={episodeDetails.tags || ''}
-              onChange={(event) => onDetailsChange('tags', event.target.value)}
+            <Label htmlFor="tags">Tags (max 20)</Label>
+            <TagInput
+              values={episodeDetails.tags ? episodeDetails.tags.split(',').map(t => t.trim()).filter(Boolean) : []}
+              onChange={(tagsArray) => {
+                onDetailsChange('tags', tagsArray.join(', '));
+              }}
+              placeholder="Type a tag and press Enter"
             />
+            {aiGeneratedFields.tags && (
+              <p className="text-xs text-slate-500 mt-1">AI-suggested — click to edit or replace.</p>
+            )}
             <p className="text-xs text-gray-500 mt-1">Each tag ≤30 chars. Enforced on publish.</p>
           </div>
 

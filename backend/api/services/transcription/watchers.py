@@ -191,8 +191,26 @@ def notify_watchers_processed(filename: str) -> None:
                         
                         "You can return to the dashboard to continue building your episode."
                     )
+                    # HTML version with Mike's image
+                    html_body = (
+                        f"<html><body style=\"font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;\">"
+                        f"<div style=\"text-align: center; margin-bottom: 30px;\">"
+                        f"<img src=\"https://app.podcastplusplus.com/MikeCzech.png\" alt=\"Podcast Plus Plus\" style=\"width: 80px; height: 80px; border-radius: 50%; object-fit: cover; margin-bottom: 20px;\" />"
+                        f"</div>"
+                        f"<h2 style=\"color: #2C3E50; text-align: center;\">Good news! Your recording '{friendly_text}' has finished processing!</h2>"
+                        f"<p style=\"margin: 20px 0; text-align: center;\">"
+                        f"Your recording is ready in Podcast Plus Plus."
+                        f"</p>"
+                        f"<p style=\"margin: 20px 0; text-align: center;\">"
+                        f"<a href=\"https://app.podcastplusplus.com/media-library\" style=\"display: inline-block; background-color: #2C3E50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold;\">"
+                        f"Download Your Recording</a></p>"
+                        f"<p style=\"font-size: 13px; color: #555; text-align: center; margin-top: 20px;\">"
+                        f"💡 Tip: Download a backup copy now! The raw file will be automatically deleted after 24 hours."
+                        f"</p>"
+                        f"</body></html>"
+                    )
                     try:
-                        sent = mailer.send(email, subject, body)
+                        sent = mailer.send(email, subject, body, html=html_body)
                         status = "sent" if sent else "email-failed"
                     except Exception:  # pragma: no cover - email best-effort
                         log.warning("[transcribe] mail send failed for %s", filename, exc_info=True)

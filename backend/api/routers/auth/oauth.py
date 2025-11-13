@@ -18,6 +18,13 @@ from api.core.database import get_session
 from api.models.settings import load_admin_settings
 from api.models.user import User, UserCreate
 
+# Check if verification module is available
+try:
+    from api.models.verification import EmailVerification
+    VERIFICATION_AVAILABLE = True
+except ImportError:
+    VERIFICATION_AVAILABLE = False
+
 from .utils import (
     AUTHLIB_ERROR,
     build_oauth_client,
@@ -301,6 +308,36 @@ async def auth_google_callback(request: Request, db_session: Session = Depends(g
 
         if google_user_id and not user.google_id:
             user.google_id = google_user_id
+
+        # Auto-verify email for Google OAuth users
+        # Google users don't need email verification since Google already verified their email
+        if google_user_id and VERIFICATION_AVAILABLE:
+            from sqlmodel import select
+            
+            # Check if user already has a verified email
+            existing_verification = db_session.exec(
+                select(EmailVerification)
+                .where(
+                    EmailVerification.user_id == user.id,
+                    EmailVerification.verified_at != None  # noqa: E711
+                )
+                .limit(1)
+            ).first()
+            
+            # If no verified email exists, create one
+            if not existing_verification:
+                now = datetime.utcnow()
+                verification = EmailVerification(
+                    user_id=user.id,
+                    code="GOOGLE-OAUTH",
+                    jwt_token=None,
+                    expires_at=now,  # Already expired since it's pre-verified
+                    verified_at=now,  # Mark as verified immediately
+                    used=True,  # Mark as used
+                    created_at=now,
+                )
+                db_session.add(verification)
+                log.info(f"[OAUTH] Auto-verified email for Google user {user.email}")
 
         user.last_login = datetime.utcnow()
         db_session.add(user)

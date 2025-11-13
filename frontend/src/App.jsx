@@ -18,6 +18,8 @@ import AppAB from '@/ab/AppAB.jsx';
 import { useLayout } from '@/layout/LayoutContext.jsx';
 import BuildInfo from '@/components/admin/BuildInfo.jsx';
 import { initBugReportCapture } from '@/lib/bugReportCapture.js'; // NEW: Bug reporting
+import { WarmupLoader } from '@/components/WarmupLoader.jsx';
+import { useWarmup } from '@/contexts/WarmupContext.jsx';
 
 // --- IMPORTANT ---
 // Admin is determined by backend role; no hard-coded emails.
@@ -66,8 +68,46 @@ export default function App() {
                     window.location.hash = '';
                 }
             }
-            // Detect checkout=success early (may arrive before AuthContext refresh completes)
+            
+            // Handle magic link token from email (query parameter)
             const searchParams = new URLSearchParams(window.location.search);
+            const magicToken = searchParams.get('token');
+            if (magicToken && !isAuthenticated) {
+                try {
+                    // Exchange magic link token for access token
+                    const response = await fetch('/api/auth/magic-link', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ token: magicToken }),
+                        credentials: 'include',
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.access_token) {
+                            login(data.access_token);
+                            // Remove token from URL without reloading
+                            const newUrl = new URL(window.location.href);
+                            newUrl.searchParams.delete('token');
+                            window.history.replaceState({}, '', newUrl.toString());
+                        }
+                    } else {
+                        console.warn('[App] Magic link token exchange failed:', response.status);
+                        // Remove invalid token from URL
+                        const newUrl = new URL(window.location.href);
+                        newUrl.searchParams.delete('token');
+                        window.history.replaceState({}, '', newUrl.toString());
+                    }
+                } catch (err) {
+                    console.error('[App] Error exchanging magic link token:', err);
+                    // Remove token from URL on error
+                    const newUrl = new URL(window.location.href);
+                    newUrl.searchParams.delete('token');
+                    window.history.replaceState({}, '', newUrl.toString());
+                }
+            }
+            
+            // Detect checkout=success early (may arrive before AuthContext refresh completes)
             if (searchParams.get('checkout') === 'success') {
                 setPostCheckout(true);
                 setPostCheckoutStartedAt(Date.now());
@@ -80,7 +120,7 @@ export default function App() {
             setIsLoading(false);
         };
         processAuth();
-    }, [token, login]);
+    }, [token, login, isAuthenticated]);
 
     // If we have postCheckout flag but not authenticated yet, poll user refresh a few times
     useEffect(() => {
@@ -306,10 +346,12 @@ export default function App() {
 
 // Wrap export to always include single Toaster instance
 export function AppWithToasterWrapper() {
+    const { isWarmingUp } = useWarmup();
     return <>
     <MetaHead />
         <App />
         <BuildInfo />
+        <WarmupLoader isVisible={isWarmingUp} />
         <Toaster />
     </>;
 }

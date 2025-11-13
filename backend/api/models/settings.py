@@ -494,3 +494,277 @@ def save_landing_content(session: Session, content: LandingPageContent) -> Landi
         return LandingPageContent(**data)
     except Exception:  # pragma: no cover - fallback to defaults if corrupted immediately after save
         return LandingPageContent()
+
+
+# ===== PRICING PAGE CONTENT =====
+
+class PricingTierFeature(BaseModel):
+    """Feature flags for a pricing tier"""
+    uploadRecord: bool = True
+    basicCleanup: bool = True
+    manualPublish: bool = True
+    flubber: bool = False
+    intern: bool = False
+    advancedIntern: bool = False
+    sfxTemplates: bool = False
+    analytics: str = "Basic"  # "Basic", "Advanced", "Full"
+    multiUser: bool | str = False  # Can be bool or "Coming soon" string
+    priorityQueue: bool = False
+    premiumSupport: bool = False
+
+
+class PricingTier(BaseModel):
+    """Pricing tier configuration for the pricing page"""
+    key: str  # "starter", "creator", "pro", "executive", "enterprise"
+    name: str
+    monthly: int | None = None
+    annual: int | None = None
+    credits: str  # Display string like "28,800"
+    maxEpisodeLength: str  # Display string like "40 min"
+    queuePriority: str  # Display string like "Low"
+    queue: str  # Display string like "2 hrs, held 7 days"
+    features: PricingTierFeature = PydanticField(default_factory=PricingTierFeature)
+    cta: dict[str, str] = PydanticField(default_factory=lambda: {"label": "Get Started", "href": ""})
+    popular: bool = False
+    badge: str | None = None
+    contact: bool = False
+    earlyOffers: list[dict[str, str]] | None = None  # For early access mode
+
+
+def _default_pricing_tiers() -> list[PricingTier]:
+    """Default pricing tiers matching the current Pricing.jsx hardcoded data"""
+    return [
+        PricingTier(
+            key="starter",
+            name="Starter",
+            monthly=19,
+            annual=None,
+            credits="28,800",
+            maxEpisodeLength="40 min",
+            queuePriority="Low",
+            queue="2 hrs, held 7 days",
+            features=PricingTierFeature(
+                uploadRecord=True,
+                basicCleanup=True,
+                manualPublish=True,
+                flubber=False,
+                intern=False,
+                advancedIntern=False,
+                sfxTemplates=False,
+                analytics="Basic",
+                multiUser=False,
+                priorityQueue=False,
+                premiumSupport=False,
+            ),
+            cta={"label": "Get Started", "href": "https://app.podcastpro.plus/signup?plan=starter"},
+        ),
+        PricingTier(
+            key="creator",
+            name="Creator",
+            monthly=39,
+            annual=31,
+            credits="72,000",
+            maxEpisodeLength="80 min",
+            queuePriority="Medium",
+            queue="10 hrs, held 14 days",
+            features=PricingTierFeature(
+                uploadRecord=True,
+                basicCleanup=True,
+                manualPublish=True,
+                flubber=True,
+                intern=True,
+                advancedIntern=False,
+                sfxTemplates=False,
+                analytics="Advanced",
+                multiUser=False,
+                priorityQueue=False,
+                premiumSupport=False,
+            ),
+            cta={"label": "Start Creating", "href": "https://app.podcastpro.plus/signup?plan=creator"},
+            popular=True,
+            badge="Most Popular",
+        ),
+        PricingTier(
+            key="pro",
+            name="Pro",
+            monthly=79,
+            annual=63,
+            credits="172,800",
+            maxEpisodeLength="120 min",
+            queuePriority="High",
+            queue="25 hrs, held 30 days",
+            features=PricingTierFeature(
+                uploadRecord=True,
+                basicCleanup=True,
+                manualPublish=True,
+                flubber=True,
+                intern=True,
+                advancedIntern=True,
+                sfxTemplates=True,
+                analytics="Full",
+                multiUser=False,
+                priorityQueue=False,
+                premiumSupport=False,
+            ),
+            cta={"label": "Go Pro", "href": "https://app.podcastpro.plus/signup?plan=pro"},
+        ),
+        PricingTier(
+            key="executive",
+            name="Executive",
+            monthly=129,
+            annual=107,
+            credits="288,000",
+            maxEpisodeLength="240 min*",
+            queuePriority="Highest",
+            queue="50 hrs, held 60 days",
+            features=PricingTierFeature(
+                uploadRecord=True,
+                basicCleanup=True,
+                manualPublish=True,
+                flubber=True,
+                intern=True,
+                advancedIntern=True,
+                sfxTemplates=True,
+                analytics="Full",
+                multiUser="Coming soon",
+                priorityQueue=True,
+                premiumSupport=True,
+            ),
+            cta={"label": "Go Executive", "href": "https://app.podcastpro.plus/signup?plan=executive"},
+        ),
+        PricingTier(
+            key="enterprise",
+            name="Enterprise",
+            monthly=None,
+            annual=None,
+            credits="Custom",
+            maxEpisodeLength="Custom",
+            queuePriority="Highest",
+            queue="Custom",
+            features=PricingTierFeature(
+                uploadRecord=True,
+                basicCleanup=True,
+                manualPublish=True,
+                flubber=True,
+                intern=True,
+                advancedIntern=True,
+                sfxTemplates=True,
+                analytics="Full",
+                multiUser=True,
+                priorityQueue=True,
+                premiumSupport=True,
+            ),
+            cta={"label": "Contact Us"},
+            contact=True,
+        ),
+    ]
+
+
+class PricingFeatureDefinition(BaseModel):
+    """Definition of a feature/benefit row in the pricing matrix"""
+    key: str  # Unique identifier (e.g., "credits", "maxEpisodeLength", "flubber")
+    label: str  # Display name (e.g., "Monthly Credits", "Flubber")
+    description: str = ""  # Optional description/tooltip
+    type: str = "text"  # "boolean", "number", "text", "select"
+    options: list[str] | None = None  # For select type
+    fieldPath: str = ""  # Where to store the value (e.g., "credits" or "features.flubber")
+    order: int = 0  # Display order
+    category: str = "general"  # Optional category for grouping
+
+
+def _default_feature_definitions() -> list[PricingFeatureDefinition]:
+    """Default feature definitions matching current hardcoded rows"""
+    return [
+        PricingFeatureDefinition(key="monthly", label="Monthly Price", description="Monthly subscription price in USD", type="number", fieldPath="monthly", order=1),
+        PricingFeatureDefinition(key="annual", label="Annual Price", description="Annual subscription price in USD (null if not available)", type="number", fieldPath="annual", order=2),
+        PricingFeatureDefinition(key="credits", label="Monthly Credits", description="Monthly credits allocation (display string)", type="text", fieldPath="credits", order=3),
+        PricingFeatureDefinition(key="maxEpisodeLength", label="Max Episode Length", description="Maximum episode length (e.g., \"40 min\")", type="text", fieldPath="maxEpisodeLength", order=4),
+        PricingFeatureDefinition(key="queuePriority", label="Queue Priority", description="Processing queue priority", type="select", options=["Low", "Medium", "High", "Highest"], fieldPath="queuePriority", order=5),
+        PricingFeatureDefinition(key="queue", label="Queue Storage", description="Queue storage description (e.g., \"2 hrs, held 7 days\")", type="text", fieldPath="queue", order=6),
+        PricingFeatureDefinition(key="uploadRecord", label="Upload & Record", description="Allow upload and recording", type="boolean", fieldPath="features.uploadRecord", order=7),
+        PricingFeatureDefinition(key="basicCleanup", label="Basic Cleanup", description="Basic cleanup (noise, trim)", type="boolean", fieldPath="features.basicCleanup", order=8),
+        PricingFeatureDefinition(key="manualPublish", label="Manual Publish", description="Manual publishing capability", type="boolean", fieldPath="features.manualPublish", order=9),
+        PricingFeatureDefinition(key="flubber", label="Flubber", description="Flubber (filler removal)", type="boolean", fieldPath="features.flubber", order=10),
+        PricingFeatureDefinition(key="intern", label="Intern", description="Intern (spoken edits)", type="boolean", fieldPath="features.intern", order=11),
+        PricingFeatureDefinition(key="advancedIntern", label="Advanced Intern", description="Advanced Intern (multi-step edits)", type="boolean", fieldPath="features.advancedIntern", order=12),
+        PricingFeatureDefinition(key="sfxTemplates", label="SFX & Templates", description="Sound Effects & templates", type="boolean", fieldPath="features.sfxTemplates", order=13),
+        PricingFeatureDefinition(key="analytics", label="Analytics", description="Analytics level", type="select", options=["Basic", "Advanced", "Full"], fieldPath="features.analytics", order=14),
+        PricingFeatureDefinition(key="multiUser", label="Multi-user", description="Multi-user accounts (true/false/\"Coming soon\")", type="text", fieldPath="features.multiUser", order=15),
+        PricingFeatureDefinition(key="priorityQueue", label="Priority Queue", description="Priority processing queue", type="boolean", fieldPath="features.priorityQueue", order=16),
+        PricingFeatureDefinition(key="premiumSupport", label="Premium Support", description="Premium support access", type="boolean", fieldPath="features.premiumSupport", order=17),
+    ]
+
+
+class PricingPageContent(BaseModel):
+    """Pricing page configuration"""
+    standardTiers: list[PricingTier] = PydanticField(default_factory=_default_pricing_tiers)
+    earlyAccessTiers: list[PricingTier] | None = None
+    featureDefinitions: list[PricingFeatureDefinition] = PydanticField(default_factory=_default_feature_definitions)
+    updated_at: Optional[datetime] = None
+
+
+def load_pricing_content(session: Session) -> PricingPageContent:
+    """Load pricing page content from database"""
+    try:
+        rec = session.get(AppSetting, "pricing_page_content")
+    except Exception as exc:
+        logger.warning("Failed loading pricing content, using defaults: %s", exc)
+        return PricingPageContent()
+    if not rec or not (rec.value_json or "").strip():
+        return PricingPageContent()
+    try:
+        data = json.loads(rec.value_json)
+        content = PricingPageContent(**data)
+        # Ensure featureDefinitions exist (for backward compatibility)
+        if not content.featureDefinitions:
+            content.featureDefinitions = _default_feature_definitions()
+        # Sort features by order
+        content.featureDefinitions.sort(key=lambda f: f.order)
+    except Exception as exc:
+        logger.warning("Invalid pricing content payload, using defaults: %s", exc)
+        return PricingPageContent()
+    if content.updated_at is None and getattr(rec, "updated_at", None):
+        try:
+            content.updated_at = rec.updated_at
+        except Exception:
+            pass
+    return content
+
+
+def save_pricing_content(session: Session, content: PricingPageContent) -> PricingPageContent:
+    """Save pricing page content to database"""
+    payload = content.model_copy(update={"updated_at": datetime.utcnow()})
+
+    def _load_or_create() -> AppSetting:
+        rec = session.get(AppSetting, "pricing_page_content")
+        data = payload.model_dump_json()
+        if not rec:
+            rec = AppSetting(key="pricing_page_content", value_json=data)
+        else:
+            rec.value_json = data
+        try:
+            rec.updated_at = datetime.utcnow()
+        except Exception:
+            pass
+        session.add(rec)
+        return rec
+
+    try:
+        rec = _load_or_create()
+        session.commit()
+    except (ProgrammingError, OperationalError) as exc:
+        if not _is_missing_table_error(exc):
+            session.rollback()
+            raise
+        session.rollback()
+        _ensure_appsetting_table(session)
+        rec = _load_or_create()
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    try:
+        data = json.loads(rec.value_json or "{}")
+        return PricingPageContent(**data)
+    except Exception:
+        return PricingPageContent()

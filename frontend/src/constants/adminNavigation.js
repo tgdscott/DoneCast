@@ -10,6 +10,7 @@ import {
   MessageSquare,
   Database,
   Headphones,
+  Ticket,
 } from "lucide-react";
 
 /**
@@ -28,5 +29,6 @@ export const navigationItems = [
   { id: "db", label: "DB Explorer", icon: Database },
   { id: "settings", label: "Settings", icon: SettingsIcon },
   { id: "billing", label: "Billing", icon: CreditCard },
+  { id: "promo-codes", label: "Promo Codes", icon: Ticket },
   { id: "help", label: "Help & Docs", icon: HelpCircle },
 ];

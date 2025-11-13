@@ -385,10 +385,13 @@ def register_uploaded_media(
             )
             try:
                 if category == MediaCategory.main_content:
-                    from api.main import _compute_pt_expiry  # type: ignore
-
+                    from api.startup_tasks import _compute_pt_expiry  # type: ignore
+                    # Get user's tier for tier-based expiration
+                    user_tier = getattr(current_user, "tier", "starter") or "starter"
+                    if user_tier.lower() == "free":
+                        user_tier = "starter"
                     now_utc = datetime.utcnow()
-                    media_item.expires_at = _compute_pt_expiry(now_utc)
+                    media_item.expires_at = _compute_pt_expiry(now_utc, tier=user_tier)
             except Exception:
                 pass
 
@@ -788,12 +791,16 @@ async def upload_media_files(
                 category=category,
             )
 
-            # Assign expires_at for raw uploads (main_content): 2am PT +14 days rule
+            # Assign expires_at for raw uploads (main_content): tier-based retention
             try:
                 if category == MediaCategory.main_content:
-                    from api.main import _compute_pt_expiry  # type: ignore
+                    from api.startup_tasks import _compute_pt_expiry  # type: ignore
+                    # Get user's tier for tier-based expiration
+                    user_tier = getattr(current_user, "tier", "starter") or "starter"
+                    if user_tier.lower() == "free":
+                        user_tier = "starter"
                     now_utc = datetime.utcnow()
-                    media_item.expires_at = _compute_pt_expiry(now_utc)
+                    media_item.expires_at = _compute_pt_expiry(now_utc, tier=user_tier)
             except Exception:
                 # don't fail upload if expiry calc wiring changes
                 pass

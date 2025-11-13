@@ -50,8 +50,30 @@ def _timing(label: str):
     return _cm()
 
 
-def _compute_pt_expiry(created_at_utc: datetime, days: int = 14) -> datetime:
-    """Compute UTC expiry aligned to 2am America/Los_Angeles."""
+def _compute_pt_expiry(created_at_utc: datetime, tier: str | None = None, days: int | None = None) -> datetime:
+    """Compute UTC expiry aligned to 2am America/Los_Angeles.
+    
+    Args:
+        created_at_utc: UTC timestamp when file was created
+        tier: User's tier (starter, creator, pro, executive, enterprise, unlimited)
+              If provided, uses tier-specific retention days from plan config
+        days: Explicit retention days (overrides tier if provided)
+    
+    Returns:
+        UTC datetime when file should expire (aligned to next 2am PT after retention period)
+    """
+    # Determine retention days: explicit > tier-based > default
+    if days is None:
+        if tier:
+            from api.billing.plans import get_storage_days, has_unlimited_storage
+            if has_unlimited_storage(tier):
+                # For unlimited plans, use a very long retention (100 years) - effectively unlimited
+                days = 36500
+            else:
+                days = get_storage_days(tier) or 14  # Fallback to 14 days if not found
+        else:
+            days = 14  # Default fallback
+    
     try:
         pt = ZoneInfo("America/Los_Angeles") if ZoneInfo else None
     except Exception:

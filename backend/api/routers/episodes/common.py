@@ -173,7 +173,7 @@ def _local_final_candidates(path: Optional[str]) -> list[Path]:
     return candidates
 
 
-def compute_playback_info(episode: Any, *, now: Optional[datetime] = None) -> dict[str, Any]:
+def compute_playback_info(episode: Any, *, now: Optional[datetime] = None, wrap_with_op3: bool = False) -> dict[str, Any]:
     """Determine playback URL from R2/GCS or Spreaker.
 
     Priority order for audio URLs:
@@ -181,6 +181,11 @@ def compute_playback_info(episode: Any, *, now: Optional[datetime] = None) -> di
     2. Spreaker stream URL - For Spreaker-hosted episodes
 
     NO LOCAL FILES - cloud storage or Spreaker only.
+    
+    Args:
+        episode: Episode object
+        now: Optional datetime for testing
+        wrap_with_op3: If True, wrap audio URL with OP3 prefix for tracking (default: False)
     
     Returns keys compatible with existing episode serializers.
     """
@@ -257,13 +262,26 @@ def compute_playback_info(episode: Any, *, now: Optional[datetime] = None) -> di
 
     # Determine final playback URL
     playback_url = final_audio_url if final_audio_url else stream_url
+    
+    # Wrap with OP3 prefix if requested (for public website tracking)
+    if wrap_with_op3 and playback_url:
+        try:
+            # Import OP3 wrapper function from RSS feed module
+            from api.routers.rss_feed import _wrap_with_op3
+            playback_url = _wrap_with_op3(str(playback_url))
+        except Exception as err:
+            from api.core.logging import get_logger
+            logger = get_logger("api.episodes.common")
+            logger.warning("Failed to wrap audio URL with OP3: %s", err)
+            # Continue with unwrapped URL if OP3 wrapping fails
+    
     playback_type = "cloud" if final_audio_url else ("spreaker" if stream_url else "none")
     audio_available = bool(cloud_exists or stream_url)
 
     return {
-        "final_audio_url": final_audio_url,  # Cloud storage URL or None
+        "final_audio_url": final_audio_url,  # Cloud storage URL or None (unwrapped)
         "stream_url": stream_url,  # Spreaker stream or None
-        "playback_url": playback_url,  # The actual URL to use
+        "playback_url": playback_url,  # The actual URL to use (may be OP3-wrapped)
         "playback_type": playback_type,  # "cloud", "spreaker", or "none"
         "final_audio_exists": audio_available,  # True if any audio source exists
         "gcs_exists": cloud_exists,  # True if cloud file exists (legacy key name)

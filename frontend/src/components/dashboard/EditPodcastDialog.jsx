@@ -140,10 +140,28 @@ export default function EditPodcastDialog({
 			category_2_id: podcast.category_2_id ? String(podcast.category_2_id) : "",
 			category_3_id: podcast.category_3_id ? String(podcast.category_3_id) : "",
 		});
-		// Use cover_url if available (already resolved), otherwise fallback to cover_path
-		const initialCoverUrl = podcast.cover_url || resolveCoverURL(podcast.cover_path);
-		setCoverPreview(initialCoverUrl);
-	}, [podcast, remoteStatus.loaded, isOpen, userEmail]);
+		// Fetch fresh podcast data to get current cover_url (signed URLs expire)
+		// This ensures we always have a valid signed URL when opening the dialog
+		async function fetchFreshPodcast() {
+			try {
+				const api = makeApi(token);
+				// Use list endpoint and find this podcast (no single-podcast GET endpoint exists)
+				const podcasts = await api.get('/api/podcasts/');
+				const podcastList = Array.isArray(podcasts) ? podcasts : [];
+				const freshPodcast = podcastList.find(p => p.id === podcast.id);
+				if (freshPodcast?.cover_url) {
+					setCoverPreview(freshPodcast.cover_url);
+					return;
+				}
+			} catch (err) {
+				console.warn('[EditPodcastDialog] Failed to fetch fresh podcast for cover_url:', err);
+			}
+			// Fallback to existing cover_url or resolve from cover_path
+			const initialCoverUrl = podcast.cover_url || resolveCoverURL(podcast.cover_path);
+			setCoverPreview(initialCoverUrl);
+		}
+		fetchFreshPodcast();
+	}, [podcast, remoteStatus.loaded, isOpen, userEmail, token]);
 
 	// Fetch categories once when dialog opens
 	useEffect(() => {
@@ -169,6 +187,13 @@ export default function EditPodcastDialog({
 			// Backend should provide cover_url instead, but log warning
 			console.warn("EditPodcastDialog: Received gs:// URL, should use cover_url field instead");
 			return ""; // Don't try to render gs:// URLs directly
+		}
+		// R2 URLs (https://bucket.account.r2.cloudflarestorage.com/...) need signed URLs from backend
+		// If we get a raw R2 URL, it might not be accessible - backend should provide cover_url instead
+		if (path.startsWith("https://") && path.includes(".r2.cloudflarestorage.com")) {
+			console.warn("EditPodcastDialog: Received raw R2 URL, backend should provide signed cover_url");
+			// Return empty - backend should provide cover_url with signed URL
+			return "";
 		}
 		if (path.startsWith("http")) return path;
 		const filename = path.replace(/^\/+/, "").split("/").pop();
@@ -258,7 +283,7 @@ export default function EditPodcastDialog({
 			onClose();
 		} catch (error) {
 			console.error('[EditPodcastDialog] Save failed:', error);
-			const msg = isApiError(error) ? (error.detail || error.error || error.message) : String(error);
+			const msg = toErrorText(error);
 			toast({ title: "Error", description: msg, variant: "destructive" });
 		} finally {
 			setIsSaving(false);

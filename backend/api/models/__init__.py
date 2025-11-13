@@ -46,6 +46,12 @@ from .media import (  # noqa: F401
 # User models
 from .user import User, UserCreate, UserPublic, UserTermsAcceptance  # noqa: F401
 
+# Promo code models
+from .promo_code import PromoCode, PromoCodeCreate, PromoCodeUpdate, PromoCodePublic  # noqa: F401
+
+# Affiliate code models
+from .affiliate_code import UserAffiliateCode, UserAffiliateCodePublic  # noqa: F401
+
 # Other models
 from .subscription import Subscription  # noqa: F401
 from .settings import AppSetting  # noqa: F401
@@ -53,3 +59,4 @@ from .usage import ProcessingMinutesLedger, LedgerDirection, LedgerReason  # noq
 from .recurring import RecurringSchedule  # noqa: F401
 from .website import PodcastWebsite, PodcastWebsiteStatus  # noqa: F401
 from .transcription import TranscriptionWatch  # noqa: F401
+from .admin_log import AdminActionLog, AdminActionType  # noqa: F401

@@ -59,18 +59,30 @@ class OP3ShowStats(BaseModel):
     top_countries: List[Dict[str, Any]] = []
     top_apps: List[Dict[str, Any]] = []
     top_episodes: List[Dict[str, Any]] = []  # Top 3-5 episodes
+    all_episodes_map: Dict[str, int] = {}  # Map of episode title (lowercase) -> downloads_all_time for ALL episodes
 
 
 class OP3Analytics:
     """Client for OP3 Analytics API."""
     
-    BASE_URL = "https://analytics.podcastplusplus.com/api/1"
+    # Try public OP3.dev first (where most data is), then fall back to self-hosted
+    PUBLIC_BASE_URL = "https://op3.dev/api/1"
+    SELF_HOSTED_BASE_URL = "https://analytics.podcastplusplus.com/api/1"
     # Self-hosted OP3 instance with admin token
     PREVIEW_TOKEN = "ZTY4NDZjOWMtNWE4Ny00NzIxLWFmOGQtYWM5Y2QxNjUzY2Y1"
     
-    def __init__(self, timeout: int = 30, api_token: Optional[str] = None):
+    # Default to public OP3.dev (no token needed for public data)
+    BASE_URL = PUBLIC_BASE_URL
+    
+    def __init__(self, timeout: int = 30, api_token: Optional[str] = None, use_public: bool = True):
         self.timeout = timeout
-        self.api_token = api_token or self.PREVIEW_TOKEN
+        # Use public OP3.dev by default (where data is), no token needed
+        if use_public:
+            self.base_url = self.PUBLIC_BASE_URL
+            self.api_token = None  # Public OP3.dev doesn't require token for public data
+        else:
+            self.base_url = self.SELF_HOSTED_BASE_URL
+            self.api_token = api_token or self.PREVIEW_TOKEN
         self.client = httpx.AsyncClient(timeout=timeout)
     
     async def close(self):
@@ -92,8 +104,10 @@ class OP3Analytics:
         # Convert feed URL to urlsafe base64
         feed_url_b64 = base64.urlsafe_b64encode(feed_url.encode()).decode().rstrip('=')
         
-        url = f"{self.BASE_URL}/shows/{feed_url_b64}"
-        params = {"token": self.api_token}
+        url = f"{self.base_url}/shows/{feed_url_b64}"
+        params = {}
+        if self.api_token:
+            params["token"] = self.api_token
         
         logger.info(f"OP3: Looking up show UUID for feed: {feed_url}")
         logger.debug(f"OP3: Base64 encoded: {feed_url_b64}")
@@ -121,6 +135,7 @@ class OP3Analytics:
         show_url: str,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
+        show_uuid: Optional[str] = None,
     ) -> OP3ShowStats:
         """
         Get comprehensive download statistics for a podcast show using OP3's APIs.
@@ -133,30 +148,39 @@ class OP3Analytics:
             show_url: The RSS feed URL of the podcast show
             start_date: Ignored (OP3 uses fixed windows)
             end_date: Ignored (OP3 uses fixed windows)
+            show_uuid: Optional show UUID (if known, skips RSS feed URL lookup)
         
         Returns:
             OP3ShowStats with comprehensive download data across all time periods
         """
-        # Step 1: Get the show UUID from the feed URL
-        show_uuid = await self.get_show_uuid_from_feed_url(show_url)
+        # Step 1: Get the show UUID from the feed URL (or use provided UUID)
+        if not show_uuid:
+            show_uuid = await self.get_show_uuid_from_feed_url(show_url)
         
         if not show_uuid:
             logger.warning(f"OP3: Could not get show UUID for {show_url}")
+            # For public OP3.dev, try without authentication (public data might be accessible)
+            if self.base_url == self.PUBLIC_BASE_URL:
+                logger.info(f"OP3: Trying public OP3.dev queries without authentication...")
+                # Public OP3.dev might allow queries without auth for public data
+                # But we need show UUID, so this won't work without UUID lookup
             return OP3ShowStats(show_url=show_url)
         
         # Step 2: Fetch show-level stats (monthly/weekly counts)
-        show_stats_url = f"{self.BASE_URL}/queries/show-download-counts"
+        show_stats_url = f"{self.base_url}/queries/show-download-counts"
         show_params = {
             "showUuid": show_uuid,
-            "token": self.api_token,
         }
+        if self.api_token:
+            show_params["token"] = self.api_token
         
         # Step 3: Fetch episode-level stats (includes all time periods + top episodes)
-        episode_stats_url = f"{self.BASE_URL}/queries/episode-download-counts"
+        episode_stats_url = f"{self.base_url}/queries/episode-download-counts"
         episode_params = {
             "showUuid": show_uuid,
-            "token": self.api_token,
         }
+        if self.api_token:
+            episode_params["token"] = self.api_token
         
         try:
             # Fetch both in parallel
@@ -247,11 +271,12 @@ class OP3Analytics:
                     
                     # OP3 episode-download-counts ONLY returns all-time downloads per episode
                     # Time-windowed stats (7d, 30d, 365d) come from show-level endpoint only
+                    # IMPORTANT: Sum ALL episodes, even if downloadsAll is 0 (some episodes might have 0 downloads)
                     for ep in episodes:
                         # The correct field name is "downloadsAll" not "downloadsAllTime"
-                        ep_all_time = ep.get("downloadsAll", 0)
-                        if ep_all_time:
-                            downloads_all_time += ep_all_time
+                        ep_all_time = ep.get("downloadsAll", 0) or 0
+                        downloads_all_time += ep_all_time
+                        logger.debug(f"OP3: Episode '{ep.get('title', 'Unknown')}' has {ep_all_time} all-time downloads")
                     
                     # Since episode endpoint doesn't provide 7d/30d/365d per-episode,
                     # we cannot aggregate those from episodes. They come from show-level stats only.
@@ -267,7 +292,7 @@ class OP3Analytics:
                     logger.info(f"OP3:   - Summing 'downloadsAll' from {len(episodes)} episodes")
                     logger.info(f"OP3:   - Total from episodes = {downloads_all_time} (⚠️ WARNING: only recent episodes returned, NOT true all-time!)")
                     
-                    # Get top 3 episodes by all-time downloads
+                    # Get top 3 episodes by all-time downloads (for top episodes display)
                     sorted_episodes = sorted(
                         episodes,
                         key=lambda x: x.get("downloadsAll", 0),
@@ -287,6 +312,15 @@ class OP3Analytics:
                         for ep in sorted_episodes
                     ]
                     
+                    # Also build a map of ALL episodes (not just top 3) for matching with recent episodes
+                    # This allows us to get download counts for any episode, not just top performers
+                    all_episodes_map = {}
+                    for ep in episodes:
+                        title = ep.get("title", "").strip()
+                        if title:
+                            all_episodes_map[title.lower()] = ep.get("downloadsAll", 0)
+                    logger.info(f"OP3: Built map of {len(all_episodes_map)} episodes for matching")
+                    
                     logger.info(f"OP3: Processed {len(episodes)} episodes")
                     logger.info(f"OP3: Aggregated stats - 7d: {downloads_7d}, 365d: {downloads_365d}, all-time: {downloads_all_time}")
                     if top_episodes:
@@ -295,8 +329,45 @@ class OP3Analytics:
                     
                 except Exception as e:
                     logger.error(f"OP3: Error processing episode stats: {e}")
+                    all_episodes_map = {}  # Initialize empty if error
             elif isinstance(episode_resp, Exception):
                 logger.error(f"OP3: Episode stats request failed: {episode_resp}")
+                all_episodes_map = {}  # Initialize empty if error
+            else:
+                all_episodes_map = {}  # Initialize empty if no episode response
+            
+            # Build episode map for matching (use all_episodes_map if available, otherwise build from top_episodes)
+            episode_map = {}
+            if 'all_episodes_map' in locals() and all_episodes_map:
+                episode_map = all_episodes_map
+            elif top_episodes:
+                # Fallback: build map from top episodes only
+                for ep in top_episodes:
+                    title = ep.get('title', '').strip().lower()
+                    if title:
+                        episode_map[title] = ep.get('downloads_all_time', 0)
+            
+            # Use episode sum for all-time if available, otherwise use weekly proxy
+            # BUT: OP3 episode endpoint only returns RECENT episodes, so downloads_all_time is NOT true all-time
+            # For true all-time, we should use the weekly downloads sum if available
+            final_all_time = downloads_all_time
+            if 'downloads_all_time_proxy' in locals() and downloads_all_time_proxy > 0:
+                # Prefer weekly downloads sum (more accurate for all-time)
+                if downloads_all_time_proxy > downloads_all_time:
+                    final_all_time = downloads_all_time_proxy
+                    logger.info(f"OP3: Using weekly downloads sum ({downloads_all_time_proxy}) for all-time (more accurate than episode sum {downloads_all_time})")
+                elif downloads_all_time > 0:
+                    # Use episode sum if it's larger (might have more recent data)
+                    final_all_time = downloads_all_time
+                    logger.info(f"OP3: Using episode sum ({downloads_all_time}) for all-time")
+            elif downloads_all_time > 0:
+                final_all_time = downloads_all_time
+            elif len(weekly_downloads_list) > 0:
+                # Fallback: sum all weekly downloads as proxy for all-time
+                final_all_time = sum(weekly_downloads_list)
+                logger.info(f"OP3: Using weekly downloads sum ({final_all_time}) as fallback for all-time")
+            else:
+                final_all_time = 0
             
             return OP3ShowStats(
                 show_url=show_url,
@@ -304,13 +375,14 @@ class OP3Analytics:
                 total_downloads=monthly_downloads,  # Legacy field (30d)
                 downloads_7d=downloads_7d,
                 downloads_30d=monthly_downloads,
-                downloads_365d=downloads_365d if downloads_365d > 0 else downloads_all_time,  # Fallback
-                downloads_all_time=downloads_all_time,
+                downloads_365d=downloads_365d if downloads_365d > 0 else final_all_time,  # Fallback
+                downloads_all_time=final_all_time,
                 weekly_downloads=weekly_downloads_list,
                 downloads_trend=[],
                 top_countries=[],
                 top_apps=[],
                 top_episodes=top_episodes,
+                all_episodes_map=episode_map,  # Map of all episodes for matching
             )
             
         except Exception as e:
@@ -342,13 +414,15 @@ class OP3Analytics:
         start_str = start_date.strftime("%Y-%m-%d")
         end_str = end_date.strftime("%Y-%m-%d")
         
-        url = f"{self.BASE_URL}/downloads/episode"
+        url = f"{self.base_url}/downloads/episode"
         params = {
             "url": episode_url,
             "start": start_str,
             "end": end_str,
             "format": "json",
         }
+        if self.api_token:
+            params["token"] = self.api_token
         
         try:
             response = await self.client.get(url, params=params)
@@ -421,7 +495,7 @@ class OP3Analytics:
 
 
 # Convenience functions for sync usage
-def get_show_stats_sync(show_url: str, days: int = 30) -> Optional[OP3ShowStats]:
+def get_show_stats_sync(show_url: str, days: int = 30, use_public: bool = True, show_uuid: Optional[str] = None) -> Optional[OP3ShowStats]:
     """
     Synchronous wrapper for getting show stats with caching.
     
@@ -430,17 +504,21 @@ def get_show_stats_sync(show_url: str, days: int = 30) -> Optional[OP3ShowStats]
     and then use the cached result. Cache expires after CACHE_TTL_HOURS hours.
     
     Args:
-        show_url: RSS feed URL
+        show_url: RSS feed URL (used for cache key and fallback lookup)
         days: Number of days to look back (default 30)
+        use_public: Use public OP3.dev instance (default True) or self-hosted
+        show_uuid: Optional known show UUID (skips RSS URL lookup if provided)
     
     Returns:
         OP3ShowStats or None if error
     """
     
     # Check cache first (before acquiring lock)
+    # Include use_public in cache key since different instances have different data
+    cache_key = f"{show_url}:{'public' if use_public else 'self-hosted'}"
     now = datetime.utcnow()
-    if show_url in _op3_cache:
-        cached_entry = _op3_cache[show_url]
+    if cache_key in _op3_cache:
+        cached_entry = _op3_cache[cache_key]
         cached_at = cached_entry.get("cached_at")
         if cached_at and (now - cached_at) < timedelta(hours=CACHE_TTL_HOURS):
             cached_stats = cached_entry.get("stats")
@@ -451,6 +529,7 @@ def get_show_stats_sync(show_url: str, days: int = 30) -> Optional[OP3ShowStats]
     
     async def _fetch_with_lock():
         """Fetch stats with lock to prevent concurrent requests."""
+        nonlocal cache_key  # Allow access to cache_key from outer scope
         # Get or create a lock for this URL
         async with _locks_lock:
             if show_url not in _fetch_locks:
@@ -458,8 +537,8 @@ def get_show_stats_sync(show_url: str, days: int = 30) -> Optional[OP3ShowStats]
             lock = _fetch_locks[show_url]
         
         # Check cache again (another request might have fetched while we waited for lock)
-        if show_url in _op3_cache:
-            cached_entry = _op3_cache[show_url]
+        if cache_key in _op3_cache:
+            cached_entry = _op3_cache[cache_key]
             cached_at = cached_entry.get("cached_at")
             if cached_at and (datetime.utcnow() - cached_at) < timedelta(hours=CACHE_TTL_HOURS):
                 cached_stats = cached_entry.get("stats")
@@ -470,8 +549,8 @@ def get_show_stats_sync(show_url: str, days: int = 30) -> Optional[OP3ShowStats]
         # Acquire lock for this URL (prevents concurrent fetches)
         async with lock:
             # Triple-check cache (another request might have fetched while we waited for lock)
-            if show_url in _op3_cache:
-                cached_entry = _op3_cache[show_url]
+            if cache_key in _op3_cache:
+                cached_entry = _op3_cache[cache_key]
                 cached_at = cached_entry.get("cached_at")
                 if cached_at and (datetime.utcnow() - cached_at) < timedelta(hours=CACHE_TTL_HOURS):
                     cached_stats = cached_entry.get("stats")
@@ -480,24 +559,64 @@ def get_show_stats_sync(show_url: str, days: int = 30) -> Optional[OP3ShowStats]
                         return cached_stats
             
             # Cache miss - fetch from OP3
-            logger.info(f"OP3: ❌ Cache MISS for {show_url} - fetching from OP3...")
-            client = OP3Analytics()
-            try:
-                start_date = datetime.utcnow() - timedelta(days=days)
-                stats = await client.get_show_downloads(show_url, start_date=start_date)
-                
-                # Cache the result
-                if stats:
-                    fetch_time = datetime.utcnow()
-                    _op3_cache[show_url] = {
-                        "stats": stats,
-                        "cached_at": fetch_time
-                    }
-                    logger.info(f"OP3: 💾 Cached fresh stats for {show_url} (valid for {CACHE_TTL_HOURS} hours)")
-                
-                return stats
-            finally:
-                await client.close()
+            # Try public OP3.dev first (where data usually is), then fall back to self-hosted
+            stats = None
+            if use_public:
+                instance_name = "public OP3.dev"
+                logger.info(f"OP3: ❌ Cache MISS for {show_url} - fetching from {instance_name}...")
+                if show_uuid:
+                    logger.info(f"OP3: Using known show UUID: {show_uuid}")
+                client = OP3Analytics(use_public=True)
+                try:
+                    start_date = datetime.utcnow() - timedelta(days=days)
+                    # Use known show UUID if provided, otherwise lookup from RSS URL
+                    stats = await client.get_show_downloads(show_url, start_date=start_date, show_uuid=show_uuid)
+                    if stats and (stats.downloads_30d > 0 or stats.downloads_all_time > 0):
+                        logger.info(f"OP3: ✅ Found data on {instance_name}: 7d={stats.downloads_7d}, 30d={stats.downloads_30d}, all-time={stats.downloads_all_time}")
+                    else:
+                        logger.warning(f"OP3: ⚠️ No data on {instance_name} for {show_url}, trying self-hosted...")
+                        stats = None  # Try self-hosted if public has no data
+                except Exception as e:
+                    logger.warning(f"OP3: ⚠️ Error fetching from {instance_name}: {e}, trying self-hosted...")
+                    stats = None
+                finally:
+                    await client.close()
+            
+            # Fall back to self-hosted if public has no data or if use_public=False
+            if not stats or (use_public and stats.downloads_30d == 0 and stats.downloads_all_time == 0):
+                instance_name = "self-hosted OP3"
+                logger.info(f"OP3: Trying {instance_name} for {show_url}...")
+                if show_uuid:
+                    logger.info(f"OP3: Using known show UUID: {show_uuid}")
+                client = OP3Analytics(use_public=False)
+                try:
+                    start_date = datetime.utcnow() - timedelta(days=days)
+                    # Use known show UUID if provided, otherwise lookup from RSS URL
+                    self_hosted_stats = await client.get_show_downloads(show_url, start_date=start_date, show_uuid=show_uuid)
+                    if self_hosted_stats and (self_hosted_stats.downloads_30d > 0 or self_hosted_stats.downloads_all_time > 0):
+                        logger.info(f"OP3: ✅ Found data on {instance_name}: 7d={self_hosted_stats.downloads_7d}, 30d={self_hosted_stats.downloads_30d}, all-time={self_hosted_stats.downloads_all_time}")
+                        stats = self_hosted_stats
+                        # Update cache key for self-hosted
+                        cache_key = f"{show_url}:self-hosted"
+                    elif not stats:
+                        stats = self_hosted_stats  # Use self-hosted even if zero, to avoid falling back to historical
+                except Exception as e:
+                    logger.warning(f"OP3: ⚠️ Error fetching from {instance_name}: {e}")
+                    # Keep stats from public if available, even if zero
+                finally:
+                    await client.close()
+            
+            # Cache the result
+            if stats:
+                fetch_time = datetime.utcnow()
+                _op3_cache[cache_key] = {
+                    "stats": stats,
+                    "cached_at": fetch_time
+                }
+                instance_used = "public OP3.dev" if use_public and (stats.downloads_30d > 0 or stats.downloads_all_time > 0) else "self-hosted OP3"
+                logger.info(f"OP3: 💾 Cached fresh stats for {show_url} from {instance_used} (valid for {CACHE_TTL_HOURS} hours)")
+            
+            return stats
     
     try:
         # Try to use existing event loop if one exists, otherwise create new one

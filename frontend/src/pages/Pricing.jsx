@@ -3,8 +3,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import Footer from "@/components/Footer.jsx";
 import Logo from "@/components/Logo.jsx";
+import { api } from "@/lib/apiClient";
 
-const standardTiers = [
+// Fallback data in case API fails
+const fallbackStandardTiers = [
   {
     key: "starter",
     name: "Starter",
@@ -130,7 +132,7 @@ const standardTiers = [
   },
 ];
 
-const earlyAccessTiers = [
+const fallbackEarlyAccessTiers = [
   {
     key: "starter",
     name: "Starter",
@@ -311,7 +313,8 @@ const earlyAccessTiers = [
   },
 ];
 
-const rows = [
+// Fallback rows if featureDefinitions are not available
+const fallbackRows = [
   { key: "price", label: "Price" },
   { key: "credits", label: "Monthly credits" },
   { key: "maxEpisodeLength", label: "Max episode length" },
@@ -342,6 +345,29 @@ export default function PricingPage() {
   const [mode, setMode] = useState("standard");
   const [annual, setAnnual] = useState(false);
   const [countdown, setCountdown] = useState(() => getCountdownParts());
+  const [pricingData, setPricingData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Load pricing data from API
+  useEffect(() => {
+    const fetchPricingData = async () => {
+      try {
+        setLoading(true);
+        const data = await api.get("/api/admin/pricing/public");
+        setPricingData(data);
+      } catch (error) {
+        console.error("Failed to load pricing data, using fallback:", error);
+        // Use fallback data on error
+        setPricingData({
+          standardTiers: fallbackStandardTiers,
+          earlyAccessTiers: fallbackEarlyAccessTiers,
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchPricingData();
+  }, []);
 
   useEffect(() => {
     if (mode !== "early") return undefined;
@@ -356,9 +382,30 @@ export default function PricingPage() {
     return `$${amt}/mo` + (annual ? " (billed annually)" : "");
   };
 
+  const standardTiers = pricingData?.standardTiers || fallbackStandardTiers;
+  const earlyAccessTiers = pricingData?.earlyAccessTiers || fallbackEarlyAccessTiers;
+  const featureDefinitions = pricingData?.featureDefinitions || [];
+
+  // Build rows from featureDefinitions, with price as special first row
+  const rows = useMemo(() => {
+    const priceRow = { key: "price", label: "Price" };
+    if (featureDefinitions.length === 0) {
+      return [priceRow, ...fallbackRows.slice(1)];
+    }
+    // Convert featureDefinitions to rows format
+    const featureRows = featureDefinitions.map(feature => ({
+      key: feature.key,
+      label: feature.label,
+      fieldPath: feature.fieldPath,
+      type: feature.type,
+      options: feature.options
+    }));
+    return [priceRow, ...featureRows];
+  }, [featureDefinitions]);
+
   const visibleTiers = useMemo(
     () => (mode === "early" ? earlyAccessTiers : standardTiers),
-    [mode]
+    [mode, earlyAccessTiers, standardTiers]
   );
 
   const handleModeChange = (nextMode) => {
@@ -437,6 +484,17 @@ export default function PricingPage() {
   const countdownDisplay = countdown.ended
     ? "Offer ended"
     : `${countdown.days}d ${countdown.hours}h ${countdown.minutes}m ${countdown.seconds}s`;
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading pricing information...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-white">
@@ -592,20 +650,59 @@ export default function PricingPage() {
               {rows.map(row => (
                 <tr key={row.key} className="border-t">
                   <td className="p-3 text-sm font-medium">{row.label}</td>
-                  {visibleTiers.map(t => (
-                    <td key={t.key} className="p-3 text-sm">
-                      {row.key === "price" && renderPriceCell(t)}
-                      {row.key === "credits" && t.credits}
-                      {row.key === "maxEpisodeLength" && t.maxEpisodeLength}
-                      {row.key === "queuePriority" && t.queuePriority}
-                      {row.key === "queue" && t.queue}
-                      {row.key === "analytics" && (typeof t.features[row.key] === "string" ? t.features[row.key] : <Check on={!!t.features[row.key]} />)}
-                      {row.key === "multiUser" && (typeof t.features[row.key] === "string" ? t.features[row.key] : <Check on={!!t.features[row.key]} />)}
-                      {row.key !== "price" && row.key !== "credits" && row.key !== "maxEpisodeLength" && row.key !== "queuePriority" && row.key !== "queue" && row.key !== "analytics" && row.key !== "multiUser" && (
-                        <Check on={!!t.features[row.key]} />
-                      )}
-                    </td>
-                  ))}
+                  {visibleTiers.map(t => {
+                    // Handle price row specially
+                    if (row.key === "price") {
+                      return (
+                        <td key={t.key} className="p-3 text-sm">
+                          {renderPriceCell(t)}
+                        </td>
+                      );
+                    }
+                    
+                    // Get value using fieldPath
+                    const getValue = (obj, path) => {
+                      if (!path) {
+                        // Fallback to old behavior for backward compatibility
+                        if (obj[row.key] !== undefined) return obj[row.key];
+                        if (obj.features && obj.features[row.key] !== undefined) return obj.features[row.key];
+                        return null;
+                      }
+                      const parts = path.split('.');
+                      let value = obj;
+                      for (const part of parts) {
+                        if (value == null) return null;
+                        value = value[part];
+                      }
+                      return value;
+                    };
+                    
+                    const value = getValue(t, row.fieldPath);
+                    
+                    // Render based on type
+                    if (row.type === "boolean") {
+                      return (
+                        <td key={t.key} className="p-3 text-sm">
+                          <Check on={!!value} />
+                        </td>
+                      );
+                    }
+                    
+                    if (row.type === "select") {
+                      return (
+                        <td key={t.key} className="p-3 text-sm">
+                          {typeof value === "string" ? value : <Check on={!!value} />}
+                        </td>
+                      );
+                    }
+                    
+                    // Default: text or number
+                    return (
+                      <td key={t.key} className="p-3 text-sm">
+                        {value != null ? String(value) : "—"}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>
@@ -625,6 +722,81 @@ export default function PricingPage() {
           <p>
             We're building more—this table is ready for future add-ons (social posting, clip generation, and more).
           </p>
+        </div>
+      </section>
+
+      {/* Credits FAQ Section */}
+      <section className="container mx-auto max-w-4xl px-4 py-12">
+        <div className="rounded-xl border bg-white p-8 shadow-sm">
+          <h2 className="text-2xl md:text-3xl font-bold mb-2">How Our Credit System Works</h2>
+          <p className="text-muted-foreground mb-8">
+            We like to keep things simple and transparent — you always know what you're getting and what it costs.
+          </p>
+
+          <div className="space-y-8">
+            <div>
+              <h3 className="text-xl font-semibold mb-3">Recording and Uploading</h3>
+              <p className="text-muted-foreground mb-2">
+                Every second of audio you record or upload uses <strong>1 credit</strong>.
+              </p>
+              <p className="text-muted-foreground">
+                Want studio-quality sound? Our premium processing automatically upgrades lower-quality recordings (like from webcams or phones) for <strong>just 1 extra credit per second</strong>.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-xl font-semibold mb-3">Editing and Finishing</h3>
+              <p className="text-muted-foreground mb-2">
+                When you're ready to assemble your final episode, that's where the magic happens.
+              </p>
+              <p className="text-muted-foreground">
+                Final audio assembly costs <strong>3 credits per second</strong> — covering your intros, outros, and all the polishing that makes your episode shine.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-xl font-semibold mb-3">Plan Overview</h3>
+              <p className="text-muted-foreground mb-3">Choose the plan that fits your production style:</p>
+              <ul className="list-disc list-inside space-y-2 text-muted-foreground ml-4">
+                <li><strong>Starter:</strong> 28,800 credits = about 2 hours of finished audio</li>
+                <li><strong>Creator:</strong> 72,000 credits = about 5 hours</li>
+                <li><strong>Pro:</strong> 172,800 credits = about 12 hours</li>
+                <li><strong>Executive:</strong> 288,000 credits = about 20 hours</li>
+              </ul>
+            </div>
+
+            <div>
+              <h3 className="text-xl font-semibold mb-3">Optional Features</h3>
+              <p className="text-muted-foreground mb-3">Enhance your workflow with add-ons:</p>
+              <ul className="list-disc list-inside space-y-2 text-muted-foreground ml-4">
+                <li><strong>AI Titles, Descriptions & Tags:</strong> 1–3 credits each — perfect for quick content creation.</li>
+                <li><strong>Intern Feature:</strong> 1 credit per answer — your built-in helper.</li>
+                <li><strong>Text-to-Speech:</strong> 12–15 credits per second — natural, studio-grade voices for intros, outros, or responses.</li>
+              </ul>
+            </div>
+
+            <div>
+              <h3 className="text-xl font-semibold mb-3">Refunds and Flexibility</h3>
+              <p className="text-muted-foreground mb-3">
+                We're still in alpha, which means we're improving fast and keeping things fair.
+              </p>
+              <p className="text-muted-foreground mb-3">
+                If something goes wrong, just request a refund in your subscription page — we'll make it right.
+              </p>
+              <p className="text-muted-foreground mb-2">You can also undo and get credits back:</p>
+              <ul className="list-disc list-inside space-y-2 text-muted-foreground ml-4">
+                <li>Delete within <strong>24 hours</strong> → refund of 2 out of every 3 credits.</li>
+                <li>Delete within <strong>7 days</strong> → refund of 1 out of every 3 credits.</li>
+                <li>After 7 days, refunds close automatically.</li>
+              </ul>
+            </div>
+
+            <div className="pt-4 border-t">
+              <p className="text-muted-foreground italic">
+                Simple, fair, and transparent — so you can focus on creating, not calculating.
+              </p>
+            </div>
+          </div>
         </div>
       </section>
 

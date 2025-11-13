@@ -14,11 +14,11 @@ import AdminPodcastsTab from "@/components/admin/tabs/AdminPodcastsTab.jsx";
 import AdminBugsTab from "@/components/admin/tabs/AdminBugsTab.jsx";
 import AdminBillingTab from "@/components/admin/tabs/AdminBillingTab.jsx";
 import AdminHelpTab from "@/components/admin/tabs/AdminHelpTab.jsx";
-import AdminTierEditor from "@/components/admin/AdminTierEditor.jsx";
 import AdminTierEditorV2 from "@/components/admin/AdminTierEditorV2.jsx";
 import AdminMusicLibrary from "@/components/admin/AdminMusicLibrary.jsx";
 import AdminLandingEditor from "@/components/admin/AdminLandingEditor.jsx";
 import DbExplorer from "@/components/admin/DbExplorer.jsx";
+import PromoCodesTab from "@/components/admin-dashboard/tabs/PromoCodesTab.jsx";
 
 /**
  * AdminMainContent - Main content area that handles tab switching and renders tab components
@@ -216,10 +216,6 @@ export default function AdminMainContent({
       {activeTab === "tiers" && (
         <div className="space-y-4">
           <AdminTierEditorV2 />
-          <div className="mt-8 pt-8 border-t">
-            <div className="text-sm text-gray-500 mb-4">Legacy Editor (Deprecated)</div>
-            <AdminTierEditor />
-          </div>
         </div>
       )}
 
@@ -254,12 +250,17 @@ export default function AdminMainContent({
 
       {/* Billing Tab (Admin) */}
       {activeTab === "billing" && (
-        <AdminBillingTab />
+        <AdminBillingTab onViewUserCredits={viewUserCredits} />
       )}
 
       {/* Help & Docs Tab (Admin) */}
       {activeTab === "help" && (
         <AdminHelpTab />
+      )}
+
+      {/* Promo Codes Tab (Admin) */}
+      {activeTab === "promo-codes" && (
+        <PromoCodesTab token={token} />
       )}
 
       {/* Enhanced Analytics Tab */}
@@ -297,7 +298,7 @@ export default function AdminMainContent({
       )}
       
       {/* Other tabs placeholder */}
-      {!["users", "analytics", "settings", "dashboard", "music", "tiers", "landing", "db", "podcasts", "bugs", "billing", "help"].includes(activeTab) && (
+      {!["users", "analytics", "settings", "dashboard", "music", "tiers", "landing", "db", "podcasts", "bugs", "billing", "help", "promo-codes"].includes(activeTab) && (
         <div className="text-center py-12">
           <h3 className="text-xl font-semibold text-gray-600 mb-2">
             {navigationItems.find((item) => item.id === activeTab)?.label} Coming Soon

@@ -48,6 +48,8 @@ function SortableSection({
   onMoveDown,
   canMoveUp,
   canMoveDown,
+  podcast,
+  episodes,
 }) {
   const {
     attributes,
@@ -177,6 +179,8 @@ function SortableSection({
           sectionDef={sectionDef}
           config={config}
           enabled={enabled}
+          podcast={podcast}
+          episodes={episodes}
         />
       </div>
 
@@ -201,6 +205,8 @@ export default function SectionCanvas({
   onToggleSection,
   onEditSection,
   onDeleteSection,
+  podcast = null,
+  episodes = [],
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -286,6 +292,8 @@ export default function SectionCanvas({
                 onMoveDown={() => handleMoveDown(index)}
                 canMoveUp={index > 0}
                 canMoveDown={index < sections.length - 1}
+                podcast={podcast}
+                episodes={episodes}
               />
             );
           })}

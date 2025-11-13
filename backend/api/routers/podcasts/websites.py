@@ -24,6 +24,13 @@ from api.services.website_sections import get_section_definition
 
 log = logging.getLogger(__name__)
 
+# Optional import for AI theme generator - don't crash if it fails
+try:
+    from api.services.ai_theme_generator import generate_complete_theme
+except ImportError as e:
+    log.warning("AI theme generator not available: %s", e)
+    generate_complete_theme = None
+
 router = APIRouter(prefix="/{podcast_id}/website", tags=["Podcast Websites"])
 
 
@@ -114,7 +121,11 @@ def generate_website(
     try:
         website, content = podcast_websites.create_or_refresh_site(session, podcast, current_user)
     except PodcastWebsiteAIError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        log.exception("Failed to regenerate website with AI: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc) or "AI website generation failed")
+    except Exception as exc:
+        log.exception("Unexpected error during website regeneration: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Website regeneration failed: {str(exc)}")
     return _serialize_response(website, content)
 
 
@@ -364,6 +375,101 @@ def get_css(
     return {
         "css": website.global_css or ""
     }
+
+
+@router.post("/generate-ai-theme")
+def generate_ai_theme(
+    podcast_id: UUID,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Analyze podcast and generate a complete themed design.
+    
+    This endpoint:
+    1. Analyzes the podcast (name, description, cover art, tone)
+    2. Generates a theme specification (colors, fonts, motifs, animations)
+    3. Maps the theme to building blocks (sections)
+    4. Generates custom CSS that styles the blocks
+    5. Applies the theme to the website
+    """
+    if generate_complete_theme is None:
+        raise HTTPException(
+            status_code=503,
+            detail="AI theme generator is not available. Please check server logs."
+        )
+    
+    podcast = _load_podcast(session, podcast_id, current_user)
+    
+    # Ensure website exists
+    website = session.exec(select(PodcastWebsite).where(PodcastWebsite.podcast_id == podcast.id)).first()
+    if website is None:
+        # Create website if it doesn't exist
+        from api.services.podcast_websites import create_or_refresh_site
+        website, _ = create_or_refresh_site(session, podcast, current_user)
+        session.commit()
+        session.refresh(website)
+    
+    # Get cover URL and tagline for better analysis
+    cover_url, _ = podcast_websites._derive_visual_identity(podcast)
+    tagline = None  # Could extract from description or add as separate field
+    
+    try:
+        # Generate complete theme
+        theme_result = generate_complete_theme(podcast, cover_url, tagline)
+        
+        # Apply theme to website - ONLY update theme-related config, preserve structure
+        current_config = website.get_sections_config()
+        
+        # Only update theme metadata and section styling, don't change section structure
+        for section_id, section_config in theme_result.sections_config.get("sections_config", {}).items():
+            if section_id == "_theme_metadata":
+                # Always update theme metadata
+                current_config[section_id] = section_config
+            elif section_id in current_config:
+                # Merge styling/config but preserve existing structure
+                # Only update style-related fields, not content/structure
+                existing = current_config[section_id]
+                # Merge only theme-related fields (colors, styles, etc.)
+                # Don't overwrite headings, content, or structural settings
+                style_fields = ['background_color', 'text_color', 'style', 'variant', 'layout', 'show_cover_art']
+                for field in style_fields:
+                    if field in section_config:
+                        existing[field] = section_config[field]
+            else:
+                # New section config - add it
+                current_config[section_id] = section_config
+        
+        website.set_sections_config(current_config)
+        
+        # DO NOT update sections_order - preserve user's section arrangement
+        # if theme_result.sections_config.get("sections_order"):
+        #     website.set_sections_order(theme_result.sections_config["sections_order"])
+        
+        # Apply CSS (this is the main theme change)
+        website.global_css = theme_result.css
+        
+        # Update timestamp
+        website.updated_at = datetime.utcnow()
+        
+        session.add(website)
+        session.commit()
+        session.refresh(website)
+        
+        return {
+            "message": "AI theme generated and applied successfully",
+            "description": theme_result.description,
+            "theme_spec": theme_result.theme_spec.dict(),
+            "sections_config": theme_result.sections_config,
+            "css_preview": theme_result.css[:500] + "..." if len(theme_result.css) > 500 else theme_result.css
+        }
+        
+    except Exception as e:
+        log.exception("Failed to generate AI theme: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate AI theme: {str(e)}"
+        )
 
 
 @router.post("/reset")

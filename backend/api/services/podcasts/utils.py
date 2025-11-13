@@ -30,10 +30,10 @@ def save_cover_upload(
     allowed_extensions: Optional[Iterable[str]] = None,
     require_image_content_type: bool = False,
 ) -> Tuple[str, Path]:
-    """Persist an uploaded cover image to GCS with temporary local staging.
+    """Persist an uploaded cover image to cloud storage (R2 or GCS) with temporary local staging.
 
-    Returns the GCS URL as filename and temp path. Raises :class:`HTTPException`
-    for validation issues so API handlers can surface friendly errors.
+    Returns the storage URL (gs://... or https://...) as filename and temp path. 
+    Raises :class:`HTTPException` for validation issues so API handlers can surface friendly errors.
     """
     import os
 
@@ -50,7 +50,7 @@ def save_cover_upload(
                 + ", ".join(sorted(allowed)),
             )
 
-    # Always capture content_type for GCS upload
+    # Always capture content_type for cloud storage upload
     content_type = (getattr(cover_image, "content_type", "") or "").lower()
     
     if require_image_content_type:
@@ -64,8 +64,8 @@ def save_cover_upload(
 
     safe_name = sanitize_cover_filename(cover_image.filename)
     file_extension = Path(safe_name).suffix.lower() or extension or ".png"
-    unique_filename = f"{user_id}_{uuid4()}{file_extension}"
-    temp_path = upload_dir / unique_filename
+    unique_filename = f"{user_id.hex}/covers/{user_id}_{uuid4()}{file_extension}"
+    temp_path = upload_dir / f"{user_id}_{uuid4()}{file_extension}"
 
     # Stage to /tmp temporarily
     total = 0
@@ -95,34 +95,54 @@ def save_cover_upload(
             pass
         raise HTTPException(status_code=500, detail=f"Failed to store cover image: {exc}") from exc
 
-    # Upload to GCS immediately
-    gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
-    gcs_key = f"{user_id.hex}/covers/{unique_filename}"
-    
+    # Process image constraints (resize/compress) before uploading
+    # This ensures the uploaded image meets platform requirements
     try:
-        from infrastructure import gcs
+        from ...services.image_utils import ensure_cover_image_constraints
+        processed_path = ensure_cover_image_constraints(str(temp_path))
+        # If processing created a new file, use that instead
+        if processed_path != str(temp_path) and Path(processed_path).exists():
+            # Clean up original temp file
+            try:
+                temp_path.unlink(missing_ok=True)  # type: ignore[call-arg]
+            except Exception:
+                pass
+            temp_path = Path(processed_path)
+    except Exception as img_err:
+        # Non-fatal: if image processing fails, continue with original
+        import logging
+        logging.getLogger(__name__).warning(f"Image processing failed, using original: {img_err}")
+
+    # Upload to cloud storage (R2 or GCS based on STORAGE_BACKEND)
+    try:
+        from infrastructure import storage
         with open(temp_path, "rb") as f:
-            # Disable fallback - podcast covers MUST be in GCS
-            gcs_url = gcs.upload_fileobj(
-                gcs_bucket, 
-                gcs_key, 
-                f, 
+            # Use storage routing module - routes to R2 if STORAGE_BACKEND=r2, otherwise GCS
+            # Disable fallback - podcast covers MUST be in cloud storage
+            storage_url = storage.upload_fileobj(
+                bucket_name="",  # Ignored, uses configured bucket from env vars
+                key=unique_filename,
+                fileobj=f,
                 content_type=content_type or "image/jpeg",
                 allow_fallback=False
             )
         
         # Clean up temp file
         try:
-            temp_path.unlink(missing_ok=True)
+            temp_path.unlink(missing_ok=True)  # type: ignore[call-arg]
         except Exception:
             pass
         
-        # Verify GCS upload succeeded
-        if not gcs_url or not gcs_url.startswith("gs://"):
-            raise Exception(f"GCS upload returned invalid URL: {gcs_url}")
+        # Verify upload succeeded
+        if not storage_url:
+            raise Exception("Cloud storage upload returned None")
         
-        # Return GCS URL as filename
-        return gcs_url, temp_path  # temp_path for backward compat (no longer exists)
+        # Accept both gs:// (GCS) and https:// (R2) URLs
+        if not (storage_url.startswith("gs://") or storage_url.startswith("https://") or storage_url.startswith("http://")):
+            raise Exception(f"Cloud storage upload returned invalid URL format: {storage_url}")
+        
+        # Return storage URL as filename
+        return storage_url, temp_path  # temp_path for backward compat (may not exist anymore)
         
     except Exception as e:
         # Clean up temp file and fail

@@ -26,7 +26,7 @@ from api.core.paths import WS_ROOT as PROJECT_ROOT, FINAL_DIR, MEDIA_DIR
 from infrastructure import storage
 from infrastructure.tasks_client import enqueue_http_task
 
-from . import billing, media, transcript
+from . import media, transcript
 from .transcript import _commit_with_retry
 
 
@@ -964,17 +964,19 @@ def _finalize_episode(
     try:
         from api.services.billing import credits
         
-        # Get audio duration in minutes (convert from milliseconds)
-        audio_duration_minutes = (episode.duration_ms / 1000 / 60) if episode.duration_ms else 0
+        # Get audio duration in SECONDS (convert from milliseconds)
+        # charge_for_assembly expects seconds, not minutes!
+        audio_duration_seconds = (episode.duration_ms / 1000.0) if episode.duration_ms else 0.0
         
-        # Determine if Auphonic was used (costs more)
+        # Determine if Auphonic was used (doesn't affect assembly rate, but logged for transparency)
         use_auphonic_flag = bool(auphonic_processed)
         
         # Charge credits for assembly
         logging.info(
-            "[assemble] 💳 Charging credits: episode_id=%s, duration=%.2f minutes, auphonic=%s",
+            "[assemble] 💳 Charging credits: episode_id=%s, duration=%.2f seconds (%.2f minutes), auphonic=%s",
             episode.id,
-            audio_duration_minutes,
+            audio_duration_seconds,
+            audio_duration_seconds / 60.0,
             use_auphonic_flag
         )
         
@@ -982,17 +984,16 @@ def _finalize_episode(
             session=session,
             user=session.get(User, episode.user_id),
             episode_id=episode.id,
-            total_duration_minutes=audio_duration_minutes,
+            total_duration_seconds=audio_duration_seconds,
             use_auphonic=use_auphonic_flag,
             correlation_id=f"assembly_{episode.id}",
         )
         
         logging.info(
-            "[assemble] ✅ Credits charged: %.2f credits (base=%.2f, pipeline=%s, multiplier=%.2fx)",
+            "[assemble] ✅ Credits charged: %.2f credits (duration=%.2fs, rate=%.2f credits/sec)",
             cost_breakdown['total_credits'],
-            cost_breakdown['base_cost'],
-            cost_breakdown['pipeline'],
-            cost_breakdown['multiplier']
+            cost_breakdown['duration_seconds'],
+            cost_breakdown['assembly_rate_per_sec']
         )
         
     except Exception as credits_err:
@@ -1284,20 +1285,60 @@ def _finalize_episode(
         user = session.get(User, episode.user_id)
         if user and user.email:
             episode_title = episode.title or "Untitled Episode"
-            subject = "Your episode is ready to publish!"
-            body = (
-                f"Great news! Your episode '{episode_title}' has finished processing and is ready to publish.\n\n"
-                f"🎧 Your episode has been assembled with all your intro, outro, and music.\n\n"
-                f"Next steps:\n"
-                f"1. Preview the final audio to make sure it sounds perfect\n"
-                f"2. Add episode details (title, description, show notes)\n"
-                f"3. Publish to your podcast feed\n\n"
-                f"Go to your dashboard to review and publish:\n"
-                f"https://app.podcastplusplus.com/dashboard\n\n"
-                f"Happy podcasting!"
+            subject = "Your episode is ready! 🎉"
+            
+            # Generate magic link token for auto-login (24 hour expiry)
+            from api.routers.auth.utils import create_access_token
+            from datetime import timedelta
+            magic_token = create_access_token(
+                {"sub": user.email, "type": "magic_link"},
+                expires_delta=timedelta(hours=24)
             )
+            
+            base_url = "https://app.podcastplusplus.com"
+            episodes_url = f"{base_url}/dashboard?tab=episodes&token={magic_token}"
+            dashboard_url = f"{base_url}/dashboard?token={magic_token}"
+            
+            # Plain text version
+            body = (
+                f"🎉🎊🎈 Congratulations! Your episode '{episode_title}' has finished processing! 🎈🎊🎉\n\n"
+                f"Click here to see your newest and latest episodes:\n"
+                f"{episodes_url}\n\n"
+                f"Click here to go back to your dashboard to create your next masterpiece:\n"
+                f"{dashboard_url}\n"
+            )
+            
+            # HTML version with better formatting
+            html_body = (
+                f"<html><body style=\"font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;\">"
+                f"<div style=\"text-align: center; margin-bottom: 30px;\">"
+                f"<img src=\"{base_url}/MikeCzech.png\" alt=\"Podcast Plus Plus\" style=\"width: 80px; height: 80px; border-radius: 50%; object-fit: cover; margin-bottom: 20px;\" />"
+                f"</div>"
+                f"<h2 style=\"color: #2C3E50; text-align: center;\">🎉🎊🎈 Congratulations! Your episode '{episode_title}' has finished processing! 🎈🎊🎉</h2>"
+                f"<p style=\"margin: 20px 0; text-align: center;\">"
+                f"Your episode has been assembled with all your intro, outro, and music."
+                f"</p>"
+                f"<div style=\"margin: 30px 0;\">"
+                f"<p style=\"font-weight: bold; margin-bottom: 10px;\">Next steps:</p>"
+                f"<ol style=\"margin-left: 20px; padding-left: 10px;\">"
+                f"<li style=\"margin-bottom: 8px;\">Preview the final audio to make sure it sounds perfect</li>"
+                f"<li style=\"margin-bottom: 8px;\">Add episode details (title, description, show notes)</li>"
+                f"<li style=\"margin-bottom: 8px;\">Publish to your podcast feed</li>"
+                f"</ol>"
+                f"</div>"
+                f"<p style=\"margin: 20px 0; text-align: center;\">"
+                f"Go to your dashboard to review and publish:"
+                f"</p>"
+                f"<p style=\"margin: 20px 0; text-align: center;\">"
+                f"<a href=\"{episodes_url}\" style=\"display: inline-block; background-color: #2C3E50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; margin: 5px;\">"
+                f"View Episodes</a>"
+                f"<a href=\"{dashboard_url}\" style=\"display: inline-block; background-color: #2C3E50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; margin: 5px;\">"
+                f"Go to Dashboard</a></p>"
+                f"</body></html>"
+            )
+            
             try:
-                sent = mailer.send(user.email, subject, body)
+                sent = mailer.send(user.email, subject, body, html=html_body)
                 if sent:
                     logging.info("[assemble] Email notification sent to %s for episode %s", user.email, episode.id)
                 else:
@@ -1351,13 +1392,11 @@ def orchestrate_create_podcast_episode(
     
     with session_scope() as session:
         try:
-            billing.debit_usage_at_start(
-                session=session,
-                user_id=user_id,
-                episode_id=episode_id,
-                main_content_filename=main_content_filename,
-                skip_charge=skip_charge,
-            )
+            # NOTE: OLD BILLING SYSTEM REMOVED
+            # We now charge credits at the end of assembly using the new credit system
+            # which charges based on actual episode duration in seconds (3 credits/sec for assembly).
+            # The old upfront charge (debit_usage_at_start) used minutes and is no longer needed.
+            # Credits are charged in _finalize_episode() using credits.charge_for_assembly()
 
             media_context, words_json_path, early_result = media.resolve_media_context(
                 session=session,

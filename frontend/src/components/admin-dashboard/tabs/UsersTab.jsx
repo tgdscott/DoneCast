@@ -37,8 +37,9 @@ function getTierBadge(tier) {
   const normalized = (tier || "").toLowerCase();
   if (normalized === "pro") return <Badge className="bg-purple-100 text-purple-800">Pro</Badge>;
   if (normalized === "creator") return <Badge className="bg-blue-100 text-blue-800">Creator</Badge>;
-  if (normalized === "free") return <Badge className="bg-gray-100 text-gray-800">Free</Badge>;
+  if (normalized === "free" || normalized === "starter") return <Badge className="bg-gray-100 text-gray-800">Starter</Badge>;
   if (normalized === "unlimited") return <Badge className="bg-yellow-100 text-yellow-800">Unlimited</Badge>;
+  if (normalized === "executive") return <Badge className="bg-teal-100 text-teal-800">Executive</Badge>;
   if (normalized === "admin") return <Badge className="bg-orange-100 text-orange-800">Admin</Badge>;
   if (normalized === "superadmin") return <Badge className="bg-red-100 text-red-800">Super Admin</Badge>;
   return <Badge variant="secondary">{tier || "—"}</Badge>;
@@ -174,7 +175,8 @@ export default function UsersTab({
                     <SelectItem value="all">All Tiers</SelectItem>
                     <SelectItem value="pro">Pro</SelectItem>
                     <SelectItem value="creator">Creator</SelectItem>
-                    <SelectItem value="free">Free</SelectItem>
+                    <SelectItem value="starter">Starter</SelectItem>
+                    <SelectItem value="executive">Executive</SelectItem>
                     <SelectItem value="unlimited">Unlimited</SelectItem>
                   </SelectContent>
                 </Select>
@@ -278,14 +280,14 @@ export default function UsersTab({
                           </Button>
                         )}
                       </TableCell>
-                      <TableCell>{getTierBadge(user.tier || "free")}</TableCell>
+                      <TableCell>{getTierBadge(user.tier || "starter")}</TableCell>
                       <TableCell>{getStatusBadge(user.is_active ? "Active" : "Inactive")}</TableCell>
                       <TableCell className="text-gray-600">{user.episode_count}</TableCell>
                       <TableCell className="text-gray-600">{user.last_activity ? user.last_activity.slice(0, 10) : "—"}</TableCell>
                       <TableCell>
                         <div className="flex items-center space-x-2">
                           <Select
-                            defaultValue={user.tier || "free"}
+                            defaultValue={user.tier === "free" ? "starter" : (user.tier || "starter")}
                             onValueChange={(value) => onUpdateUser(user.id, { tier: value })}
                             disabled={savingIds.has(user.id) || user.tier === "superadmin"}
                           >
@@ -293,9 +295,10 @@ export default function UsersTab({
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="free">Free</SelectItem>
+                              <SelectItem value="starter">Starter</SelectItem>
                               <SelectItem value="creator">Creator</SelectItem>
                               <SelectItem value="pro">Pro</SelectItem>
+                              <SelectItem value="executive">Executive</SelectItem>
                               <SelectItem value="unlimited">Unlimited</SelectItem>
                               {isSuperAdmin && <SelectItem value="admin">Admin</SelectItem>}
                               {user.tier === "superadmin" && (
@@ -385,7 +388,7 @@ export default function UsersTab({
                               Clear
                             </button>
                           </div>
-                          {(user.is_active || (user.tier && user.tier.toLowerCase() !== "free")) && (
+                          {(user.is_active || (user.tier && user.tier.toLowerCase() !== "free" && user.tier.toLowerCase() !== "starter")) && (
                             <Button
                               variant="ghost"
                               size="sm"
@@ -415,8 +418,8 @@ export default function UsersTab({
                               disabled={savingIds.has(user.id)}
                               onClick={() => onPrepareUserForDeletion(user.id, user.email, user.is_active, user.tier)}
                               title={
-                                user.is_active || (user.tier && user.tier.toLowerCase() !== "free")
-                                  ? "User must be INACTIVE + FREE tier to delete. Click to prepare first."
+                                user.is_active || (user.tier && user.tier.toLowerCase() !== "free" && user.tier.toLowerCase() !== "starter")
+                                  ? "User must be INACTIVE + STARTER tier to delete. Click to prepare first."
                                   : "Delete user and all their data (permanent)"
                               }
                               aria-label={`Delete user ${displayName}`}

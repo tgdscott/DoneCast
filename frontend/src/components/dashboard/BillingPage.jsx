@@ -5,9 +5,11 @@ import { Button } from '../ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
 import { Progress } from '../ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { makeApi, isApiError } from '@/lib/apiClient';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { makeApi, isApiError, api } from '@/lib/apiClient';
 import { useResolvedTimezone } from '@/hooks/useResolvedTimezone';
 import { formatToPartsInTimezone } from '@/lib/timezone';
+import CreditLedger from './CreditLedger';
 
 export default function BillingPage({ token, onBack }) {
   const { refreshUser } = useAuth();
@@ -22,6 +24,7 @@ export default function BillingPage({ token, onBack }) {
   const [showModal, setShowModal] = useState(false);
   const [planPolling, setPlanPolling] = useState(false);
   const [annual, setAnnual] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
   const { toast } = (() => { try { return useToast(); } catch { return { toast: () => {} }; } })();
   const tabIdRef = useRef(null);
   if(!tabIdRef.current) {
@@ -194,8 +197,12 @@ export default function BillingPage({ token, onBack }) {
     return iso;
   };
 
-  // Pricing data
-  const tiers = useMemo(() => ([
+  // Pricing data - load from API
+  const [pricingData, setPricingData] = useState(null);
+  const [pricingLoading, setPricingLoading] = useState(true);
+
+  // Fallback data in case API fails
+  const fallbackTiers = [
     {
       key: 'starter', name: 'Starter', monthly: 19, annual: null,
       credits: '28,800', maxEpisodeLength: '40 min', queuePriority: 'Low',
@@ -248,9 +255,37 @@ export default function BillingPage({ token, onBack }) {
       },
       contact: true,
     },
-  ]), []);
+  ];
 
-  const rows = useMemo(() => ([
+  // Load pricing data from API
+  useEffect(() => {
+    const fetchPricingData = async () => {
+      try {
+        setPricingLoading(true);
+        // Use public API client (no auth required) for pricing data
+        const data = await api.get('/api/admin/pricing/public');
+        setPricingData(data);
+      } catch (error) {
+        console.error('Failed to load pricing data, using fallback:', error);
+        // Use fallback data on error
+        setPricingData({ standardTiers: fallbackTiers });
+      } finally {
+        setPricingLoading(false);
+      }
+    };
+    
+    fetchPricingData();
+  }, []); // Only run once on mount
+
+  const tiers = useMemo(() => {
+    if (pricingData?.standardTiers) {
+      return pricingData.standardTiers;
+    }
+    return fallbackTiers;
+  }, [pricingData]);
+
+  // Build rows from featureDefinitions
+  const fallbackRows = [
     { key: 'price', label: 'Price' },
     { key: 'credits', label: 'Monthly credits' },
     { key: 'maxEpisodeLength', label: 'Max episode length' },
@@ -267,7 +302,27 @@ export default function BillingPage({ token, onBack }) {
     { key: 'multiUser', label: 'Multi-user accounts' },
     { key: 'priorityQueue', label: 'Priority processing queue' },
     { key: 'premiumSupport', label: 'Premium support' },
-  ]), []);
+  ];
+
+  const rows = useMemo(() => {
+    const featureDefinitions = pricingData?.featureDefinitions || [];
+    const priceRow = { key: 'price', label: 'Price' };
+    
+    if (featureDefinitions.length === 0) {
+      return [priceRow, ...fallbackRows.slice(1)];
+    }
+    
+    // Convert featureDefinitions to rows format
+    const featureRows = featureDefinitions.map(feature => ({
+      key: feature.key,
+      label: feature.label,
+      fieldPath: feature.fieldPath,
+      type: feature.type,
+      options: feature.options
+    }));
+    
+    return [priceRow, ...featureRows];
+  }, [pricingData]);
 
   const priceFor = (t) => {
     if (t.contact) return 'Contact Us';
@@ -295,36 +350,143 @@ export default function BillingPage({ token, onBack }) {
       </div>
       {error && <div className="text-red-600 text-sm">{error}</div>}
 
-      {/* Usage bar above table */}
-      <Card>
-        <CardContent className="pt-6">
-          {!usage && <div className="text-sm text-gray-500">Loading usage...</div>}
-          {usage && (() => {
-            const usedMin = typeof usage.processing_minutes_used_this_month === 'number' ? usage.processing_minutes_used_this_month : (typeof usage.minutes_used === 'number' ? usage.minutes_used : null);
-            const capMin = (typeof usage.max_processing_minutes_month === 'number') ? usage.max_processing_minutes_month : (usage.max_processing_minutes_month == null ? null : undefined);
-            const leftMin = (capMin == null) ? '∞' : (usedMin == null ? null : Math.max(0, capMin - usedMin));
-            const pct = (capMin && typeof usedMin === 'number') ? Math.min(100, (usedMin/Math.max(1,capMin))*100) : null;
-            return (
-              <div className="space-y-2 text-sm relative">
-                <div className="flex justify-between"><span>Processing minutes</span><span>{usedMin ?? '—'} / {capMin == null ? '∞' : capMin}</span></div>
-                {typeof pct === 'number' && <Progress value={pct} />}
-                <div className="flex items-center justify-between">
-                  {leftMin !== null && <div className="text-xs text-muted-foreground">Minutes left: {leftMin}</div>}
-                  {currentPlanKey !== 'free' && renewalIso && (
-                    <div className="text-[11px] text-muted-foreground">
-                      {cancelAtEnd ? 'Your subscription ends on ' : 'Your subscription renews on '}
-                      <span className="font-medium">{formatDate(renewalIso)}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-        </CardContent>
-      </Card>
+      {/* Tabs for Overview and Credit History */}
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="grid w-full max-w-md grid-cols-2">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="credits">Credit History</TabsTrigger>
+        </TabsList>
 
-      {/* Pricing table */}
-      <Card>
+        <TabsContent value="overview" className="space-y-6 mt-6">
+          {/* Usage bar above table */}
+          <Card>
+            <CardContent className="pt-6">
+              {!usage && <div className="text-sm text-gray-500">Loading usage...</div>}
+              {usage && (() => {
+                // NEW: Use credits system (primary)
+                // For progress bar: show monthly allocation usage (not total credits which includes purchased)
+                const monthlyUsed = typeof usage.monthly_credits_used === 'number' ? usage.monthly_credits_used : 0;
+                const monthlyTotal = typeof usage.monthly_credits_total === 'number' ? usage.monthly_credits_total : (usage.max_credits_month || 0);
+                const totalUsed = typeof usage.credits_used_this_month === 'number' ? usage.credits_used_this_month : 0;
+                const maxCredits = typeof usage.max_credits_month === 'number' ? usage.max_credits_month : (usage.max_credits_month == null ? null : undefined);
+                const leftCredits = (maxCredits == null) ? '∞' : Math.max(0, usage.credits_balance || 0);
+                // Progress bar shows monthly allocation usage
+                const pct = (monthlyTotal > 0 && typeof monthlyUsed === 'number') ? Math.min(100, (monthlyUsed/Math.max(1,monthlyTotal))*100) : null;
+                
+                // Format large numbers with commas
+                const formatCredits = (val) => {
+                  if (val === '∞' || val === null) return val;
+                  if (typeof val === 'number') {
+                    return val.toLocaleString('en-US', { maximumFractionDigits: 0 });
+                  }
+                  return val;
+                };
+                
+                return (
+                  <div className="space-y-2 text-sm relative">
+                    <div className="flex justify-between">
+                      <span className="font-medium">Credits</span>
+                      <span className="font-semibold">
+                        {formatCredits(monthlyUsed)} / {monthlyTotal == null || monthlyTotal === 0 ? (maxCredits == null ? '∞' : formatCredits(maxCredits)) : formatCredits(monthlyTotal)}
+                      </span>
+                    </div>
+                    {typeof pct === 'number' && (
+                      <Progress 
+                        value={pct} 
+                        className={pct >= 100 ? 'bg-red-500' : pct >= 80 ? 'bg-yellow-500' : ''}
+                      />
+                    )}
+                    <div className="flex items-center justify-between">
+                      {leftCredits !== null && leftCredits !== '∞' && (
+                        <div className="text-xs text-muted-foreground">
+                          Credits remaining: {formatCredits(leftCredits)}
+                        </div>
+                      )}
+                      {leftCredits === '∞' && (
+                        <div className="text-xs text-muted-foreground">
+                          Unlimited credits
+                        </div>
+                      )}
+                      {currentPlanKey !== 'free' && renewalIso && (
+                        <div className="text-[11px] text-muted-foreground">
+                          {cancelAtEnd ? 'Your subscription ends on ' : 'Your subscription renews on '}
+                          <span className="font-medium">{formatDate(renewalIso)}</span>
+                        </div>
+                      )}
+                    </div>
+                    {usage.credits_balance !== undefined && (
+                      <div className="text-xs text-muted-foreground pt-1 border-t">
+                        Current balance: <span className="font-medium">{formatCredits(usage.credits_balance)} credits</span>
+                      </div>
+                    )}
+                    
+                    {/* Purchase Addon Credits Box */}
+                    {currentPlanKey !== 'free' && currentPlanKey !== 'enterprise' && (
+                      <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-sm font-semibold text-gray-800">Buy Extra Credits</div>
+                            <div className="text-xs text-gray-600 mt-0.5">10,000 credits - Never expire</div>
+                          </div>
+                          <Button
+                            disabled={checkoutLoading}
+                            onClick={() => {
+                              (async () => {
+                                try {
+                                  setCheckoutLoading(true);
+                                  const api = makeApi(token);
+                                  const data = await api.post('/api/billing/checkout/addon_credits', {
+                                    plan_key: currentPlanKey,
+                                    return_url: window.location.pathname,
+                                  });
+                                  const w = window.open(data.url, 'ppp_stripe_checkout_credits', 'width=720,height=850,noopener');
+                                  if (!w) {
+                                    window.location.href = data.url;
+                                  } else {
+                                    w.focus();
+                                    // Poll for completion
+                                    const checkInterval = setInterval(() => {
+                                      try {
+                                        if (w.closed) {
+                                          clearInterval(checkInterval);
+                                          fetchAll(); // Refresh usage
+                                        }
+                                      } catch (e) {}
+                                    }, 500);
+                                    setTimeout(() => clearInterval(checkInterval), 300000);
+                                  }
+                                } catch (e) {
+                                  const msg = isApiError(e) ? (e.detail || e.error || e.message) : String(e);
+                                  setError(msg);
+                                } finally {
+                                  setCheckoutLoading(false);
+                                }
+                              })();
+                            }}
+                            size="sm"
+                            className="bg-blue-600 hover:bg-blue-700"
+                          >
+                            {(() => {
+                              const addonPrices = {
+                                'starter': 8,
+                                'creator': 7,
+                                'pro': 6,
+                                'executive': 5,
+                              };
+                              return `$${addonPrices[currentPlanKey] || 5}`;
+                            })()}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </CardContent>
+          </Card>
+
+          {/* Pricing table */}
+          <Card>
         <CardHeader className="flex flex-col gap-3 border-b border-slate-100 pb-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <CardTitle>Subscription Plans</CardTitle>
@@ -339,7 +501,7 @@ export default function BillingPage({ token, onBack }) {
                 <button type="button" onClick={()=>setAnnual(true)} aria-pressed={annual} className={`relative z-10 flex-1 rounded-full px-2 text-center text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${annual ? 'text-slate-900' : 'text-slate-500'}`}>Annual</button>
               </div>
             </div>
-            <span className="text-xs text-muted-foreground">Annual saves about 20%.</span>
+            <span className="text-xs text-muted-foreground">Save even more with an Annual Subscription</span>
           </div>
         </CardHeader>
         <CardContent>
@@ -441,38 +603,112 @@ export default function BillingPage({ token, onBack }) {
                             </div>
                           </div>
                         )}
-                        {row.key === 'credits' && t.credits}
-                        {row.key === 'maxEpisodeLength' && t.maxEpisodeLength}
-                        {row.key === 'queuePriority' && t.queuePriority}
-                        {row.key === 'queue' && t.queue}
-                        {row.key === 'analytics' && (typeof t.features[row.key] === 'string' ? t.features[row.key] : <Check on={!!t.features[row.key]} />)}
-                        {row.key === 'multiUser' && (typeof t.features[row.key] === 'string' ? t.features[row.key] : <Check on={!!t.features[row.key]} />)}
-                        {row.key !== 'price' && row.key !== 'credits' && row.key !== 'maxEpisodeLength' && row.key !== 'queuePriority' && row.key !== 'queue' && row.key !== 'analytics' && row.key !== 'multiUser' && (
-                          <Check on={!!t.features[row.key]} />
-                        )}
+                        {row.key !== 'price' && (() => {
+                          // Get value using fieldPath
+                          const getValue = (obj, path) => {
+                            if (!path) {
+                              // Fallback to old behavior for backward compatibility
+                              if (obj[row.key] !== undefined) return obj[row.key];
+                              if (obj.features && obj.features[row.key] !== undefined) return obj.features[row.key];
+                              return null;
+                            }
+                            const parts = path.split('.');
+                            let value = obj;
+                            for (const part of parts) {
+                              if (value == null) return null;
+                              value = value[part];
+                            }
+                            return value;
+                          };
+                          
+                          const value = getValue(t, row.fieldPath);
+                          
+                          // Render based on type
+                          if (row.type === 'boolean') {
+                            return <Check on={!!value} />;
+                          }
+                          
+                          if (row.type === 'select') {
+                            return typeof value === 'string' ? value : <Check on={!!value} />;
+                          }
+                          
+                          // Default: text or number
+                          return value != null ? String(value) : '—';
+                        })()}
                       </td>
                     ))}
                   </tr>
                 ))}
-                {/* Manage subscription row for non-free plans */}
-                {currentPlanKey !== 'free' && (
-                  <tr className="border-t">
-                    <td className="p-2 text-[13px] font-medium">Manage</td>
-                    {tiers.map(t => (
+                {/* Addon Credits row */}
+                <tr className="border-t">
+                  <td className="p-2 text-[13px] font-medium">Addon Credits (10,000)</td>
+                  {tiers.map(t => {
+                    // Prices: Starter=$8, Creator=$7, Pro=$6, Executive=$5, Enterprise=$5
+                    const addonPrices = {
+                      'starter': 8,
+                      'creator': 7,
+                      'pro': 6,
+                      'executive': 5,
+                      'enterprise': 5,
+                    };
+                    const price = addonPrices[t.key] || null;
+                    
+                    return (
                       <td key={t.key} className="p-2 text-[13px]">
-                        {currentPlanKey === t.key ? (
-                          <Button disabled={portalLoading} onClick={openPortal}>Manage Subscription</Button>
-                        ) : <span className="text-xs text-muted-foreground">—</span>}
+                        {t.contact ? (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        ) : price ? (
+                          <Button 
+                            disabled={checkoutLoading} 
+                            onClick={() => {
+                              // Use the addon credits checkout endpoint
+                              (async () => {
+                                try {
+                                  setCheckoutLoading(true);
+                                  const api = makeApi(token);
+                                  const data = await api.post('/api/billing/checkout/addon_credits', {
+                                    plan_key: t.key,
+                                    return_url: window.location.pathname,
+                                  });
+                                  const w = window.open(data.url, 'ppp_stripe_checkout_credits', 'width=720,height=850,noopener');
+                                  if (!w) {
+                                    window.location.href = data.url;
+                                  } else {
+                                    w.focus();
+                                  }
+                                } catch (e) {
+                                  const msg = isApiError(e) ? (e.detail || e.error || e.message) : String(e);
+                                  setError(msg);
+                                } finally {
+                                  setCheckoutLoading(false);
+                                }
+                              })();
+                            }}
+                            variant="outline"
+                            size="sm"
+                          >
+                            ${price}
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
                       </td>
-                    ))}
-                  </tr>
-                )}
+                    );
+                  })}
+                </tr>
               </tbody>
             </table>
           </div>
           {planPolling && <div className="text-xs text-amber-600 mt-3">Finalizing upgrade...</div>}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+        </TabsContent>
+
+        <TabsContent value="credits" className="mt-6">
+          <CreditLedger token={token} />
+        </TabsContent>
+      </Tabs>
+
       {showModal && <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
         <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 space-y-4">
           <h3 className="text-xl font-semibold">Subscription Updated</h3>

@@ -13,6 +13,8 @@ import BillingPage from "@/components/dashboard/BillingPage.jsx";
 import EpisodeHistory from "@/components/dashboard/EpisodeHistory.jsx";
 import PodcastManager from "@/components/dashboard/PodcastManager.jsx";
 import PodcastCreator from "@/components/dashboard/PodcastCreator.jsx";
+import PodcastAnalytics from "@/components/dashboard/PodcastAnalytics.jsx";
+import WebsiteBuilder from "@/components/dashboard/WebsiteBuilder.jsx";
 import { abApi } from "./lib/abApi";
 import Recorder from "@/components/quicktools/Recorder.jsx";
 import { makeApi } from "@/lib/apiClient";
@@ -25,6 +27,7 @@ export default function AppAB({ token }) {
   const [collapsed, setCollapsed] = useState(false);
 
   const [shows, setShows] = useState([]);
+  const [selectedPodcastId, setSelectedPodcastId] = useState(null);
 
   // Start with no demo uploads or drafts; real items will appear as the user uploads
   const [uploads, setUploads] = useState([]);
@@ -262,9 +265,12 @@ export default function AppAB({ token }) {
                 'media-library': 'Media Uploads',
                 'my-templates': 'My Templates',
                 billing: 'Billing',
+                analytics: 'Analytics',
+                'website-builder': 'Website Builder',
                 'creator-upload': 'Upload',
                 'creator-finalize': 'Finalize',
                 settings: 'Settings',
+                recorder: 'Record',
               };
               const here = labels[active] || '—';
               return (<span>Plus Plus workspace / <span className="text-foreground">{here}</span></span>);
@@ -284,7 +290,16 @@ export default function AppAB({ token }) {
             <EpisodeHistory token={token} onBack={() => setActive("dashboard")} />
           )}
           {active === "podcast-manager" && (
-            <PodcastManager token={token} podcasts={shows} setPodcasts={setShows} onBack={() => setActive("dashboard")} />
+            <PodcastManager 
+              token={token} 
+              podcasts={shows} 
+              setPodcasts={setShows} 
+              onBack={() => setActive("dashboard")}
+              onViewAnalytics={(podcastId) => {
+                setSelectedPodcastId(podcastId);
+                setActive("analytics");
+              }}
+            />
           )}
           {active === "media-library" && (
             <MediaLibrary token={token} onBack={() => setActive("dashboard")} />
@@ -294,6 +309,20 @@ export default function AppAB({ token }) {
           )}
           {active === "billing" && (
             <BillingPage token={token} onBack={() => setActive("dashboard")} />
+          )}
+          {active === "analytics" && (
+            <PodcastAnalytics 
+              podcastId={selectedPodcastId || (shows.length > 0 ? shows[0].id : null)} 
+              token={token} 
+              onBack={() => setActive("dashboard")}
+            />
+          )}
+          {active === "website-builder" && (
+            <WebsiteBuilder 
+              token={token} 
+              podcasts={shows}
+              onBack={() => setActive("dashboard")}
+            />
           )}
           {active === "creator-upload" && (
             <CreatorUpload

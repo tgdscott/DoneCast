@@ -3,8 +3,9 @@
  * Each section renders a preview of how it will look on the published site.
  */
 
-import { ExternalLink, Mail, Radio, Rss, Users, Quote, DollarSign, Calendar, Heart, Sparkles } from "lucide-react";
+import { ExternalLink, Mail, Radio, Rss, Users, Quote, DollarSign, Calendar, Heart, Sparkles, ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useState, useEffect } from "react";
 
 // Helper to get icon component by name
 export function getSectionIcon(iconName) {
@@ -42,35 +43,123 @@ export function HeroSectionPreview({ config, enabled, podcast }) {
     subtitle,
     cta_text = "Listen Now",
     cta_url,
-    background_color = "#1e293b",
-    text_color = "#ffffff",
+    background_color,
+    text_color,
     show_cover_art = true,
+    variant,
   } = config || {};
   
   // Use config title or fall back to podcast title
   const displayTitle = title || podcast?.title || "Your Podcast Name";
   const displaySubtitle = subtitle || podcast?.description || "A captivating tagline that hooks listeners";
   const coverUrl = podcast?.cover_url;
+  
+  // Debug logging for cover image - FORCE string conversion
+  useEffect(() => {
+    console.log('[HeroSection] ===== COVER IMAGE DEBUG =====');
+    console.log('[HeroSection] Cover URL (raw):', coverUrl);
+    console.log('[HeroSection] Cover URL (type):', typeof coverUrl);
+    console.log('[HeroSection] Cover URL (truthy?):', !!coverUrl);
+    console.log('[HeroSection] Show cover art:', show_cover_art);
+    console.log('[HeroSection] Show cover art (type):', typeof show_cover_art);
+    console.log('[HeroSection] Podcast object:', JSON.stringify(podcast || {}));
+    console.log('[HeroSection] Should show image?', (show_cover_art !== false) && coverUrl);
+    console.log('[HeroSection] ============================');
+  }, [coverUrl, show_cover_art, podcast]);
+
+  // Use CSS variables from AI theme if available, otherwise use config values
+  const bgColor = background_color || "#1e293b";
+  const txtColor = text_color || "#ffffff";
+  const heroClass = variant ? `hero ${variant}` : "hero";
+  
+  // Check if we should use CSS variables (when background_color is a CSS variable)
+  const useCSSVars = background_color && background_color.startsWith('var(');
 
   return (
     <div
-      className="w-full relative overflow-hidden"
-      style={{
-        backgroundColor: background_color,
-        color: text_color,
+      className={`w-full relative overflow-hidden ${heroClass}`}
+      style={useCSSVars ? {
+        // Let CSS variables handle colors - don't set inline styles
+        opacity: enabled ? 1 : 0.6,
+      } : {
+        backgroundColor: bgColor,
+        color: txtColor,
         opacity: enabled ? 1 : 0.6,
       }}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
         <div className="grid md:grid-cols-2 gap-8 items-center">
-          <div className="space-y-6">
+          {/* Cover image on the left - ALWAYS show if coverUrl exists and show_cover_art is not explicitly false */}
+          {(() => {
+            // Force check - be very explicit
+            const hasCoverUrl = coverUrl && typeof coverUrl === 'string' && coverUrl.trim().length > 0;
+            const shouldShowCover = show_cover_art !== false;
+            const shouldShow = hasCoverUrl && shouldShowCover;
+            
+            console.log('[HeroSection] Render check:', {
+              hasCoverUrl,
+              coverUrlValue: coverUrl,
+              shouldShowCover,
+              show_cover_art,
+              finalShouldShow: shouldShow
+            });
+            
+            if (!shouldShow) {
+              console.warn('[HeroSection] ⚠️ Cover image NOT rendering:', {
+                reason: !hasCoverUrl ? 'NO_COVER_URL' : 'SHOW_COVER_ART_FALSE',
+                coverUrl: coverUrl || 'MISSING',
+                show_cover_art
+              });
+            }
+            
+            return shouldShow ? (
+              <div className="flex justify-center md:justify-start order-1 md:order-1">
+                <img
+                  src={coverUrl}
+                  alt={displayTitle}
+                  className="w-64 h-64 md:w-80 md:h-80 rounded-2xl shadow-2xl object-cover"
+                  style={{ border: '2px solid #10b981' }} // Green border to confirm it's rendering
+                  onError={(e) => {
+                    console.error('[HeroSection] ❌ IMAGE LOAD ERROR:', {
+                      src: coverUrl,
+                      error: e.target.error,
+                      naturalWidth: e.target.naturalWidth,
+                      naturalHeight: e.target.naturalHeight
+                    });
+                    e.target.style.border = '4px solid red';
+                  }}
+                  onLoad={(e) => {
+                    console.log('[HeroSection] ✅ IMAGE LOADED SUCCESSFULLY:', {
+                      src: coverUrl,
+                      naturalWidth: e.target.naturalWidth,
+                      naturalHeight: e.target.naturalHeight
+                    });
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="flex justify-center md:justify-start order-1 md:order-1 p-4 border-2 border-yellow-500">
+                <p className="text-xs text-yellow-700">
+                  No cover image: coverUrl={coverUrl ? 'EXISTS' : 'MISSING'}, show_cover_art={String(show_cover_art)}
+                </p>
+              </div>
+            );
+          })()}
+          {/* Don't show debug message - just leave space empty if no cover */}
+          
+          {/* Title and content on the right */}
+          <div className="space-y-6 order-2 md:order-2">
             <h1 className="text-4xl md:text-5xl font-bold leading-tight">{displayTitle}</h1>
             {displaySubtitle && <p className="text-lg md:text-xl opacity-90">{displaySubtitle}</p>}
             {cta_text && cta_url && (
               <div className="pt-4">
                 <Button 
                   size="lg" 
-                  style={{ color: background_color, backgroundColor: text_color }}
+                  className={variant === "marquee-style" ? "btn ticket-style" : ""}
+                  style={useCSSVars ? undefined : { 
+                    color: bgColor,
+                    backgroundColor: txtColor
+                  }}
                   asChild
                 >
                   <a href={cta_url}>{cta_text}</a>
@@ -79,16 +168,12 @@ export function HeroSectionPreview({ config, enabled, podcast }) {
             )}
           </div>
           
-          {show_cover_art && coverUrl && (
-            <div className="flex justify-center md:justify-end">
-              <img
-                src={coverUrl}
-                alt={displayTitle}
-                className="w-64 h-64 md:w-80 md:h-80 rounded-2xl shadow-2xl object-cover"
-                onError={(e) => {
-                  e.target.style.display = 'none';
-                }}
-              />
+          {/* Theater bulbs decoration if marquee style */}
+          {variant === "marquee-style" && (
+            <div className="bulb-row absolute bottom-4 left-1/2 -translate-x-1/2 w-full">
+              {[...Array(12)].map((_, i) => (
+                <div key={i} className="bulb" />
+              ))}
             </div>
           )}
         </div>
@@ -131,19 +216,81 @@ export function AboutSectionPreview({ config, enabled, podcast }) {
 export function LatestEpisodesSectionPreview({ config, enabled, podcast, episodes = [] }) {
   const {
     heading = "Latest Episodes",
-    count = 3,
+    count = 6,
+    layout = "cards", // Default to cards, not list
     show_descriptions = true,
     show_dates = true,
   } = config || {};
 
-  // Use actual episodes if provided, otherwise show placeholder
-  const displayEpisodes = episodes.length > 0 ? episodes.slice(0, count) : [];
+  // Pagination state - persist across re-renders
+  const [currentPage, setCurrentPage] = useState(1);
+  const episodesPerPage = count || 6;
+  const totalPages = Math.ceil((episodes?.length || 0) / episodesPerPage);
+  
+  // Calculate which episodes to show (must be before useEffect that uses them)
+  const startIndex = (currentPage - 1) * episodesPerPage;
+  const endIndex = startIndex + episodesPerPage;
+  const displayEpisodes = (episodes?.length > 0) ? episodes.slice(startIndex, endIndex) : [];
+  
+  // Debug logging
+  useEffect(() => {
+    const totalEpisodes = episodes?.length || 0;
+    const shouldShowPagination = totalEpisodes > episodesPerPage;
+    console.log('[LatestEpisodes] ===== EPISODE DEBUG =====');
+    console.log('[LatestEpisodes] Total episodes received:', totalEpisodes);
+    console.log('[LatestEpisodes] Episodes per page:', episodesPerPage);
+    console.log('[LatestEpisodes] Total pages:', totalPages);
+    console.log('[LatestEpisodes] Current page:', currentPage);
+    console.log('[LatestEpisodes] Display episodes count:', displayEpisodes.length);
+    console.log('[LatestEpisodes] Start index:', startIndex, 'End index:', endIndex);
+    console.log('[LatestEpisodes] Should show pagination?', shouldShowPagination, `(${totalEpisodes} > ${episodesPerPage})`);
+    if (totalEpisodes > 0) {
+      console.log('[LatestEpisodes] First episode:', episodes[0]?.title, episodes[0]?.publish_date);
+      console.log('[LatestEpisodes] Last episode:', episodes[totalEpisodes - 1]?.title, episodes[totalEpisodes - 1]?.publish_date);
+      if (totalEpisodes >= 200) {
+        console.log('[LatestEpisodes] ✅ Episode 200 exists:', episodes[199]?.title);
+      }
+      if (totalEpisodes >= 204) {
+        console.log('[LatestEpisodes] ✅ Episode 204 exists:', episodes[203]?.title);
+      }
+    }
+    console.log('[LatestEpisodes] ========================');
+  }, [episodes?.length, episodesPerPage, totalPages, currentPage, startIndex, endIndex, displayEpisodes.length, episodes]);
+  
+  // Reset to page 1 only if current page is invalid (e.g., episodes list shrunk)
+  useEffect(() => {
+    if (totalPages > 0 && currentPage > totalPages) {
+      setCurrentPage(1);
+    }
+  }, [totalPages, currentPage]);
   
   // Format date helper
   const formatDate = (dateString) => {
     if (!dateString) return '';
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  };
+  
+  const handlePreviousPage = () => {
+    setCurrentPage(prev => {
+      if (prev > 1) {
+        // Scroll to top of section
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return prev - 1;
+      }
+      return prev;
+    });
+  };
+  
+  const handleNextPage = () => {
+    setCurrentPage(prev => {
+      if (prev < totalPages) {
+        // Scroll to top of section
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return prev + 1;
+      }
+      return prev;
+    });
   };
 
   if (displayEpisodes.length === 0) {
@@ -176,7 +323,135 @@ export function LatestEpisodesSectionPreview({ config, enabled, podcast, episode
     );
   }
 
-  // Real episodes rendering
+  // Format duration helper
+  const formatDuration = (seconds) => {
+    if (!seconds) return '';
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    if (hours > 0) {
+      return `${hours}h ${minutes}m ${secs > 0 ? secs + 's' : ''}`;
+    }
+    return `${minutes}m ${secs > 0 ? secs + 's' : ''}`;
+  };
+
+  // Real episodes rendering - Simplified Spreaker-style
+  if (layout === "list") {
+    // Simple list layout: title, play button, runtime, add to queue
+    return (
+      <div
+        className="w-full bg-white py-12"
+        style={{ opacity: enabled ? 1 : 0.6 }}
+      >
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+          <h2 className="text-3xl font-bold text-slate-900 mb-8">{heading}</h2>
+          <div className="space-y-3">
+            {displayEpisodes.map((episode) => (
+              <div
+                key={episode.id}
+                className="flex items-center justify-between gap-4 p-4 rounded-lg hover:bg-slate-50 transition-colors border border-slate-100"
+              >
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-base font-semibold text-slate-900 mb-1 truncate">
+                    {episode.title}
+                  </h3>
+                  {show_dates && episode.publish_date && (
+                    <p className="text-xs text-slate-500">
+                      {formatDate(episode.publish_date)}
+                    </p>
+                  )}
+                </div>
+                
+                <div className="flex items-center gap-3">
+                  {/* Play Button */}
+                  {episode.audio_url ? (
+                    <Button
+                      size="sm"
+                      variant="default"
+                      className="bg-slate-900 hover:bg-slate-800 text-white"
+                      onClick={() => {
+                        // Trigger play in persistent player
+                        // Add episode to queue first, then play
+                        window.dispatchEvent(new CustomEvent('add-to-queue', {
+                          detail: { episode }
+                        }));
+                        window.dispatchEvent(new CustomEvent('play-episode', {
+                          detail: { episode }
+                        }));
+                      }}
+                    >
+                      <Radio className="mr-1.5 h-3.5 w-3.5" />
+                      Play
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="outline" disabled>
+                      <Radio className="mr-1.5 h-3.5 w-3.5" />
+                      Play
+                    </Button>
+                  )}
+                  
+                  {/* Runtime */}
+                  {episode.duration_seconds && (
+                    <span className="text-xs text-slate-500 min-w-[60px] text-right">
+                      {formatDuration(episode.duration_seconds)}
+                    </span>
+                  )}
+                  
+                  {/* Add to Queue */}
+                  {episode.audio_url && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-slate-600 hover:text-slate-900"
+                      onClick={() => {
+                        window.dispatchEvent(new CustomEvent('add-to-queue', {
+                          detail: { episode }
+                        }));
+                      }}
+                      title="Add to queue"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          {/* Pagination Controls - Show if we have more episodes than per page */}
+          {episodes && Array.isArray(episodes) && episodes.length > episodesPerPage && (
+            <div className="flex items-center justify-center gap-4 mt-8">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handlePreviousPage}
+                disabled={currentPage === 1}
+              >
+                <ChevronLeft className="h-4 w-4 mr-1" />
+                Previous
+              </Button>
+              
+              <span className="text-sm text-slate-600">
+                Page {currentPage} of {totalPages}
+              </span>
+              
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleNextPage}
+                disabled={currentPage === totalPages}
+              >
+                Next
+                <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Cards/Grid layout (default) - keep existing card-based rendering
   return (
     <div
       className="w-full bg-white py-12"
@@ -248,6 +523,35 @@ export function LatestEpisodesSectionPreview({ config, enabled, podcast, episode
             </div>
           ))}
         </div>
+        
+        {/* Pagination Controls */}
+        {(episodes?.length || 0) > episodesPerPage && (
+          <div className="flex items-center justify-center gap-4 mt-8">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePreviousPage}
+              disabled={currentPage === 1}
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" />
+              Previous
+            </Button>
+            
+            <span className="text-sm text-slate-600">
+              Page {currentPage} of {totalPages}
+            </span>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleNextPage}
+              disabled={currentPage === totalPages}
+            >
+              Next
+              <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

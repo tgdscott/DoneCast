@@ -15,8 +15,10 @@ import Legal from '@/pages/Legal.jsx';
 import Verify from '@/pages/Verify.jsx';
 import EmailVerification from '@/pages/EmailVerification.jsx';
 import Pricing from '@/pages/Pricing.jsx';
+import PublicPricing from '@/pages/PublicPricing.jsx';
 import PodcastWebsiteBuilder from '@/pages/PodcastWebsiteBuilder.jsx';
 import NewLanding from '@/pages/NewLanding.jsx';
+import Signup from '@/pages/Signup.jsx';
 import InDevelopment from '@/pages/InDevelopment.jsx';
 import Contact from '@/pages/Contact.jsx';
 import Guides from '@/pages/Guides.jsx';
@@ -29,6 +31,7 @@ import { AuthProvider } from './AuthContext.jsx';
 import { BrandProvider } from './brand/BrandContext.jsx';
 import { ComfortProvider } from './ComfortContext.jsx';
 import { LayoutProvider } from './layout/LayoutContext.jsx';
+import { WarmupProvider } from './contexts/WarmupContext.jsx';
 import './index.css' // <-- This line imports all the styles
 import { assetUrl } from './lib/apiClient';
 
@@ -141,7 +144,9 @@ const router = createBrowserRouter([
   { path: '/legal', element: <Legal /> },
   { path: '/verify', element: <Verify /> },
   { path: '/email-verification', element: <EmailVerification /> },
+  { path: '/signup', element: <Signup /> },
   { path: '/pricing', element: <Pricing /> },
+  { path: '/pricing-public', element: <PublicPricing /> },
   { path: '/subscriptions', element: <Pricing /> },
   { path: '/contact', element: <Contact /> },
   { path: '/guides', element: <Guides /> },
@@ -158,15 +163,17 @@ const router = createBrowserRouter([
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <AuthProvider>
-      <BrandProvider>
-        <LayoutProvider>
-          <ComfortProvider>
-            <RouterProvider router={router} />
-          </ComfortProvider>
-        </LayoutProvider>
-      </BrandProvider>
-    </AuthProvider>
+    <WarmupProvider>
+      <AuthProvider>
+        <BrandProvider>
+          <LayoutProvider>
+            <ComfortProvider>
+              <RouterProvider router={router} />
+            </ComfortProvider>
+          </LayoutProvider>
+        </BrandProvider>
+      </AuthProvider>
+    </WarmupProvider>
   </React.StrictMode>,
 )
 

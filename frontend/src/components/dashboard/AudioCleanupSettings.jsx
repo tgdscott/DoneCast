@@ -12,6 +12,7 @@ import { SectionCard, SectionItem } from "@/components/dashboard/SettingsSection
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { formatDisplayName } from "@/lib/displayNames";
+import { X } from "lucide-react";
 
 const DEFAULT_SETTINGS = {
   removeFillers: true,
@@ -454,7 +455,7 @@ export default function AudioCleanupSettings({ className }) {
   );
 }
 
-function TagInput({ values, onChange, placeholder }) {
+export function TagInput({ values, onChange, placeholder }) {
   const [draft, setDraft] = useState("");
 
   const add = (value) => {
@@ -475,10 +476,20 @@ function TagInput({ values, onChange, placeholder }) {
           <Badge
             key={value}
             variant="secondary"
-            className="cursor-pointer bg-slate-200 text-slate-700 hover:bg-slate-300"
-            onClick={() => remove(value)}
+            className="flex items-center gap-1.5 bg-slate-200 text-slate-700 px-2 py-1"
           >
-            {value}
+            <span>{value}</span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                remove(value);
+              }}
+              className="ml-0.5 rounded-full hover:bg-slate-300 p-0.5 transition-colors"
+              aria-label={`Remove ${value}`}
+            >
+              <X className="h-3 w-3" />
+            </button>
           </Badge>
         ))}
       </div>

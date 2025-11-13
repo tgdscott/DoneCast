@@ -18,6 +18,8 @@ from ..models import recurring as _recurring_models  # noqa: F401
 from ..models import usage as _usage_models  # noqa: F401
 from ..models import website as _website_models  # noqa: F401
 from ..models import transcription as _transcription_models  # noqa: F401
+from ..models import promo_code as _promo_code_models  # noqa: F401
+from ..models import affiliate_code as _affiliate_code_models  # noqa: F401
 from pathlib import Path
 from .config import settings
 

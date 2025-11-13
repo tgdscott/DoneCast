@@ -47,6 +47,11 @@ def run_one_time_migrations() -> dict[str, bool]:
     results["add_episode_priority"] = run_migration_once("add_episode_priority", _add_episode_priority)
     results["add_sms_notification_fields"] = run_migration_once("add_sms_notification_fields", _add_sms_notification_fields)
     results["add_phone_verification_table"] = run_migration_once("add_phone_verification_table", _add_phone_verification_table)
+    results["add_credit_wallet"] = run_migration_once("add_credit_wallet", _add_credit_wallet)
+    results["add_admin_action_log"] = run_migration_once("add_admin_action_log", _add_admin_action_log)
+    results["add_wallet_period_processed"] = run_migration_once("add_wallet_period_processed", _add_wallet_period_processed)
+    results["add_promo_code_support"] = run_migration_once("add_promo_code_support", _add_promo_code_support)
+    results["add_affiliate_code_support"] = run_migration_once("add_affiliate_code_support", _add_affiliate_code_support)
     
     # Check for pending migrations
     pending = get_pending_migrations()
@@ -488,5 +493,115 @@ def _add_phone_verification_table() -> bool:
         return True
     except Exception as e:
         log.warning("[migrate] Phone verification table migration failed: %s", e)
+        return False
+
+
+def _add_credit_wallet() -> bool:
+    """Add credit wallet table (migration 032)."""
+    import importlib.util
+    import os
+    from sqlmodel import Session
+    from api.core.database import engine
+    
+    try:
+        migration_path_032 = os.path.join(os.path.dirname(__file__), '032_add_credit_wallet.py')
+        spec_032 = importlib.util.spec_from_file_location('migration_032', migration_path_032)
+        if spec_032 and spec_032.loader:
+            module_032 = importlib.util.module_from_spec(spec_032)
+            spec_032.loader.exec_module(module_032)
+            with Session(engine) as session:
+                module_032.run_migration(session)
+        log.debug("[migrate] Credit wallet table verified")
+        return True
+    except Exception as e:
+        log.warning("[migrate] Credit wallet migration failed: %s", e)
+        return False
+
+
+def _add_wallet_period_processed() -> bool:
+    """Add wallet period processed table (migration 034)."""
+    import importlib.util
+    import os
+    from sqlmodel import Session
+    from api.core.database import engine
+    
+    try:
+        migration_path_034 = os.path.join(os.path.dirname(__file__), '034_add_wallet_period_processed.py')
+        spec_034 = importlib.util.spec_from_file_location('migration_034', migration_path_034)
+        if spec_034 and spec_034.loader:
+            module_034 = importlib.util.module_from_spec(spec_034)
+            spec_034.loader.exec_module(module_034)
+            with Session(engine) as session:
+                module_034.run_migration(session)
+        log.debug("[migrate] Wallet period processed table verified")
+        return True
+    except Exception as e:
+        log.warning("[migrate] Wallet period processed migration failed: %s", e)
+        return False
+
+
+def _add_admin_action_log() -> bool:
+    """Add admin action log table (migration 037)."""
+    import importlib.util
+    import os
+    from sqlmodel import Session
+    from api.core.database import engine
+    
+    try:
+        migration_path_037 = os.path.join(os.path.dirname(__file__), '037_add_admin_action_log.py')
+        spec_037 = importlib.util.spec_from_file_location('migration_037', migration_path_037)
+        if spec_037 and spec_037.loader:
+            module_037 = importlib.util.module_from_spec(spec_037)
+            spec_037.loader.exec_module(module_037)
+            with Session(engine) as session:
+                module_037.run_migration(session)
+        log.debug("[migrate] Admin action log table verified")
+        return True
+    except Exception as e:
+        log.warning("[migrate] Admin action log migration failed: %s", e)
+        return False
+
+
+def _add_promo_code_support() -> bool:
+    """Add promo code support (migration 038)."""
+    import importlib.util
+    import os
+    from sqlmodel import Session
+    from api.core.database import engine
+    
+    try:
+        migration_path_038 = os.path.join(os.path.dirname(__file__), '038_add_promo_code_support.py')
+        spec_038 = importlib.util.spec_from_file_location('migration_038', migration_path_038)
+        if spec_038 and spec_038.loader:
+            module_038 = importlib.util.module_from_spec(spec_038)
+            spec_038.loader.exec_module(module_038)
+            with Session(engine) as session:
+                module_038.run_migration(session)
+        log.debug("[migrate] Promo code support verified")
+        return True
+    except Exception as e:
+        log.warning("[migrate] Promo code support migration failed: %s", e)
+        return False
+
+
+def _add_affiliate_code_support() -> bool:
+    """Add affiliate code support (migration 039)."""
+    import importlib.util
+    import os
+    from sqlmodel import Session
+    from api.core.database import engine
+    
+    try:
+        migration_path_039 = os.path.join(os.path.dirname(__file__), '039_add_affiliate_code_support.py')
+        spec_039 = importlib.util.spec_from_file_location('migration_039', migration_path_039)
+        if spec_039 and spec_039.loader:
+            module_039 = importlib.util.module_from_spec(spec_039)
+            spec_039.loader.exec_module(module_039)
+            with Session(engine) as session:
+                module_039.run_migration(session)
+        log.debug("[migrate] Affiliate code support verified")
+        return True
+    except Exception as e:
+        log.warning("[migrate] Affiliate code support migration failed: %s", e)
         return False
 

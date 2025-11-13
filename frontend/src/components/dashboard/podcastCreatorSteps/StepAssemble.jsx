@@ -4,6 +4,7 @@ import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Label } from '../../ui/label';
 import { Loader2 } from 'lucide-react';
+import AssemblyCelebration from './AssemblyCelebration';
 
 const resolveAssetUrl = (path) => {
   if (!path || typeof path !== 'string') return path;
@@ -21,6 +22,7 @@ export default function StepAssemble({
   statusMessage,
   onBack,
   onCancel,
+  onViewHistory,
 }) {
   if (!assemblyComplete) {
     return (
@@ -68,6 +70,26 @@ export default function StepAssemble({
   const playbackUrl = assembledEpisode
     ? resolveAssetUrl(assembledEpisode.proxy_playback_url || assembledEpisode.final_audio_url || '')
     : '';
+
+  // Show celebration if assembly just completed (only for published/scheduled, not drafts)
+  const showCelebration = assemblyComplete && publishMode !== 'draft';
+
+  if (showCelebration && onViewHistory) {
+    return (
+      <div className="space-y-8">
+        <CardHeader className="text-center">
+          <CardTitle style={{ color: '#2C3E50' }}>
+            Step 6: {publishMode === 'schedule' ? 'Scheduled' : 'Completed'}
+          </CardTitle>
+        </CardHeader>
+        <AssemblyCelebration
+          assembledEpisode={assembledEpisode}
+          onViewHistory={onViewHistory}
+          onBack={onBack}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">

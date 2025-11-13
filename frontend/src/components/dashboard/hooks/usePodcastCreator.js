@@ -147,6 +147,9 @@ export default function usePodcastCreator({
     internPrefetch: aiOrchestration.internPrefetch,
   });
 
+  const [showCreditPurchase, setShowCreditPurchase] = useState(false);
+  const [creditPurchaseData, setCreditPurchaseData] = useState(null);
+
   const assembly = useEpisodeAssembly({
     token,
     selectedTemplate: stepNav.selectedTemplate,
@@ -169,6 +172,11 @@ export default function usePodcastCreator({
     scheduleTime: publishing.scheduleTime,
     handleUploadProcessedCoverAndPreview: mediaManagement.handleUploadProcessedCover,
     useAuphonic,
+    usage: quota.usage,
+    onShowCreditPurchase: (data) => {
+      setCreditPurchaseData(data);
+      setShowCreditPurchase(true);
+    },
   });
 
   useEffect(() => {
@@ -277,6 +285,10 @@ export default function usePodcastCreator({
   }, [pendingIntentLabels]);
 
   return {
+    showCreditPurchase,
+    setShowCreditPurchase,
+    creditPurchaseData,
+    setCreditPurchaseData,
     ...stepNav,
     ...fileUpload,
     ...voiceConfig,

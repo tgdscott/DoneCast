@@ -131,6 +131,58 @@ oauth2_scheme = core_oauth2_scheme
 get_current_user = core_get_current_user
 
 
+def _parse_terms_version_date(version_str: str | None) -> datetime | None:
+    """Parse TERMS_VERSION string (e.g., '2025-10-22') as a date.
+    
+    Returns None if version_str is None or cannot be parsed.
+    """
+    if not version_str:
+        return None
+    try:
+        # TERMS_VERSION is in format 'YYYY-MM-DD', parse as date and convert to datetime at midnight UTC
+        from datetime import date
+        parsed_date = datetime.strptime(version_str.strip(), "%Y-%m-%d").date()
+        return datetime.combine(parsed_date, datetime.min.time()).replace(tzinfo=None)
+    except (ValueError, AttributeError):
+        logger.warning(f"Failed to parse TERMS_VERSION as date: {version_str}")
+        return None
+
+
+def _terms_need_acceptance(user: User, current_terms_version: str | None) -> bool:
+    """Check if user needs to accept updated terms based on date comparison.
+    
+    Returns True if:
+    - Current terms version date is newer than user's terms_accepted_at date, OR
+    - User has never accepted terms (both terms_version_accepted and terms_accepted_at are None), OR
+    - Version strings don't match (fallback if date parsing fails or date is missing)
+    """
+    if not current_terms_version:
+        return False
+    
+    accepted_version = getattr(user, "terms_version_accepted", None)
+    user_accepted_at = getattr(user, "terms_accepted_at", None)
+    
+    # If user has never accepted any version, they need to accept
+    if not accepted_version and not user_accepted_at:
+        return True
+    
+    # Try date-based comparison first (most accurate)
+    current_terms_date = _parse_terms_version_date(current_terms_version)
+    if current_terms_date and user_accepted_at:
+        # Both dates are available - compare them
+        return current_terms_date > user_accepted_at.replace(tzinfo=None)
+    
+    # Fallback to version string comparison if:
+    # - Date parsing failed, OR
+    # - User has version but no date (legacy data)
+    if accepted_version:
+        return accepted_version != current_terms_version
+    
+    # If we get here, user has no version string but might have a date (unlikely)
+    # Default to requiring acceptance for safety
+    return True
+
+
 def to_user_public(user: User) -> UserPublic:
     """Build a safe public view from DB User without leaking hashed_password."""
     
@@ -150,14 +202,21 @@ def to_user_public(user: User) -> UserPublic:
     # Set is_admin flag (legacy support)
     public.is_admin = is_admin_email(user.email) or bool(getattr(user, "is_admin", False))
     
-    # Skip terms enforcement in dev mode (dev/prod share same DB, constant re-acceptance is annoying)
+    # Check if terms need acceptance based on date comparison
     env = (settings.APP_ENV or "dev").strip().lower()
-    if env in {"dev", "development", "local", "test", "testing"}:
-        public.terms_version_required = None
-    else:
-        public.terms_version_required = getattr(settings, "TERMS_VERSION", None)
+    current_terms_version = getattr(settings, "TERMS_VERSION", None)
     
-    logger.info(f"[to_user_public] Final result: role={public.role}, is_admin={public.is_admin}")
+    if env in {"dev", "development", "local", "test", "testing"}:
+        # Skip terms enforcement in dev mode
+        public.terms_version_required = None
+    elif current_terms_version and _terms_need_acceptance(user, current_terms_version):
+        # Terms need to be accepted - set required version
+        public.terms_version_required = current_terms_version
+    else:
+        # Terms are up to date or no terms version set
+        public.terms_version_required = None
+    
+    logger.info(f"[to_user_public] Final result: role={public.role}, is_admin={public.is_admin}, terms_required={public.terms_version_required}")
     return public
 
 

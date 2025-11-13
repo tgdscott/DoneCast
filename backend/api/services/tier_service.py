@@ -111,6 +111,10 @@ def get_tier_config(session: Session, tier_name: str) -> dict[str, Any]:
     if tier_name in configs:
         return configs[tier_name]
     
+    # Normalize "starter" to "free" for TIER_LIMITS lookup (backend uses "free", frontend uses "starter")
+    if tier_name == "starter":
+        tier_name = "free"
+    
     # Fallback to hard-coded constants (migration period)
     if tier_name not in ('free', 'creator', 'pro', 'unlimited'):
         log.warning(f"[tier_service] Unknown tier '{tier_name}', defaulting to 'free' tier limits")

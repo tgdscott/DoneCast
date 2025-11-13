@@ -1037,6 +1037,66 @@ Contact support to downgrade. Note:
           `
         },
         {
+          title: 'How Our Credit System Works',
+          description: 'Understanding credits, costs, and refunds',
+          link: '#credits',
+          content: `
+## How Our Credit System Works
+
+We like to keep things simple and transparent — you always know what you're getting and what it costs.
+
+### Recording and Uploading
+
+Every second of audio you record or upload uses **1 credit**.  
+
+Want studio-quality sound? Our premium processing automatically upgrades lower-quality recordings (like from webcams or phones) for **just 1 extra credit per second**.
+
+### Editing and Finishing
+
+When you're ready to assemble your final episode, that's where the magic happens.  
+
+Final audio assembly costs **3 credits per second** — covering your intros, outros, and all the polishing that makes your episode shine.
+
+### Plan Overview
+
+Choose the plan that fits your production style:
+
+- **Starter:** 28,800 credits = about 2 hours of finished audio  
+
+- **Creator:** 72,000 credits = about 5 hours  
+
+- **Pro:** 172,800 credits = about 12 hours  
+
+- **Executive:** 288,000 credits = about 20 hours  
+
+### Optional Features
+
+Enhance your workflow with add-ons:
+
+- **AI Titles, Descriptions & Tags:** 1–3 credits each — perfect for quick content creation.  
+
+- **Intern Feature:** 1 credit per answer — your built-in helper.  
+
+- **Text-to-Speech:** 12–15 credits per second — natural, studio-grade voices for intros, outros, or responses.
+
+### Refunds and Flexibility
+
+We're still in alpha, which means we're improving fast and keeping things fair.  
+
+If something goes wrong, just request a refund in your subscription page — we'll make it right.
+
+You can also undo and get credits back:
+
+- Delete within **24 hours** → refund of 2 out of every 3 credits.  
+
+- Delete within **7 days** → refund of 1 out of every 3 credits.  
+
+- After 7 days, refunds close automatically.
+
+Simple, fair, and transparent — so you can focus on creating, not calculating.
+          `
+        },
+        {
           title: 'Usage & Minutes',
           description: 'How usage is calculated',
           link: '#usage',

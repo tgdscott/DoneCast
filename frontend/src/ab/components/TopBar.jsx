@@ -7,6 +7,7 @@ import { makeApi } from "@/lib/apiClient";
 import { useBrand } from "@/brand/BrandContext.jsx";
 import { useResolvedTimezone } from "@/hooks/useResolvedTimezone";
 import { formatInTimezone } from "@/lib/timezone";
+import Logo from "@/components/Logo.jsx";
 
 function formatShort(iso, timezone) {
   if (!iso) return "";
@@ -144,10 +145,7 @@ export default function TopBar({ onSwitch, active }) {
     <header className="sticky top-0 z-40 w-full border-b bg-background/80 backdrop-blur">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="size-8 rounded-xl bg-primary/15 text-primary font-semibold flex items-center justify-center">
-            ++
-          </div>
-          <span className="font-semibold tracking-tight">{brand.shortName}</span>
+          <Logo size={28} lockup />
         </div>
         <nav className="hidden md:flex items-center gap-1">
           {tabs.map((tab) => (

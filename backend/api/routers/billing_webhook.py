@@ -146,6 +146,22 @@ async def stripe_webhook(request: Request):
                         pass
                     session.add(user)
                     session.commit()
+                    
+                    # Initialize credit wallet for active subscription
+                    # This ensures users have their monthly credits allocated immediately
+                    try:
+                        from api.services.billing.wallet import get_or_create_wallet
+                        wallet = get_or_create_wallet(session, user.id, plan_key)
+                        logger.info(
+                            f"[webhook] Initialized wallet for user {user.id} "
+                            f"(plan={plan_key}, monthly_credits={wallet.monthly_credits})"
+                        )
+                    except Exception as e:
+                        # Don't fail webhook if wallet initialization fails (wallet table might not exist)
+                        logger.warning(
+                            f"[webhook] Failed to initialize wallet for user {user.id}: {e}. "
+                            f"Wallet will be created on first debit or balance check."
+                        )
                 # Downgrade / cancellation
                 if status in ('canceled','incomplete_expired') and plan_key in ALLOWED_PLANS and plan_key == user.tier:
                     if status == 'incomplete_expired' or (status == 'canceled' and not data.get('cancel_at_period_end')):
@@ -157,12 +173,64 @@ async def stripe_webhook(request: Request):
             customer_id = cs.get('customer')
             metadata = cs.get('metadata') or {}
             user_id = metadata.get('user_id')
+            purchase_type = metadata.get('type')
+            
             if user_id and customer_id:
                 user = session.get(User, user_id)
                 if user and not getattr(user, 'stripe_customer_id', None):
                     user.stripe_customer_id = customer_id
                     session.add(user)
                     session.commit()
+            
+            # Handle addon credits purchase
+            if purchase_type == 'addon_credits' and user_id:
+                try:
+                    from uuid import UUID
+                    user_uuid = UUID(str(user_id))
+                    user = session.get(User, user_uuid)
+                    if not user:
+                        logger.error(f"[webhook] User {user_id} not found for addon credits purchase")
+                        return {"received": True}
+                    
+                    # Get the line items to determine credit amount
+                    line_items = stripe.checkout.Session.list_line_items(cs['id'], limit=1)
+                    if line_items.data and len(line_items.data) > 0:
+                        price = line_items.data[0].price
+                        # Get credits amount from price metadata
+                        credits_amount = 0.0
+                        if hasattr(price, 'metadata') and price.metadata and 'credits' in price.metadata:
+                            credits_amount = float(price.metadata['credits'])
+                        elif price.get('metadata') and 'credits' in price.get('metadata', {}):
+                            credits_amount = float(price['metadata']['credits'])
+                        else:
+                            # Default: 10,000 credits for addon_credits products
+                            logger.warning(f"[webhook] No credits metadata found for price {price.id}, defaulting to 10,000")
+                            credits_amount = 10000.0
+                        
+                        if credits_amount > 0:
+                            from api.services.billing.wallet import add_purchased_credits
+                            wallet = add_purchased_credits(session, user_uuid, credits_amount)
+                            logger.info(
+                                f"[webhook] Added {credits_amount} purchased credits to user {user_id} "
+                                f"(total_purchased={wallet.purchased_credits})"
+                            )
+                            
+                            # Create notification
+                            try:
+                                note = Notification(
+                                    user_id=user_uuid,
+                                    type="billing",
+                                    title="Credits Purchased",
+                                    body=f"You've purchased {int(credits_amount):,} credits. They've been added to your account."
+                                )
+                                session.add(note)
+                                session.commit()
+                            except Exception as e:
+                                logger.warning(f"[webhook] Failed to create notification for addon credits: {e}")
+                        else:
+                            logger.warning(f"[webhook] Could not determine credits amount for addon purchase (price_id={price.id})")
+                except Exception as e:
+                    logger.error(f"[webhook] Error processing addon credits purchase: {e}", exc_info=True)
         else:
             logger.debug("Ignoring Stripe event type: %s", kind)
         return {"received": True}

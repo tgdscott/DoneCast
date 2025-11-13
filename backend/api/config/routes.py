@@ -29,6 +29,28 @@ def attach_routes(app: FastAPI) -> None:
     # --- Attach Routers ---
     try:
         availability = attach_routers(app)
+        # Log admin router availability for debugging
+        if availability.get("admin"):
+            log.info("Admin router registered successfully")
+            # List all registered routes for debugging
+            admin_routes = [r for r in app.routes if hasattr(r, 'path') and '/admin' in str(getattr(r, 'path', ''))]
+            admin_paths = [str(getattr(r, 'path', 'NO_PATH')) for r in admin_routes[:20]]  # Log first 20
+            log.info("Registered admin routes (%d total): %s", len(admin_routes), admin_paths)
+            # Specifically check for users/full route
+            users_full_routes = [r for r in admin_routes if 'users/full' in str(getattr(r, 'path', ''))]
+            if users_full_routes:
+                log.info("Found /users/full route: %s", [str(getattr(r, 'path', '')) for r in users_full_routes])
+            else:
+                log.warning("WARNING: /users/full route NOT found in registered admin routes!")
+        else:
+            log.error("Admin router NOT available - admin endpoints will not work")
+            # Check if admin router file exists
+            import os
+            admin_init = os.path.join(os.path.dirname(__file__), '..', 'routers', 'admin', '__init__.py')
+            if os.path.exists(admin_init):
+                log.error("Admin router file exists at %s but failed to import", admin_init)
+            else:
+                log.error("Admin router file NOT found at %s", admin_init)
     except Exception as e:
         log.exception("attach_routers threw an exception: %s", e)
         availability = {}
@@ -133,17 +155,43 @@ def configure_static(app: FastAPI) -> None:
     app.mount("/static/intern",  StaticFiles(directory=str(INTERN_CTX_DIR),  check_dir=False), name="intern")
 
     # --- SPA Catch-All ---
+    # This catch-all route should ONLY handle non-API, non-static paths for SPA routing.
+    # FastAPI routes are matched in order, and more specific routes take precedence.
+    # Since API routes are registered before this catch-all, they will be matched first.
+    # If we reach this handler for an API path, it means no API route matched,
+    # which should result in FastAPI's standard 404 handling, not our catch-all.
+    # 
+    # However, we need to be careful: FastAPI's route matching will try this catch-all
+    # for any path. To avoid interfering with API routes, we should raise HTTPException
+    # to let FastAPI handle it properly, or better yet, not register this at all for API paths.
+    # 
+    # The safest approach: Only handle paths that are clearly not API/static routes.
+    # For API routes that don't exist, FastAPI will return 404 automatically through
+    # its exception handling system.
     @app.get("/{full_path:path}")
     async def spa_catch_all(full_path: str):
-        if full_path.startswith(("api/", "static/")):
-            return JSONResponse(status_code=404, content={"detail": "Not Found"})
+        # Explicitly exclude API and static paths - these should be handled by routers
+        # If this handler is reached for an API path, it means the route doesn't exist,
+        # and we should let FastAPI return a proper 404 through its exception system
+        path_lower = full_path.lower()
+        if (path_lower.startswith("api/") or 
+            path_lower.startswith("/api/") or 
+            path_lower.startswith("static/") or 
+            path_lower.startswith("/static/")):
+            # Don't handle API/static paths here - let FastAPI's router system handle 404s
+            from starlette.exceptions import HTTPException
+            raise HTTPException(status_code=404, detail="Not Found")
+        
+        # For all other paths (SPA routes), serve the React app
         try:
             candidate = STATIC_UI_DIR / full_path
             if candidate.is_file():
                 return FileResponse(candidate)
+            # Serve index.html for SPA routing (React Router will handle client-side routing)
             index = STATIC_UI_DIR / "index.html"
             if index.exists():
                 return FileResponse(index, media_type="text/html")
         except Exception:
             pass
+        # If we can't serve the file or index.html, return 404
         return JSONResponse(status_code=404, content={"detail": "Not Found"})

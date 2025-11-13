@@ -14,10 +14,14 @@ from api.models.settings import (
     AdminSettings,
     AppSetting,
     LandingPageContent,
+    PricingPageContent,
+    PricingFeatureDefinition,
     load_admin_settings,
     load_landing_content,
+    load_pricing_content,
     save_admin_settings,
     save_landing_content,
+    save_pricing_content,
 )
 from api.models.tier_config import (
     TierConfiguration,
@@ -335,6 +339,39 @@ def update_landing_page_content(
 ) -> LandingPageContent:
     del admin_user
     return save_landing_content(session, payload)
+
+
+# ===== PRICING PAGE ENDPOINTS =====
+
+@router.get("/pricing", response_model=PricingPageContent)
+def get_pricing_page_content(
+    session: Session = Depends(get_session),
+    admin_user: User = Depends(get_current_admin_user),
+) -> PricingPageContent:
+    """Get pricing page content (admin only)"""
+    del admin_user
+    return load_pricing_content(session)
+
+
+@router.put("/pricing", response_model=PricingPageContent)
+def update_pricing_page_content(
+    payload: PricingPageContent,
+    session: Session = Depends(get_session),
+    admin_user: User = Depends(get_current_admin_user),
+) -> PricingPageContent:
+    """Update pricing page content (admin only)"""
+    del admin_user
+    return save_pricing_content(session, payload)
+
+
+# ===== PUBLIC PRICING ENDPOINT =====
+
+@router.get("/pricing/public", response_model=PricingPageContent)
+def get_public_pricing_content(
+    session: Session = Depends(get_session),
+) -> PricingPageContent:
+    """Get pricing page content (public endpoint, no auth required)"""
+    return load_pricing_content(session)
 
 
 __all__ = ["router"]

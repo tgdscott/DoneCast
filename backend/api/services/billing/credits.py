@@ -18,7 +18,7 @@ from sqlalchemy import extract, case
 
 from api.models.usage import ProcessingMinutesLedger, LedgerDirection, LedgerReason
 from api.services import tier_service
-from api.billing.plans import RATES, RATES_ELEVENLABS, get_elevenlabs_rate
+from api.billing.plans import RATES, RATES_ELEVENLABS, get_elevenlabs_rate, get_ai_metadata_rate
 from api.services.billing.wallet import debit as wallet_debit, get_wallet_balance
 
 if TYPE_CHECKING:
@@ -454,6 +454,72 @@ def charge_for_storage(
     return entry, breakdown
 
 
+def charge_for_ai_metadata(
+    session: Session,
+    user: User,
+    metadata_type: str,
+    episode_id: Optional[UUID] = None,
+    notes: Optional[str] = None,
+    correlation_id: Optional[str] = None,
+    provider: Optional[str] = None
+) -> ProcessingMinutesLedger:
+    """
+    Charge credits for AI-generated metadata (title, description, tags).
+    
+    Args:
+        session: Database session
+        user: User to charge
+        metadata_type: Type of metadata ("title", "description", "notes", "tags")
+        episode_id: Optional episode this is for
+        notes: Optional notes (will be auto-generated if not provided)
+        correlation_id: Optional idempotency key (prevents double-charging)
+        provider: Optional AI provider name (e.g., "gemini", "groq") for metadata
+    
+    Returns:
+        Ledger entry
+    
+    Raises:
+        ValueError: If insufficient credits (for non-unlimited plans)
+    """
+    from api.billing.plans import get_ai_metadata_rate
+    
+    # Get rate for this metadata type
+    credits = get_ai_metadata_rate(metadata_type)
+    
+    # Generate default notes if not provided
+    if notes is None:
+        metadata_label = metadata_type.replace("_", " ").title()
+        notes = f"AI {metadata_label} generation"
+    
+    # Build cost breakdown metadata
+    cost_breakdown = {
+        "type": "ai_metadata",
+        "metadata_type": metadata_type.lower(),
+        "provider": provider or "unknown",
+        "credits_charged": credits
+    }
+    
+    # Generate correlation ID if not provided (for idempotency)
+    if correlation_id is None:
+        import time
+        timestamp = int(time.time() * 1000)  # milliseconds
+        correlation_id = f"ai_{metadata_type}_{episode_id or 'none'}_{timestamp}"
+    
+    # Charge credits
+    entry = charge_credits(
+        session=session,
+        user_id=user.id,
+        credits=credits,
+        reason=LedgerReason.AI_METADATA_GENERATION,
+        episode_id=episode_id,
+        notes=notes,
+        cost_breakdown=cost_breakdown,
+        correlation_id=correlation_id
+    )
+    
+    return entry
+
+
 __all__ = [
     "get_user_credit_balance",
     "check_sufficient_credits",
@@ -463,6 +529,7 @@ __all__ = [
     "charge_for_transcription",
     "charge_for_assembly",
     "charge_for_storage",
+    "charge_for_ai_metadata",
     "BASE_CREDIT_RATE",
     "TRANSCRIPTION_RATE",
     "TTS_GENERATION_RATE",

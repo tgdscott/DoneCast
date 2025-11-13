@@ -77,16 +77,6 @@ export default function EpisodeStartOptions({
         </Card>
       )}
 
-      {!hasReadyAudio && !errorMessage && (
-        <Card className="border border-amber-200 bg-amber-50">
-          <CardContent className="flex items-center gap-3 text-sm text-amber-800">
-            <AlertTriangle className="w-5 h-5" />
-            <div>
-              We'll email you as soon as your upload is transcribed so you can come back and assemble without waiting.
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }

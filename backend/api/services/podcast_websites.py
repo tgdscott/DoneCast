@@ -548,9 +548,15 @@ def _build_context_prompt(ctx: WebsiteContext, include_layout: Optional[Dict[str
 
 
 def _invoke_site_builder(prompt: str) -> Dict[str, Any]:
-    raw = ai_client.generate(prompt, max_output_tokens=2048, temperature=0.75)
+    try:
+        raw = ai_client.generate(prompt, max_output_tokens=2048, temperature=0.75)
+    except Exception as exc:
+        log.exception("AI client generate() failed: %s", exc)
+        raise PodcastWebsiteAIError(f"AI service unavailable: {str(exc)}")
+    
     if not raw:
         raise PodcastWebsiteAIError("Empty response from AI site builder")
+    
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
@@ -563,6 +569,7 @@ def _invoke_site_builder(prompt: str) -> Dict[str, Any]:
                 return json.loads(snippet)
             except Exception as exc:  # pragma: no cover - defensive logging
                 log.warning("Failed to parse JSON snippet from AI response: %s", exc)
+        log.error("AI response was not valid JSON. Raw response (first 500 chars): %s", raw[:500])
         raise PodcastWebsiteAIError("AI response was not valid JSON")
 
 
@@ -1159,16 +1166,55 @@ def create_or_refresh_site(session: Session, podcast: Podcast, user: User) -> Tu
     website.apply_layout(_serialize_content(content))
     website.status = PodcastWebsiteStatus.draft
     
-    # For new websites, set up default sections
+    # For new websites, set up default sections and generate AI theme
     if is_new_website or not website.get_sections_order():
         sections_order, sections_config, sections_enabled = _create_default_sections(podcast, cover_url, theme)
         website.set_sections_order(sections_order)
         website.set_sections_config(sections_config)
         website.set_sections_enabled(sections_enabled)
+        
+        # Auto-generate AI theme for new websites
+        try:
+            from api.services.ai_theme_generator import generate_complete_theme
+            if generate_complete_theme is not None:
+                log.info("Auto-generating AI theme for new website")
+                theme_result = generate_complete_theme(podcast, cover_url, None)
+                
+                # Merge theme into sections config (don't overwrite existing)
+                current_config = website.get_sections_config()
+                for section_id, section_config in theme_result.sections_config.get("sections_config", {}).items():
+                    if section_id not in current_config:
+                        current_config[section_id] = section_config
+                    elif section_id == "_theme_metadata":
+                        # Always include theme metadata
+                        current_config[section_id] = section_config
+                
+                website.set_sections_config(current_config)
+                
+                # Apply theme CSS (merge with existing if any)
+                if theme_result.css:
+                    website.global_css = theme_result.css
+        except Exception as e:
+            log.warning("Failed to auto-generate AI theme (non-fatal): %s", e)
     
-    # ALWAYS regenerate CSS from theme colors (so colors update when user clicks "Regenerate")
-    if theme:
-        css = _generate_css_from_theme(theme, podcast.name)
+    # Only regenerate CSS from theme colors if no AI theme CSS exists
+    # This preserves AI-generated themes when user clicks "Regenerate"
+    if not website.global_css or not website.get_sections_config().get("_theme_metadata"):
+        # ALWAYS regenerate CSS from theme colors (so colors update when user clicks "Regenerate")
+        # If theme extraction failed, use default colors but still generate CSS
+        if theme:
+            css = _generate_css_from_theme(theme, podcast.name)
+        else:
+            # Fallback to default theme if extraction failed
+            default_theme = {
+                "primary_color": "#0f172a",
+                "secondary_color": "#ffffff",
+                "accent_color": "#2563eb",
+                "background_color": "#f8fafc",
+                "text_color": "#ffffff",
+                "mood": "balanced",
+            }
+            css = _generate_css_from_theme(default_theme, podcast.name)
         website.global_css = css
 
     payload = {

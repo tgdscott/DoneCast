@@ -75,6 +75,13 @@ export default function useEpisodeMetadata({
   const [isAiTitleBusy, setIsAiTitleBusy] = useState(false);
   const [isAiDescBusy, setIsAiDescBusy] = useState(false);
 
+  // Track which fields are AI-generated
+  const [aiGeneratedFields, setAiGeneratedFields] = useState({
+    title: false,
+    description: false,
+    tags: false,
+  });
+
   // AI cache (avoid re-generating same content) - using useState instead of useRef to prevent hooks order violations
   const [aiCache, setAiCache] = useState({ title: null, notes: null, tags: null });
 
@@ -176,6 +183,10 @@ export default function useEpisodeMetadata({
   const handleDetailsChange = useCallback(
     (field, value) => {
       setEpisodeDetails(prev => ({ ...prev, [field]: value }));
+      // Clear AI-generated flag when user manually edits
+      if (field === 'title' || field === 'description' || field === 'tags') {
+        setAiGeneratedFields(prev => ({ ...prev, [field]: false }));
+      }
     },
     []
   );
@@ -378,6 +389,7 @@ export default function useEpisodeMetadata({
         const title = await suggestTitle({ force: true });
         if (title && !/[a-f0-9]{16,}/i.test(title)) {
           handleDetailsChange('title', title);
+          setAiGeneratedFields(prev => ({ ...prev, title: true }));
         }
       } finally {
         setIsAiTitleBusy(false);
@@ -405,6 +417,7 @@ export default function useEpisodeMetadata({
         const title = await suggestTitle({ force: true, currentText: currentTitle });
         if (title && !/[a-f0-9]{16,}/i.test(title)) {
           handleDetailsChange('title', title);
+          setAiGeneratedFields(prev => ({ ...prev, title: true }));
         }
       } finally {
         setIsAiTitleBusy(false);
@@ -423,7 +436,10 @@ export default function useEpisodeMetadata({
           .replace(/^(?:\*\*?)?description:?\*?\*?\s*/i, '')
           .replace(/^#+\s*description\s*/i, '')
           .trim();
-        if (cleaned) handleDetailsChange('description', cleaned);
+        if (cleaned) {
+          handleDetailsChange('description', cleaned);
+          setAiGeneratedFields(prev => ({ ...prev, description: true }));
+        }
       } finally {
         setIsAiDescBusy(false);
       }
@@ -452,7 +468,10 @@ export default function useEpisodeMetadata({
           .replace(/^(?:\*\*?)?description:?\*?\*?\s*/i, '')
           .replace(/^#+\s*description\s*/i, '')
           .trim();
-        if (cleaned) handleDetailsChange('description', cleaned);
+        if (cleaned) {
+          handleDetailsChange('description', cleaned);
+          setAiGeneratedFields(prev => ({ ...prev, description: true }));
+        }
       } finally {
         setIsAiDescBusy(false);
       }
@@ -468,6 +487,8 @@ export default function useEpisodeMetadata({
     setIsAiTitleBusy,
     isAiDescBusy,
     setIsAiDescBusy,
+    aiGeneratedFields,
+    setAiGeneratedFields,
     
     // Handlers
     handleDetailsChange,

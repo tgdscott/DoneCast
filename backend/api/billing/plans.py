@@ -6,6 +6,23 @@ Single source of truth for plan tiers, credit rates, and billing rules.
 import os
 from typing import Optional, Dict, Any
 
+# Storage limits (configurable via environment variables)
+# Format: hours of raw audio storage, retention days
+_STORAGE_HOURS_STARTER = int(os.getenv("STORAGE_HOURS_STARTER", "2"))
+_STORAGE_DAYS_STARTER = int(os.getenv("STORAGE_DAYS_STARTER", "7"))
+_STORAGE_HOURS_CREATOR = int(os.getenv("STORAGE_HOURS_CREATOR", "10"))
+_STORAGE_DAYS_CREATOR = int(os.getenv("STORAGE_DAYS_CREATOR", "14"))
+_STORAGE_HOURS_PRO = int(os.getenv("STORAGE_HOURS_PRO", "25"))
+_STORAGE_DAYS_PRO = int(os.getenv("STORAGE_DAYS_PRO", "30"))
+_STORAGE_HOURS_EXECUTIVE = int(os.getenv("STORAGE_HOURS_EXECUTIVE", "50"))
+_STORAGE_DAYS_EXECUTIVE = int(os.getenv("STORAGE_DAYS_EXECUTIVE", "60"))
+
+# Enterprise and Unlimited have no limits (None = unlimited)
+_STORAGE_HOURS_ENTERPRISE = os.getenv("STORAGE_HOURS_ENTERPRISE")
+_STORAGE_DAYS_ENTERPRISE = os.getenv("STORAGE_DAYS_ENTERPRISE")
+_STORAGE_HOURS_UNLIMITED = os.getenv("STORAGE_HOURS_UNLIMITED")
+_STORAGE_DAYS_UNLIMITED = os.getenv("STORAGE_DAYS_UNLIMITED")
+
 # Plan definitions
 PLANS: Dict[str, Dict[str, Any]] = {
     "starter": {
@@ -14,6 +31,8 @@ PLANS: Dict[str, Dict[str, Any]] = {
         "max_minutes": 40,
         "analytics": "basic",
         "priority": 1,
+        "storage_hours": _STORAGE_HOURS_STARTER,  # Maximum hours of raw audio storage
+        "storage_days": _STORAGE_DAYS_STARTER,  # Retention period in days
     },
     "creator": {
         "price": 39,
@@ -21,6 +40,8 @@ PLANS: Dict[str, Dict[str, Any]] = {
         "max_minutes": 80,
         "analytics": "advanced",
         "priority": 2,
+        "storage_hours": _STORAGE_HOURS_CREATOR,
+        "storage_days": _STORAGE_DAYS_CREATOR,
     },
     "pro": {
         "price": 79,
@@ -28,6 +49,8 @@ PLANS: Dict[str, Dict[str, Any]] = {
         "max_minutes": 120,
         "analytics": "full",
         "priority": 3,
+        "storage_hours": _STORAGE_HOURS_PRO,
+        "storage_days": _STORAGE_DAYS_PRO,
     },
     "executive": {
         "price": 129,
@@ -36,18 +59,24 @@ PLANS: Dict[str, Dict[str, Any]] = {
         "analytics": "full",
         "priority": 4,
         "allow_manual_override": True,  # Can manually override max_minutes
+        "storage_hours": _STORAGE_HOURS_EXECUTIVE,
+        "storage_days": _STORAGE_DAYS_EXECUTIVE,
     },
     "enterprise": {
         "contact_only": True,
         "analytics": "full",
         "priority": 5,
         # No public limits - use contract flags
+        "storage_hours": int(_STORAGE_HOURS_ENTERPRISE) if _STORAGE_HOURS_ENTERPRISE else None,
+        "storage_days": int(_STORAGE_DAYS_ENTERPRISE) if _STORAGE_DAYS_ENTERPRISE else None,
     },
     "unlimited": {
         "internal": True,
         "monthly_credits": None,  # Unlimited
         "analytics": "full",
         "priority": 6,
+        "storage_hours": int(_STORAGE_HOURS_UNLIMITED) if _STORAGE_HOURS_UNLIMITED else None,
+        "storage_days": int(_STORAGE_DAYS_UNLIMITED) if _STORAGE_DAYS_UNLIMITED else None,
     },
 }
 
@@ -72,6 +101,14 @@ RATES_ELEVENLABS: Dict[str, int] = {
     "unlimited": 12,  # Same as executive
 }
 
+# AI metadata generation rates (flat rate per generation)
+RATES_AI_METADATA: Dict[str, int] = {
+    "title": 1,
+    "description": 2,  # Also used for "notes"
+    "notes": 2,  # Alias for description
+    "tags": 1,
+}
+
 # Analytics levels
 ANALYTICS_LEVELS = {
     "basic": 1,
@@ -81,8 +118,17 @@ ANALYTICS_LEVELS = {
 
 
 def get_plan(plan_key: str) -> Optional[Dict[str, Any]]:
-    """Get plan configuration by key."""
-    return PLANS.get(plan_key.lower())
+    """
+    Get plan configuration by key.
+    
+    Normalizes "free" to "starter" for backward compatibility.
+    Backend uses "free" internally, but plans use "starter".
+    """
+    normalized = plan_key.lower()
+    # Map "free" to "starter" (backend uses "free", plans use "starter")
+    if normalized == "free":
+        normalized = "starter"
+    return PLANS.get(normalized)
 
 
 def get_plan_priority(plan_key: str) -> int:
@@ -138,6 +184,18 @@ def get_elevenlabs_rate(plan_key: str) -> int:
     return RATES_ELEVENLABS.get(plan_key.lower(), 15)  # Default to starter rate
 
 
+def get_ai_metadata_rate(metadata_type: str) -> int:
+    """Get credit rate for AI metadata generation.
+    
+    Args:
+        metadata_type: Type of metadata ("title", "description", "notes", "tags")
+    
+    Returns:
+        Credits to charge (default: 1)
+    """
+    return RATES_AI_METADATA.get(metadata_type.lower(), 1)
+
+
 def allows_overlength(plan_key: str) -> bool:
     """Check if plan allows episodes exceeding max_minutes (with surcharge or override)."""
     plan = get_plan(plan_key)
@@ -166,11 +224,44 @@ def requires_overlength_surcharge(plan_key: str) -> bool:
     return plan_key.lower() in ("creator", "pro")
 
 
+def get_storage_hours(plan_key: str) -> Optional[int]:
+    """Get maximum hours of raw audio storage for a plan.
+    
+    Returns None for unlimited plans (enterprise/unlimited).
+    """
+    plan = get_plan(plan_key)
+    if not plan:
+        return None
+    return plan.get("storage_hours")
+
+
+def get_storage_days(plan_key: str) -> Optional[int]:
+    """Get retention period in days for raw audio storage for a plan.
+    
+    Returns None for unlimited plans (enterprise/unlimited).
+    """
+    plan = get_plan(plan_key)
+    if not plan:
+        return None
+    return plan.get("storage_days")
+
+
+def has_unlimited_storage(plan_key: str) -> bool:
+    """Check if plan has unlimited storage (no hour or day limits)."""
+    plan = get_plan(plan_key)
+    if not plan:
+        return False
+    storage_hours = plan.get("storage_hours")
+    storage_days = plan.get("storage_days")
+    return storage_hours is None or storage_days is None
+
+
 __all__ = [
     "PLANS",
     "ROLLOVER_RATE",
     "RATES",
     "RATES_ELEVENLABS",
+    "RATES_AI_METADATA",
     "ANALYTICS_LEVELS",
     "get_plan",
     "get_plan_priority",
@@ -180,7 +271,11 @@ __all__ = [
     "is_unlimited_plan",
     "is_enterprise_plan",
     "get_elevenlabs_rate",
+    "get_ai_metadata_rate",
     "allows_overlength",
     "requires_overlength_surcharge",
+    "get_storage_hours",
+    "get_storage_days",
+    "has_unlimited_storage",
 ]
 

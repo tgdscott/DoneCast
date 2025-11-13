@@ -117,7 +117,14 @@ export const AuthProvider = ({ children }) => {
         return data;
     }, [token]);
 
-    const value = { token, user, login, logout, refreshUser, isAuthenticated: !!token, backendOnline, hydrated, acceptTerms, maintenanceInfo };
+    const submitTermsConcern = useCallback(async (concern) => {
+        if (!token) throw new Error('Not authenticated');
+        const api = makeApi(token);
+        const data = await api.post('/api/auth/terms/concern', { concern });
+        return data;
+    }, [token]);
+
+    const value = { token, user, login, logout, refreshUser, isAuthenticated: !!token, backendOnline, hydrated, acceptTerms, submitTermsConcern, maintenanceInfo };
 
     return (
         <AuthContext.Provider value={value}>

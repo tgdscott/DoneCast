@@ -14,6 +14,7 @@ import FlubberCommandReviewText from './podcastCreator/FlubberCommandReviewText'
 import InternCommandReviewText from './podcastCreator/InternCommandReviewText';
 import IntentQuestions from './IntentQuestions';
 import VoicePicker from '@/components/VoicePicker';
+import CreditPurchaseModal from './CreditPurchaseModal';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
@@ -39,6 +40,7 @@ export default function PodcastCreator({
   preselectedStartStep,
   onRequestUpload,
   userTimezone = null,
+  onViewHistory = null,
 }) {
   const resolvedTimezone = useResolvedTimezone(userTimezone);
   const controller = usePodcastCreator({
@@ -195,6 +197,10 @@ export default function PodcastCreator({
             const tags = await controller.suggestTags();
             if (Array.isArray(tags) && tags.length && typeof handleDetailsChange === 'function') {
               handleDetailsChange('tags', tags.join(', '));
+              // Mark tags as AI-generated
+              if (typeof controller.setAiGeneratedFields === 'function') {
+                controller.setAiGeneratedFields(prev => ({ ...prev, tags: true }));
+              }
             }
           } catch (_) {}
         }
@@ -528,6 +534,7 @@ export default function PodcastCreator({
             formatDuration={formatDuration}
             audioDurationSec={audioDurationSec}
             onRetryPrecheck={retryMinutesPrecheck}
+            aiGeneratedFields={controller.aiGeneratedFields}
           />
         );
       case 6:
@@ -545,6 +552,7 @@ export default function PodcastCreator({
                 setCurrentStep(5); // Go back to Episode Details step
               }
             }}
+            onViewHistory={onViewHistory}
           />
         );
       default:
@@ -620,6 +628,27 @@ export default function PodcastCreator({
         onThresholdChange={setFuzzyThreshold}
         onRetry={retryFlubberSearch}
         onSkip={skipFlubberRetry}
+      />
+
+      <CreditPurchaseModal
+        open={controller.showCreditPurchase || false}
+        onOpenChange={(open) => {
+          if (controller.setShowCreditPurchase) {
+            controller.setShowCreditPurchase(open);
+          }
+        }}
+        token={token}
+        planKey={controller.creditPurchaseData?.planKey}
+        requiredCredits={controller.creditPurchaseData?.requiredCredits}
+        onSuccess={() => {
+          // Refresh usage after successful purchase
+          if (controller.quota?.refreshUsage) {
+            controller.quota.refreshUsage();
+          }
+          if (controller.setShowCreditPurchase) {
+            controller.setShowCreditPurchase(false);
+          }
+        }}
       />
 
       <Dialog open={!!minutesDialog} onOpenChange={(open) => { if (!open) closeMinutesDialog(); }}>

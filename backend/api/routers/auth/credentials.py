@@ -19,6 +19,8 @@ from api.core.database import get_session
 from api.models.settings import load_admin_settings
 from api.models.user import User, UserCreate, UserPublic
 from api.models.verification import EmailVerification
+from api.models.promo_code import PromoCode
+from api.models.affiliate_code import UserAffiliateCode
 from api.services.mailer import mailer
 
 from .utils import (
@@ -37,6 +39,7 @@ class UserRegisterPayload(UserCreate):
     # Terms acceptance moved to post-signup onboarding flow
     accept_terms: bool | None = None
     terms_version: str | None = None
+    promo_code: Optional[str] = None
 
 
 class UserRegisterResponse(BaseModel):
@@ -87,13 +90,82 @@ async def register_user(
         default_active = False
         default_tier = "unlimited"  # Fallback to unlimited if settings can't be loaded
 
-    base_user = UserCreate(**user_in.model_dump(exclude={"accept_terms", "terms_version"}))
+    base_user = UserCreate(**user_in.model_dump(exclude={"accept_terms", "terms_version", "promo_code"}))
     # Users must verify their email before they can log in
     base_user.is_active = False
     # Set tier from admin settings
     base_user.tier = default_tier
 
     user = crud.create_user(session=session, user_create=base_user)
+    session.commit()
+    session.refresh(user)
+    
+    # Validate and apply promo code or affiliate code if provided
+    if user_in.promo_code:
+        promo_code_upper = user_in.promo_code.strip().upper()
+        if promo_code_upper:
+            try:
+                # First, check if it's an admin-created promo code
+                promo_code_obj = session.exec(
+                    select(PromoCode).where(PromoCode.code == promo_code_upper)
+                ).first()
+                
+                if promo_code_obj:
+                    # Validate promo code is active
+                    if not promo_code_obj.is_active:
+                        logging.getLogger(__name__).warning(
+                            f"[REGISTRATION] User {user.email} attempted to use inactive promo code: {promo_code_upper}"
+                        )
+                    # Check if expired
+                    elif promo_code_obj.expires_at and promo_code_obj.expires_at < datetime.utcnow():
+                        logging.getLogger(__name__).warning(
+                            f"[REGISTRATION] User {user.email} attempted to use expired promo code: {promo_code_upper}"
+                        )
+                    # Check if max uses reached
+                    elif promo_code_obj.max_uses is not None and promo_code_obj.usage_count >= promo_code_obj.max_uses:
+                        logging.getLogger(__name__).warning(
+                            f"[REGISTRATION] User {user.email} attempted to use promo code that reached max uses: {promo_code_upper}"
+                        )
+                    else:
+                        # Valid promo code - save it to user and increment usage
+                        user.promo_code_used = promo_code_upper
+                        promo_code_obj.usage_count += 1
+                        promo_code_obj.updated_at = datetime.utcnow()
+                        session.add(user)
+                        session.add(promo_code_obj)
+                        session.commit()
+                        session.refresh(user)
+                        logging.getLogger(__name__).info(
+                            f"[REGISTRATION] User {user.email} registered with promo code: {promo_code_upper}"
+                        )
+                else:
+                    # Not a promo code - check if it's a user affiliate code
+                    affiliate_code_obj = session.exec(
+                        select(UserAffiliateCode).where(UserAffiliateCode.code == promo_code_upper)
+                    ).first()
+                    
+                    if affiliate_code_obj:
+                        # Valid affiliate code - save it to user and track referral
+                        user.promo_code_used = promo_code_upper  # Store the code for tracking
+                        user.referred_by_user_id = affiliate_code_obj.user_id  # Track who referred them
+                        session.add(user)
+                        session.commit()
+                        session.refresh(user)
+                        logging.getLogger(__name__).info(
+                            f"[REGISTRATION] User {user.email} registered with affiliate code: {promo_code_upper} (referred by user {affiliate_code_obj.user_id})"
+                        )
+                    else:
+                        # Code not found - log but don't fail registration
+                        logging.getLogger(__name__).info(
+                            f"[REGISTRATION] User {user.email} attempted to use invalid code: {promo_code_upper}"
+                        )
+            except Exception as e:
+                # Log error but don't fail registration if code validation fails
+                logging.getLogger(__name__).error(
+                    f"[REGISTRATION] Error validating code {promo_code_upper} for user {user.email}: {e}",
+                    exc_info=True
+                )
+                # Don't rollback - user is already created, just skip code
 
     # Record terms acceptance if provided during registration
     # This prevents users from seeing TermsGate after email verification
@@ -150,6 +222,9 @@ async def register_user(
     )
     html_body = f"""
     <div style='font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:8px 4px;'>
+      <div style='text-align:center;margin-bottom:30px;'>
+        <img src='https://app.podcastplusplus.com/MikeCzech.png' alt='Podcast Plus Plus' style='width:80px;height:80px;border-radius:50%;object-fit:cover;margin-bottom:20px;' />
+      </div>
       <h2 style='font-size:20px;margin:0 0 12px;'>Confirm your email</h2>
     <p style='font-size:15px;line-height:1.5;margin:0 0 16px;'>Use the code below or click the button to finish creating your Podcast Plus Plus account.</p>
       <div style='background:#111;color:#fff;font-size:26px;letter-spacing:4px;padding:12px 16px;text-align:center;border-radius:6px;font-weight:600;margin:0 0 20px;'>{code}</div>
@@ -266,6 +341,74 @@ async def login_for_access_token_json(
 
     access_token = create_access_token({"sub": user.email})
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+class MagicLinkRequest(BaseModel):
+    token: str
+
+
+@router.post("/magic-link", response_model=dict)
+@limiter.limit("10/minute")
+async def exchange_magic_link_token(
+    request: Request,
+    payload: MagicLinkRequest,
+    session: Session = Depends(get_session),
+) -> dict:
+    """Exchange a magic link token (from email) for a regular access token."""
+    from jose import JWTError, jwt
+    
+    try:
+        # Decode and verify the magic link token
+        token_payload = jwt.decode(
+            payload.token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM],
+            options={"verify_exp": True}
+        )
+        
+        # Verify it's a magic link token
+        if token_payload.get("type") != "magic_link":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token type",
+            )
+        
+        # Get user email from token
+        email = token_payload.get("sub")
+        if not email:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token",
+            )
+        
+        # Get user from database
+        user = crud.get_user_by_email(session=session, email=email)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+            )
+        
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Account is not active",
+            )
+        
+        # Update last login
+        user.last_login = datetime.utcnow()
+        session.add(user)
+        session.commit()
+        
+        # Create and return a regular access token
+        access_token = create_access_token({"sub": user.email})
+        return {"access_token": access_token, "token_type": "bearer"}
+        
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
 
 
 @router.get("/me", response_model=UserPublic)

@@ -74,6 +74,10 @@ flubber                = _safe_import("api.routers.flubber")
 intern                 = _safe_import("api.routers.intern")
 users                  = _safe_import("api.routers.users")
 admin                  = _safe_import("api.routers.admin")  # Uses admin/__init__.py (modular structure)
+if admin is None:
+    log.error("CRITICAL: Admin router failed to import - admin endpoints will NOT work")
+else:
+    log.info("Admin router imported successfully: %s", type(admin))
 podcasts               = _safe_import("api.routers.podcasts")
 importer               = _safe_import("api.routers.importer")
 public                 = _safe_import("api.routers.public")
@@ -107,6 +111,7 @@ auphonic_router        = _safe_import("api.routers.episodes.auphonic")
 # user_deletion_router is in admin/users.py (loaded via admin module)
 speakers_router        = _safe_import("api.routers.speakers")
 worker_health_router   = _safe_import("api.routers.worker_health")
+affiliate_router       = _safe_import("api.routers.affiliate")
 
 def _maybe(app: FastAPI, r, prefix: str = "/api"):
     if r is not None:
@@ -205,7 +210,8 @@ def attach_routers(app: FastAPI) -> dict:
     availability['speakers_router'] = speakers_router is not None
     _maybe(app, worker_health_router)  # Local worker health check and fallback status
     availability['worker_health_router'] = worker_health_router is not None
-    availability['speakers_router'] = speakers_router is not None
+    _maybe(app, affiliate_router, prefix="/api/affiliate")
+    availability['affiliate_router'] = affiliate_router is not None
 
     # Cloud Tasks internal hook (no prefix: it already has /api/tasks)
     app.include_router(tasks_router)

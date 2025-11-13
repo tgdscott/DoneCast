@@ -1,43 +1,30 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 import { useAuth } from '@/AuthContext';
 import { makeApi } from '@/lib/apiClient';
 import { useToast } from '@/hooks/use-toast';
 import { 
-  Info, 
-  AlertTriangle, 
-  CheckCircle, 
   Save, 
   RotateCcw, 
-  Clock,
-  CreditCard,
-  Zap,
-  Sparkles,
-  Settings,
-  TrendingUp,
-  Shield,
-  DollarSign,
-  Table as TableIcon
+  AlertTriangle,
+  CheckCircle,
+  X,
+  Loader2,
+  Plus,
+  Edit,
+  Trash2,
+  ChevronUp,
+  ChevronDown,
+  GripVertical
 } from 'lucide-react';
-
-const CATEGORY_CONFIG = {
-  credits: { label: 'Credits & Quotas', icon: CreditCard, color: 'text-blue-600' },
-  processing: { label: 'Audio Processing', icon: Settings, color: 'text-purple-600' },
-  ai_tts: { label: 'AI & TTS', icon: Sparkles, color: 'text-pink-600' },
-  editing: { label: 'Editing Features', icon: Zap, color: 'text-green-600' },
-  branding: { label: 'Branding & Publishing', icon: TrendingUp, color: 'text-orange-600' },
-  analytics: { label: 'Analytics & Insights', icon: TrendingUp, color: 'text-indigo-600' },
-  support: { label: 'Support & Priority', icon: Shield, color: 'text-gray-600' },
-  costs: { label: 'Cost Multipliers', icon: DollarSign, color: 'text-red-600' },
-};
 
 export default function AdminTierEditorV2() {
   const { token } = useAuth();
@@ -46,13 +33,13 @@ export default function AdminTierEditorV2() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
-  const [data, setData] = useState(null);
-  const [editedFeatures, setEditedFeatures] = useState({});
-  const [selectedTier, setSelectedTier] = useState('free');
-  const [activeCategory, setActiveCategory] = useState('credits');
-  const [validationErrors, setValidationErrors] = useState([]);
-  const [showHardCodedComparison, setShowHardCodedComparison] = useState(false);
-  const [viewMode, setViewMode] = useState('edit'); // 'edit' or 'comparison'
+  const [pricingData, setPricingData] = useState(null);
+  const [editedTiers, setEditedTiers] = useState({});
+  const [editedFeatures, setEditedFeatures] = useState([]);
+  const [hasChanges, setHasChanges] = useState(false);
+  const [editingFeature, setEditingFeature] = useState(null);
+  const [showFeatureDialog, setShowFeatureDialog] = useState(false);
+  const [isEditingExistingFeature, setIsEditingExistingFeature] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -63,20 +50,22 @@ export default function AdminTierEditorV2() {
     setError(null);
     try {
       const api = makeApi(token);
-      const response = await api.get('/api/admin/tiers/v2');
-      setData(response);
+      const response = await api.get('/api/admin/pricing');
+      setPricingData(response);
       
-      // Initialize edited features with current values
+      // Initialize edited features with current values (deep copy)
+      const features = response.featureDefinitions || [];
+      setEditedFeatures(features.map(f => JSON.parse(JSON.stringify(f))));
+      
+      // Initialize edited tiers with current values (deep copy)
       const initial = {};
-      response.tiers.forEach(tier => {
-        initial[tier.tier_name] = {};
-        response.features.forEach(feature => {
-          initial[tier.tier_name][feature.key] = feature.values[tier.tier_name];
-        });
+      response.standardTiers.forEach(tier => {
+        initial[tier.key] = JSON.parse(JSON.stringify(tier));
       });
-      setEditedFeatures(initial);
+      setEditedTiers(initial);
+      setHasChanges(false);
     } catch (e) {
-      const msg = e?.detail || e?.message || 'Failed to load tier configuration';
+      const msg = e?.detail || e?.message || 'Failed to load pricing configuration';
       setError(msg);
       toast({ title: 'Error', description: msg, variant: 'destructive' });
     } finally {
@@ -84,231 +73,321 @@ export default function AdminTierEditorV2() {
     }
   };
 
-  const updateFeatureValue = (tierName, featureKey, value) => {
-    setEditedFeatures(prev => ({
-      ...prev,
-      [tierName]: {
-        ...prev[tierName],
-        [featureKey]: value
+  const updateTierValue = (tierKey, fieldPath, value) => {
+    setEditedTiers(prev => {
+      const updated = { ...prev };
+      if (!updated[tierKey]) {
+        const originalTier = pricingData.standardTiers.find(t => t.key === tierKey);
+        if (originalTier) {
+          updated[tierKey] = JSON.parse(JSON.stringify(originalTier));
+        } else {
+          return prev;
+        }
       }
-    }));
-    
-    // Clear validation errors when user makes changes
-    setValidationErrors([]);
-  };
-
-  const validateTierConfig = (tierName) => {
-    const features = editedFeatures[tierName];
-    const errors = [];
-
-    // Validate Auphonic dependencies
-    if (features.auto_filler_removal && features.audio_pipeline !== 'auphonic') {
-      errors.push('Auto filler removal requires Auphonic pipeline');
-    }
-    if (features.auto_noise_reduction && features.audio_pipeline !== 'auphonic') {
-      errors.push('Auto noise reduction requires Auphonic pipeline');
-    }
-    if (features.auto_leveling && features.audio_pipeline !== 'auphonic') {
-      errors.push('Auto leveling requires Auphonic pipeline');
-    }
-
-    // Validate ElevenLabs dependencies
-    if (features.elevenlabs_voices > 0 && features.tts_provider !== 'elevenlabs') {
-      errors.push('ElevenLabs voice clones require ElevenLabs TTS provider');
-    }
-
-    // Validate negative values
-    Object.entries(features).forEach(([key, value]) => {
-      if (typeof value === 'number' && value < 0) {
-        errors.push(`${key} cannot be negative`);
+      
+      // Handle nested field paths (e.g., "features.flubber")
+      if (fieldPath.includes('.')) {
+        const parts = fieldPath.split('.');
+        const lastPart = parts.pop();
+        let target = updated[tierKey];
+        for (const part of parts) {
+          if (!target[part]) target[part] = {};
+          target = target[part];
+        }
+        target[lastPart] = value;
+        // Create new object to trigger re-render
+        updated[tierKey] = { ...updated[tierKey] };
+      } else {
+        updated[tierKey] = {
+          ...updated[tierKey],
+          [fieldPath]: value
+        };
       }
+      
+      return updated;
     });
-
-    // Validate multipliers
-    if (features.auphonic_cost_multiplier && features.auphonic_cost_multiplier < 1.0) {
-      errors.push('Auphonic cost multiplier must be >= 1.0');
-    }
-    if (features.elevenlabs_cost_multiplier && features.elevenlabs_cost_multiplier < 1.0) {
-      errors.push('ElevenLabs cost multiplier must be >= 1.0');
-    }
-
-    return errors;
+    
+    setHasChanges(true);
   };
 
-  const saveTier = async (tierName) => {
-    const errors = validateTierConfig(tierName);
-    if (errors.length > 0) {
-      setValidationErrors(errors);
-      toast({ 
-        title: 'Validation Failed', 
-        description: errors[0], 
-        variant: 'destructive' 
-      });
-      return;
+  const getTierValue = (tierKey, fieldPath) => {
+    const tier = editedTiers[tierKey] || pricingData?.standardTiers.find(t => t.key === tierKey);
+    if (!tier) return null;
+    
+    // Handle nested field paths
+    if (fieldPath.includes('.')) {
+      const parts = fieldPath.split('.');
+      let value = tier;
+      for (const part of parts) {
+        if (value == null) return null;
+        value = value[part];
+      }
+      return value ?? null;
     }
+    
+    return tier[fieldPath] ?? null;
+  };
 
+  const saveAll = async () => {
     setSaving(true);
     try {
       const api = makeApi(token);
-      await api.put('/api/admin/tiers/v2', {
-        tier_name: tierName,
-        features: editedFeatures[tierName],
-        reason: 'Updated via admin tier editor'
+      
+      // Build updated tiers
+      const updatedTiers = pricingData.standardTiers.map(tier => {
+        const edited = editedTiers[tier.key];
+        if (!edited) return tier;
+        
+        return {
+          ...tier,
+          ...edited,
+          features: {
+            ...tier.features,
+            ...(edited.features || {})
+          }
+        };
       });
+      
+      // Sort features by order before saving
+      const sortedFeatures = [...editedFeatures].sort((a, b) => a.order - b.order);
+      
+      const updatedData = {
+        standardTiers: updatedTiers,
+        earlyAccessTiers: pricingData.earlyAccessTiers || null,
+        featureDefinitions: sortedFeatures
+      };
+      
+      await api.put('/api/admin/pricing', updatedData);
       
       toast({ 
         title: 'Success', 
-        description: `${tierName.charAt(0).toUpperCase() + tierName.slice(1)} tier updated successfully` 
+        description: 'Pricing configuration updated successfully. Changes will be reflected on the pricing page.' 
       });
       
-      // Refresh data
+      setHasChanges(false);
       await fetchData();
     } catch (e) {
-      const msg = e?.detail?.message || e?.detail || e?.message || 'Failed to save tier configuration';
+      const msg = e?.detail?.message || e?.detail || e?.message || 'Failed to save pricing configuration';
       toast({ title: 'Save Failed', description: msg, variant: 'destructive' });
     } finally {
       setSaving(false);
     }
   };
 
-  const resetTier = (tierName) => {
-    if (!data) return;
-    const reset = {};
-    data.features.forEach(feature => {
-      reset[feature.key] = feature.values[tierName];
+  const resetChanges = () => {
+    if (!pricingData) return;
+    const initial = {};
+    pricingData.standardTiers.forEach(tier => {
+      initial[tier.key] = JSON.parse(JSON.stringify(tier));
     });
-    setEditedFeatures(prev => ({
-      ...prev,
-      [tierName]: reset
-    }));
-    setValidationErrors([]);
+    setEditedTiers(initial);
+    const features = pricingData.featureDefinitions || [];
+    setEditedFeatures(features.map(f => JSON.parse(JSON.stringify(f))));
+    setHasChanges(false);
   };
 
-  const featuresByCategory = useMemo(() => {
-    if (!data) return {};
+  const openNewFeatureDialog = () => {
+    setIsEditingExistingFeature(false);
+    // Calculate next order: max order + 1, or length + 1 if no features
+    const nextOrder = editedFeatures.length > 0 
+      ? Math.max(...editedFeatures.map(f => f.order || 0)) + 1 
+      : 1;
+    setEditingFeature({
+      key: '',
+      label: '',
+      description: '',
+      type: 'text',
+      options: null,
+      fieldPath: '',
+      order: nextOrder,
+      category: 'general'
+    });
+    setShowFeatureDialog(true);
+  };
+
+  const openEditFeatureDialog = (feature) => {
+    setIsEditingExistingFeature(true);
+    setEditingFeature(JSON.parse(JSON.stringify(feature)));
+    setShowFeatureDialog(true);
+  };
+
+  const saveFeature = () => {
+    if (!editingFeature) return;
     
-    const grouped = {};
-    data.features.forEach(feature => {
-      const category = feature.category || 'other';
-      if (!grouped[category]) {
-        grouped[category] = [];
+    if (!editingFeature.key || !editingFeature.label || !editingFeature.fieldPath) {
+      toast({ title: 'Error', description: 'Key, label, and field path are required', variant: 'destructive' });
+      return;
+    }
+    
+    if (isEditingExistingFeature) {
+      // Update existing feature - find by original key
+      const originalKey = editingFeature.key; // Key shouldn't change for existing features
+      const existingIndex = editedFeatures.findIndex(f => f.key === originalKey);
+      if (existingIndex >= 0) {
+        const updated = [...editedFeatures];
+        updated[existingIndex] = editingFeature;
+        setEditedFeatures(updated);
       }
-      grouped[category].push(feature);
-    });
-    return grouped;
-  }, [data]);
-
-  const calculateCreditsFromMinutes = (minutes) => {
-    if (minutes === null || minutes === undefined) return 'Unlimited';
-    return (minutes * 1.5).toFixed(0);
+    } else {
+      // Check if key already exists (for new features)
+      if (editedFeatures.some(f => f.key === editingFeature.key)) {
+        toast({ title: 'Error', description: 'A feature with this key already exists', variant: 'destructive' });
+        return;
+      }
+      // Add new feature
+      setEditedFeatures([...editedFeatures, editingFeature]);
+    }
+    
+    setShowFeatureDialog(false);
+    setEditingFeature(null);
+    setIsEditingExistingFeature(false);
+    setHasChanges(true);
   };
 
-  const renderFeatureControl = (feature, tierName) => {
-    const value = editedFeatures[tierName]?.[feature.key];
+  const deleteFeature = (featureKey) => {
+    if (!confirm(`Are you sure you want to delete the feature "${featureKey}"?`)) {
+      return;
+    }
+    setEditedFeatures(editedFeatures.filter(f => f.key !== featureKey));
+    setHasChanges(true);
+  };
+
+  const moveFeature = (sortedIndex, direction) => {
+    if (direction === 'up' && sortedIndex === 0) return;
+    if (direction === 'down' && sortedIndex === sortedFeatures.length - 1) return;
+    
+    // Get the feature to move and its target neighbor from sorted array
+    const featureToMove = sortedFeatures[sortedIndex];
+    const targetIndex = direction === 'up' ? sortedIndex - 1 : sortedIndex + 1;
+    const targetFeature = sortedFeatures[targetIndex];
+    
+    if (!featureToMove || !targetFeature) return;
+    
+    // Find indices in editedFeatures array
+    const moveIndex = editedFeatures.findIndex(f => f.key === featureToMove.key);
+    const targetIdx = editedFeatures.findIndex(f => f.key === targetFeature.key);
+    
+    if (moveIndex === -1 || targetIdx === -1) return;
+    
+    // Swap order values by creating new objects
+    const updated = editedFeatures.map((f, i) => {
+      if (i === moveIndex) {
+        return { ...f, order: targetFeature.order };
+      } else if (i === targetIdx) {
+        return { ...f, order: featureToMove.order };
+      }
+      return f;
+    });
+    
+    setEditedFeatures(updated);
+    setHasChanges(true);
+  };
+
+  const renderCell = (feature, tier) => {
+    const value = getTierValue(tier.key, feature.fieldPath);
     
     if (feature.type === 'boolean') {
+      const isChecked = !!value;
       return (
-        <div className="flex justify-center">
-          <Switch
-            checked={!!value}
-            onCheckedChange={(checked) => updateFeatureValue(tierName, feature.key, checked)}
-          />
-        </div>
+        <TableCell 
+          className="text-center p-2"
+        >
+          <button
+            type="button"
+            onClick={() => updateTierValue(tier.key, feature.fieldPath, !isChecked)}
+            className="w-full h-8 flex items-center justify-center hover:bg-gray-100 rounded transition-colors"
+            title={`Click to ${isChecked ? 'disable' : 'enable'}`}
+          >
+            {isChecked ? (
+              <CheckCircle className="h-6 w-6 text-green-600" />
+            ) : (
+              <X className="h-6 w-6 text-red-500" />
+            )}
+          </button>
+        </TableCell>
       );
     }
     
     if (feature.type === 'number') {
       return (
-        <div className="flex justify-center">
+        <TableCell className="p-2 text-center">
           <Input
             type="number"
-            className="w-32 text-center"
-            value={value === null ? '' : (value ?? '')}
-            placeholder="Unlimited"
+            className="w-full max-w-[100px] text-center h-8 mx-auto"
+            value={value === null || value === undefined ? '' : value}
+            placeholder="—"
             onChange={(e) => {
               const val = e.target.value;
               if (val === '') {
-                updateFeatureValue(tierName, feature.key, null);
+                updateTierValue(tier.key, feature.fieldPath, null);
               } else {
                 const num = Number(val);
-                updateFeatureValue(tierName, feature.key, isNaN(num) ? 0 : num);
+                updateTierValue(tier.key, feature.fieldPath, isNaN(num) ? 0 : num);
               }
             }}
           />
-        </div>
+        </TableCell>
       );
     }
     
     if (feature.type === 'select') {
       return (
-        <div className="flex justify-center">
-          <Select
-            value={value || feature.options[0]}
-            onValueChange={(val) => updateFeatureValue(tierName, feature.key, val)}
-          >
-            <SelectTrigger className="w-40">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {feature.options?.map(option => (
-                <SelectItem key={option} value={option}>
-                  {option}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <TableCell className="p-2 text-center">
+          <div className="flex justify-center">
+            <Select
+              value={value || (feature.options && feature.options[0]) || ''}
+              onValueChange={(val) => updateTierValue(tier.key, feature.fieldPath, val)}
+            >
+              <SelectTrigger className="w-full max-w-[120px] h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {feature.options?.map(option => (
+                  <SelectItem key={option} value={option}>
+                    {option}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </TableCell>
       );
     }
     
-    return <span className="text-sm text-gray-500">Unknown type</span>;
-  };
-
-  const renderHardCodedComparison = () => {
-    if (!data || !showHardCodedComparison) return null;
-
+    // Default: text input
     return (
-      <Alert className="mb-4">
-        <Info className="h-4 w-4" />
-        <AlertDescription>
-          <div className="font-semibold mb-2">Hard-Coded vs Database Values</div>
-          {data.tiers.map(tier => {
-            const hardCoded = data.hard_coded_values[tier.tier_name];
-            const dbValues = editedFeatures[tier.tier_name];
-            const differences = [];
-            
-            Object.entries(hardCoded).forEach(([key, value]) => {
-              if (JSON.stringify(dbValues[key]) !== JSON.stringify(value)) {
-                differences.push(`${key}: DB=${JSON.stringify(dbValues[key])} vs Hard-coded=${JSON.stringify(value)}`);
-              }
-            });
-            
-            if (differences.length > 0) {
-              return (
-                <div key={tier.tier_name} className="mt-2">
-                  <div className="font-medium text-sm">{tier.display_name}:</div>
-                  <ul className="text-xs ml-4 mt-1 space-y-1">
-                    {differences.map((diff, idx) => (
-                      <li key={idx} className="text-orange-600">⚠️ {diff}</li>
-                    ))}
-                  </ul>
-                </div>
-              );
+      <TableCell className="p-2 text-center">
+        <Input
+          type="text"
+          className="w-full max-w-[120px] text-center h-8 text-sm mx-auto"
+          value={value === null || value === undefined ? '' : String(value)}
+          placeholder="—"
+          onChange={(e) => {
+            let val = e.target.value;
+            // Handle boolean strings for multiUser or similar fields
+            if (feature.fieldPath === 'features.multiUser') {
+              if (val.toLowerCase() === 'true') val = true;
+              else if (val.toLowerCase() === 'false') val = false;
             }
-            return null;
-          })}
-        </AlertDescription>
-      </Alert>
+            updateTierValue(tier.key, feature.fieldPath, val);
+          }}
+        />
+      </TableCell>
     );
   };
+
+  // Sort features by order
+  const sortedFeatures = useMemo(() => {
+    return [...editedFeatures].sort((a, b) => a.order - b.order);
+  }, [editedFeatures]);
 
   if (loading) {
     return (
       <Card>
         <CardContent className="p-6">
           <div className="flex items-center justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mr-3"></div>
-            <span>Loading tier configuration...</span>
+            <Loader2 className="h-8 w-8 animate-spin mr-3" />
+            <span>Loading pricing configuration...</span>
           </div>
         </CardContent>
       </Card>
@@ -331,324 +410,259 @@ export default function AdminTierEditorV2() {
     );
   }
 
-  if (!data) return null;
+  if (!pricingData) return null;
 
-  const CategoryIcon = CATEGORY_CONFIG[activeCategory]?.icon || Info;
+  const tiers = pricingData.standardTiers || [];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Settings className="h-5 w-5" />
-            Tier Editor v2 (Credits System)
-          </CardTitle>
-          <CardDescription>
-            Configure features and credits for each subscription tier. Changes take effect immediately after saving.
-            <div className="mt-2 flex items-center gap-2">
-              <Badge variant="outline">1 minute = 1 credit</Badge>
-              <Badge variant="outline">Database-driven feature gating</Badge>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Tier Editor</CardTitle>
+              <CardDescription>
+                Edit subscription plan features and benefits. Click checkmarks/X to toggle, or edit values directly in cells.
+                Changes are saved to the pricing page.
+              </CardDescription>
             </div>
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex justify-between items-center mb-4">
             <div className="flex gap-2">
               <Button
-                variant={viewMode === 'edit' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setViewMode('edit')}
+                variant="outline"
+                onClick={openNewFeatureDialog}
+                disabled={saving}
               >
-                <Settings className="h-4 w-4 mr-2" />
-                Edit Mode
+                <Plus className="h-4 w-4 mr-2" />
+                Add Benefit
               </Button>
               <Button
-                variant={viewMode === 'comparison' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setViewMode('comparison')}
+                variant="outline"
+                onClick={resetChanges}
+                disabled={saving || !hasChanges}
               >
-                <TableIcon className="h-4 w-4 mr-2" />
-                Comparison Matrix
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Reset
               </Button>
               <Button
-                variant={showHardCodedComparison ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setShowHardCodedComparison(!showHardCodedComparison)}
+                onClick={saveAll}
+                disabled={saving || !hasChanges}
               >
-                <Info className="h-4 w-4 mr-2" />
-                {showHardCodedComparison ? 'Hide' : 'Show'} Hard-Coded Comparison
+                {saving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4 mr-2" />
+                    Save All Changes
+                  </>
+                )}
               </Button>
             </div>
           </div>
-
-          {renderHardCodedComparison()}
-
-          {validationErrors.length > 0 && (
-            <Alert variant="destructive" className="mb-4">
+          {hasChanges && (
+            <Alert className="mt-2">
               <AlertTriangle className="h-4 w-4" />
               <AlertDescription>
-                <div className="font-semibold">Validation Errors:</div>
-                <ul className="mt-2 ml-4 space-y-1">
-                  {validationErrors.map((err, idx) => (
-                    <li key={idx} className="text-sm">• {err}</li>
-                  ))}
-                </ul>
+                You have unsaved changes. Click "Save All Changes" to update the pricing page.
               </AlertDescription>
             </Alert>
           )}
-
-          {/* COMPARISON MATRIX VIEW */}
-          {viewMode === 'comparison' && (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="font-bold sticky left-0 bg-white z-10 min-w-[200px]">Feature</TableHead>
-                    {data.tiers.map(tier => (
-                      <TableHead key={tier.tier_name} className="text-center font-bold min-w-[120px]">
-                        {tier.display_name}
-                        {!tier.is_public && <div className="text-xs text-gray-500">(Admin)</div>}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {Object.entries(CATEGORY_CONFIG).map(([category, config]) => {
-                    const Icon = config.icon;
-                    const features = featuresByCategory[category] || [];
-                    if (features.length === 0) return null;
-                    
-                    return (
-                      <React.Fragment key={category}>
-                        {/* Category Header Row */}
-                        <TableRow className="bg-gray-50">
-                          <TableCell colSpan={data.tiers.length + 1} className="font-bold">
-                            <div className="flex items-center gap-2">
-                              <Icon className={`h-4 w-4 ${config.color}`} />
-                              {config.label}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                        {/* Feature Rows */}
-                        {features.map(feature => (
-                          <TableRow key={feature.key} className="hover:bg-gray-50">
-                            <TableCell className="sticky left-0 bg-white z-10">
-                              <div>
-                                <div className="font-medium text-sm">{feature.label}</div>
-                                {feature.description && (
-                                  <div className="text-xs text-gray-500 mt-1">{feature.description}</div>
-                                )}
-                              </div>
-                            </TableCell>
-                            {data.tiers.map(tier => {
-                              const value = editedFeatures[tier.tier_name]?.[feature.key];
-                              let displayValue;
-                              
-                              if (feature.type === 'boolean') {
-                                displayValue = value ? (
-                                  <CheckCircle className="h-5 w-5 text-green-600 mx-auto" />
-                                ) : (
-                                  <span className="text-gray-400 text-sm">—</span>
-                                );
-                              } else if (feature.type === 'number') {
-                                displayValue = value === null ? (
-                                  <Badge variant="secondary" className="text-xs">Unlimited</Badge>
-                                ) : (
-                                  <span className="font-medium">{value}</span>
-                                );
-                              } else if (feature.type === 'select') {
-                                displayValue = (
-                                  <Badge variant="outline" className="text-xs">{value}</Badge>
-                                );
-                              } else {
-                                displayValue = <span className="text-sm">{String(value)}</span>;
-                              }
-                              
-                              return (
-                                <TableCell key={tier.tier_name} className="text-center">
-                                  {displayValue}
-                                </TableCell>
-                              );
-                            })}
-                          </TableRow>
-                        ))}
-                      </React.Fragment>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-
-          {/* EDIT MODE VIEW */}
-          {viewMode === 'edit' && (
-            <Tabs value={selectedTier} onValueChange={setSelectedTier} className="space-y-4">
-            <TabsList className="grid w-full grid-cols-4">
-              {data.tiers.map(tier => (
-                <TabsTrigger key={tier.tier_name} value={tier.tier_name} className="capitalize">
-                  {tier.display_name}
-                  {!tier.is_public && <Badge variant="secondary" className="ml-2 text-xs">Admin</Badge>}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-
-            {data.tiers.map(tier => (
-              <TabsContent key={tier.tier_name} value={tier.tier_name} className="space-y-4">
-                <div className="flex justify-between items-center p-4 bg-gray-50 rounded-lg">
-                  <div>
-                    <h3 className="text-lg font-semibold">{tier.display_name} Tier</h3>
-                    <p className="text-sm text-gray-600">
-                      Configure features and limits for this tier
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => resetTier(tier.tier_name)}
-                      disabled={saving}
-                    >
-                      <RotateCcw className="h-4 w-4 mr-2" />
-                      Reset
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => saveTier(tier.tier_name)}
-                      disabled={saving}
-                    >
-                      {saving ? (
-                        <>
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                          Saving...
-                        </>
-                      ) : (
-                        <>
-                          <Save className="h-4 w-4 mr-2" />
-                          Save {tier.display_name}
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                </div>
-
-                <Tabs value={activeCategory} onValueChange={setActiveCategory}>
-                  <TabsList className="grid w-full grid-cols-4 lg:grid-cols-8">
-                    {Object.entries(CATEGORY_CONFIG).map(([key, config]) => {
-                      const Icon = config.icon;
-                      return (
-                        <TabsTrigger key={key} value={key} className="text-xs">
-                          <Icon className={`h-3 w-3 mr-1 ${config.color}`} />
-                          <span className="hidden lg:inline">{config.label}</span>
-                        </TabsTrigger>
-                      );
-                    })}
-                  </TabsList>
-
-                  {Object.entries(CATEGORY_CONFIG).map(([categoryKey, categoryConfig]) => (
-                    <TabsContent key={categoryKey} value={categoryKey} className="mt-4">
-                      <Card>
-                        <CardHeader>
-                          <CardTitle className="flex items-center gap-2 text-lg">
-                            <CategoryIcon className={`h-5 w-5 ${categoryConfig.color}`} />
-                            {categoryConfig.label}
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead className="w-1/3">Feature</TableHead>
-                                <TableHead className="w-1/2">Description</TableHead>
-                                <TableHead className="w-1/6 text-center">Value</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {featuresByCategory[categoryKey]?.map(feature => (
-                                <TableRow key={feature.key}>
-                                  <TableCell>
-                                    <div className="font-medium">{feature.label}</div>
-                                    <div className="text-xs text-gray-500 mt-1">
-                                      {feature.type === 'boolean' && '✓ On/Off'}
-                                      {feature.type === 'number' && '# Number'}
-                                      {feature.type === 'select' && '▼ Dropdown'}
-                                    </div>
-                                  </TableCell>
-                                  <TableCell>
-                                    <div className="text-sm text-gray-700">{feature.description}</div>
-                                    {feature.help_text && (
-                                      <div className="text-xs text-gray-500 mt-1 italic">
-                                        💡 {feature.help_text}
-                                      </div>
-                                    )}
-                                  </TableCell>
-                                  <TableCell>
-                                    {renderFeatureControl(feature, tier.tier_name)}
-                                  </TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </CardContent>
-                      </Card>
-                    </TabsContent>
-                  ))}
-                </Tabs>
-              </TabsContent>
-            ))}
-          </Tabs>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Credit Calculator */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CreditCard className="h-5 w-5" />
-            Credit Calculator
-          </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            {data.tiers.map(tier => {
-              const credits = editedFeatures[tier.tier_name]?.monthly_credits;
-              const episodes = editedFeatures[tier.tier_name]?.max_episodes_month;
-              const pipeline = editedFeatures[tier.tier_name]?.audio_pipeline;
-              const tts = editedFeatures[tier.tier_name]?.tts_provider;
-              
-              return (
-                <div key={tier.tier_name} className="p-4 border rounded-lg">
-                  <div className="font-semibold mb-2">{tier.display_name}</div>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Credits:</span>
-                      <span className="font-medium">
-                        {credits === null ? 'Unlimited' : credits.toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Minutes:</span>
-                      <span className="font-medium">
-                        {credits === null ? 'Unlimited' : Math.floor(credits / 1.0).toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Episodes:</span>
-                      <span className="font-medium">
-                        {episodes === null ? 'Unlimited' : episodes}
-                      </span>
-                    </div>
-                    <div className="pt-2 border-t">
-                      <div className="text-xs text-gray-500">Pipeline: {pipeline}</div>
-                      <div className="text-xs text-gray-500">TTS: {tts}</div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="overflow-x-auto border rounded-lg">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-gray-50">
+                  <TableHead className="font-bold sticky left-0 bg-gray-50 z-10 min-w-[300px] max-w-[300px] border-r shadow-sm">
+                    <div className="py-2">Benefit / Feature</div>
+                  </TableHead>
+                  {tiers.map(tier => (
+                    <TableHead key={tier.key} className="text-center font-bold min-w-[160px] bg-gray-50">
+                      <div className="flex flex-col items-center gap-1 py-2">
+                        <span className="text-base">{tier.name}</span>
+                        {tier.popular && (
+                          <Badge variant="secondary" className="text-xs">{tier.badge || 'Popular'}</Badge>
+                        )}
+                      </div>
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sortedFeatures.map((feature, index) => (
+                  <TableRow key={feature.key} className="hover:bg-gray-50/50 border-b group">
+                    <TableCell className="font-medium sticky left-0 bg-white z-10 border-r shadow-sm min-w-[300px] max-w-[300px]">
+                      <div className="flex items-center gap-2 py-2">
+                        <div className="flex flex-col gap-1 flex-1">
+                          <div className="flex items-center gap-2">
+                            <GripVertical className="h-4 w-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            <div className="font-semibold text-sm text-gray-900">{feature.label}</div>
+                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0"
+                                onClick={() => openEditFeatureDialog(feature)}
+                                title="Edit feature"
+                              >
+                                <Edit className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0 text-red-600 hover:text-red-700"
+                                onClick={() => deleteFeature(feature.key)}
+                                title="Delete feature"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </div>
+                          {feature.description && (
+                            <div className="text-xs text-gray-500 mt-1 leading-relaxed ml-6">
+                              {feature.description}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0"
+                            onClick={() => moveFeature(index, 'up')}
+                            disabled={index === 0}
+                            title="Move up"
+                          >
+                            <ChevronUp className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0"
+                            onClick={() => moveFeature(index, 'down')}
+                            disabled={index === sortedFeatures.length - 1}
+                            title="Move down"
+                          >
+                            <ChevronDown className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </TableCell>
+                    {tiers.map(tier => renderCell(feature, tier))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </div>
         </CardContent>
       </Card>
+
+      {/* Feature Edit Dialog */}
+      <Dialog open={showFeatureDialog} onOpenChange={setShowFeatureDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{editingFeature?.key ? 'Edit Benefit' : 'New Benefit'}</DialogTitle>
+            <DialogDescription>
+              Define a benefit or feature that will appear as a row in the pricing matrix.
+            </DialogDescription>
+          </DialogHeader>
+          {editingFeature && (
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="key">Key (unique identifier)</Label>
+                  <Input
+                    id="key"
+                    value={editingFeature.key}
+                    onChange={(e) => setEditingFeature({...editingFeature, key: e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '')})}
+                    placeholder="e.g., credits"
+                    disabled={isEditingExistingFeature}
+                  />
+                  <p className="text-xs text-gray-500">
+                    {isEditingExistingFeature 
+                      ? 'Key cannot be changed for existing features' 
+                      : 'Unique identifier (lowercase, alphanumeric only)'}
+                  </p>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="label">Label (display name)</Label>
+                  <Input
+                    id="label"
+                    value={editingFeature.label}
+                    onChange={(e) => setEditingFeature({...editingFeature, label: e.target.value})}
+                    placeholder="e.g., Monthly Credits"
+                  />
+                  <p className="text-xs text-gray-500">Displayed in the pricing table</p>
+                </div>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="description">Description</Label>
+                <Input
+                  id="description"
+                  value={editingFeature.description}
+                  onChange={(e) => setEditingFeature({...editingFeature, description: e.target.value})}
+                  placeholder="Optional description/tooltip"
+                />
+                <p className="text-xs text-gray-500">Shown as tooltip in the editor</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="type">Type</Label>
+                  <Select
+                    value={editingFeature.type}
+                    onValueChange={(val) => setEditingFeature({...editingFeature, type: val, options: val === 'select' ? ['Option 1'] : null})}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="boolean">Boolean (Checkmark/X)</SelectItem>
+                      <SelectItem value="number">Number</SelectItem>
+                      <SelectItem value="text">Text</SelectItem>
+                      <SelectItem value="select">Select (Dropdown)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="fieldPath">Field Path *</Label>
+                  <Input
+                    id="fieldPath"
+                    value={editingFeature.fieldPath}
+                    onChange={(e) => setEditingFeature({...editingFeature, fieldPath: e.target.value})}
+                    placeholder="e.g., credits or features.flubber"
+                  />
+                  <p className="text-xs text-gray-500">Where to store the value. Use "features.X" for feature flags.</p>
+                </div>
+              </div>
+              {editingFeature.type === 'select' && (
+                <div className="grid gap-2">
+                  <Label htmlFor="options">Options (comma-separated)</Label>
+                  <Input
+                    id="options"
+                    value={editingFeature.options?.join(', ') || ''}
+                    onChange={(e) => {
+                      const options = e.target.value.split(',').map(s => s.trim()).filter(s => s);
+                      setEditingFeature({...editingFeature, options: options.length > 0 ? options : null});
+                    }}
+                    placeholder="e.g., Low, Medium, High, Highest"
+                  />
+                  <p className="text-xs text-gray-500">Comma-separated list of options for the dropdown</p>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowFeatureDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={saveFeature}>
+              {isEditingExistingFeature ? 'Update' : 'Create'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -26,18 +26,24 @@ except Exception:  # pragma: no cover
 def purge_expired_uploads() -> dict:
     """Delete expired raw uploads that are no longer referenced.
     
-    For recordings (main_content), enforces 24-hour minimum retention period
-    even if used in an episode, giving users time to download a backup.
+    For recordings (main_content), enforces:
+    1. Tier-based retention period (files with expires_at <= now)
+    2. 24-hour minimum retention period (safety buffer)
+    3. Storage hour limits (delete oldest files if over limit)
+    
+    Cleanup runs daily at 2am PT, deleting files that expired since last run.
     """
 
     session = next(get_session())
     now = datetime.utcnow()
     removed = 0
+    removed_over_limit = 0
     skipped_in_use = 0
     skipped_too_young = 0
     checked = 0
 
     try:
+        # First, get all expired files (expires_at <= now)
         query = (
             select(MediaItem)
             .where(MediaItem.category == MediaCategory.main_content)  # type: ignore
@@ -137,6 +143,138 @@ def purge_expired_uploads() -> dict:
 
         if removed:
             session.commit()
+        
+        # Second pass: Enforce storage hour limits per user
+        # If a user exceeds their storage hours, delete oldest files first
+        try:
+            from api.models.user import User
+            from api.services.storage.validation import get_user_storage_hours, get_storage_hours
+            from api.services.episodes.assembler import _estimate_audio_seconds
+            from api.billing.plans import has_unlimited_storage
+            
+            # Get all users with main_content files
+            # Use a subquery to get distinct user_ids, then fetch users
+            user_ids_query = (
+                select(MediaItem.user_id)  # type: ignore
+                .where(MediaItem.category == MediaCategory.main_content)  # type: ignore
+                .distinct()
+            )
+            user_ids = session.exec(user_ids_query).all()
+            
+            # Fetch users by ID
+            users = []
+            for user_id in user_ids:
+                user = session.get(User, user_id)
+                if user:
+                    users.append(user)
+            
+            for user in users:
+                user_id = str(user.id)
+                tier = getattr(user, "tier", "starter") or "starter"
+                if tier.lower() == "free":
+                    tier = "starter"
+                
+                # Skip unlimited plans
+                if has_unlimited_storage(tier):
+                    continue
+                
+                max_hours = get_storage_hours(tier)
+                if max_hours is None:
+                    continue
+                
+                # Get current storage usage
+                current_hours = get_user_storage_hours(session, user_id, tier)
+                
+                if current_hours <= max_hours:
+                    continue  # User is within limits
+                
+                # User exceeds limit - delete oldest files first
+                logging.info(
+                    "[purge] User %s (%s tier) exceeds storage limit: %.2f hours / %d hours. Deleting oldest files.",
+                    user_id, tier, current_hours, max_hours
+                )
+                
+                # Get all main_content files for this user, ordered by created_at (oldest first)
+                user_files_query = (
+                    select(MediaItem)
+                    .where(MediaItem.user_id == user.id)  # type: ignore
+                    .where(MediaItem.category == MediaCategory.main_content)  # type: ignore
+                    .order_by(MediaItem.created_at.asc())  # type: ignore
+                )
+                user_files = session.exec(user_files_query).all()
+                
+                # Calculate which files to delete to get under limit
+                files_to_delete = []
+                total_hours_to_remove = current_hours - max_hours
+                hours_removed = 0.0
+                
+                for file_item in user_files:
+                    # Skip files that are in use by incomplete episodes
+                    filename = getattr(file_item, "filename", None)
+                    if not filename or filename in in_use:
+                        continue
+                    
+                    # Skip files less than 24 hours old (safety buffer)
+                    created_at = getattr(file_item, "created_at", None)
+                    if created_at:
+                        age_hours = (now - created_at).total_seconds() / 3600
+                        if age_hours < 24:
+                            continue
+                    
+                    # Estimate file duration
+                    try:
+                        seconds = _estimate_audio_seconds(filename)
+                        if seconds and seconds > 0:
+                            file_hours = seconds / 3600.0
+                            files_to_delete.append((file_item, file_hours))
+                            hours_removed += file_hours
+                            
+                            if hours_removed >= total_hours_to_remove:
+                                break  # We've removed enough
+                    except Exception:
+                        # If we can't estimate, skip this file
+                        continue
+                
+                # Delete the files
+                for file_item, file_hours in files_to_delete:
+                    try:
+                        filename = getattr(file_item, "filename", None)
+                        if not filename:
+                            continue
+                        
+                        # Delete from GCS if it's a GCS URL
+                        if filename.startswith("gs://"):
+                            try:
+                                bucket_key = filename[5:]  # Remove "gs://" prefix
+                                bucket, _, key = bucket_key.partition("/")
+                                if bucket and key:
+                                    delete_blob(bucket, key)
+                            except Exception as e:
+                                logging.warning("[purge] Failed to delete GCS blob %s: %s", filename, e)
+                        
+                        # Delete from local filesystem if it exists
+                        try:
+                            path = MEDIA_DIR / filename
+                            if path.exists():
+                                path.unlink()
+                        except Exception:
+                            pass  # File might not exist locally
+                        
+                        session.delete(file_item)
+                        removed_over_limit += 1
+                        logging.info(
+                            "[purge] Deleted file over storage limit: user=%s file=%s hours=%.2f",
+                            user_id, filename, file_hours
+                        )
+                    except Exception as e:
+                        logging.warning("[purge] Failed to delete file %s: %s", filename, e, exc_info=True)
+                
+                if removed_over_limit > 0:
+                    session.commit()
+        except Exception as e:
+            logging.warning("[purge] Failed to enforce storage hour limits: %s", e, exc_info=True)
+            # Don't fail the whole task if storage limit enforcement fails
+        
     except Exception:
         session.rollback()
         logging.warning("[purge] purge_expired_uploads failed", exc_info=True)
@@ -144,15 +282,17 @@ def purge_expired_uploads() -> dict:
         session.close()
 
     logging.info(
-        "[purge] expired uploads: checked=%s removed=%s skipped_in_use=%s skipped_too_young=%s",
+        "[purge] expired uploads: checked=%s removed=%s removed_over_limit=%s skipped_in_use=%s skipped_too_young=%s",
         checked,
         removed,
+        removed_over_limit,
         skipped_in_use,
         skipped_too_young,
     )
     return {
         "checked": checked, 
-        "removed": removed, 
+        "removed": removed,
+        "removed_over_limit": removed_over_limit,
         "skipped_in_use": skipped_in_use,
         "skipped_too_young": skipped_too_young
     }

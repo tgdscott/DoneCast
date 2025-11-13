@@ -3,7 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Loader2, Music, Trash2, Upload, Edit, Save, XCircle, Play, Pause, CheckSquare, Square } from "lucide-react";
+import { ArrowLeft, Loader2, Music, Trash2, Upload, Edit, Save, XCircle, Play, Pause, CheckSquare, Square, X } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { useState, useEffect, useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { makeApi, buildApiUrl, coerceArray } from "@/lib/apiClient";
@@ -334,9 +335,34 @@ export default function MediaLibrary({ onBack, token }) {
                             </>
                           ) : (
                             <div className="flex items-start gap-2 flex-col">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm">{displayName}</span>
-                                {file.trigger_keyword && (category==='sfx' || category==='commercial') && <span className="text-[10px] uppercase tracking-wide bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{file.trigger_keyword}</span>}
+                                {file.trigger_keyword && (category==='sfx' || category==='commercial') && (
+                                  <Badge
+                                    variant="secondary"
+                                    className="flex items-center gap-1.5 bg-blue-100 text-blue-700 px-2 py-0.5 text-[10px] uppercase tracking-wide"
+                                  >
+                                    <span>{file.trigger_keyword}</span>
+                                    <button
+                                      type="button"
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
+                                        try {
+                                          const api = makeApi(token);
+                                          await api.put(`/api/media/${file.id}`, { trigger_keyword: null });
+                                          setMediaFiles(prev => prev.map(f => f.id === file.id ? {...f, trigger_keyword: null} : f));
+                                          toast({ title: "Trigger keyword removed" });
+                                        } catch (err) {
+                                          toast({ title: "Error", description: err.message, variant: 'destructive' });
+                                        }
+                                      }}
+                                      className="ml-0.5 rounded-full hover:bg-blue-200 p-0.5 transition-colors"
+                                      aria-label={`Remove trigger keyword ${file.trigger_keyword}`}
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </Badge>
+                                )}
                               </div>
                               {(category==='intro' || category==='outro') && (file.transcript_text || file.transcript || file.subtitle) && (
                                 <span className="text-xs italic text-gray-500">{file.transcript_text || file.transcript || file.subtitle}</span>

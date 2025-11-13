@@ -51,6 +51,8 @@ export default function useEpisodeAssembly({
   scheduleTime,
   handleUploadProcessedCoverAndPreview,
   useAuphonic = false,
+  usage = null, // Add usage prop for credit checking
+  onShowCreditPurchase = null, // Callback to show credit purchase modal
 }) {
   // Assembly state
   const [isAssembling, setIsAssembling] = useState(false);
@@ -88,7 +90,32 @@ export default function useEpisodeAssembly({
         return;
       }
 
-      // Guard: Minutes quota check failed
+      // Guard: Check credits first (new system)
+      if (usage && typeof usage.credits_balance === 'number') {
+        // Estimate credits needed for assembly
+        // Assembly: 3 credits/sec, Processing: 1 credit/sec
+        const estimatedCredits = audioDurationSec ? (audioDurationSec * 4) : 0; // Rough estimate: 4 credits/sec total
+        
+        if (usage.credits_balance < estimatedCredits) {
+          // Show credit purchase modal instead of blocking
+          if (onShowCreditPurchase) {
+            onShowCreditPurchase({
+              requiredCredits: estimatedCredits,
+              availableCredits: usage.credits_balance,
+              planKey: usage.plan_key || 'pro',
+            });
+            setStatusMessage('');
+            setError('');
+            return;
+          } else {
+            // Fallback: show error but don't block (allow user to try)
+            setError(`Insufficient credits. You have ${usage.credits_balance.toFixed(0)} credits, but need approximately ${estimatedCredits.toFixed(0)} credits for this episode.`);
+            return;
+          }
+        }
+      }
+
+      // Guard: Minutes quota check failed (legacy system - keep for backward compatibility)
       if (minutesPrecheck && minutesPrecheck.allowed === false) {
         const detail = minutesPrecheck.detail || {};
         const required = Number(detail.minutes_required) || null;
@@ -105,6 +132,21 @@ export default function useEpisodeAssembly({
           if (Number.isFinite(main) && main > 0) return main;
           return audioDurationSec && audioDurationSec > 0 ? audioDurationSec : null;
         })();
+
+        // For minutes system, also try to show credit purchase if available
+        if (onShowCreditPurchase && usage && typeof usage.credits_balance === 'number') {
+          const estimatedCredits = durationSeconds ? (durationSeconds * 4) : (required ? (required * 60 * 4) : 0);
+          if (usage.credits_balance < estimatedCredits) {
+            onShowCreditPurchase({
+              requiredCredits: estimatedCredits,
+              availableCredits: usage.credits_balance,
+              planKey: usage.plan_key || 'pro',
+            });
+            setStatusMessage('');
+            setError('');
+            return;
+          }
+        }
 
         setMinutesDialog({
           requiredMinutes: required,

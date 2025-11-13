@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { makeApi } from "@/lib/apiClient";
 
-const defaultCreditDialogState = { open: false, userId: null, userData: null, loading: false };
+const defaultCreditDialogState = { open: false, userId: null, userData: null, loading: false, refundRequest: null, refundRequestDetail: null };
 
 export function useAdminDashboardData({ token, toast }) {
   const [users, setUsers] = useState([]);
@@ -205,22 +205,104 @@ export function useAdminDashboardData({ token, toast }) {
     }
   }, [toast, toastApiError, token]);
 
-  const viewUserCredits = useCallback(async (userId) => {
-    setCreditViewerDialog({ open: true, userId, userData: null, loading: true });
+  const viewUserCredits = useCallback(async (userId, page = 1, perPage = 20, refundRequest = null) => {
+    setCreditViewerDialog({ open: true, userId, userData: null, loading: true, refundRequest, refundRequestDetail: null });
 
     try {
       const api = makeApi(token);
-      const data = await api.get(`/api/admin/users/${userId}/credits`);
-      setCreditViewerDialog({ open: true, userId, userData: data, loading: false });
+      
+      // Fetch credit data
+      const data = await api.get(`/api/admin/users/${userId}/credits?page=${page}&per_page=${perPage}`);
+      
+      // If there's a refund request with notification_id, fetch detailed information
+      let refundDetail = null;
+      if (refundRequest?.notification_id) {
+        try {
+          refundDetail = await api.get(`/api/admin/users/refund-requests/${refundRequest.notification_id}/detail`);
+        } catch (detailError) {
+          // Log but don't fail - detail is nice-to-have
+          console.warn('Failed to load refund request detail:', detailError);
+        }
+      }
+      
+      setCreditViewerDialog({ 
+        open: true, 
+        userId, 
+        userData: data, 
+        loading: false, 
+        refundRequest,
+        refundRequestDetail: refundDetail
+      });
     } catch (error) {
       toastApiError(error, "Failed to load credit data");
       setCreditViewerDialog(defaultCreditDialogState);
     }
   }, [toastApiError, token]);
 
+  const refundUserCredits = useCallback(async (userId, ledgerEntryIds, notes, manualCredits = undefined) => {
+    try {
+      const api = makeApi(token);
+      const payload = {
+        ledger_entry_ids: ledgerEntryIds,
+        notes: notes || null
+      };
+      if (manualCredits !== undefined) {
+        payload.manual_credits = manualCredits;
+      }
+      const result = await api.post(`/api/admin/users/${userId}/credits/refund`, payload);
+      toast?.({ title: "Success", description: result.message || "Credits refunded successfully" });
+      return result;
+    } catch (error) {
+      toastApiError(error, "Failed to refund credits");
+      throw error;
+    }
+  }, [toast, toastApiError, token]);
+
+  const awardUserCredits = useCallback(async (userId, credits, reason, notes) => {
+    try {
+      const api = makeApi(token);
+      const result = await api.post(`/api/admin/users/${userId}/credits/award`, {
+        credits: credits,
+        reason: reason,
+        notes: notes || null
+      });
+      toast?.({ title: "Success", description: result.message || "Credits awarded successfully" });
+      return result;
+    } catch (error) {
+      toastApiError(error, "Failed to award credits");
+      throw error;
+    }
+  }, [toast, toastApiError, token]);
+
+  const denyRefundRequest = useCallback(async (notificationId, denialReason) => {
+    try {
+      const api = makeApi(token);
+      const result = await api.post(`/api/admin/users/refund-requests/${notificationId}/deny`, {
+        notification_id: notificationId,
+        denial_reason: denialReason
+      });
+      toast?.({ title: "Success", description: result.message || "Refund request denied" });
+      return result;
+    } catch (error) {
+      toastApiError(error, "Failed to deny refund request");
+      throw error;
+    }
+  }, [toast, toastApiError, token]);
+
   const closeCreditViewer = useCallback(() => {
     setCreditViewerDialog(defaultCreditDialogState);
   }, []);
+
+  const fetchRefundRequests = useCallback(async () => {
+    try {
+      const api = makeApi(token);
+      const data = await api.get('/api/admin/users/refund-requests');
+      return data || [];
+    } catch (error) {
+      toastApiError(error, "Failed to load refund requests");
+      return [];
+    }
+  }, [toastApiError, token]);
 
   const deleteUser = useCallback(async (userId, userEmail, showPrep = true) => {
     if (showPrep) {
@@ -318,7 +400,8 @@ export function useAdminDashboardData({ token, toast }) {
   }, [toast, toastApiError, token]);
 
   const prepareUserForDeletion = useCallback(async (userId, userEmail, userIsActive, userTier) => {
-    const needsPrep = userIsActive || (userTier && userTier.toLowerCase() !== "free");
+    const normalizedTier = (userTier || "").toLowerCase();
+    const needsPrep = userIsActive || (userTier && normalizedTier !== "free" && normalizedTier !== "starter");
 
     if (!needsPrep) {
       await deleteUser(userId, userEmail, false);
@@ -326,11 +409,11 @@ export function useAdminDashboardData({ token, toast }) {
     }
 
     const prepConfirm = window.confirm(
-      "\u26a0\ufe0f SAFETY CHECK: This user must be INACTIVE and on FREE tier before deletion.\n\n" +
+      "\u26a0\ufe0f SAFETY CHECK: This user must be INACTIVE and on STARTER tier before deletion.\n\n" +
       `User: ${userEmail}\n` +
       `Current Status: ${userIsActive ? "ACTIVE" : "INACTIVE"}\n` +
       `Current Tier: ${userTier || "unknown"}\n\n` +
-      "Click OK to automatically set this user to INACTIVE + FREE tier, then you can delete them.\n" +
+      "Click OK to automatically set this user to INACTIVE + STARTER tier, then you can delete them.\n" +
       "Click Cancel to abort."
     );
 
@@ -341,13 +424,14 @@ export function useAdminDashboardData({ token, toast }) {
     setSavingIds((prev) => new Set([...prev, userId]));
     try {
       const api = makeApi(token);
-      const payload = { is_active: false, tier: "free" };
+      // Use "starter" as the tier value (backend should handle both "free" and "starter")
+      const payload = { is_active: false, tier: "starter" };
       await api.patch(`/api/admin/users/${userId}`, payload);
-      setUsers((prev) => prev.map((user) => (user.id === userId ? { ...user, is_active: false, tier: "free" } : user)));
+      setUsers((prev) => prev.map((user) => (user.id === userId ? { ...user, is_active: false, tier: "starter" } : user)));
       try {
         toast?.({
           title: "User prepared for deletion",
-          description: `${userEmail} is now INACTIVE and on FREE tier. You can now delete this user.`,
+          description: `${userEmail} is now INACTIVE and on STARTER tier. You can now delete this user.`,
         });
       } catch (_) {
         // ignore toast errors
@@ -425,6 +509,10 @@ export function useAdminDashboardData({ token, toast }) {
     creditViewerDialog,
     viewUserCredits,
     closeCreditViewer,
+    refundUserCredits,
+    awardUserCredits,
+    denyRefundRequest,
+    fetchRefundRequests,
     prepareUserForDeletion,
     deleteUser,
     verifyUserEmail,

@@ -164,25 +164,48 @@ export function buildApiUrl(path) {
   return `${trimmedBase}${normalizedPath}`;
 }
 
+// Global warmup callback - set by WarmupProvider
+let warmupStartRequest = null;
+let warmupEndRequest = null;
+
+export function setWarmupCallbacks(start, end) {
+  warmupStartRequest = start;
+  warmupEndRequest = end;
+}
+
 async function req(path, opts = {}) {
   const url = buildApiUrl(path);
-  const res = await fetch(url, {
-    credentials: "include",
-    headers: { ...(opts.headers || {}) },
-    ...opts,
-  });
-  // Try to parse JSON if content-type hints it, otherwise allow empty
-  const ct = res.headers.get && res.headers.get("content-type");
-  const canJson = ct && ct.includes("application/json");
-  const data = canJson ? await res.json().catch(() => ({})) : await res.text().catch(() => "");
-  if (!res.ok) {
-    if (canJson) {
-      const payload = (data && typeof data === 'object') ? data : { message: String(data || 'Request failed') };
-      throw { status: res.status, ...payload };
-    }
-    throw { status: res.status, message: String(data || "Request failed") };
+  const requestId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  
+  // Start tracking if warmup callbacks are available
+  if (warmupStartRequest) {
+    warmupStartRequest(requestId);
   }
-  return canJson ? data : { ok: true, data };
+  
+  try {
+    const res = await fetch(url, {
+      credentials: "include",
+      headers: { ...(opts.headers || {}) },
+      ...opts,
+    });
+    // Try to parse JSON if content-type hints it, otherwise allow empty
+    const ct = res.headers.get && res.headers.get("content-type");
+    const canJson = ct && ct.includes("application/json");
+    const data = canJson ? await res.json().catch(() => ({})) : await res.text().catch(() => "");
+    if (!res.ok) {
+      if (canJson) {
+        const payload = (data && typeof data === 'object') ? data : { message: String(data || 'Request failed') };
+        throw { status: res.status, ...payload };
+      }
+      throw { status: res.status, message: String(data || "Request failed") };
+    }
+    return canJson ? data : { ok: true, data };
+  } finally {
+    // End tracking when request completes (success or failure)
+    if (warmupEndRequest) {
+      warmupEndRequest(requestId);
+    }
+  }
 }
 
 function jsonBody(body) {

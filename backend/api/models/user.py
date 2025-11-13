@@ -35,6 +35,8 @@ class UserBase(SQLModel):
     sms_notify_transcription_ready: bool = Field(default=False, description="Notify user when episode is ready to assemble (after transcription)")
     sms_notify_publish: bool = Field(default=False, description="Notify user when episode is published or scheduled")
     sms_notify_worker_down: bool = Field(default=False, description="Notify admin when worker server is down")
+    # Promo code used at signup
+    promo_code_used: Optional[str] = Field(default=None, max_length=50, index=True, description="Promo code used during registration")
 
 class User(UserBase, table=True):
     """The database model for a User."""
@@ -55,10 +57,17 @@ class User(UserBase, table=True):
     deletion_requested_by: Optional[str] = Field(default=None, max_length=10, description="'user' or 'admin' - determines if admin notification sent")
     deletion_reason: Optional[str] = Field(default=None, description="Optional reason provided by user")
     is_deleted_view: bool = Field(default=False, description="User-facing deleted state - blocks login, appears deleted to user")
+    # Referrer user ID (user who referred this user via affiliate code)
+    referred_by_user_id: Optional[UUID] = Field(default=None, foreign_key="user.id", index=True, description="User who referred this user")
 
     # This creates the link back to the templates that belong to this user
     templates: List["PodcastTemplate"] = Relationship(back_populates="user")
     terms_acceptances: List["UserTermsAcceptance"] = Relationship(back_populates="user")
+    # Affiliate code relationship (one-to-one: each user can have one affiliate code)
+    affiliate_code: Optional["UserAffiliateCode"] = Relationship(
+        back_populates="user", 
+        sa_relationship=relationship("UserAffiliateCode", uselist=False, overlaps="user")
+    )
 
 class UserCreate(UserBase):
     """Schema for creating a new user (registration)."""

@@ -242,7 +242,7 @@ export default function CreatorFinalize({ token, drafts, uploads, uploadById, go
             <label className="text-sm font-medium">Title</label>
             <div className="flex gap-2">
               <input className="flex-1 rounded-lg border px-3 py-2 focus:outline-none focus-visible:ring" value={title} onChange={e=>setTitle(e.target.value)} />
-              <button className="px-3 py-2 rounded-lg border hover:bg-muted" onClick={onAISuggestTitle}>AI suggest</button>
+              <button className="px-3 py-2 rounded-lg border hover:bg-muted" onClick={onAISuggestTitle} title="AI suggest title (1 credit)">AI suggest</button>
               {aiError.title && (
                 <button className="px-3 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 text-xs" onClick={onAISuggestTitle} title={aiError.title}>Retry</button>
               )}
@@ -253,8 +253,8 @@ export default function CreatorFinalize({ token, drafts, uploads, uploadById, go
             <label className="text-sm font-medium">Description</label>
             <textarea className="min-h-32 rounded-lg border px-3 py-2 focus:outline-none focus-visible:ring" value={description} onChange={e=>setDescription(e.target.value)} />
             <div className="flex gap-2">
-              <button className="px-3 py-2 rounded-lg border hover:bg-muted" onClick={onAIExpandDesc}>AI expand</button>
-              <button className="px-3 py-2 rounded-lg border hover:bg-muted" onClick={onAIShortenDesc}>AI shorten</button>
+              <button className="px-3 py-2 rounded-lg border hover:bg-muted" onClick={onAIExpandDesc} title="AI expand description (2 credits)">AI expand</button>
+              <button className="px-3 py-2 rounded-lg border hover:bg-muted" onClick={onAIShortenDesc} title="AI shorten description (2 credits)">AI shorten</button>
               {aiError.description && (
                 <button className="px-3 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 text-xs" onClick={onAIExpandDesc} title={aiError.description}>Retry</button>
               )}
@@ -265,7 +265,7 @@ export default function CreatorFinalize({ token, drafts, uploads, uploadById, go
             <label className="text-sm font-medium">Tags</label>
             <div className="flex gap-2">
               <input className="flex-1 rounded-lg border px-3 py-2" value={tags} onChange={e=>setTags(e.target.value)} placeholder="comma, separated, tags" />
-              <button className="px-3 py-2 rounded-lg border hover:bg-muted" onClick={onAISuggestTags}>AI tags</button>
+              <button className="px-3 py-2 rounded-lg border hover:bg-muted" onClick={onAISuggestTags} title="AI suggest tags (1 credit)">AI tags</button>
               {aiError.tags && (
                 <button className="px-3 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 text-xs" onClick={onAISuggestTags} title={aiError.tags}>Retry</button>
               )}

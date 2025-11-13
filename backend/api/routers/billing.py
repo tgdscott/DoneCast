@@ -28,7 +28,7 @@ _TASKS_AUTH = os.getenv("TASKS_AUTH", "")
 PRICE_MAP = {
     "starter": {
         "monthly": os.getenv("PRICE_STARTER_MONTHLY", "price_starter_monthly_placeholder"),
-        "annual": os.getenv("PRICE_STARTER_ANNUAL", "price_starter_annual_placeholder"),
+        # Starter does not have an annual plan
     },
     "creator": {
         "monthly": (
@@ -83,10 +83,11 @@ def _resolve_price_id(raw: str) -> str:
 
 class CheckoutRequest(BaseModel):
     plan_key: str
-    billing_cycle: str = "monthly"  # monthly | annual
-    # Base path (no query). We'll append ?checkout=success&session_id=... to avoid double '?'.
-    success_path: str = "/billing"
-    cancel_path: str = "/billing/cancel"
+    billing_cycle: str = "monthly"
+
+class AddonCreditsRequest(BaseModel):
+    plan_key: str
+    return_url: str = "/billing"
 
 class CheckoutResponse(BaseModel):
     url: str
@@ -133,6 +134,8 @@ async def create_embedded_checkout_session(
         raise HTTPException(status_code=400, detail="Unknown plan")
     cycle_prices = PRICE_MAP[req.plan_key]
     if req.billing_cycle not in cycle_prices:
+        if req.plan_key == 'starter' and req.billing_cycle == 'annual':
+            raise HTTPException(status_code=400, detail="Starter plan does not have an annual option")
         raise HTTPException(status_code=400, detail="Invalid billing cycle")
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Stripe not configured")
@@ -257,6 +260,8 @@ async def create_checkout_session(
         raise HTTPException(status_code=400, detail="Unknown plan")
     cycle_prices = PRICE_MAP[req.plan_key]
     if req.billing_cycle not in cycle_prices:
+        if req.plan_key == 'starter' and req.billing_cycle == 'annual':
+            raise HTTPException(status_code=400, detail="Starter plan does not have an annual option")
         raise HTTPException(status_code=400, detail="Invalid billing cycle")
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Stripe not configured")
@@ -577,56 +582,97 @@ async def force_sync_session(session_id: str, current_user: User = Depends(get_c
 
 @router.get("/usage")
 async def get_usage(current_user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    tier = getattr(current_user, 'tier', 'free') or 'free'
-    limits = TIER_LIMITS.get(tier, TIER_LIMITS['free'])
-    max_eps = limits.get('max_episodes_month')
-    used = _episodes_created_this_month(session, current_user.id) if max_eps is not None else None
-    remaining = (max_eps - used) if (max_eps is not None and used is not None) else None
-    # --- New minutes-based usage via ledger ---
-    max_minutes = limits.get('max_processing_minutes_month')
-    minutes_used = None
-    minutes_remaining = None
-    if max_minutes is not None:
-        from datetime import datetime, timezone
-        now = datetime.now(timezone.utc)
-        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        minutes_used = usage_svc.month_minutes_used(session, current_user.id, start, now)
-        minutes_remaining = max_minutes - minutes_used if minutes_used is not None else None
+    """
+    Get usage information for the current user.
     
-    # ========== NEW: CREDITS SYSTEM ==========
-    from api.services.billing import credits
+    Returns credit-based usage (new system) as primary, with legacy fields for backward compatibility.
+    """
     from datetime import datetime, timezone
+    from api.services.billing import credits
+    from api.billing.plans import get_plan, is_unlimited_plan
+    from api.services.billing.wallet import get_wallet_details
     
-    # Get current balance and monthly usage
+    tier = getattr(current_user, 'tier', 'free') or 'free'
+    plan = get_plan(tier)
+    
+    # ========== CREDITS SYSTEM (PRIMARY) ==========
+    # Get current credit balance and wallet details
     credits_balance = credits.get_user_credit_balance(session, current_user.id)
+    wallet_details = get_wallet_details(session, current_user.id)
+    
+    # Get monthly credit allocation from plan
+    if is_unlimited_plan(tier):
+        max_credits = None  # Unlimited
+    elif plan:
+        max_credits = plan.get("monthly_credits")
+    else:
+        max_credits = 0.0
     
     # Get breakdown by action type for this month
     now = datetime.now(timezone.utc)
     start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     breakdown = usage_svc.month_credits_breakdown(session, current_user.id, start_of_month, now)
+    total_credits_used = breakdown.get('total', 0.0)
     
-    # Convert minutes to credits for backward compatibility (1 min = 1 credit)
-    credits_from_minutes = (minutes_used * 1.0) if minutes_used else 0
-    total_credits_used = breakdown.get('total', credits_from_minutes)
+    # For quota display: use monthly allocation usage (not total credits which includes purchased)
+    # The progress bar should show: used_monthly_rollover / monthly_credits
+    monthly_credits_used = wallet_details.get("used_monthly_rollover", 0.0)
+    monthly_credits_total = wallet_details.get("monthly_credits", 0.0)
+    
+    # Calculate credits remaining (total available credits)
+    if max_credits is None:
+        credits_remaining = None  # Unlimited
+    else:
+        credits_remaining = max(0.0, credits_balance)  # Use current balance, not max - used
+    
+    # ========== LEGACY FIELDS (for backward compatibility) ==========
+    # Keep episode limits for now (may be removed in future)
+    limits = TIER_LIMITS.get(tier, TIER_LIMITS['free'])
+    max_eps = limits.get('max_episodes_month')
+    used = _episodes_created_this_month(session, current_user.id) if max_eps is not None else None
+    remaining = (max_eps - used) if (max_eps is not None and used is not None) else None
+    
+    # Legacy minutes fields (deprecated, but kept for transition)
+    max_minutes = limits.get('max_processing_minutes_month')
+    minutes_used = None
+    minutes_remaining = None
+    if max_minutes is not None:
+        minutes_used = usage_svc.month_minutes_used(session, current_user.id, start_of_month, now)
+        minutes_remaining = max_minutes - minutes_used if minutes_used is not None else None
     
     return {
         "plan_key": tier,
+        # Legacy episode fields
         "max_episodes_month": max_eps,
         "episodes_used_this_month": used,
         "episodes_remaining_this_month": remaining,
-        # Legacy minutes fields (still useful for comparison)
+        # Legacy minutes fields (deprecated)
         "max_processing_minutes_month": max_minutes,
         "processing_minutes_used_this_month": minutes_used,
         "processing_minutes_remaining_this_month": minutes_remaining,
-        # NEW: Credits fields
+        # NEW: Credits fields (PRIMARY)
+        "max_credits_month": max_credits,
         "credits_balance": credits_balance,
         "credits_used_this_month": total_credits_used,
+        "credits_remaining_this_month": credits_remaining,
+        # Monthly allocation usage (for progress bar display)
+        "monthly_credits_used": monthly_credits_used,
+        "monthly_credits_total": monthly_credits_total,
         "credits_breakdown": {
             "tts_generation": breakdown.get('tts_generation', 0),
             "transcription": breakdown.get('transcription', 0),
             "assembly": breakdown.get('assembly', 0),
             "storage": breakdown.get('storage', 0),
             "auphonic_processing": breakdown.get('auphonic_processing', 0),
+            "ai_metadata": breakdown.get('ai_metadata', 0),
+        },
+        # Wallet details for detailed breakdown
+        "wallet": {
+            "monthly_credits": wallet_details.get("monthly_credits", 0.0),
+            "rollover_credits": wallet_details.get("rollover_credits", 0.0),
+            "purchased_credits": wallet_details.get("purchased_credits", 0.0),
+            "monthly_allocation_available": wallet_details.get("monthly_allocation_available", 0.0),
+            "purchased_credits_available": wallet_details.get("purchased_credits_available", 0.0),
         }
     }
 
@@ -639,6 +685,74 @@ class LedgerList(BaseModel):
 async def get_ledger(current_user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     items = usage_svc.user_ledger(session, current_user.id, limit=200, offset=0)
     return {"items": items}
+
+
+@router.post("/checkout/addon_credits", response_model=CheckoutResponse)
+async def create_addon_credits_checkout(
+    request: Request,
+    req: AddonCreditsRequest,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """
+    Create a Stripe Checkout Session for purchasing addon credits.
+    
+    Uses lookup_key format: addon_credits_<plan>
+    """
+    if not stripe.api_key:
+        raise HTTPException(status_code=500, detail="Stripe not configured")
+    
+    # Look up the addon credits price using lookup_key
+    lookup_key = f"addon_credits_{req.plan_key.lower()}"
+    
+    try:
+        # Query Stripe for price with this lookup_key
+        prices = stripe.Price.list(lookup_keys=[lookup_key], limit=1)
+        if not prices.data or len(prices.data) == 0:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Addon credits price not found for plan '{req.plan_key}'. Lookup key: {lookup_key}"
+            )
+        price = prices.data[0]
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=500, detail=f"Stripe error looking up price: {e}")
+    
+    # Ensure customer exists
+    customer_id = _ensure_customer(current_user, session)
+    
+    # Build return URLs
+    base_url = os.getenv("APP_BASE_URL", "https://app.podcastplusplus.com")
+    success_url = f"{base_url}{req.return_url}?checkout=success&session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{base_url}{req.return_url}"
+    
+    try:
+        checkout_session = stripe.checkout.Session.create(
+            customer=customer_id,
+            payment_method_types=["card"],
+            line_items=[
+                {
+                    "price": price.id,
+                    "quantity": 1,
+                }
+            ],
+            mode="payment",  # One-time payment, not subscription
+            success_url=success_url,
+            cancel_url=cancel_url,
+            metadata={
+                "user_id": str(current_user.id),
+                "type": "addon_credits",
+                "plan_key": req.plan_key,
+            },
+            allow_promotion_codes=True,
+        )
+        
+        chk_url = getattr(checkout_session, 'url', None)
+        if not chk_url:
+            raise HTTPException(status_code=502, detail="Stripe did not return a checkout URL")
+        
+        return CheckoutResponse(url=str(chk_url))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Stripe error: {e}")
 
 
 class RefundRequest(BaseModel):

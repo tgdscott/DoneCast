@@ -26,6 +26,7 @@ class LedgerReason(str, Enum):
     ASSEMBLY = "ASSEMBLY"  # Episode assembly
     STORAGE = "STORAGE"  # Cloud storage charges
     AUPHONIC_PROCESSING = "AUPHONIC_PROCESSING"  # Auphonic-specific processing
+    AI_METADATA_GENERATION = "AI_METADATA_GENERATION"  # AI-generated titles, descriptions, tags
 
 
 class ProcessingMinutesLedger(SQLModel, table=True):

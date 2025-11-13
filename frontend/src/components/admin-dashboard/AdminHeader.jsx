@@ -26,6 +26,7 @@ export default function AdminHeader({ activeTab, navigationItems, resolvedTimezo
       landing: "Customize landing page reviews, FAQs, and hero messaging",
       billing: "View and manage billing details and subscriptions",
       podcasts: "View and manage all podcasts on the platform",
+      "promo-codes": "Manage referral and promotional codes",
       help: "Access help documentation and resources",
     };
     return descriptions[tabId] || "";

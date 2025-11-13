@@ -94,44 +94,162 @@ async def get_podcast_downloads(
     # Get podcast slug or use ID as identifier
     identifier = getattr(podcast, 'slug', None) or str(podcast.id)
     
-    # ALWAYS use production domain for RSS feed URL (dev uses localhost which breaks OP3 lookups)
-    rss_url = f"https://podcastplusplus.com/rss/{identifier}/feed.xml"
+    # Try multiple RSS feed URL variations (OP3 might have registered a different URL)
+    # Order: current URL, then variations (with/without www, with/without /api)
+    rss_url_variations = [
+        f"https://podcastplusplus.com/rss/{identifier}/feed.xml",  # Current format
+        f"https://www.podcastplusplus.com/rss/{identifier}/feed.xml",  # With www
+        f"https://app.podcastplusplus.com/rss/{identifier}/feed.xml",  # App subdomain
+        f"https://app.podcastplusplus.com/api/rss/{identifier}/feed.xml",  # With /api
+        f"https://podcastplusplus.com/api/rss/{identifier}/feed.xml",  # With /api, no www
+    ]
     
-    logger.info(f"Analytics request for podcast {podcast_id} - RSS URL: {rss_url}")
+    # Also check if podcast has a stored rss_url (might be old Spreaker URL or different format)
+    if hasattr(podcast, 'rss_url') and podcast.rss_url:
+        rss_url_variations.insert(0, podcast.rss_url)  # Try stored URL first
+    
+    logger.info(f"Analytics request for podcast {podcast_id} - Trying RSS URLs: {rss_url_variations}")
     
     # Use cached sync fetch (respects 3-hour cache)
+    # Try public OP3.dev first (where data usually is), then fall back to self-hosted
     from api.services.op3_analytics import get_show_stats_sync
     
-    try:
-        stats = get_show_stats_sync(rss_url, days=days)
-    except Exception as e:
-        logger.error(f"OP3 stats fetch failed for {rss_url}: {e}", exc_info=True)
-        # Return empty stats instead of failing completely
-        stats = None
+    stats = None
+    successful_url = None
     
-    if not stats or (hasattr(stats, 'downloads_30d') and stats.downloads_30d == 0 and stats.downloads_all_time == 0):
-        logger.warning(f"No OP3 stats available for {rss_url} - checking historical fallback")
-        
-        # Try historical TSV fallback
-        historical = get_historical_data()
-        downloads_7d = historical.get_total_downloads(days=7)
-        downloads_30d = historical.get_total_downloads(days=30)
-        downloads_all_time = historical.get_total_downloads()
-        
-        if downloads_all_time > 0:
-            logger.info(f"Historical fallback: 7d={downloads_7d}, 30d={downloads_30d}, all-time={downloads_all_time}")
-            # Return historical stats
+    # Try public OP3.dev first (where the data is based on screenshot)
+    for rss_url in rss_url_variations:
+        try:
+            logger.info(f"OP3: Trying public OP3.dev with RSS URL: {rss_url}")
+            stats = get_show_stats_sync(rss_url, days=days, use_public=True)
+            if stats and (stats.downloads_30d > 0 or stats.downloads_all_time > 0):
+                successful_url = rss_url
+                logger.info(f"OP3: ✅ Found data on public OP3.dev with URL: {rss_url}")
+                logger.info(f"OP3: Stats - 7d={stats.downloads_7d}, 30d={stats.downloads_30d}, 365d={stats.downloads_365d}, all-time={stats.downloads_all_time}")
+                break
+            elif stats:
+                logger.info(f"OP3: Public OP3.dev returned stats but no data for URL: {rss_url}")
+        except Exception as e:
+            logger.warning(f"OP3: Failed to fetch from public OP3.dev with URL {rss_url}: {e}")
+            continue
+    
+    # If public OP3.dev has no data, try self-hosted OP3
+    if not stats or (stats.downloads_30d == 0 and stats.downloads_all_time == 0):
+        logger.info(f"OP3: No data on public OP3.dev, trying self-hosted OP3...")
+        # Use the first URL variation (current format) for self-hosted
+        rss_url = rss_url_variations[0]
+        try:
+            stats = get_show_stats_sync(rss_url, days=days, use_public=False)
+            if stats and (stats.downloads_30d > 0 or stats.downloads_all_time > 0):
+                successful_url = rss_url
+                logger.info(f"OP3: ✅ Found data on self-hosted OP3 with URL: {rss_url}")
+                logger.info(f"OP3: Stats - 7d={stats.downloads_7d}, 30d={stats.downloads_30d}, 365d={stats.downloads_365d}, all-time={stats.downloads_all_time}")
+        except Exception as e:
+            logger.error(f"OP3: Failed to fetch from self-hosted OP3 with URL {rss_url}: {e}")
+            stats = None
+    
+    # Use the successful URL for merging (or first variation if none worked)
+    rss_url = successful_url or rss_url_variations[0]
+    logger.info(f"OP3: Using RSS URL: {rss_url} for data merge")
+    
+    # Check for Cinema IRL historical data merge
+    # Historical data should be merged with OP3 data, not used as fallback only
+    historical = get_historical_data()
+    historical_all_time = historical.get_total_downloads() if historical else 0
+    
+    # Merge historical data with OP3 data
+    # For time-windowed stats (7d, 30d, 365d), use OP3 data only (historical is old)
+    # For all-time, merge historical all-time + OP3 all-time (since migration)
+    op3_downloads_7d = stats.downloads_7d if stats else 0
+    op3_downloads_30d = stats.downloads_30d if stats else 0
+    op3_downloads_365d = stats.downloads_365d if stats else 0
+    op3_downloads_all_time = stats.downloads_all_time if stats else 0
+    
+    # Merge all-time downloads: historical (pre-migration) + OP3 (post-migration)
+    # Only merge if we have both historical and OP3 data for Cinema IRL
+    merged_all_time = op3_downloads_all_time
+    if historical_all_time > 0:
+        # Check if this is Cinema IRL (by podcast name or slug)
+        podcast_identifier = getattr(podcast, 'slug', '').lower() or podcast.name.lower()
+        if 'cinema' in podcast_identifier and 'irl' in podcast_identifier:
+            logger.info(f"Merging historical data for Cinema IRL: historical={historical_all_time}, OP3={op3_downloads_all_time}")
+            # Historical data is pre-migration, OP3 data is post-migration
+            # They should be additive, not overlapping
+            # However, we need to be careful: if OP3 already includes historical data, don't double-count
+            # For now, assume OP3 only tracks new downloads since migration, so add them together
+            merged_all_time = historical_all_time + op3_downloads_all_time
+            logger.info(f"Merged all-time downloads: {merged_all_time} (historical: {historical_all_time} + OP3: {op3_downloads_all_time})")
+    
+    # Merge top episodes: combine historical and OP3 episodes
+    # Historical episodes are older, OP3 episodes are newer
+    top_episodes = stats.top_episodes if stats else []
+    if historical_all_time > 0 and hasattr(podcast, 'slug'):
+        podcast_identifier = getattr(podcast, 'slug', '').lower() or podcast.name.lower()
+        if 'cinema' in podcast_identifier and 'irl' in podcast_identifier:
+            # Get top historical episodes
+            historical_top = historical.get_top_episodes(limit=10, days=None)
+            # Combine with OP3 top episodes
+            # Create a dict to avoid duplicates (by title)
+            episodes_dict = {}
+            for ep in historical_top:
+                episodes_dict[ep['episode_title']] = {
+                    "title": ep['episode_title'],
+                    "episode_id": None,  # Historical data doesn't have episode IDs
+                    "downloads_1d": 0,
+                    "downloads_3d": 0,
+                    "downloads_7d": ep.get('downloads', 0),  # Use all-time as proxy
+                    "downloads_30d": ep.get('downloads', 0),
+                    "downloads_all_time": ep.get('downloads', 0),
+                }
+            # Add OP3 episodes (they will overwrite historical if same title, which is fine - OP3 is newer)
+            for ep in top_episodes:
+                ep_title = ep.get('title', '')
+                if ep_title in episodes_dict:
+                    # Merge: use OP3 all-time (newer data)
+                    episodes_dict[ep_title]['downloads_all_time'] = max(
+                        episodes_dict[ep_title]['downloads_all_time'],
+                        ep.get('downloads_all_time', 0)
+                    )
+                else:
+                    episodes_dict[ep_title] = ep
+            # Sort by all-time downloads and take top 10
+            top_episodes = sorted(
+                episodes_dict.values(),
+                key=lambda x: x.get('downloads_all_time', 0),
+                reverse=True
+            )[:10]
+            logger.info(f"Merged top episodes: {len(top_episodes)} episodes (historical: {len(historical_top)}, OP3: {len(stats.top_episodes) if stats else 0})")
+    
+    # If no OP3 stats, fall back to historical only
+    if not stats or (op3_downloads_30d == 0 and op3_downloads_all_time == 0):
+        if historical_all_time > 0:
+            logger.warning(f"No OP3 stats available for {rss_url} - using historical fallback")
+            historical_7d = historical.get_total_downloads(days=7)
+            historical_30d = historical.get_total_downloads(days=30)
+            historical_top = historical.get_top_episodes(limit=10, days=None)
+            
             return {
                 "podcast_id": str(podcast_id),
                 "podcast_name": podcast.name,
                 "rss_url": rss_url,
                 "period_days": days,
-                "downloads_7d": downloads_7d,
-                "downloads_30d": downloads_30d,
+                "downloads_7d": historical_7d,
+                "downloads_30d": historical_30d,
                 "downloads_365d": 0,  # TSV doesn't have 365-day data
-                "downloads_all_time": downloads_all_time,
-                "total_downloads": downloads_30d if days == 30 else downloads_7d if days == 7 else downloads_all_time,
-                "top_episodes": [],  # Could parse from TSV but keep simple for now
+                "downloads_all_time": historical_all_time,
+                "total_downloads": historical_30d if days == 30 else historical_7d if days == 7 else historical_all_time,
+                "top_episodes": [
+                    {
+                        "title": ep['episode_title'],
+                        "episode_id": None,
+                        "downloads_1d": 0,
+                        "downloads_3d": 0,
+                        "downloads_7d": ep.get('downloads', 0),
+                        "downloads_30d": ep.get('downloads', 0),
+                        "downloads_all_time": ep.get('downloads', 0),
+                    }
+                    for ep in historical_top
+                ],
                 "downloads_by_day": [],
                 "weekly_downloads": [],
                 "top_countries": [],
@@ -163,30 +281,31 @@ async def get_podcast_downloads(
             "note": "Analytics data will appear after your RSS feed has been published and episodes have been downloaded by listeners."
         }
     
-    # Return comprehensive stats
+    # Return comprehensive stats with merged data
     return {
         "podcast_id": str(podcast_id),
         "podcast_name": podcast.name,
         "rss_url": rss_url,
         "period_days": days,
-        # Time period breakdowns
-        "downloads_7d": stats.downloads_7d,
-        "downloads_30d": stats.downloads_30d,
-        "downloads_365d": stats.downloads_365d,
-        "downloads_all_time": stats.downloads_all_time,
-        # Legacy field for requested period (use 30d as baseline)
-        "total_downloads": stats.downloads_30d if days == 30 else stats.downloads_7d if days == 7 else stats.downloads_all_time,
-        # Top episodes
-        "top_episodes": stats.top_episodes,
-        # Trend data
-        "downloads_by_day": stats.downloads_trend,
-        "weekly_downloads": stats.weekly_downloads,
-        # Breakdowns (not yet implemented in enhanced fetch)
-        "top_countries": stats.top_countries,
-        "top_apps": stats.top_apps,
+        # Time period breakdowns (use OP3 data only - historical is old)
+        "downloads_7d": op3_downloads_7d,
+        "downloads_30d": op3_downloads_30d,
+        "downloads_365d": op3_downloads_365d,
+        "downloads_all_time": merged_all_time,  # Merged: historical + OP3
+        # Legacy field for requested period
+        "total_downloads": op3_downloads_30d if days == 30 else op3_downloads_7d if days == 7 else merged_all_time,
+        # Top episodes (merged: historical + OP3)
+        "top_episodes": top_episodes,
+        # Trend data (from OP3 only)
+        "downloads_by_day": stats.downloads_trend if stats else [],
+        "weekly_downloads": stats.weekly_downloads if stats else [],
+        # Breakdowns (from OP3 only)
+        "top_countries": stats.top_countries if stats else [],
+        "top_apps": stats.top_apps if stats else [],
         # Metadata
         "cached": True,  # All data comes from cache (3h TTL)
-        "last_updated": "Updates every 3 hours"
+        "last_updated": "Updates every 3 hours",
+        "note": "All-time downloads include historical data (pre-migration) merged with new OP3 data (post-migration)." if historical_all_time > 0 else None
     }
 
 

@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from sqlmodel import Session, select
+from sqlmodel import Session, select, col as sqlmodel_col
+from sqlalchemy import func, extract
 
 from api.models.wallet import CreditWallet
 from api.billing.plans import PLANS, ROLLOVER_RATE
@@ -48,10 +49,63 @@ def get_or_create_wallet(
         return wallet
     
     # Create new wallet
-    plan = PLANS.get(plan_key.lower())
+    # Normalize "free" to "starter" for plan lookup (backend uses "free", plans use "starter")
+    normalized_plan_key = plan_key.lower()
+    if normalized_plan_key == "free":
+        normalized_plan_key = "starter"
+    plan = PLANS.get(normalized_plan_key)
     monthly_credits = 0.0
     if plan and not plan.get("internal", False):
         monthly_credits = plan.get("monthly_credits", 0.0)
+    
+    # Check if there are existing ledger entries for this period
+    # This handles the case where credits were charged before wallet was created
+    used_credits_from_ledger = 0.0
+    try:
+        from api.models.usage import ProcessingMinutesLedger, LedgerDirection
+        
+        # Parse period to get year and month
+        year, month = map(int, period.split("-"))
+        
+        # Get all debit entries for this user in this period
+        ledger_stmt = (
+            select(func.sum(ProcessingMinutesLedger.credits))
+            .where(ProcessingMinutesLedger.user_id == user_id)
+            .where(ProcessingMinutesLedger.direction == LedgerDirection.DEBIT)
+            .where(extract('year', sqlmodel_col(ProcessingMinutesLedger.created_at)) == year)
+            .where(extract('month', sqlmodel_col(ProcessingMinutesLedger.created_at)) == month)
+        )
+        used_credits_from_ledger = session.exec(ledger_stmt).one() or 0.0
+        
+        # Get refunds (CREDIT entries) for this period
+        refund_stmt = (
+            select(func.sum(ProcessingMinutesLedger.credits))
+            .where(ProcessingMinutesLedger.user_id == user_id)
+            .where(ProcessingMinutesLedger.direction == LedgerDirection.CREDIT)
+            .where(extract('year', sqlmodel_col(ProcessingMinutesLedger.created_at)) == year)
+            .where(extract('month', sqlmodel_col(ProcessingMinutesLedger.created_at)) == month)
+        )
+        refunded_credits = session.exec(refund_stmt).one() or 0.0
+        
+        # Net usage = debits - refunds
+        used_credits_from_ledger = max(0.0, used_credits_from_ledger - refunded_credits)
+        
+        if used_credits_from_ledger > 0:
+            log.info(
+                f"[wallet] Found existing ledger usage for user {user_id}, period {period}: "
+                f"{used_credits_from_ledger} credits"
+            )
+    except Exception as e:
+        # If ledger table doesn't exist or query fails, continue with 0 usage
+        log.warning(
+            f"[wallet] Could not sync ledger usage for user {user_id}, period {period}: {e}"
+        )
+    
+    # Calculate how much of the monthly credits have been used
+    # We'll debit from monthly+rollover first (standard debit order)
+    available_monthly = monthly_credits
+    used_monthly_rollover = min(used_credits_from_ledger, available_monthly)
+    used_purchased = max(0.0, used_credits_from_ledger - available_monthly)
     
     wallet = CreditWallet(
         user_id=user_id,
@@ -59,9 +113,9 @@ def get_or_create_wallet(
         monthly_credits=monthly_credits,
         rollover_credits=0.0,
         purchased_credits=0.0,
-        used_credits=0.0,
-        used_monthly_rollover=0.0,
-        used_purchased=0.0,
+        used_credits=used_credits_from_ledger,
+        used_monthly_rollover=used_monthly_rollover,
+        used_purchased=used_purchased,
     )
     
     session.add(wallet)
@@ -70,7 +124,7 @@ def get_or_create_wallet(
     
     log.info(
         f"[wallet] Created wallet for user {user_id}, period {period}, "
-        f"monthly_credits={monthly_credits}"
+        f"monthly_credits={monthly_credits}, used_credits={used_credits_from_ledger}"
     )
     
     return wallet
@@ -142,22 +196,31 @@ def debit(
         # The calling code should check before calling debit()
     
     # Debit in order: monthly+rollover first, then purchased
+    # IMPORTANT: Monthly+rollover credits MUST be used 100% before touching purchased credits
     remaining = amount
     
-    # First, use monthly+rollover credits
+    # First, use monthly+rollover credits (ALWAYS first, 100% of cases)
     available_mr = wallet.available_monthly_rollover
     if available_mr > 0 and remaining > 0:
         use_mr = min(available_mr, remaining)
         wallet.used_monthly_rollover += use_mr
         remaining -= use_mr
+        log.debug(
+            f"[wallet] Used {use_mr} from monthly+rollover pool "
+            f"(available_mr={available_mr}, remaining={remaining})"
+        )
     
-    # Then, use purchased credits
+    # Then, use purchased credits (ONLY after monthly+rollover is exhausted)
     if remaining > 0:
         available_purchased = wallet.available_purchased
         if available_purchased > 0:
             use_purchased = min(available_purchased, remaining)
             wallet.used_purchased += use_purchased
             remaining -= use_purchased
+            log.debug(
+                f"[wallet] Used {use_purchased} from purchased pool "
+                f"(available_purchased={available_purchased}, remaining={remaining})"
+            )
     
     # Update total used
     wallet.used_credits += amount
@@ -286,7 +349,11 @@ def get_wallet_balance(
     user_id: UUID,
     period: Optional[str] = None
 ) -> float:
-    """Get total available credits for user in period."""
+    """
+    Get total available credits for user in period.
+    
+    If wallet doesn't exist, creates it with monthly credits from user's plan.
+    """
     if period is None:
         period = get_period_string()
     
@@ -297,10 +364,100 @@ def get_wallet_balance(
     wallet = session.exec(stmt).first()
     
     if not wallet:
-        # Return 0 if no wallet exists (will be created on first debit)
-        return 0.0
+        # Wallet doesn't exist - create it with monthly credits from plan
+        # This ensures users see their credits even if wallet wasn't created during subscription
+        from api.models.user import User
+        user = session.get(User, user_id)
+        if not user:
+            return 0.0
+        
+        plan_key = getattr(user, 'tier', 'free') or 'free'
+        wallet = get_or_create_wallet(session, user_id, plan_key, period)
+        log.info(
+            f"[wallet] Created wallet on balance check for user {user_id}, "
+            f"period {period}, monthly_credits={wallet.monthly_credits}"
+        )
     
     return wallet.total_available
+
+
+def get_wallet_details(
+    session: Session,
+    user_id: UUID,
+    period: Optional[str] = None
+) -> dict:
+    """
+    Get detailed wallet information including purchased credits and monthly allocation.
+    
+    Returns:
+        dict with:
+        - total_available: Total available credits
+        - purchased_credits_available: Available purchased credits (never expire)
+        - monthly_allocation_available: Available monthly + rollover credits
+        - monthly_credits: Monthly credits from plan
+        - rollover_credits: Rolled over credits
+        - purchased_credits: Total purchased credits (before usage)
+        - used_monthly_rollover: Credits used from monthly+rollover pool
+        - used_purchased: Credits used from purchased pool
+    """
+    from api.models.user import User
+    user = session.get(User, user_id)
+    if not user:
+        return {
+            "total_available": 0.0,
+            "purchased_credits_available": 0.0,
+            "monthly_allocation_available": 0.0,
+            "monthly_credits": 0.0,
+            "rollover_credits": 0.0,
+            "purchased_credits": 0.0,
+            "used_monthly_rollover": 0.0,
+            "used_purchased": 0.0,
+        }
+    
+    plan_key = getattr(user, 'tier', 'free') or 'free'
+    
+    # Check if unlimited plan
+    from api.billing.plans import is_unlimited_plan
+    if is_unlimited_plan(plan_key):
+        return {
+            "total_available": 999999.0,
+            "purchased_credits_available": 0.0,
+            "monthly_allocation_available": 999999.0,
+            "monthly_credits": 999999.0,
+            "rollover_credits": 0.0,
+            "purchased_credits": 0.0,
+            "used_monthly_rollover": 0.0,
+            "used_purchased": 0.0,
+        }
+    
+    if period is None:
+        period = get_period_string()
+    
+    stmt = select(CreditWallet).where(
+        CreditWallet.user_id == user_id,
+        CreditWallet.period == period
+    )
+    wallet = session.exec(stmt).first()
+    
+    if not wallet:
+        # Wallet doesn't exist - create it with monthly credits from plan
+        # This ensures users see their credits even if wallet wasn't created during subscription
+        wallet = get_or_create_wallet(session, user_id, plan_key, period)
+        log.info(
+            f"[wallet] Created wallet on details check for user {user_id}, "
+            f"period {period}, monthly_credits={wallet.monthly_credits}"
+        )
+    
+    return {
+        "total_available": wallet.total_available,
+        "purchased_credits_available": wallet.available_purchased,
+        "monthly_allocation_available": wallet.available_monthly_rollover,
+        "monthly_credits": wallet.monthly_credits,
+        "rollover_credits": wallet.rollover_credits,
+        "purchased_credits": wallet.purchased_credits,
+        "used_monthly_rollover": wallet.used_monthly_rollover,
+        "used_purchased": wallet.used_purchased,
+    }
 
 
 def process_monthly_rollover(
@@ -434,12 +591,17 @@ def process_monthly_rollover(
             
             plan_key = getattr(user, 'tier', 'free') or 'free'
             
-            # Skip free tier users (unless they have active subscription)
+            # Normalize "free" to "starter" for plan lookup
+            normalized_plan_key = plan_key.lower()
+            if normalized_plan_key == "free":
+                normalized_plan_key = "starter"
+            
+            # Skip free/starter tier users (unless they have active subscription)
             if plan_key == 'free' and user_id not in subscription_user_ids and user_id not in future_expiry_user_ids:
                 continue
             
-            # Get plan
-            plan = PLANS.get(plan_key.lower())
+            # Get plan (using normalized key)
+            plan = PLANS.get(normalized_plan_key)
             if not plan:
                 log.warning(f"[WALLET] Unknown plan for user {user_id}: {plan_key}")
                 continue
@@ -539,6 +701,112 @@ def process_monthly_rollover(
     }
 
 
+def refund_to_wallet(
+    session: Session,
+    user_id: UUID,
+    amount: float,
+    original_period: Optional[str] = None
+) -> None:
+    """
+    Refund credits to user's wallet.
+    
+    Attempts to refund to the original bank (monthly/rollover or purchased) based on period.
+    If original period is not provided or wallet doesn't exist, refunds to current period as purchased.
+    
+    Args:
+        session: Database session
+        user_id: User to refund
+        amount: Credits to refund
+        original_period: Period when the charge was made (YYYY-MM format). If None, uses current period.
+    """
+    if amount <= 0:
+        return
+    
+    if original_period is None:
+        original_period = get_period_string()
+    
+    # Get wallet for the original period
+    from api.models.user import User
+    user = session.get(User, user_id)
+    if not user:
+        log.error(f"[wallet] User {user_id} not found for refund")
+        return
+    
+    plan_key = getattr(user, 'tier', 'free') or 'free'
+    
+    # Check if wallet table exists, if not, skip wallet refund (just log)
+    try:
+        wallet = get_or_create_wallet(session, user_id, plan_key, original_period)
+    except Exception as e:
+        # Wallet table might not exist (migration not run)
+        log.warning(f"[wallet] Could not access wallet table for refund (table may not exist): {e}")
+        log.info(f"[wallet] Skipping wallet refund for user {user_id}, amount {amount}. Please run migration 032.")
+        return
+    
+    # Heuristic: Try to refund proportionally to monthly/rollover first if available
+    # If monthly/rollover was used in that period, refund there first
+    # Otherwise, refund as purchased credits (more flexible)
+    
+    # Store original amount for logging
+    original_amount = amount
+    
+    # Check if monthly/rollover credits were used in that period
+    if wallet.used_monthly_rollover > 0:
+        # Refund to monthly/rollover pool (reduce used amount)
+        refund_to_mr = min(amount, wallet.used_monthly_rollover)
+        wallet.used_monthly_rollover = max(0.0, wallet.used_monthly_rollover - refund_to_mr)
+        wallet.used_credits = max(0.0, wallet.used_credits - refund_to_mr)
+        amount -= refund_to_mr
+        
+        log.info(
+            f"[wallet] Refunded {refund_to_mr} credits to monthly/rollover pool "
+            f"for user {user_id}, period {original_period}"
+        )
+    
+    # Remaining amount (or all if no monthly/rollover was used) goes to purchased
+    if amount > 0:
+        # For current period, add as purchased credits
+        # For past periods, we still add as purchased in current period (more useful)
+        current_period = get_period_string()
+        if original_period == current_period:
+            # Same period: reduce used_purchased if possible, otherwise add to purchased
+            if wallet.used_purchased > 0:
+                refund_to_purchased = min(amount, wallet.used_purchased)
+                wallet.used_purchased = max(0.0, wallet.used_purchased - refund_to_purchased)
+                wallet.used_credits = max(0.0, wallet.used_credits - refund_to_purchased)
+                amount -= refund_to_purchased
+                log.info(
+                    f"[wallet] Refunded {refund_to_purchased} credits to purchased pool "
+                    f"(reduced usage) for user {user_id}, period {original_period}"
+                )
+            
+            # Any remaining goes to purchased credits
+            if amount > 0:
+                wallet.purchased_credits += amount
+                log.info(
+                    f"[wallet] Refunded {amount} credits as new purchased credits "
+                    f"for user {user_id}, period {original_period}"
+                )
+        else:
+            # Past period: add to current period as purchased credits
+            current_wallet = get_or_create_wallet(session, user_id, plan_key, current_period)
+            current_wallet.purchased_credits += amount
+            log.info(
+                f"[wallet] Refunded {amount} credits from period {original_period} "
+                f"to current period {current_period} as purchased credits for user {user_id}"
+            )
+            session.add(current_wallet)
+    
+    wallet.updated_at = datetime.utcnow()
+    session.add(wallet)
+    session.commit()
+    
+    log.info(
+        f"[wallet] Completed refund of {original_amount} credits for user {user_id} "
+        f"(original_period={original_period})"
+    )
+
+
 __all__ = [
     "get_period_string",
     "get_or_create_wallet",
@@ -547,5 +815,7 @@ __all__ = [
     "process_rollover",
     "process_monthly_rollover",
     "get_wallet_balance",
+    "get_wallet_details",
+    "refund_to_wallet",
 ]
 

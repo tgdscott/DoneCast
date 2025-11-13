@@ -1,125 +1,141 @@
-from fastapi import APIRouter, Query, Depends
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
-from sqlalchemy import text
+
 from api.core.database import get_session
-from api.models.podcast import Episode
-from api.models.settings import (
-    AdminSettings,
-    load_admin_settings,
-    load_landing_content,
-    LandingPageContent,
-)
-import os
-from pathlib import Path
-from api.core.paths import FINAL_DIR, MEDIA_DIR
+from api.models.podcast import Episode, EpisodeStatus, Podcast
+from api.services.op3_analytics import get_show_stats_sync
+from api.services.op3_historical_data import get_historical_data
 
-router = APIRouter(prefix="/public", tags=["Public"])
+router = APIRouter(prefix="/public", tags=["public"])
 
-@router.get("/episodes")
-def public_episodes(limit: int = Query(10, ge=1, le=50), session: Session = Depends(get_session)):
-    """List recently published episodes (unauthenticated) for demo.
-    Returns only fields safe for public consumption.
+
+@router.get("/podcast/{podcast_id}/analytics")
+def public_podcast_analytics(
+    podcast_id: str,
+    session: Session = Depends(get_session),
+):
     """
-    statement = (
-        select(Episode)
-        .where(Episode.status == "published")
-        .order_by(text("processed_at DESC"))
-        .limit(limit)
-    )
-    eps = session.exec(statement).all()
+    Public analytics endpoint for podcast front page.
+
+    Returns analytics data with smart time period filtering based on podcast age.
+    No authentication required - public access.
+
+    Time periods shown:
+    - 7 days: if podcast exists >= 7 days
+    - 30 days: if podcast exists >= 30 days
+    - 365 days: if podcast exists >= 365 days
+    - All-time: always shown
+    - Don't repeat: if podcast is < 30 days, only show 7d and all-time
+    """
+    import logging
     
-    items = []
-    missing_audio_count = 0
-    for e in eps:
-        audio_url = None
-        if e.final_audio_path:
-            base = os.path.basename(e.final_audio_path)
-            candidates = [FINAL_DIR / base, MEDIA_DIR / base]
-            existing = next((c for c in candidates if c.exists()), None)
-            if existing is not None:
-                if existing.parent == MEDIA_DIR:
-                    audio_url = f"/static/media/{base}"
-                else:
-                    audio_url = f"/static/final/{base}"
-            else:
-                missing_audio_count += 1
-        
-        # Use compute_cover_info to properly handle gcs_cover_path (R2 URLs)
-        from api.routers.episodes.common import compute_cover_info
-        cover_info = compute_cover_info(e)
-        cover_url = cover_info.get("cover_url")
-        
-        # Fallback: if no cover_url from compute_cover_info, try cover_path
-        if not cover_url and e.cover_path:
-            cp = str(e.cover_path)
-            if cp.lower().startswith(("http://", "https://")):
-                # Only use if it's not a Spreaker URL
-                if "spreaker.com" not in cp.lower() and "cdn.spreaker.com" not in cp.lower():
-                    cover_url = cp
-            else:
-                cover_url = f"/static/media/{os.path.basename(cp)}"
+    logger = logging.getLogger(__name__)
 
-        items.append({
-            "id": str(e.id),
-            "title": e.title,
-            "description": e.show_notes or "",
-            "final_audio_url": audio_url,
-            "cover_url": cover_url,
-        })
-
-    return {"items": items, "diagnostics": {"missing_audio_files": missing_audio_count}}
-
-# Lightweight config surface for SPA boot-time fetch.
-from api.core.config import settings
-
-
-def _load_admin_settings_safe() -> AdminSettings:
+    # Get podcast by ID or slug
     try:
-        from api.core.database import engine
-        from sqlmodel import Session as SQLSession
+        podcast_uuid = UUID(podcast_id)
+        podcast = session.get(Podcast, podcast_uuid)
+    except (ValueError, AttributeError):
+        # Try by slug
+        podcast = session.exec(
+            select(Podcast).where(Podcast.slug == podcast_id)
+        ).first()
 
-        with SQLSession(engine) as session:
-            return load_admin_settings(session)
-    except Exception:
-        return AdminSettings()
-
-
-def _clamp_upload_limit(raw_value: int | None) -> int:
+    if not podcast:
+        raise HTTPException(status_code=404, detail="Podcast not found")
+    
+    # Calculate podcast age (days since first episode or creation)
+    # Use first episode publish date if available, otherwise use podcast creation date
+    first_episode = session.exec(
+        select(Episode)
+        .where(Episode.podcast_id == podcast.id)
+        .where(Episode.status == EpisodeStatus.published)
+        .order_by(Episode.publish_at.asc())  # type: ignore
+        .limit(1)
+    ).first()
+    
+    if first_episode and first_episode.publish_at:
+        podcast_start_date = first_episode.publish_at
+    else:
+        # Use current time if no first episode (podcast is new)
+        podcast_start_date = datetime.now(timezone.utc)
+    
+    # Calculate podcast age in days
+    now = datetime.now(timezone.utc)
+    if podcast_start_date.tzinfo is None:
+        podcast_start_date = podcast_start_date.replace(tzinfo=timezone.utc)
+    podcast_age_days = (now - podcast_start_date).days
+    
+    logger.info(f"Podcast {podcast_id} age: {podcast_age_days} days (start: {podcast_start_date})")
+    
+    # Get RSS feed URL
+    identifier = getattr(podcast, 'slug', None) or str(podcast.id)
+    rss_url = f"https://podcastplusplus.com/rss/{identifier}/feed.xml"
+    
+    # Fetch OP3 stats
+    # Try public OP3.dev first (where data usually is), then fall back to self-hosted
     try:
-        base_value = raw_value if raw_value else 500
-        value = int(base_value)
-    except (TypeError, ValueError):
-        return 500
-    if value < 10:
-        return 10
-    if value > 2048:
-        return 2048
-    return value
+        stats = get_show_stats_sync(rss_url, days=365, use_public=True)
+        # If public OP3.dev has no data, try self-hosted
+        if not stats or (stats.downloads_30d == 0 and stats.downloads_all_time == 0):
+            logger.info(f"OP3: No data on public OP3.dev for {rss_url}, trying self-hosted...")
+            stats = get_show_stats_sync(rss_url, days=365, use_public=False)
+    except Exception as e:
+        logger.error(f"OP3 stats fetch failed for {rss_url}: {e}", exc_info=True)
+        stats = None
+    
+    # Merge with historical data (for Cinema IRL)
+    historical = get_historical_data()
+    historical_all_time = historical.get_total_downloads() if historical else 0
+    
+    # Merge all-time downloads
+    op3_downloads_7d = stats.downloads_7d if stats else 0
+    op3_downloads_30d = stats.downloads_30d if stats else 0
+    op3_downloads_365d = stats.downloads_365d if stats else 0
+    op3_downloads_all_time = stats.downloads_all_time if stats else 0
 
+    merged_all_time = op3_downloads_all_time
+    if historical_all_time > 0:
+        podcast_identifier = getattr(podcast, 'slug', '').lower() or podcast.name.lower()
+        if 'cinema' in podcast_identifier and 'irl' in podcast_identifier:
+            logger.info(f"Merging historical data for Cinema IRL: historical={historical_all_time}, OP3={op3_downloads_all_time}")
+            merged_all_time = historical_all_time + op3_downloads_all_time
 
-@router.get("/config")
-def public_config():
-    admin_settings = _load_admin_settings_safe()
+    # Smart time period filtering based on podcast age
+    # Don't repeat - if podcast is < 30 days, only show 7d and all-time
+    time_periods = {}
+
+    # Always show all-time
+    time_periods["all_time"] = merged_all_time
+
+    # Show 7d if podcast exists >= 7 days
+    if podcast_age_days >= 7:
+        time_periods["7d"] = op3_downloads_7d
+
+    # Show 30d if podcast exists >= 30 days
+    if podcast_age_days >= 30:
+        time_periods["30d"] = op3_downloads_30d
+
+    # Show 365d if podcast exists >= 365 days
+    if podcast_age_days >= 365:
+        time_periods["365d"] = op3_downloads_365d
+
+    logger.info(f"Podcast {podcast_id} analytics - age: {podcast_age_days} days, periods: {list(time_periods.keys())}")
+
     return {
-        "terms_version": getattr(settings, "TERMS_VERSION", ""),
-    # Rebrand: expose new API base (frontend should prefer dynamic origin in prod)
-        "api_base": "https://api.podcastplusplus.com",
-        # Include dynamic admin-exposed limits for client UX (non-sensitive)
-        "max_upload_mb": _get_max_upload_mb(admin_settings),
-        "browser_audio_conversion_enabled": bool(
-            admin_settings.browser_audio_conversion_enabled
-        ),
+        "podcast_id": str(podcast.id),
+        "podcast_name": podcast.name,
+        "podcast_age_days": podcast_age_days,
+        "time_periods": time_periods,
+        "downloads_7d": op3_downloads_7d,
+        "downloads_30d": op3_downloads_30d,
+        "downloads_365d": op3_downloads_365d,
+        "downloads_all_time": merged_all_time,
+        "cached": True,
+        "last_updated": "Updates every 3 hours"
     }
-
-
-@router.get("/landing", response_model=LandingPageContent)
-def public_landing_content(session: Session = Depends(get_session)) -> LandingPageContent:
-    return load_landing_content(session)
-
-# Pull current admin setting from DB if available; default to 500 on error
-def _get_max_upload_mb(admin_settings: AdminSettings | None = None) -> int:
-    try:
-        settings_obj = admin_settings or _load_admin_settings_safe()
-        return _clamp_upload_limit(getattr(settings_obj, "max_upload_mb", 500))
-    except Exception:
-        return 500

@@ -257,6 +257,70 @@ async def upload_media_files(
                 detail=f"Internal error: filename is not a GCS URL. This indicates a bug in the upload process."
             )
 
+        # For main_content uploads, validate storage limits and set tier-based expiration
+        expires_at = None
+        if category == MediaCategory.main_content:
+            # Get user's tier
+            user_tier = getattr(current_user, "tier", "starter") or "starter"
+            # Normalize "free" to "starter"
+            if user_tier.lower() == "free":
+                user_tier = "starter"
+            
+            # Validate storage limits
+            try:
+                from api.services.storage.validation import check_storage_limits
+                from api.services.episodes.assembler import _estimate_audio_seconds
+                
+                # Try to estimate duration from the uploaded file
+                # Note: This may not always work for GCS files, but we'll try
+                estimated_seconds = None
+                try:
+                    # Try to estimate from the GCS file
+                    estimated_seconds = _estimate_audio_seconds(final_filename)
+                except Exception:
+                    # If estimation fails, we'll allow the upload but log a warning
+                    # The cleanup task will handle enforcement later
+                    log.warning("[storage] Could not estimate audio duration for %s, allowing upload", final_filename)
+                
+                # Check storage limits (will skip if estimation failed)
+                if estimated_seconds is not None:
+                    allowed, error_msg = check_storage_limits(
+                        session,
+                        str(current_user.id),
+                        user_tier,
+                        new_file_duration_seconds=estimated_seconds
+                    )
+                    if not allowed:
+                        # Delete the uploaded file from GCS
+                        try:
+                            from infrastructure.gcs import delete_blob
+                            if final_filename.startswith("gs://"):
+                                bucket_key = final_filename[5:]  # Remove "gs://" prefix
+                                bucket, _, key = bucket_key.partition("/")
+                                if bucket and key:
+                                    delete_blob(bucket, key)
+                                    log.info("[storage] Deleted uploaded file due to storage limit: %s", final_filename)
+                        except Exception as e:
+                            log.warning("[storage] Failed to delete uploaded file after storage limit error: %s", e)
+                        
+                        raise HTTPException(status_code=403, detail=error_msg or "Storage limit exceeded")
+                
+                # Set tier-based expiration
+                try:
+                    from api.startup_tasks import _compute_pt_expiry
+                    from datetime import datetime
+                    now_utc = datetime.utcnow()
+                    expires_at = _compute_pt_expiry(now_utc, tier=user_tier)
+                    log.info("[storage] Set expiration for %s: tier=%s, expires_at=%s", final_filename, user_tier, expires_at)
+                except Exception as e:
+                    log.warning("[storage] Failed to set expiration date: %s", e, exc_info=True)
+                    # Don't fail upload if expiration calculation fails
+            except HTTPException:
+                raise
+            except Exception as e:
+                log.warning("[storage] Storage validation error (non-fatal): %s", e, exc_info=True)
+                # Don't fail upload if validation fails - we'll enforce limits in cleanup
+        
         log.info("[upload.storage] Creating MediaItem with filename='%s' (GCS URL)", final_filename)
         media_item = MediaItem(
             filename=final_filename,
@@ -264,7 +328,8 @@ async def upload_media_files(
             content_type=final_content_type,
             filesize=bytes_written,
             user_id=current_user.id,
-            category=category
+            category=category,
+            expires_at=expires_at
         )
         session.add(media_item)
         created_items.append(media_item)
@@ -693,6 +758,27 @@ async def list_main_content_uploads(
         # Use database transcript_ready field (transcripts now in GCS, not local files)
         ready = item.transcript_ready
         
+        # Backfill expires_at if missing (for existing files uploaded before tier-based expiration)
+        expires_at = item.expires_at
+        if not expires_at and item.created_at:
+            try:
+                from api.startup_tasks import _compute_pt_expiry
+                user_tier = getattr(current_user, "tier", "starter") or "starter"
+                if user_tier.lower() == "free":
+                    user_tier = "starter"
+                expires_at = _compute_pt_expiry(item.created_at, tier=user_tier)
+                # Optionally update the database (but don't block the response)
+                try:
+                    item.expires_at = expires_at
+                    session.add(item)
+                    session.commit()
+                except Exception:
+                    session.rollback()
+                    # Non-fatal - we'll calculate it on-the-fly
+            except Exception:
+                # If calculation fails, expires_at remains None
+                pass
+        
         intents = {}
         duration = None
         if ready:
@@ -717,7 +803,7 @@ async def list_main_content_uploads(
                 filename=filename,
                 friendly_name=item.friendly_name,
                 created_at=item.created_at.isoformat() if item.created_at else None,
-                expires_at=item.expires_at.isoformat() if item.expires_at else None,
+                expires_at=expires_at.isoformat() if expires_at else None,
                 transcript_ready=ready,
                 intents=intents or {},
                 notify_pending=pending,

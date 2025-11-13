@@ -26,8 +26,11 @@ try {
         Write-Host "`nBucket now allows browser uploads from:" -ForegroundColor Cyan
         Write-Host "  - http://127.0.0.1:5173 (local dev)" -ForegroundColor White
         Write-Host "  - http://localhost:5173 (local dev)" -ForegroundColor White
+        Write-Host "  - https://app.podcastplusplus.com (production)" -ForegroundColor White
         Write-Host "  - https://podcastplusplus.com (production)" -ForegroundColor White
+        Write-Host "  - https://www.podcastplusplus.com (production)" -ForegroundColor White
         Write-Host "  - https://getpodcastplus.com (legacy production)" -ForegroundColor White
+        Write-Host "  - https://www.getpodcastplus.com (legacy production)" -ForegroundColor White
         
         Write-Host "`nTo verify CORS configuration:" -ForegroundColor Cyan
         Write-Host "  gcloud storage buckets describe gs://$bucketName --format=`"json(cors_config)`"" -ForegroundColor White

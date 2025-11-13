@@ -24,7 +24,7 @@ from api.routers.auth import get_current_user
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/billing/ledger", tags=["Billing", "Credits"])
+router = APIRouter(prefix="/billing/ledger", tags=["Billing", "Credits"])
 
 
 class LedgerLineItem(BaseModel):
@@ -38,6 +38,8 @@ class LedgerLineItem(BaseModel):
     notes: Optional[str] = None
     cost_breakdown: Optional[dict] = None
     correlation_id: Optional[str] = None
+    refund_status: Optional[str] = None  # pending, approved, denied
+    refund_denial_reason: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -68,6 +70,8 @@ class AccountLedgerItem(BaseModel):
     credits: float
     notes: Optional[str] = None
     cost_breakdown: Optional[dict] = None
+    refund_status: Optional[str] = None  # pending, approved, denied
+    refund_denial_reason: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -79,6 +83,12 @@ class LedgerSummaryResponse(BaseModel):
     total_credits_available: float
     total_credits_used_this_month: float
     total_credits_remaining: float
+    
+    # Wallet breakdown
+    purchased_credits_available: float = Field(default=0.0, description="Available purchased credits (never expire)")
+    monthly_allocation_available: float = Field(default=0.0, description="Available monthly + rollover credits")
+    monthly_credits: float = Field(default=0.0, description="Monthly credits from plan")
+    rollover_credits: float = Field(default=0.0, description="Rolled over credits")
     
     # Episode-based charges (grouped by episode)
     episode_invoices: List[EpisodeInvoice]
@@ -148,6 +158,34 @@ async def get_ledger_summary(
             if e.direction == LedgerDirection.CREDIT
         )
         
+        # Get refund statuses for episode entries
+        episode_refund_statuses = {}
+        try:
+            from api.models.notification import Notification
+            refund_notifications = session.exec(
+                select(Notification)
+                .where(Notification.user_id == current_user.id)
+                .where(Notification.type == "refund_request")
+            ).all()
+            
+            for notif in refund_notifications:
+                try:
+                    import json
+                    details = json.loads(notif.body)
+                    entry_ids = details.get("ledger_entry_ids", [])
+                    status = details.get("status", "pending")
+                    denial_reason = details.get("denial_reason")
+                    
+                    for entry_id in entry_ids:
+                        episode_refund_statuses[entry_id] = {
+                            "status": status,
+                            "denial_reason": denial_reason
+                        }
+                except (json.JSONDecodeError, KeyError, TypeError):
+                    continue
+        except Exception:
+            pass
+        
         # Convert entries to line items
         line_items = [
             LedgerLineItem(
@@ -159,7 +197,9 @@ async def get_ledger_summary(
                 minutes=e.minutes,
                 notes=e.notes,
                 cost_breakdown=_parse_cost_breakdown(e.cost_breakdown_json),
-                correlation_id=e.correlation_id
+                correlation_id=e.correlation_id,
+                refund_status=episode_refund_statuses.get(e.id or 0, {}).get("status"),
+                refund_denial_reason=episode_refund_statuses.get(e.id or 0, {}).get("denial_reason")
             )
             for e in sorted(entries, key=lambda x: x.created_at, reverse=True)
         ]
@@ -179,6 +219,34 @@ async def get_ledger_summary(
     # Sort invoices by date (newest first)
     episode_invoices.sort(key=lambda x: x.created_at, reverse=True)
     
+    # Get refund request statuses for account-level entries
+    account_refund_statuses = {}
+    try:
+        from api.models.notification import Notification
+        refund_notifications = session.exec(
+            select(Notification)
+            .where(Notification.user_id == current_user.id)
+            .where(Notification.type == "refund_request")
+        ).all()
+        
+        for notif in refund_notifications:
+            try:
+                import json
+                details = json.loads(notif.body)
+                entry_ids = details.get("ledger_entry_ids", [])
+                status = details.get("status", "pending")
+                denial_reason = details.get("denial_reason")
+                
+                for entry_id in entry_ids:
+                    account_refund_statuses[entry_id] = {
+                        "status": status,
+                        "denial_reason": denial_reason
+                    }
+            except (json.JSONDecodeError, KeyError, TypeError):
+                continue
+    except Exception:
+        pass
+    
     # Build account-level charges
     account_charges = [
         AccountLedgerItem(
@@ -188,7 +256,9 @@ async def get_ledger_summary(
             reason=e.reason.value,
             credits=e.credits,
             notes=e.notes,
-            cost_breakdown=_parse_cost_breakdown(e.cost_breakdown_json)
+            cost_breakdown=_parse_cost_breakdown(e.cost_breakdown_json),
+            refund_status=account_refund_statuses.get(e.id or 0, {}).get("status"),
+            refund_denial_reason=account_refund_statuses.get(e.id or 0, {}).get("denial_reason")
         )
         for e in sorted(account_level_entries, key=lambda x: x.created_at, reverse=True)
     ]
@@ -196,6 +266,10 @@ async def get_ledger_summary(
     # Calculate summary stats
     from api.services.billing import credits
     balance = credits.get_user_credit_balance(session, current_user.id)
+    
+    # Get wallet details
+    from api.services.billing.wallet import get_wallet_details
+    wallet_details = get_wallet_details(session, current_user.id)
     
     # Get current month usage
     current_month = now.month
@@ -229,6 +303,10 @@ async def get_ledger_summary(
         total_credits_available=available,
         total_credits_used_this_month=used_this_month,
         total_credits_remaining=remaining,
+        purchased_credits_available=wallet_details.get("purchased_credits_available", 0.0),
+        monthly_allocation_available=wallet_details.get("monthly_allocation_available", 0.0),
+        monthly_credits=wallet_details.get("monthly_credits", 0.0),
+        rollover_credits=wallet_details.get("rollover_credits", 0.0),
         episode_invoices=episode_invoices,
         account_charges=account_charges,
         period_start=period_start,
@@ -308,11 +386,17 @@ async def get_episode_invoice(
     )
 
 
+class RefundRequest(BaseModel):
+    """Request model for refund requests"""
+    episode_id: Optional[UUID] = None
+    ledger_entry_ids: List[int] = Field(default_factory=list)
+    reason: str = Field(..., min_length=10, description="Reason for refund request (minimum 10 characters)")
+    notes: Optional[str] = None
+
+
 @router.post("/refund-request")
 async def request_refund(
-    episode_id: Optional[UUID] = None,
-    ledger_entry_ids: List[int] = [],
-    reason: str = "",
+    request: RefundRequest,
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
@@ -321,58 +405,281 @@ async def request_refund(
     
     Creates a notification for admin review with all relevant details.
     """
-    if not episode_id and not ledger_entry_ids:
+    if not request.episode_id and not request.ledger_entry_ids:
         raise HTTPException(status_code=400, detail="Must provide episode_id or ledger_entry_ids")
     
-    if not reason or len(reason.strip()) < 10:
+    if not request.reason or len(request.reason.strip()) < 10:
         raise HTTPException(
             status_code=400, 
             detail="Please provide a detailed reason (at least 10 characters)"
         )
     
     # Verify entries belong to user
-    if ledger_entry_ids:
+    if request.ledger_entry_ids:
         from sqlalchemy import column
         entries = session.exec(
             select(ProcessingMinutesLedger)
-            .where(column('id').in_(ledger_entry_ids))
+            .where(column('id').in_(request.ledger_entry_ids))
             .where(ProcessingMinutesLedger.user_id == current_user.id)
         ).all()
         
-        if len(entries) != len(ledger_entry_ids):
+        if len(entries) != len(request.ledger_entry_ids):
             raise HTTPException(status_code=404, detail="Some entries not found or not authorized")
     
     # Create notification for admin
     from api.models.notification import Notification
+    from api.routers.auth import is_admin_email
+    from sqlmodel import select as sqlmodel_select
     
-    details = {
+    # Find all admin users to notify
+    admin_users = session.exec(
+        sqlmodel_select(User).where(User.is_admin == True)  # noqa: E712
+    ).all()
+    
+    import json
+    
+    # Create notification for requesting user with status tracking
+    request_details = {
         "user_id": str(current_user.id),
         "user_email": current_user.email,
-        "episode_id": str(episode_id) if episode_id else None,
-        "ledger_entry_ids": ledger_entry_ids,
-        "reason": reason,
-        "timestamp": datetime.utcnow().isoformat()
+        "episode_id": str(request.episode_id) if request.episode_id else None,
+        "ledger_entry_ids": request.ledger_entry_ids,
+        "reason": request.reason,
+        "notes": request.notes,
+        "timestamp": datetime.utcnow().isoformat(),
+        "status": "pending"  # pending, approved, denied
     }
     
-    notification = Notification(
+    # Create user-friendly message (don't expose internal details)
+    user_message = f"Your refund request has been submitted and is under review."
+    if request.reason:
+        user_message += f"\n\nReason: {request.reason}"
+    user_message += "\n\nYou will be notified once your request has been processed."
+    
+    user_notification = Notification(
         user_id=current_user.id,
         type="refund_request",
-        title="Credit Refund Request",
-        body=f"User {current_user.email} requested refund for {len(ledger_entry_ids) if ledger_entry_ids else 'episode'} charges. Reason: {reason[:100]}. Details: {details}"
+        title="Credit Refund Request Submitted",
+        body=user_message  # User-friendly message, not raw JSON
     )
+    session.add(user_notification)
+    session.flush()  # Get the notification ID
     
-    session.add(notification)
+    # Create notifications for all admin users
+    admin_details = {
+        "user_id": str(current_user.id),
+        "user_email": current_user.email,
+        "episode_id": str(request.episode_id) if request.episode_id else None,
+        "ledger_entry_ids": request.ledger_entry_ids,
+        "reason": request.reason,
+        "notes": request.notes,
+        "timestamp": datetime.utcnow().isoformat(),
+        "status": "pending",
+        "user_notification_id": str(user_notification.id)  # Link to user's notification
+    }
+    
+    admin_details_json = json.dumps(admin_details, indent=2)
+    
+    for admin_user in admin_users:
+        admin_notification = Notification(
+            user_id=admin_user.id,
+            type="refund_request",
+            title=f"Credit Refund Request from {current_user.email}",
+            body=f"User {current_user.email} requested refund for {len(request.ledger_entry_ids) if request.ledger_entry_ids else 'episode'} charges.\n\nReason: {request.reason}\n\nDetails:\n{admin_details_json}"
+        )
+        session.add(admin_notification)
+    
     session.commit()
     
     log.info(
         f"[billing-ledger] Refund request from user {current_user.id}: "
-        f"episode={episode_id}, entries={ledger_entry_ids}, reason={reason[:50]}"
+        f"episode={request.episode_id}, entries={request.ledger_entry_ids}, reason={request.reason[:50]}"
     )
     
     return {
         "success": True,
-        "message": "Refund request submitted. Our team will review and respond within 24-48 hours."
+        "message": "Refund request submitted. Our team will review and respond within 24-48 hours.",
+        "notification_id": str(user_notification.id)
     }
+
+
+class CreditChargeItem(BaseModel):
+    """Single credit charge/refund item for line item view"""
+    id: int
+    timestamp: datetime
+    episode_id: Optional[UUID] = None
+    episode_title: Optional[str] = None
+    direction: str  # DEBIT or CREDIT
+    reason: str
+    credits: float
+    minutes: int
+    notes: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+
+
+class CreditChargesResponse(BaseModel):
+    """Paginated credit charges response"""
+    charges: List[CreditChargeItem]
+    pagination: dict
+    credits_balance: float
+    credits_allocated: Optional[float]
+    credits_used_this_month: float
+    credits_breakdown: dict
+    purchased_credits_available: float = Field(default=0.0, description="Available purchased credits (never expire)")
+    monthly_allocation_available: float = Field(default=0.0, description="Available monthly + rollover credits")
+    monthly_credits: float = Field(default=0.0, description="Monthly credits from plan")
+    rollover_credits: float = Field(default=0.0, description="Rolled over credits")
+
+
+@router.get("/charges", response_model=CreditChargesResponse)
+async def get_credit_charges(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    page: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
+    per_page: int = Query(default=20, ge=1, le=100, description="Items per page (20, 50, or 100)"),
+) -> CreditChargesResponse:
+    """
+    Get paginated credit charges for the current user.
+    
+    Similar to admin view but for the user's own charges.
+    Returns a simple line-item list with pagination.
+    """
+    # Validate per_page
+    if per_page not in [20, 50, 100]:
+        per_page = 20
+    
+    # Get credit balance
+    from api.services.billing import credits
+    balance = credits.get_user_credit_balance(session, current_user.id)
+    
+    # Get wallet details
+    from api.services.billing.wallet import get_wallet_details
+    wallet_details = get_wallet_details(session, current_user.id)
+    
+    # Get tier allocation
+    from api.services import tier_service
+    tier = getattr(current_user, 'tier', 'free') or 'free'
+    tier_credits = tier_service.get_tier_credits(session, tier)
+    
+    # Get monthly breakdown
+    from datetime import datetime, timezone
+    from api.services.billing import usage as usage_svc
+    
+    now = datetime.now(timezone.utc)
+    start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    breakdown = usage_svc.month_credits_breakdown(session, current_user.id, start_of_month, now)
+    
+    # Get paginated charges
+    from sqlmodel import select, func
+    from sqlalchemy import desc as sa_desc
+    
+    # Count total charges
+    count_stmt = (
+        select(func.count(ProcessingMinutesLedger.id))
+        .where(ProcessingMinutesLedger.user_id == current_user.id)
+    )
+    total_count = session.exec(count_stmt).one()
+    
+    # Get paginated charges
+    offset = (page - 1) * per_page
+    stmt = (
+        select(ProcessingMinutesLedger)
+        .where(ProcessingMinutesLedger.user_id == current_user.id)
+        .order_by(sa_desc(ProcessingMinutesLedger.created_at))
+        .limit(per_page)
+        .offset(offset)
+    )
+    recent = session.exec(stmt).all()
+    
+    # Get refund request statuses for these entries
+    from api.models.notification import Notification
+    refund_statuses = {}
+    try:
+        # Get all refund request notifications for this user
+        refund_notifications = session.exec(
+            select(Notification)
+            .where(Notification.user_id == current_user.id)
+            .where(Notification.type == "refund_request")
+        ).all()
+        
+        # Parse each notification to extract status
+        for notif in refund_notifications:
+            try:
+                import json
+                details = json.loads(notif.body)
+                entry_ids = details.get("ledger_entry_ids", [])
+                status = details.get("status", "pending")
+                denial_reason = details.get("denial_reason")
+                
+                for entry_id in entry_ids:
+                    refund_statuses[entry_id] = {
+                        "status": status,
+                        "denial_reason": denial_reason,
+                        "notification_id": str(notif.id)
+                    }
+            except (json.JSONDecodeError, KeyError, TypeError):
+                # Old format or invalid JSON, skip
+                continue
+    except Exception:
+        # Notifications not available or error, continue without status
+        pass
+    
+    charges = []
+    for entry in recent:
+        entry_id = entry.id or 0
+        refund_info = refund_statuses.get(entry_id, {})
+        
+        charge = CreditChargeItem(
+            id=entry_id,
+            timestamp=entry.created_at,
+            episode_id=entry.episode_id,
+            direction=entry.direction.value if hasattr(entry.direction, 'value') else str(entry.direction),
+            reason=entry.reason.value if hasattr(entry.reason, 'value') else str(entry.reason),
+            credits=float(entry.credits),
+            minutes=entry.minutes,
+            notes=entry.notes,
+            refund_status=refund_info.get("status"),
+            refund_denial_reason=refund_info.get("denial_reason")
+        )
+        
+        # Try to get episode title if episode_id exists
+        if entry.episode_id:
+            try:
+                episode = session.get(Episode, entry.episode_id)
+                if episode:
+                    charge.episode_title = episode.title
+            except Exception:
+                pass
+        
+        charges.append(charge)
+    
+    total_pages = (total_count + per_page - 1) // per_page if total_count > 0 else 1
+    
+    return CreditChargesResponse(
+        charges=charges,
+        pagination={
+            "page": page,
+            "per_page": per_page,
+            "total": total_count,
+            "total_pages": total_pages
+        },
+        credits_balance=float(balance),
+        credits_allocated=float(tier_credits) if tier_credits is not None else None,
+        credits_used_this_month=float(breakdown.get('total', 0)),
+        credits_breakdown={
+            "transcription": float(breakdown.get('transcription', 0)),
+            "assembly": float(breakdown.get('assembly', 0)),
+            "tts_generation": float(breakdown.get('tts_generation', 0)),
+            "auphonic_processing": float(breakdown.get('auphonic_processing', 0)),
+            "storage": float(breakdown.get('storage', 0)),
+        },
+        purchased_credits_available=float(wallet_details.get("purchased_credits_available", 0.0)),
+        monthly_allocation_available=float(wallet_details.get("monthly_allocation_available", 0.0)),
+        monthly_credits=float(wallet_details.get("monthly_credits", 0.0)),
+        rollover_credits=float(wallet_details.get("rollover_credits", 0.0)),
+    )
 
 
 def _parse_cost_breakdown(json_str: Optional[str]) -> Optional[dict]:

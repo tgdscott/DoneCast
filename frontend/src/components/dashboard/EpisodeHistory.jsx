@@ -10,6 +10,7 @@ import CoverCropper from './CoverCropper';
 import { makeApi, isApiError, assetUrl } from "@/lib/apiClient.js";
 import { useResolvedTimezone } from "@/hooks/useResolvedTimezone";
 import { formatInTimezone } from "@/lib/timezone";
+import { toast } from "@/hooks/use-toast";
 // ------------------------------
 // Utility helpers (pure / outside component to avoid re-creation)
 // ------------------------------
@@ -436,27 +437,51 @@ export default function EpisodeHistory({ token, onBack }) {
         setEditValues(v=>({...v,cover_uploading:true}));
         try {
           const fd = new FormData();
-            let fileToSend = editValues.cover_file;
-            if(cropperRef.current){
-              try {
-                const blob = await cropperRef.current.getProcessedBlob();
-                if(blob){
-                  fileToSend = new File([blob], editValues.cover_file.name.replace(/\.[^.]+$/,'')+"-square.jpg", { type:'image/jpeg' });
-                }
-                if(cropperRef.current.getMode && cropperRef.current.getMode()==='pad' && body.image_crop){
-                  delete body.image_crop; // pad mode keeps full image
-                }
-              } catch {}
+          let fileToSend = editValues.cover_file;
+          if(cropperRef.current){
+            try {
+              const blob = await cropperRef.current.getProcessedBlob();
+              if(blob){
+                fileToSend = new File([blob], editValues.cover_file.name.replace(/\.[^.]+$/,'')+"-square.jpg", { type:'image/jpeg' });
+              }
+              if(cropperRef.current.getMode && cropperRef.current.getMode()==='pad' && body.image_crop){
+                delete body.image_crop; // pad mode keeps full image
+              }
+            } catch (err) {
+              console.warn('Failed to process cover image with cropper', err);
             }
+          }
           fd.append('file', fileToSend);
           const api = makeApi(token);
           try {
             const uj = await api.raw('/api/media/upload/cover_art', { method:'POST', body: fd });
             coverPath = uj?.filename || uj?.path || uj?.stored_as || null;
+            if (!coverPath) {
+              throw new Error('Cover upload succeeded but no path returned from server');
+            }
           } catch (e) {
-            console.warn('Cover upload failed', e);
+            const errorMsg = isApiError(e) ? (e.detail || e.error || e.message) : (e.message || String(e));
+            const displayMsg = errorMsg || 'Cover upload failed. Please try again.';
+            toast({
+              variant: 'destructive',
+              title: 'Cover upload failed',
+              description: displayMsg
+            });
+            setEditValues(v=>({...v,cover_uploading:false}));
+            setSaving(false);
+            return; // Abort save - don't PATCH without cover_image_path
           }
-        } catch(err){ console.warn('Cover upload error', err); }
+        } catch(err){
+          const errorMsg = err?.message || String(err);
+          toast({
+            variant: 'destructive',
+            title: 'Cover upload error',
+            description: errorMsg || 'Failed to prepare cover image for upload'
+          });
+          setEditValues(v=>({...v,cover_uploading:false}));
+          setSaving(false);
+          return; // Abort save
+        }
         setEditValues(v=>({...v,cover_uploading:false}));
       }
       if(coverPath) body.cover_image_path = coverPath;
@@ -1314,7 +1339,7 @@ export default function EpisodeHistory({ token, onBack }) {
                     size="icon"
                     onClick={() => handleAiGenerate('title')}
                     disabled={saving || aiBusy.title}
-                    title="Regenerate title with AI"
+                    title="Regenerate title with AI (1 credit)"
                   >
                     {aiBusy.title ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
                   </Button>
@@ -1352,7 +1377,7 @@ export default function EpisodeHistory({ token, onBack }) {
                       size="icon"
                       onClick={() => handleAiGenerate('description')}
                       disabled={saving || aiBusy.description}
-                      title="Regenerate description with AI"
+                      title="Regenerate description with AI (2 credits)"
                     >
                       {aiBusy.description ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
                     </Button>
@@ -1394,7 +1419,7 @@ export default function EpisodeHistory({ token, onBack }) {
                     size="icon"
                     onClick={() => handleAiGenerate('tags')}
                     disabled={saving || aiBusy.tags}
-                    title="Regenerate tags with AI"
+                    title="Regenerate tags with AI (1 credit)"
                   >
                     {aiBusy.tags ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
                   </Button>
@@ -1427,7 +1452,7 @@ export default function EpisodeHistory({ token, onBack }) {
                 <CoverCropper
                   ref={cropperRef}
                   sourceFile={editValues.cover_file}
-                  existingUrl={resolveAssetUrl(editing?.cover_url) || (editing ? resolveAssetUrl(`/api/episodes/${editing.id}/cover`) : null)}
+                  existingUrl={resolveAssetUrl(editing?.cover_url) || (editing && (editing.cover_path || editing.gcs_cover_path) ? resolveAssetUrl(`/api/episodes/${editing.id}/cover`) : null)}
                   value={editValues.cover_file ? editValues.image_crop : (editing?.image_crop || '')}
                   onChange={(c)=>setEditValues(v=>{
                     // Only store crop if a new file is selected; otherwise ignore (can't edit existing)
