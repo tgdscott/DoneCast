@@ -885,3 +885,42 @@ async def retry_queued_episodes_task(request: Request, x_tasks_auth: str | None 
         log.exception("event=retry_queued_episodes.error err=%s", exc)
         raise HTTPException(status_code=500, detail=f"Failed to retry queued episodes: {exc}")
 
+
+@router.post("/maintenance/check-stuck-episodes")
+async def maintenance_check_stuck_episodes(
+    request: Request,
+    x_tasks_auth: str | None = Header(default=None),
+):
+    """Check for episodes stuck in processing/queued due to Cloud Tasks/worker failures.
+    
+    This endpoint:
+    - Finds episodes in processing/queued status for > 60 minutes
+    - Checks if they have Cloud Tasks job IDs
+    - Marks episodes as error if Cloud Tasks has failed or retries exhausted
+    - Provides clear error messages for users
+    
+    Can be called by Cloud Scheduler or a background task.
+    """
+    if not _IS_DEV:
+        # Accept either Cloud Scheduler OIDC token OR legacy TASKS_AUTH header
+        auth_header = request.headers.get("Authorization", "")
+        has_oidc = auth_header.startswith("Bearer ")
+        has_tasks_auth = x_tasks_auth and x_tasks_auth == _TASKS_AUTH
+        
+        if not (has_oidc or has_tasks_auth):
+            raise HTTPException(status_code=401, detail="unauthorized")
+    
+    try:
+        from api.services.episodes.cloud_tasks_monitor import check_stuck_episodes
+        session_gen = get_session()
+        session = next(session_gen)
+        try:
+            marked = check_stuck_episodes(session, limit=100)
+            log.info("event=check_stuck_episodes.completed marked=%d", marked)
+            return {"ok": True, "marked_as_error": marked}
+        finally:
+            session.close()
+    except Exception as exc:
+        log.exception("event=check_stuck_episodes.error err=%s", exc)
+        raise HTTPException(status_code=500, detail=f"Failed to check stuck episodes: {exc}")
+

@@ -3,8 +3,10 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
+from sqlalchemy import or_, and_
 
 from api.core.paths import FINAL_DIR, MEDIA_DIR
+from api.models.podcast import EpisodeStatus
 
 
 def _final_url_for(path: Optional[str]) -> Optional[str]:
@@ -471,10 +473,52 @@ def compute_cover_info(episode: Any, *, now: Optional[datetime] = None) -> dict[
     }
 
 
+def is_published_condition(now: Optional[datetime] = None):
+    """
+    Returns a SQLAlchemy condition that matches episodes that are "published".
+    
+    An episode is considered "published" if:
+    1. status == 'published' (explicitly published), OR
+    2. status == 'processed' AND publish_at <= now (scheduled episode whose time has passed)
+    
+    This unifies the logic so publish_at is the source of truth for published status,
+    eliminating the need for a maintenance job to update status when publish_at passes.
+    
+    Args:
+        now: Current datetime (UTC). If None, uses datetime.now(timezone.utc)
+    
+    Returns:
+        SQLAlchemy condition that can be used in .where() clauses
+    
+    Usage:
+        from api.routers.episodes.common import is_published_condition
+        from api.models.podcast import Episode
+        episodes = session.exec(
+            select(Episode).where(is_published_condition())
+        ).all()
+    """
+    # Import here to avoid circular imports and ensure Episode is the SQLModel class
+    from api.models.podcast import Episode
+    
+    if now is None:
+        now = datetime.now(timezone.utc)
+    
+    # Build the condition using Episode model columns
+    return or_(
+        Episode.status == EpisodeStatus.published,
+        and_(
+            Episode.status == EpisodeStatus.processed,
+            Episode.publish_at.isnot(None),
+            Episode.publish_at <= now
+        )
+    )
+
+
 __all__ = [
     "_final_url_for",
     "_cover_url_for",
     "_status_value",
     "compute_playback_info",
     "compute_cover_info",
+    "is_published_condition",
 ]

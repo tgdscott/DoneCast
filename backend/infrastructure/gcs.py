@@ -228,15 +228,28 @@ def _local_media_path(key: str) -> Path:
 
 
 def _is_dev_env() -> bool:
-    env = (
-        os.getenv("APP_ENV")
-        or os.getenv("ENV")
-        or os.getenv("PYTHON_ENV")
-        or ""
-    ).strip().lower()
-    if not env:
-        return True  # Treat unset as development for local runs.
-    return env in {"dev", "development", "local", "test", "testing"}
+    """Check if running in development environment.
+    
+    Returns False (safe default) if environment parsing fails, with logging.
+    """
+    try:
+        env = (
+            os.getenv("APP_ENV")
+            or os.getenv("ENV")
+            or os.getenv("PYTHON_ENV")
+            or ""
+        ).strip().lower()
+        if not env:
+            return True  # Treat unset as development for local runs.
+        return env in {"dev", "development", "local", "test", "testing"}
+    except Exception as e:
+        logger.warning(
+            "event=env.check_failed function=_is_dev_env error=%s - "
+            "Environment variable parsing failed, defaulting to False (production mode)",
+            str(e),
+            exc_info=True
+        )
+        return False  # Safe default: treat as production if parsing fails
 
 
 def _looks_like_local_bucket(bucket_name: str) -> bool:

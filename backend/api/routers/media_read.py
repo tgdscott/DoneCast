@@ -2,8 +2,9 @@ from collections import defaultdict
 import json
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple, Optional
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import text as _sa_text
@@ -22,6 +23,10 @@ from api.services.intent_detection import analyze_intents, get_user_commands
 from .media_schemas import MainContentItem
 
 logger = logging.getLogger(__name__)
+
+# Recovery attempt thresholds
+MAX_RECOVERY_ATTEMPTS = 3
+MAX_RECOVERY_TIME_MINUTES = 5
 
 router = APIRouter(prefix="/media", tags=["Media Library"])
 
@@ -51,12 +56,21 @@ async def list_user_media(
     return session.exec(statement).all()
 
 
-def _resolve_transcript_path(filename: str, session: Session | None = None) -> Path:
+def _resolve_transcript_path(
+    filename: str, 
+    session: Session | None = None,
+    media_item: MediaItem | None = None
+) -> Tuple[Path, Optional[str]]:
     """Resolve transcript path, downloading from GCS if missing locally.
     
     After Cloud Run deployments, local ephemeral storage is wiped. This function
     checks GCS for transcripts that were previously uploaded and downloads them
     back to local storage so the frontend can see transcript_ready=True.
+    
+    Returns:
+        Tuple of (transcript_path, error_message)
+        - transcript_path: Path to transcript file (may not exist)
+        - error_message: None if no error, or error message if recovery exhausted
     """
     stem = Path(filename).stem
     candidates = [
@@ -69,7 +83,7 @@ def _resolve_transcript_path(filename: str, session: Session | None = None) -> P
     # Check if any candidate exists locally
     for candidate in candidates:
         if candidate.exists():
-            return candidate
+            return (candidate, None)
     
     # No local file found - try to recover from GCS using MediaTranscript metadata
     if session is not None:
@@ -80,6 +94,67 @@ def _resolve_transcript_path(filename: str, session: Session | None = None) -> P
             
             if transcript_record and transcript_record.transcript_meta_json:
                 meta = json.loads(transcript_record.transcript_meta_json)
+                
+                # Track recovery attempts in metadata
+                recovery_attempts = meta.get("gcs_recovery_attempts", [])
+                first_attempt_time = meta.get("gcs_recovery_first_attempt")
+                
+                # Check if recovery is exhausted
+                now = datetime.utcnow()
+                if first_attempt_time:
+                    try:
+                        # Parse ISO format timestamp (handle both with and without timezone)
+                        first_attempt_str = first_attempt_time.replace('Z', '+00:00')
+                        if '+' in first_attempt_str or first_attempt_str.endswith('00:00'):
+                            # Has timezone info
+                            first_attempt = datetime.fromisoformat(first_attempt_str)
+                            # Convert to naive UTC datetime for comparison
+                            if first_attempt.tzinfo:
+                                first_attempt = first_attempt.replace(tzinfo=None)
+                        else:
+                            # No timezone, assume UTC
+                            first_attempt = datetime.fromisoformat(first_attempt_str)
+                        time_elapsed = (now - first_attempt).total_seconds() / 60
+                        if time_elapsed > MAX_RECOVERY_TIME_MINUTES:
+                                error_msg = (
+                                    f"Transcript recovery failed after {MAX_RECOVERY_TIME_MINUTES} minutes. "
+                                    "The transcript file may be missing from storage. Please re-upload the audio file."
+                                )
+                                logger.error(
+                                    "[media_read] event=transcript.recovery.exhausted filename=%s attempts=%d time_elapsed_min=%.1f",
+                                    filename, len(recovery_attempts), time_elapsed
+                                )
+                                # Mark MediaItem with error if available
+                                if media_item:
+                                    media_item.transcription_error = error_msg
+                                    session.add(media_item)
+                                    try:
+                                        session.commit()
+                                    except Exception:
+                                        session.rollback()
+                                return (candidates[0], error_msg)
+                    except Exception as e:
+                        logger.warning("[media_read] Error parsing recovery timestamp: %s", e)
+                
+                if len(recovery_attempts) >= MAX_RECOVERY_ATTEMPTS:
+                    error_msg = (
+                        f"Transcript recovery failed after {MAX_RECOVERY_ATTEMPTS} attempts. "
+                        "The transcript file may be missing from storage. Please re-upload the audio file."
+                    )
+                    logger.error(
+                        "[media_read] event=transcript.recovery.exhausted filename=%s attempts=%d",
+                        filename, len(recovery_attempts)
+                    )
+                    # Mark MediaItem with error if available
+                    if media_item:
+                        media_item.transcription_error = error_msg
+                        session.add(media_item)
+                        try:
+                            session.commit()
+                        except Exception:
+                            session.rollback()
+                    return (candidates[0], error_msg)
+                
                 gcs_uri = meta.get("gcs_json") or meta.get("gcs_uri")
                 bucket_stem = meta.get("bucket_stem") or meta.get("safe_stem") or stem
                 
@@ -115,17 +190,46 @@ def _resolve_transcript_path(filename: str, session: Session | None = None) -> P
                                 "[media_read] Recovered transcript from gs://%s/%s to %s",
                                 bucket_name, key, local_path
                             )
-                            return local_path
+                            # Clear recovery attempts on success
+                            if recovery_attempts:
+                                meta.pop("gcs_recovery_attempts", None)
+                                meta.pop("gcs_recovery_first_attempt", None)
+                                transcript_record.transcript_meta_json = json.dumps(meta)
+                                session.add(transcript_record)
+                                try:
+                                    session.commit()
+                                except Exception:
+                                    session.rollback()
+                            return (local_path, None)
+                        else:
+                            # Download returned None (file doesn't exist in GCS)
+                            raise Exception("Transcript file not found in GCS bucket")
                     except Exception as e:
+                        # Track this failed attempt
+                        attempt_info = {
+                            "timestamp": now.isoformat(),
+                            "error": str(e)[:200]  # Truncate long errors
+                        }
+                        recovery_attempts.append(attempt_info)
+                        if not first_attempt_time:
+                            meta["gcs_recovery_first_attempt"] = now.isoformat()
+                        meta["gcs_recovery_attempts"] = recovery_attempts
+                        transcript_record.transcript_meta_json = json.dumps(meta)
+                        session.add(transcript_record)
+                        try:
+                            session.commit()
+                        except Exception:
+                            session.rollback()
+                        
                         logger.warning(
-                            "[media_read] Could not download transcript from GCS for %s: %s",
-                            filename, e
+                            "[media_read] event=transcript.recovery.failed filename=%s attempt=%d/%d error=%s",
+                            filename, len(recovery_attempts), MAX_RECOVERY_ATTEMPTS, str(e)[:100]
                         )
         except Exception as e:
             logger.warning("[media_read] Error checking MediaTranscript for %s: %s", filename, e)
     
     # Return first candidate even if it doesn't exist (for backwards compatibility)
-    return candidates[0]
+    return (candidates[0], None)
 
 
 def _compute_duration(words) -> float | None:
@@ -179,17 +283,23 @@ async def list_main_content_uploads(
     results: List[MainContentItem] = []
     for item in uploads:
         filename = str(item.filename)
-        # Pass session so we can query MediaTranscript and recover from GCS if needed
-        transcript_path = _resolve_transcript_path(filename, session=session)
-        ready = transcript_path.exists()
-        # If a worker already notified watchers for this filename, consider it ready
-        if not ready:
+        # Pass session and media_item so we can query MediaTranscript, recover from GCS, and track errors
+        transcript_path, transcript_error = _resolve_transcript_path(filename, session=session, media_item=item)
+        ready = transcript_path.exists() and transcript_error is None
+        
+        # If a worker already notified watchers for this filename, consider it ready (unless there's an error)
+        if not ready and transcript_error is None:
             try:
                 wlist = watch_map.get(filename, [])
                 if any(getattr(w, "notified_at", None) is not None for w in wlist):
                     ready = True
             except Exception:
                 pass
+        
+        # If there's a transcription_error on the MediaItem, use that as the error message
+        if transcript_error is None and item.transcription_error:
+            transcript_error = item.transcription_error
+        
         intents = {}
         duration = None
         if ready:
@@ -216,6 +326,7 @@ async def list_main_content_uploads(
                 created_at=item.created_at,
                 expires_at=item.expires_at,
                 transcript_ready=ready,
+                transcript_error=transcript_error,
                 intents=intents or {},
                 notify_pending=pending,
                 duration_seconds=duration,

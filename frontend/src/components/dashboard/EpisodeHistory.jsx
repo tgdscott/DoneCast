@@ -451,21 +451,103 @@ export default function EpisodeHistory({ token, onBack }) {
               console.warn('Failed to process cover image with cropper', err);
             }
           }
-          fd.append('file', fileToSend);
           const api = makeApi(token);
+          // Try the same pattern as creator wizard: episode_cover first, then cover_art fallback
+          let uploadResult = null;
           try {
-            const uj = await api.raw('/api/media/upload/cover_art', { method:'POST', body: fd });
-            coverPath = uj?.filename || uj?.path || uj?.stored_as || null;
+            // First try: episode_cover endpoint with 'files' field (plural)
+            const fd1 = new FormData();
+            fd1.append('files', fileToSend);
+            fd1.append('friendly_names', JSON.stringify([fileToSend.name || 'cover.jpg']));
+            try {
+              const result1 = await api.raw('/api/media/upload/episode_cover', { method:'POST', body: fd1 });
+              if (result1 && Array.isArray(result1) && result1.length > 0) {
+                uploadResult = result1[0];
+              } else if (result1 && result1.filename) {
+                uploadResult = result1;
+              }
+            } catch (e1) {
+              // Fallback: cover_art endpoint with 'file' field (singular)
+              const fd2 = new FormData();
+              fd2.append('file', fileToSend);
+              try {
+                const result2 = await api.raw('/api/media/upload/cover_art', { method:'POST', body: fd2 });
+                uploadResult = result2;
+              } catch (e2) {
+                // Both failed, throw the more specific error
+                throw e2.status === 422 || e2.status === 400 ? e2 : e1;
+              }
+            }
+            
+            // Extract path from result
+            if (uploadResult) {
+              coverPath = uploadResult.filename || uploadResult.path || uploadResult.stored_as || null;
+              if (Array.isArray(uploadResult) && uploadResult.length > 0) {
+                coverPath = uploadResult[0].filename || uploadResult[0].path || uploadResult[0].stored_as || null;
+              }
+            }
+            
             if (!coverPath) {
               throw new Error('Cover upload succeeded but no path returned from server');
             }
           } catch (e) {
-            const errorMsg = isApiError(e) ? (e.detail || e.error || e.message) : (e.message || String(e));
-            const displayMsg = errorMsg || 'Cover upload failed. Please try again.';
+            // Extract detailed error message - handle various error response formats
+            let errorMsg = 'Cover upload failed. Please try again.';
+            console.error('Cover upload error:', e);
+            
+            if (isApiError(e)) {
+              // Handle nested error structure: { error: { code, message, details } }
+              if (e.error && typeof e.error === 'object') {
+                if (e.error.message) {
+                  errorMsg = e.error.message;
+                  if (e.error.details && Array.isArray(e.error.details)) {
+                    const detailMsgs = e.error.details.map(d => {
+                      if (typeof d === 'string') return d;
+                      if (d && typeof d === 'object') return d.msg || d.message || JSON.stringify(d);
+                      return String(d);
+                    }).filter(Boolean);
+                    if (detailMsgs.length > 0) {
+                      errorMsg += ': ' + detailMsgs.join(', ');
+                    }
+                  }
+                } else if (e.error.code) {
+                  errorMsg = e.error.code;
+                } else {
+                  errorMsg = JSON.stringify(e.error);
+                }
+              } 
+              // Handle detail field (can be string, object, or array)
+              else if (e.detail) {
+                if (typeof e.detail === 'string') {
+                  errorMsg = e.detail;
+                } else if (typeof e.detail === 'object' && e.detail.message) {
+                  errorMsg = e.detail.message;
+                } else if (Array.isArray(e.detail)) {
+                  errorMsg = e.detail.map(err => {
+                    if (typeof err === 'string') return err;
+                    if (err && typeof err === 'object') return err.msg || err.message || JSON.stringify(err);
+                    return String(err);
+                  }).join(', ');
+                } else {
+                  errorMsg = JSON.stringify(e.detail);
+                }
+              } 
+              // Fallback to error or message fields
+              else if (e.error) {
+                errorMsg = String(e.error);
+              } else if (e.message) {
+                errorMsg = String(e.message);
+              }
+            } else if (e && typeof e === 'object' && e.message) {
+              errorMsg = String(e.message);
+            } else if (typeof e === 'string') {
+              errorMsg = e;
+            }
+            
             toast({
               variant: 'destructive',
               title: 'Cover upload failed',
-              description: displayMsg
+              description: errorMsg
             });
             setEditValues(v=>({...v,cover_uploading:false}));
             setSaving(false);

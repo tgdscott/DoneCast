@@ -175,14 +175,20 @@ def _should_auto_fallback() -> bool:
 def _should_allow_inline_fallback() -> bool:
     """Return True when inline fallback is allowed after worker dispatch fails.
     
-    In production, this should be False to prevent Cloud Run from falling back
+    In production, this should ALWAYS be False to prevent Cloud Run from falling back
     to inline processing when the worker times out. The worker will complete
     asynchronously, and the episode status will be updated via polling.
     
     CRITICAL: If a worker server is configured, NEVER allow inline fallback.
     The user has explicitly set up a worker server and expects all processing
     to happen there, not inline.
+    
+    CRITICAL: In production (APP_ENV=production), inline fallback is NEVER allowed,
+    regardless of other configuration. This prevents resource contention and
+    ensures proper worker isolation.
     """
+    log = logging.getLogger("assemble")
+    
     try:
         # CRITICAL: If worker server is configured, NEVER allow inline fallback
         worker_url_base = os.getenv("WORKER_URL_BASE")
@@ -192,10 +198,20 @@ def _should_allow_inline_fallback() -> bool:
         use_worker_in_dev = use_worker_in_dev_raw and use_worker_in_dev_raw.lower().strip() in {"true", "1", "yes", "on"}
         worker_server_configured = worker_url_base and (is_production or use_worker_in_dev)
         
+        # CRITICAL: In production, NEVER allow inline fallback
+        if is_production:
+            log.info(
+                "event=assemble.service.inline_fallback_disabled_production app_env=%s - "
+                "Inline fallback disabled in production environment",
+                app_env
+            )
+            return False
+        
         if worker_server_configured:
             # Worker server is configured - NEVER allow inline fallback
-            logging.getLogger("assemble").info(
-                "event=assemble.service.inline_fallback_disabled_worker_configured worker_url=%s - Worker server is configured, inline fallback disabled",
+            log.info(
+                "event=assemble.service.inline_fallback_disabled_worker_configured worker_url=%s - "
+                "Worker server is configured, inline fallback disabled",
                 worker_url_base
             )
             return False
@@ -203,13 +219,46 @@ def _should_allow_inline_fallback() -> bool:
         # Check explicit env var (defaults to False for safety)
         raw = (os.getenv("ALLOW_ASSEMBLY_INLINE_FALLBACK") or "").strip().lower()
         if raw in {"1", "true", "yes", "on"}:
+            log.warning(
+                "event=assemble.service.inline_fallback_enabled_via_env app_env=%s - "
+                "Inline fallback explicitly enabled via ALLOW_ASSEMBLY_INLINE_FALLBACK env var. "
+                "This should only be used in development environments.",
+                app_env
+            )
             return True
         if raw in {"0", "false", "no", "off"}:
+            log.info(
+                "event=assemble.service.inline_fallback_disabled_via_env app_env=%s - "
+                "Inline fallback explicitly disabled via ALLOW_ASSEMBLY_INLINE_FALLBACK env var",
+                app_env
+            )
             return False
+        
         # Default: only allow in dev environments (and only if worker server is NOT configured)
         env = (os.getenv("APP_ENV") or "dev").strip().lower()
-        return env in {"dev", "development", "local"}
-    except Exception:
+        allowed = env in {"dev", "development", "local"}
+        
+        if allowed:
+            log.info(
+                "event=assemble.service.inline_fallback_allowed_dev app_env=%s - "
+                "Inline fallback allowed in development environment",
+                env
+            )
+        else:
+            log.info(
+                "event=assemble.service.inline_fallback_disabled_default app_env=%s - "
+                "Inline fallback disabled by default (not a dev environment)",
+                env
+            )
+        
+        return allowed
+    except Exception as e:
+        log.error(
+            "event=assemble.service.inline_fallback_check_failed error=%s - "
+            "Error checking if inline fallback should be allowed, defaulting to False for safety",
+            str(e),
+            exc_info=True
+        )
         return False
 
 
@@ -217,9 +266,14 @@ _INLINE_EXECUTOR = None
 
 
 def _load_inline_executor():
-    """Return a callable capable of running the assembly orchestration inline."""
+    """Return a callable capable of running the assembly orchestration inline.
+    
+    Returns None if the inline executor cannot be loaded. This should be logged
+    as it indicates a configuration or import issue.
+    """
 
     global _INLINE_EXECUTOR
+    log = logging.getLogger("assemble")
 
     if _INLINE_EXECUTOR is not None:
         return _INLINE_EXECUTOR
@@ -234,14 +288,30 @@ def _load_inline_executor():
     for module_name in module_candidates:
         try:
             module = import_module(module_name)
-        except Exception:
+        except Exception as import_err:
+            log.debug(
+                "[assemble] Failed to import module %s for inline executor: %s",
+                module_name, import_err
+            )
             continue
         candidate = getattr(module, "orchestrate_create_podcast_episode", None)
         if callable(candidate):
             _INLINE_EXECUTOR = candidate
+            log.info(
+                "[assemble] Loaded inline executor from module %s",
+                module_name
+            )
             return _INLINE_EXECUTOR
 
     # Celery has been removed - only use inline orchestrator
+    # Log this as a warning since it means inline fallback cannot be used
+    log.warning(
+        "event=assemble.service.inline_executor_unavailable - "
+        "Inline executor could not be loaded from any candidate module. "
+        "Inline fallback will not be available. "
+        "Candidates tried: %s",
+        ", ".join(module_candidates)
+    )
     return None
 
 
@@ -258,11 +328,44 @@ def _run_inline_fallback(
     intents: Optional[Dict[str, Any]],
     use_auphonic: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    """Attempt to execute episode assembly inline when workers are unavailable."""
+    """Attempt to execute episode assembly inline when workers are unavailable.
+    
+    WARNING: Inline execution in production is NOT intended behavior and should
+    trigger investigation. This function logs high-severity events when called
+    in production environments.
+    """
 
+    log = logging.getLogger("assemble")
+    
+    # Check if we're in production - inline fallback should be rare/never in production
+    app_env = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower()
+    is_production = app_env == "production"
+    
     task_fn = _load_inline_executor()
     if not task_fn:
+        # Inline executor cannot be loaded - this is a configuration issue
+        log.error(
+            "event=assemble.service.inline_fallback_failed episode_id=%s reason=executor_unavailable - "
+            "Inline fallback attempted but executor could not be loaded",
+            str(episode_id)
+        )
         return None
+
+    # Log high-severity warning if this happens in production
+    if is_production:
+        log.error(
+            "event=assemble.service.inline_fallback_unexpected episode_id=%s app_env=%s - "
+            "CRITICAL: Inline fallback is being used in production. This is NOT intended behavior. "
+            "Worker server or Cloud Tasks should be handling assembly. "
+            "This indicates a configuration or infrastructure issue that requires immediate investigation.",
+            str(episode_id), app_env
+        )
+    else:
+        log.warning(
+            "event=assemble.service.falling_back_to_inline episode_id=%s app_env=%s - "
+            "Falling back to inline execution (dev environment only - this should not happen in production)",
+            str(episode_id), app_env
+        )
 
     try:
         result = task_fn(
@@ -278,15 +381,34 @@ def _run_inline_fallback(
             skip_charge=True,
             use_auphonic=use_auphonic,
         )
+        
+        # Log success but with appropriate severity based on environment
+        if is_production:
+            log.error(
+                "event=assemble.service.inline_fallback_completed episode_id=%s - "
+                "Inline fallback completed in PRODUCTION. This should not happen. "
+                "Investigate why worker server or Cloud Tasks was unavailable.",
+                str(episode_id)
+            )
+        else:
+            log.info(
+                "event=assemble.service.inline_fallback_completed episode_id=%s - "
+                "Inline fallback completed successfully (dev environment)",
+                str(episode_id)
+            )
+        
         return {
             "mode": "fallback-inline",
             "job_id": "fallback-inline",
             "result": result,
             "episode_id": str(episode_id),
         }
-    except Exception:
-        logging.getLogger("assemble").exception(
-            "[assemble] Inline fallback execution failed", exc_info=True
+    except Exception as exc:
+        log.error(
+            "event=assemble.service.inline_fallback_execution_failed episode_id=%s error=%s - "
+            "Inline fallback execution failed",
+            str(episode_id), str(exc),
+            exc_info=True
         )
         return None
 
@@ -999,10 +1121,48 @@ def assemble_or_queue(
                     else:
                         # Non-2xx response: worker failed, inline processing is disabled
                         log.error("event=assemble.service.worker_direct_non_2xx episode_id=%s status=%s - Worker server returned error", str(ep.id), r.status_code)
+                        # Track worker endpoint error
+                        try:
+                            from api.services.episodes.cloud_tasks_monitor import handle_worker_endpoint_error
+                            handle_worker_endpoint_error(
+                                session,
+                                ep.id,
+                                r.status_code,
+                                r.text[:200] if r.text else f"HTTP {r.status_code}",
+                            )
+                        except Exception as track_err:
+                            log.warning("event=assemble.service.track_worker_error_failed episode_id=%s error=%s", str(ep.id), str(track_err))
                         # Fall through to raise error - inline processing is disabled
+            except httpx.HTTPStatusError as http_err:
+                # Worker POST failed with HTTP error
+                status_code = http_err.response.status_code if http_err.response else 500
+                log.error("event=assemble.service.worker_direct_http_error episode_id=%s status=%s - Worker server HTTP error", str(ep.id), status_code)
+                # Track worker endpoint error
+                try:
+                    from api.services.episodes.cloud_tasks_monitor import handle_worker_endpoint_error
+                    handle_worker_endpoint_error(
+                        session,
+                        ep.id,
+                        status_code,
+                        str(http_err)[:200],
+                    )
+                except Exception as track_err:
+                    log.warning("event=assemble.service.track_worker_error_failed episode_id=%s error=%s", str(ep.id), str(track_err))
+                # Fall through to raise error - inline processing is disabled
             except Exception as worker_err:
                 # Worker POST failed: inline processing is disabled
                 log.error("event=assemble.service.worker_direct_failed episode_id=%s error=%s - Worker server unavailable", str(ep.id), str(worker_err))
+                # Track worker endpoint error (network/connection errors)
+                try:
+                    from api.services.episodes.cloud_tasks_monitor import handle_worker_endpoint_error
+                    handle_worker_endpoint_error(
+                        session,
+                        ep.id,
+                        0,  # 0 indicates network/connection error
+                        str(worker_err)[:200],
+                    )
+                except Exception as track_err:
+                    log.warning("event=assemble.service.track_worker_error_failed episode_id=%s error=%s", str(ep.id), str(track_err))
                 # Fall through to raise error - inline processing is disabled
         
         # If we get here, worker dispatch failed - queue the episode for later processing if worker_url_base is set

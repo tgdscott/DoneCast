@@ -12,6 +12,7 @@ from sqlmodel import Session, select
 from api.core.database import get_session
 from api.models.podcast import Episode, Podcast, PodcastTemplate
 from api.models.user import User
+from api.routers.episodes.common import is_published_condition
 
 from .deps import get_current_admin_user
 
@@ -37,7 +38,7 @@ def admin_summary(
     template_count = session.exec(select(func.count(PodcastTemplate.id))).one()
     episode_count = session.exec(select(func.count(Episode.id))).one()
     published_count = session.exec(
-        select(func.count(Episode.id)).where(Episode.status == "published")
+        select(func.count(Episode.id)).where(is_published_condition())
     ).one()
     return {
         "users": user_count,
