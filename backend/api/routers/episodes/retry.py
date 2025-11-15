@@ -97,8 +97,12 @@ def retry_episode(
              ep.id, template_id, main_content_filename)
     
     try:
-        # Extract use_auphonic from metadata if present
-        use_auphonic = meta.get('use_auphonic', False)
+        # Extract advanced audio preference from metadata; fall back to account preference
+        use_auphonic = meta.get('use_auphonic')
+        if use_auphonic is None:
+            use_auphonic = bool(getattr(current_user, "use_advanced_audio_processing", False))
+        else:
+            use_auphonic = bool(use_auphonic)
         
         svc_result = _svc_assembler.assemble_or_queue(
             session=session,

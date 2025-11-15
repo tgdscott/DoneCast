@@ -342,72 +342,52 @@ def _finalize_episode(
     main_content_filename: str,
     output_filename: str,
     tts_values: dict,
+    use_auphonic: bool,
 ):
     episode = media_context.episode
     stream_log_path = str(ASSEMBLY_LOG_DIR / f"{episode.id}.log")
     
-    # ========== CHECK IF AUDIO WAS AUPHONIC-PROCESSED DURING UPLOAD ==========
-    # For Pro tier users, audio is processed by Auphonic DURING UPLOAD (not assembly)
-    # We need to check if the MediaItem has auphonic_processed=True and use cleaned audio
+    # ========== CHECK IF ADVANCED AUDIO ASSETS ARE AVAILABLE ==========
+    # Advanced mastering runs during upload/transcription; if requested we expect
+    # the MediaItem to mark itself as processed so we can pull the cleaned audio here.
+    auphonic_requested = bool(use_auphonic)
     auphonic_processed = False
-    use_auphonic = False  # For backward compatibility with existing code
     auphonic_cleaned_audio_path = None
     auphonic_processed_path = None  # For backward compatibility
     
-    try:
-        from api.models.podcast import MediaItem, MediaCategory
-        from sqlmodel import select
-        
-        # Find MediaItem for this episode's main content
-        # CRITICAL: Use main_content_filename (original upload), NOT episode.working_audio_name (cleaned)
-        # working_audio_name gets updated to "cleaned_*.mp3" but MediaItem.filename is original upload
-        filename_search = main_content_filename.split("/")[-1]
-        
-        logging.info("[assemble] 🔍 Searching for MediaItem: user=%s, filename_contains='%s'", episode.user_id, filename_search)
-        
-        # Try to find by filename match
-        media_item = session.exec(
-            select(MediaItem)
-            .where(MediaItem.user_id == episode.user_id)
-            .where(MediaItem.category == MediaCategory.main_content)
-            .where(MediaItem.filename.contains(filename_search))
-            .order_by(MediaItem.created_at.desc())
-        ).first()
-        
-        if media_item:
+    if auphonic_requested:
+        try:
+            from api.models.podcast import MediaItem, MediaCategory
+            from sqlmodel import select
+            
+            filename_search = main_content_filename.split("/")[-1]
             logging.info(
-                "[assemble] 🔍 Found MediaItem id=%s, filename='%s', auphonic_processed=%s",
-                media_item.id,
-                media_item.filename,
-                media_item.auphonic_processed
-            )
-        else:
-            logging.warning("[assemble] ⚠️ No MediaItem found for filename search '%s'", filename_search)
-        
-        if media_item and media_item.auphonic_processed:
-            auphonic_processed = True
-            use_auphonic = True  # Set for backward compatibility
-            logging.info(
-                "[assemble] ✅ Audio was Auphonic-processed during upload (MediaItem %s)",
-                media_item.id
+                "[assemble] 🔍 Searching for advanced audio assets: user=%s, filename_contains='%s'",
+                episode.user_id,
+                filename_search,
             )
             
-            # Use cleaned audio URL if available
-            if media_item.auphonic_cleaned_audio_url:
-                # Download cleaned audio from GCS
-                gcs_url = media_item.auphonic_cleaned_audio_url
-                if gcs_url.startswith("gs://"):
+            media_item = session.exec(
+                select(MediaItem)
+                .where(MediaItem.user_id == episode.user_id)
+                .where(MediaItem.category == MediaCategory.main_content)
+                .where(MediaItem.filename.contains(filename_search))
+                .order_by(MediaItem.created_at.desc())
+            ).first()
+            
+            if media_item and media_item.auphonic_processed:
+                auphonic_processed = True
+                logging.info("[assemble] ✅ Advanced audio located via MediaItem %s", media_item.id)
+                
+                if media_item.auphonic_cleaned_audio_url and media_item.auphonic_cleaned_audio_url.startswith("gs://"):
                     from pathlib import Path as PathLib
-                    # tempfile already imported at module level
                     
-                    # Download to temp location
                     temp_dir = PathLib(tempfile.gettempdir()) / f"auphonic_{episode.id}"
                     temp_dir.mkdir(parents=True, exist_ok=True)
-                    
                     temp_audio_path = temp_dir / f"auphonic_cleaned_{episode.id}.mp3"
                     
                     try:
-                        parts = gcs_url[5:].split("/", 1)
+                        parts = media_item.auphonic_cleaned_audio_url[5:].split("/", 1)
                         bucket_name = parts[0]
                         key = parts[1] if len(parts) > 1 else ""
                         
@@ -415,50 +395,52 @@ def _finalize_episode(
                         temp_audio_path.write_bytes(file_bytes)
                         
                         auphonic_cleaned_audio_path = temp_audio_path
-                        auphonic_processed_path = temp_audio_path  # For backward compatibility
+                        auphonic_processed_path = temp_audio_path
                         main_content_filename = str(temp_audio_path)
                         
                         logging.info(
-                            "[assemble] Downloaded Auphonic cleaned audio: %s (%d bytes)",
+                            "[assemble] Downloaded advanced audio master: %s (%d bytes)",
                             temp_audio_path,
-                            len(file_bytes)
+                            len(file_bytes),
                         )
                     except Exception as e:
-                        logging.error("[assemble] Failed to download Auphonic cleaned audio: %s", e)
+                        logging.error("[assemble] Failed to download advanced audio master: %s", e)
                         auphonic_processed = False
-            
-            # Load Auphonic metadata (show notes, chapters)
-            if media_item.auphonic_metadata:
-                try:
-                    import json
-                    auphonic_meta = json.loads(media_item.auphonic_metadata)
-                    logging.info("[assemble] ✅ Auphonic metadata available: %s", list(auphonic_meta.keys()))
-                    
-                    # Save AI-generated metadata to Episode
-                    if auphonic_meta.get("brief_summary"):
-                        episode.brief_summary = auphonic_meta["brief_summary"]
-                        logging.info("[assemble] ✅ Saved brief_summary (%d chars)", len(auphonic_meta["brief_summary"]))
-                    
-                    if auphonic_meta.get("long_summary"):
-                        episode.long_summary = auphonic_meta["long_summary"]
-                        logging.info("[assemble] ✅ Saved long_summary (%d chars)", len(auphonic_meta["long_summary"]))
-                    
-                    if auphonic_meta.get("tags"):
-                        episode.episode_tags = json.dumps(auphonic_meta["tags"])
-                        logging.info("[assemble] ✅ Saved %d tags", len(auphonic_meta["tags"]))
-                    
-                    if auphonic_meta.get("chapters"):
-                        episode.episode_chapters = json.dumps(auphonic_meta["chapters"])
-                        logging.info("[assemble] ✅ Saved %d chapters", len(auphonic_meta["chapters"]))
-                    
-                except Exception as e:
-                    logging.warning("[assemble] Failed to parse Auphonic metadata: %s", e)
-        else:
-            logging.info("[assemble] Audio not Auphonic-processed, using standard pipeline")
-    
-    except Exception as e:
-        logging.error("[assemble] Failed to check Auphonic processing status: %s", e, exc_info=True)
-        auphonic_processed = False
+                
+                if media_item and media_item.auphonic_metadata:
+                    try:
+                        import json
+                        
+                        auphonic_meta = json.loads(media_item.auphonic_metadata)
+                        logging.info("[assemble] ✅ Advanced metadata available: %s", list(auphonic_meta.keys()))
+                        
+                        if auphonic_meta.get("brief_summary"):
+                            episode.brief_summary = auphonic_meta["brief_summary"]
+                            logging.info("[assemble] ✅ Saved brief_summary (%d chars)", len(auphonic_meta["brief_summary"]))
+                        
+                        if auphonic_meta.get("long_summary"):
+                            episode.long_summary = auphonic_meta["long_summary"]
+                            logging.info("[assemble] ✅ Saved long_summary (%d chars)", len(auphonic_meta["long_summary"]))
+                        
+                        if auphonic_meta.get("tags"):
+                            episode.episode_tags = json.dumps(auphonic_meta["tags"])
+                            logging.info("[assemble] ✅ Saved %d tags", len(auphonic_meta["tags"]))
+                        
+                        if auphonic_meta.get("chapters"):
+                            episode.episode_chapters = json.dumps(auphonic_meta["chapters"])
+                            logging.info("[assemble] ✅ Saved %d chapters", len(auphonic_meta["chapters"]))
+                    except Exception as e:
+                        logging.warning("[assemble] Failed to parse advanced audio metadata: %s", e)
+            else:
+                logging.warning(
+                    "[assemble] ⚠️ Advanced audio requested but no processed MediaItem found for '%s'",
+                    filename_search,
+                )
+        except Exception as e:
+            logging.error("[assemble] Failed to load advanced audio state: %s", e, exc_info=True)
+            auphonic_processed = False
+    else:
+        logging.info("[assemble] Advanced audio disabled for this episode; using standard pipeline")
     
     # Build cleanup options
     if auphonic_processed:
@@ -703,7 +685,7 @@ def _finalize_episode(
     
     # Determine which audio file to use for mixing
     # Priority: Auphonic processed > chunked reassembled > resolved source path > working_audio_name > main_content_filename
-    if use_auphonic and auphonic_processed_path:
+    if auphonic_processed and auphonic_processed_path:
         audio_input_path = str(auphonic_processed_path)
     elif use_chunking:
         audio_input_path = main_content_filename  # This is the reassembled path
@@ -765,7 +747,7 @@ def _finalize_episode(
     
     # Prepare cleanup options - respect existing cleanup_opts from Auphonic if set
     # Otherwise, skip all cleaning if chunking was used, or use normal options
-    if use_auphonic:
+    if auphonic_processed:
         # cleanup_opts already set by Auphonic block above (skip all cleaning)
         pass
     elif use_chunking:
@@ -835,8 +817,12 @@ def _finalize_episode(
     except Exception as proc_err:
         logging.error("[assemble] AUDIO PROCESSOR CRASHED: %s", proc_err, exc_info=True)
         logging.error("[assemble] This may indicate FFmpeg crash, memory spike, or audio format incompatibility")
-        logging.error("[assemble] audio_input_path=%s, use_auphonic=%s, use_chunking=%s", 
-                     audio_input_path, use_auphonic, use_chunking)
+        logging.error(
+            "[assemble] audio_input_path=%s, advanced_requested=%s, use_chunking=%s",
+            audio_input_path,
+            auphonic_requested,
+            use_chunking,
+        )
         _mark_episode_error(
             session,
             episode,
@@ -1037,34 +1023,30 @@ def _finalize_episode(
     except Exception as dur_err:
         raise RuntimeError(f"[assemble] Could not get audio duration: {dur_err}") from dur_err
     
-    # ========== AUDIO NORMALIZATION (Non-Pro tiers only) ==========
-    # Apply program-loudness normalization for non-Pro users
-    # Pro users use Auphonic which already handles normalization
+    # ========== AUDIO NORMALIZATION (Standard pipeline only) ==========
+    # Apply program-loudness normalization when advanced mastering is disabled
     try:
         from api.core.config import settings
-        from api.services.auphonic_helper import should_use_auphonic
         from api.services.audio.normalizer import run_loudnorm_two_pass
         import tempfile
         
         # Check if normalization is enabled
         normalize_enabled = getattr(settings, 'AUDIO_NORMALIZE_ENABLED', True)
         
-        # Get user to check tier
+        # Determine if the user prefers advanced mastering
         user = session.get(User, episode.user_id)
-        use_auphonic = should_use_auphonic(user, episode) if user else False
+        advanced_audio_enabled = bool(getattr(user, "use_advanced_audio_processing", False)) if user else False
         
-        # Skip normalization if:
-        # 1. Normalization is disabled via config
-        # 2. User is Pro tier (uses Auphonic)
-        # 3. Episode was processed via Auphonic
+        # Skip normalization if disabled, if the user prefers advanced mastering,
+        # or if this episode already has advanced mastering artifacts.
         should_normalize = (
             normalize_enabled 
-            and not use_auphonic 
+            and not advanced_audio_enabled
             and not auphonic_processed
         )
         
         if should_normalize:
-            logging.info("[assemble] [AUDIO_NORM] Starting loudness normalization for non-Pro user")
+            logging.info("[assemble] [AUDIO_NORM] Starting loudness normalization for standard pipeline")
             
             target_lufs = getattr(settings, 'AUDIO_NORMALIZE_TARGET_LUFS', -16.0)
             tp_ceil = getattr(settings, 'AUDIO_NORMALIZE_TP_CEILING_DBTP', -1.0)
@@ -1134,10 +1116,10 @@ def _finalize_episode(
             skip_reason = []
             if not normalize_enabled:
                 skip_reason.append("disabled in config")
-            if use_auphonic:
-                skip_reason.append("Pro tier (uses Auphonic)")
+            if advanced_audio_enabled:
+                skip_reason.append("advanced mastering enabled")
             if auphonic_processed:
-                skip_reason.append("processed via Auphonic")
+                skip_reason.append("already mastered")
             logging.info(
                 f"[assemble] [AUDIO_NORM] Skipping normalization: {', '.join(skip_reason)}"
             )
@@ -1413,25 +1395,17 @@ def orchestrate_create_podcast_episode(
 
             assert media_context is not None  # for type checkers
 
-            # ========== DETERMINE AUPHONIC USAGE ==========
-            # Priority:
-            # 1. User's explicit toggle (use_auphonic parameter from frontend)
-            # 2. Fallback to checking if audio was already Auphonic-processed during upload
+            # ========== DETERMINE ADVANCED AUDIO STATE ==========
+            advanced_audio_requested = bool(use_auphonic)
+            auphonic_processed = False
             
-            # Start with user's explicit choice
-            auphonic_processed = use_auphonic
-            
-            # If user didn't explicitly request Auphonic, check if it was processed during upload
-            if not auphonic_processed:
+            if advanced_audio_requested:
+                logging.info("[assemble] ✅ Advanced audio requested via toggle; verifying processed assets")
                 try:
                     from api.models.podcast import MediaItem, MediaCategory
                     from sqlmodel import select
                     
-                    # Use main_content_filename (original upload), NOT episode.working_audio_name (cleaned)
                     filename_search = main_content_filename.split("/")[-1]
-                    
-                    logging.info("[assemble] 🔍 PRE-CHECK: Searching for MediaItem: user=%s, filename='%s'", user_id, filename_search)
-                    
                     media_item = session.exec(
                         select(MediaItem)
                         .where(MediaItem.user_id == user_id)
@@ -1440,21 +1414,18 @@ def orchestrate_create_podcast_episode(
                         .order_by(MediaItem.created_at.desc())
                     ).first()
                     
-                    if media_item:
-                        logging.info(
-                            "[assemble] 🔍 PRE-CHECK: Found MediaItem id=%s, auphonic_processed=%s",
-                            media_item.id,
-                            media_item.auphonic_processed
-                        )
-                        if media_item.auphonic_processed:
-                            auphonic_processed = True
-                            logging.info("[assemble] ⚠️ Auphonic-processed audio detected - will skip redundant processing")
+                    if media_item and media_item.auphonic_processed:
+                        auphonic_processed = True
+                        logging.info("[assemble] ✅ Advanced audio assets detected via MediaItem %s", media_item.id)
                     else:
-                        logging.info("[assemble] 🔍 PRE-CHECK: No MediaItem found")
+                        logging.warning(
+                            "[assemble] ⚠️ Advanced audio was requested but no processed MediaItem was found for '%s'",
+                            filename_search,
+                        )
                 except Exception as e:
-                    logging.error("[assemble] Failed Auphonic pre-check: %s", e, exc_info=True)
+                    logging.error("[assemble] Failed advanced audio pre-check: %s", e, exc_info=True)
             else:
-                logging.info("[assemble] ✅ User explicitly requested Auphonic processing via toggle")
+                logging.info("[assemble] Advanced audio disabled for this episode")
 
             transcript_context = transcript.prepare_transcript_context(
                 session=session,
@@ -1475,6 +1446,7 @@ def orchestrate_create_podcast_episode(
                 main_content_filename=main_content_filename,
                 output_filename=output_filename,
                 tts_values=tts_values,
+                use_auphonic=advanced_audio_requested,
             )
         except Exception as exc:
             logging.exception(

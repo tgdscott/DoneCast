@@ -26,7 +26,7 @@ import { makeApi } from '@/lib/apiClient';
  * @param {string} options.scheduleDate - Scheduled publish date
  * @param {string} options.scheduleTime - Scheduled publish time
  * @param {Function} options.handleUploadProcessedCoverAndPreview - Cover upload handler
- * @param {boolean} options.useAuphonic - Whether to use Auphonic for processing
+ * @param {boolean} options.useAdvancedAudio - Whether to use advanced audio processing
  * @returns {Object} Assembly state and handlers
  */
 export default function useEpisodeAssembly({
@@ -50,7 +50,7 @@ export default function useEpisodeAssembly({
   scheduleDate,
   scheduleTime,
   handleUploadProcessedCoverAndPreview,
-  useAuphonic = false,
+  useAdvancedAudio = false,
   usage = null, // Add usage prop for credit checking
   onShowCreditPurchase = null, // Callback to show credit purchase modal
 }) {
@@ -247,7 +247,7 @@ export default function useEpisodeAssembly({
             episode_details: sanitizedDetails,
             flubber_cuts_ms: Array.isArray(flubberCutsMs) && flubberCutsMs.length ? flubberCutsMs : null,
             intents: intents,
-            use_auphonic: useAuphonic,
+            use_auphonic: useAdvancedAudio,
           });
         } catch (e) {
           // Handle 402 (quota/minutes exceeded) specially
@@ -322,6 +322,7 @@ export default function useEpisodeAssembly({
       setMinutesDialog,
       refreshUsage,
       handleUploadProcessedCoverAndPreview,
+      useAdvancedAudio,
     ]
   );
 

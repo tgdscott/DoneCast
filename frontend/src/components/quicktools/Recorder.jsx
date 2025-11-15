@@ -35,7 +35,7 @@ import { ensureExt, formatDateName, extractStemFromFilename, isMobileDevice } fr
  * @param {string} [props.source="A"] - Source identifier
  */
 export default function Recorder({ onBack, token, onFinish, onSaved, source = "A" }) {
-  const { user: authUser } = useAuth();
+  const { user: authUser, refreshUser } = useAuth();
   const { toast } = useToast();
   
   // Config
@@ -51,6 +51,13 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
   const [savedDisplayName, setSavedDisplayName] = useState("");
   const [transcriptReady, setTranscriptReady] = useState(false);
   const [showTimeoutNotice, setShowTimeoutNotice] = useState(false);
+  const [useAdvancedAudio, setUseAdvancedAudio] = useState(() => {
+    if (typeof authUser?.use_advanced_audio_processing === 'boolean') {
+      return authUser.use_advanced_audio_processing;
+    }
+    return true;
+  });
+  const [isSavingAdvancedAudio, setIsSavingAdvancedAudio] = useState(false);
 
   // Polling refs
   const pollIntervalRef = useRef(null);
@@ -83,6 +90,35 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
         completed: true
       }));
     } catch {}
+  };
+
+  // Sync advanced audio preference when auth user changes
+  useEffect(() => {
+    if (typeof authUser?.use_advanced_audio_processing === 'boolean') {
+      setUseAdvancedAudio(authUser.use_advanced_audio_processing);
+    }
+  }, [authUser?.use_advanced_audio_processing]);
+
+  const handleAdvancedAudioToggle = async (nextValue) => {
+    const previous = useAdvancedAudio;
+    setUseAdvancedAudio(nextValue);
+    setIsSavingAdvancedAudio(true);
+    try {
+      const api = makeApi(token);
+      await api.put('/api/users/me/audio-pipeline', { use_advanced_audio: nextValue });
+      if (typeof refreshUser === 'function') {
+        refreshUser({ force: true });
+      }
+    } catch (err) {
+      setUseAdvancedAudio(previous);
+      toast({
+        variant: 'destructive',
+        title: 'Could not update audio pipeline',
+        description: err?.detail?.message || err?.message || 'Please try again.',
+      });
+    } finally {
+      setIsSavingAdvancedAudio(false);
+    }
   };
 
   // Device selection
@@ -463,6 +499,9 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
               recorder.reset();
               if (onBack) onBack();
             }}
+            useAdvancedAudio={useAdvancedAudio}
+            onAdvancedAudioToggle={handleAdvancedAudioToggle}
+            isAdvancedAudioSaving={isSavingAdvancedAudio}
           />
         ) : (
           /* Main recording interface */

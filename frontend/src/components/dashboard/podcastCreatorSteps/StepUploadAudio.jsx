@@ -2,28 +2,32 @@ import React from 'react';
 import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Switch } from '../../ui/switch';
-import { FileAudio, Loader2, Mic, Upload, ArrowLeft, Lightbulb, AlertTriangle } from 'lucide-react';
+import { Loader2, Mic, Upload, ArrowLeft, AlertTriangle, Trash2 } from 'lucide-react';
 import { formatDisplayName } from '@/lib/displayNames';
-import { formatBytes, formatSpeed, formatEta, formatProgressDetail } from '@/lib/uploadProgress';
+import { formatProgressDetail } from '@/lib/uploadProgress';
 
-// Inline intent questions were removed in favor of the floating modal.
+const SEGMENT_PLACEHOLDER = 'Audio segment';
 
 export default function StepUploadAudio({
-  uploadedFile,
+  mainSegments = [],
   uploadedFilename,
   isUploading,
+  isBundling = false,
+  bundleError = null,
+  segmentsDirty = false,
   uploadProgress = null,
   uploadStats = null,
   onFileChange,
+  onSegmentRemove = () => {},
+  onSegmentProcessingChange = () => {},
+  composeSegments = async () => {},
   fileInputRef,
   onBack,
   onNext = () => {},
   onEditAutomations,
-  onIntentChange,
   onIntentSubmit,
   pendingIntentLabels = [],
   intents = {},
-  intentVisibility = {},
   minutesPrecheck = null,
   minutesPrecheckPending = false,
   minutesPrecheckError = null,
@@ -35,38 +39,17 @@ export default function StepUploadAudio({
   audioDurationSec: audioDurationSecProp = null,
   episodeStatus = null,
   wasRecorded = false,
-  useAuphonic = false,
-  onAuphonicToggle = () => {},
+  useAdvancedAudio = false,
+  onAdvancedAudioToggle = () => {},
+  isAdvancedAudioSaving = false,
 }) {
   const audioDurationSec = audioDurationSecProp;
-  const handleFileInput = (event) => {
-    if (event.target.files?.[0]) {
-      onFileChange(event.target.files[0]);
-    }
-  };
-
-  const handleDrop = (event) => {
-    event.preventDefault();
-    if (event.dataTransfer.files?.[0]) {
-      onFileChange(event.dataTransfer.files[0]);
-    }
-  };
-
+  const hasSegments = Array.isArray(mainSegments) && mainSegments.length > 0;
+  const hasMergedAudio = Boolean(uploadedFilename);
   const hasPendingIntents = Array.isArray(pendingIntentLabels) && pendingIntentLabels.length > 0;
   const pendingLabelText = hasPendingIntents ? pendingIntentLabels.join(', ') : '';
-
-  const handleContinue = async () => {
-    if (hasPendingIntents && typeof onEditAutomations === 'function') {
-      onEditAutomations();
-      return;
-    }
-    if (typeof onIntentSubmit === 'function') {
-      const result = await onIntentSubmit(intents);
-      if (result === false) return;
-      if (result === true) return;
-    }
-    onNext();
-  };
+  const processingModes = React.useMemo(() => new Set(mainSegments.map(seg => seg.processingMode)), [mainSegments]);
+  const showProcessingWarning = processingModes.size > 1;
 
   const formatDurationSafe = typeof formatDuration === 'function' ? formatDuration : () => null;
   const parseNumber = (value) => {
@@ -91,11 +74,7 @@ export default function StepUploadAudio({
     if (parsedRequiredMinutes != null && parsedRequiredMinutes > 0) {
       return Math.max(1, Math.ceil(parsedRequiredMinutes));
     }
-    const fallbackMinutes =
-      minutesFromSeconds(totalSeconds) ??
-      minutesFromSeconds(mainSeconds) ??
-      minutesFromSeconds(effectiveAudioSeconds);
-    return fallbackMinutes;
+    return minutesFromSeconds(totalSeconds) ?? minutesFromSeconds(mainSeconds) ?? minutesFromSeconds(effectiveAudioSeconds);
   })();
 
   const remainingMinutesVal = parseNumber(minutesRemaining);
@@ -109,23 +88,76 @@ export default function StepUploadAudio({
   const staticDurationText = formatSeconds(staticSeconds);
   const audioDurationText = formatSeconds(effectiveAudioSeconds);
   const requiredMinutesText =
-    requiredMinutesVal != null
-      ? `${requiredMinutesVal} minute${requiredMinutesVal === 1 ? '' : 's'}`
-      : null;
-  const remainingMinutesText = remainingMinutesDisplay != null
-    ? `${remainingMinutesDisplay} minute${remainingMinutesDisplay === 1 ? '' : 's'}`
-    : null;
-  const showPrecheckCard = (uploadedFile || uploadedFilename)
-    && (minutesPrecheckPending || minutesPrecheck || minutesPrecheckError);
+    requiredMinutesVal != null ? `${requiredMinutesVal} minute${requiredMinutesVal === 1 ? '' : 's'}` : null;
+  const remainingMinutesText =
+    remainingMinutesDisplay != null ? `${remainingMinutesDisplay} minute${remainingMinutesDisplay === 1 ? '' : 's'}` : null;
+
   const blockingMessage = minutesBlockingMessage || 'Not enough processing minutes remain to create this episode.';
+  const showPrecheckCard = hasMergedAudio && (minutesPrecheckPending || minutesPrecheck || minutesPrecheckError);
+
+  const continueDisabled =
+    isUploading ||
+    !hasSegments ||
+    !hasMergedAudio ||
+    isBundling ||
+    segmentsDirty ||
+    minutesPrecheckPending ||
+    minutesBlocking ||
+    Boolean(bundleError);
+
+  const queueFilesSequentially = async (fileList) => {
+    const files = Array.from(fileList || []);
+    for (const file of files) {
+      // eslint-disable-next-line no-await-in-loop
+      await onFileChange(file);
+    }
+  };
+
+  const handleFileInput = async (event) => {
+    const files = event.target.files;
+    if (files?.length) {
+      await queueFilesSequentially(files);
+      event.target.value = '';
+    }
+  };
+
+  const handleDrop = async (event) => {
+    event.preventDefault();
+    const files = event.dataTransfer?.files;
+    if (files?.length) {
+      await queueFilesSequentially(files);
+    }
+  };
+
+  const handleContinue = async () => {
+    if (!hasSegments) return;
+    if (!hasMergedAudio || segmentsDirty) {
+      try {
+        await composeSegments();
+      } catch {
+        return;
+      }
+    }
+    if (hasPendingIntents && typeof onEditAutomations === 'function') {
+      onEditAutomations();
+      return;
+    }
+    if (typeof onIntentSubmit === 'function') {
+      const result = await onIntentSubmit(intents);
+      if (result === false || result === true) return;
+    }
+    onNext();
+  };
 
   return (
     <div className="space-y-8">
       <CardHeader className="text-center">
         <CardTitle style={{ color: '#2C3E50' }}>
-          {wasRecorded ? 'Step 2: Your Recording' : 'Step 2: Select Main Content'}
+          {wasRecorded ? 'Step 2: Your Recording' : 'Step 2: Add Main Content Segments'}
         </CardTitle>
+        <p className="text-sm text-slate-500 mt-2">Upload each segment separately so we can stitch and process them in the right order.</p>
       </CardHeader>
+
       {(isUploading || (typeof uploadProgress === 'number' && uploadProgress < 100)) && (
         <div className="rounded-md border border-slate-200 bg-white p-3" aria-live="polite">
           <div className="flex items-center justify-between text-sm">
@@ -149,108 +181,149 @@ export default function StepUploadAudio({
       <Card className="border-2 border-dashed border-gray-200 bg-white">
         <CardContent className="p-8">
           <div
-            className="border-2 border-dashed rounded-xl p-12 text-center"
+            className="border-2 border-dashed rounded-xl p-10 text-center"
             onDragOver={(e) => e.preventDefault()}
             onDrop={handleDrop}
           >
-            {(uploadedFile || uploadedFilename) ? (
-              <div className="space-y-6">
-                <FileAudio className="w-16 h-16 mx-auto text-green-600" />
-                <p className={`text-xl font-semibold ${isUploading ? 'text-slate-600' : 'text-green-600'}`}>
-                  {isUploading ? 'Uploading your audio…' : 'File Ready!'}
-                </p>
-                {uploadedFile && (
-                  <p className="text-gray-600">
-                    {formatDisplayName(uploadedFile, { fallback: uploadedFile.name || 'Audio file' })}
-                  </p>
-                )}
-                {!uploadedFile && uploadedFilename && (
+            <Mic className="w-16 h-16 mx-auto text-gray-400" />
+            <div className="mt-6 space-y-4">
+              <p className="text-2xl font-semibold text-gray-700">Drag audio files here to add segments</p>
+              <p className="text-gray-500 text-sm">Upload as many recordings as you need—we’ll combine them for you.</p>
+              <Button
+                onClick={() => fileInputRef.current?.click()}
+                size="lg"
+                className="text-white"
+                style={{ backgroundColor: '#2C3E50' }}
+                disabled={isUploading}
+              >
+                {isUploading ? (
                   <>
-                    <p className="text-gray-600">
-                      Server file: {formatDisplayName(uploadedFilename, { fallback: 'Audio file' })}
-                    </p>
-                    <p className="text-xs text-muted-foreground">We found your previously uploaded audio — you can continue without re-uploading.</p>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" /> Uploading...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-5 h-5 mr-2" /> Choose Audio Files
                   </>
                 )}
-              </div>
-            ) : (
-              <div className="space-y-6">
-                <Mic className="w-16 h-16 mx-auto text-gray-400" />
-                <p className="text-2xl font-semibold text-gray-700">Drag your audio file here</p>
-                <p className="text-gray-500">or</p>
-                <Button
-                  onClick={() => fileInputRef.current?.click()}
-                  size="lg"
-                  className="text-white"
-                  style={{ backgroundColor: '#2C3E50' }}
-                  disabled={isUploading}
-                >
-                  {isUploading ? (
-                    <>
-                      <Loader2 className="w-5 h-5 mr-2 animate-spin" /> Uploading...
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="w-5 h-5 mr-2" /> Choose Audio File
-                    </>
-                  )}
-                </Button>
-              </div>
-            )}
-            {isUploading && (
-              <div className="mt-6 space-y-2">
-                <div className="h-2 w-full rounded-full bg-slate-200 overflow-hidden">
-                  <div
-                    className="h-full bg-slate-600 transition-all duration-200"
-                    style={{ width: `${Math.min(100, Math.max(5, typeof uploadProgress === 'number' ? uploadProgress : 5))}%` }}
-                  />
-                </div>
-                <p className="text-sm text-slate-600">
-                  Uploading{typeof uploadProgress === 'number' ? `… ${uploadProgress}%` : '…'}
-                </p>
-              </div>
-            )}
-            <input ref={fileInputRef} type="file" accept="audio/*" onChange={handleFileInput} className="hidden" />
-          </div>
-          {/* Show deletion notice for processed episodes */}
-          {(uploadedFile || uploadedFilename) && episodeStatus && ['processed', 'published', 'scheduled'].includes(String(episodeStatus).toLowerCase()) && (
-            <div className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-center">
-              <p className="text-sm font-semibold text-red-700">
-                This episode has successfully processed. You may delete this file.
-              </p>
+              </Button>
+              <p className="text-xs text-slate-500">You can also drop multiple files at once.</p>
             </div>
+            <input ref={fileInputRef} type="file" accept="audio/*" multiple onChange={handleFileInput} className="hidden" />
+          </div>
+        </CardContent>
+      </Card>
+
+      {uploadedFilename && episodeStatus && ['processed', 'published', 'scheduled'].includes(String(episodeStatus).toLowerCase()) && (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          This episode has already been processed. You can safely delete the previous master if you need to reclaim storage.
+        </div>
+      )}
+
+      <Card className="border border-slate-200 bg-white">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg text-slate-900">Segment queue</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {hasSegments ? (
+            mainSegments.map((segment, index) => (
+              <div
+                key={segment.id || segment.mediaItemId || index}
+                className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="text-left">
+                  <p className="font-semibold text-slate-900">
+                    {index + 1}. {formatDisplayName(segment.friendlyName || segment.filename, { fallback: SEGMENT_PLACEHOLDER })}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {segment.processingMode === 'advanced' ? 'Advanced mastering' : 'Standard pipeline'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-600">Advanced</span>
+                    <Switch
+                      checked={segment.processingMode === 'advanced'}
+                      onCheckedChange={(checked) => onSegmentProcessingChange(segment.id, checked ? 'advanced' : 'standard')}
+                      disabled={isBundling}
+                      aria-label="Toggle advanced processing"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onSegmentRemove(segment.id)}
+                    disabled={isBundling}
+                    className="text-slate-500 hover:text-red-600"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    <span className="sr-only">Remove</span>
+                  </Button>
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="text-sm text-slate-500 text-center py-4">No segments added yet.</p>
           )}
         </CardContent>
       </Card>
 
-      {(uploadedFile || uploadedFilename) && (
+      {hasSegments && (
         <Card className="border border-slate-200 bg-white">
           <CardHeader className="pb-3">
-            <CardTitle className="text-lg text-slate-900">Audio Processing Options</CardTitle>
+            <CardTitle className="text-lg text-slate-900">Default processing for new uploads</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-4 flex-col sm:flex-row sm:items-center">
               <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <label htmlFor="auphonic-toggle" className="text-sm font-medium text-slate-900">
-                    Use Auphonic Processing
-                  </label>
-                </div>
+                <p className="text-sm font-medium text-slate-900">Use Advanced Audio Processing</p>
                 <p className="text-xs text-slate-600">
-                  Enable professional audio enhancement with Auphonic (leveling, noise reduction, and more)
+                  This sets the default pipeline for future segments. You can still override each segment above.
                 </p>
+                {isAdvancedAudioSaving && (
+                  <p className="text-xs text-slate-500">Saving your preference…</p>
+                )}
               </div>
               <Switch
-                id="auphonic-toggle"
-                checked={useAuphonic}
-                onCheckedChange={onAuphonicToggle}
+                id="advanced-audio-toggle"
+                checked={useAdvancedAudio}
+                onCheckedChange={(checked) => onAdvancedAudioToggle(Boolean(checked))}
+                disabled={isAdvancedAudioSaving}
               />
             </div>
           </CardContent>
         </Card>
       )}
 
-      {(uploadedFile || uploadedFilename) && (
+      {showProcessingWarning && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          Mixed processing detected. Segments mastered with different pipelines may sound inconsistent.
+        </div>
+      )}
+
+      {isBundling && (
+        <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 flex items-center gap-3">
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          <span>Combining segments into a single master file…</span>
+        </div>
+      )}
+
+      {!isBundling && segmentsDirty && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          Segment changes detected. We’ll rebuild the master file automatically—hang tight.
+        </div>
+      )}
+
+      {bundleError && (
+        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 flex items-center justify-between gap-3">
+          <span>{bundleError}</span>
+          <Button size="sm" variant="outline" onClick={() => composeSegments()} disabled={isBundling}>
+            Retry merge
+          </Button>
+        </div>
+      )}
+
+      {hasMergedAudio && (
         <Card className="border border-slate-200 bg-slate-50">
           <CardHeader className="pb-2">
             <CardTitle className="text-lg text-slate-900">Before we customize anything…</CardTitle>
@@ -326,7 +399,7 @@ export default function StepUploadAudio({
         <Button onClick={onBack} variant="outline" size="lg">
           <ArrowLeft className="w-5 h-5 mr-2" />Back to Templates
         </Button>
-        {(uploadedFile || uploadedFilename) && (
+        {hasSegments && (
           <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
             <div className="flex justify-end gap-2">
               <Button
@@ -334,12 +407,7 @@ export default function StepUploadAudio({
                 size="lg"
                 className="text-white"
                 style={{ backgroundColor: '#2C3E50' }}
-                disabled={
-                  isUploading
-                  || !(uploadedFile || uploadedFilename)
-                  || minutesPrecheckPending
-                  || minutesBlocking
-                }
+                disabled={continueDisabled}
               >
                 Continue
               </Button>
@@ -356,3 +424,4 @@ export default function StepUploadAudio({
     </div>
   );
 }
+

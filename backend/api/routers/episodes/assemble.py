@@ -29,12 +29,17 @@ async def assemble_episode(
     main_content_filename = payload.get("main_content_filename")
     output_filename = payload.get("output_filename")
     tts_values = payload.get("tts_values") or {}
-    episode_details = payload.get("episode_details") or {}
-    use_auphonic = payload.get("use_auphonic", False)
+    episode_details = dict(payload.get("episode_details") or {})
+    use_auphonic = payload.get("use_auphonic")
+    if use_auphonic is None:
+        use_auphonic = bool(getattr(current_user, "use_advanced_audio_processing", False))
+    else:
+        use_auphonic = bool(use_auphonic)
     
     # Include flubber_cuts_ms in episode_details so the assembler can apply them
     if payload.get("flubber_cuts_ms"):
         episode_details["flubber_cuts_ms"] = payload.get("flubber_cuts_ms")
+    episode_details["use_auphonic"] = use_auphonic
 
     if not template_id or not main_content_filename or not output_filename:
         log.error("event=assemble.endpoint.validation_failed missing_fields template_id=%s main_content=%s output=%s",

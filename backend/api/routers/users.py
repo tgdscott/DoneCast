@@ -182,6 +182,12 @@ class AudioCleanupSettingsUpdate(BaseModel):
 class AudioCleanupSettingsPublic(BaseModel):
     settings: Dict[str, Any]
 
+class AudioPipelinePreferenceUpdate(BaseModel):
+    use_advanced_audio: bool
+
+class AudioPipelinePreferencePublic(BaseModel):
+    use_advanced_audio: bool
+
 class SMSNotificationPreferencesUpdate(BaseModel):
     # Note: phone_number cannot be set via this endpoint - it must be verified via /api/auth/verify-phone first
     sms_notifications_enabled: bool | None = None
@@ -384,6 +390,31 @@ async def get_audio_cleanup_settings(
     else:
         merged = defaults
     return { 'settings': merged }
+
+@router.get("/me/audio-pipeline", response_model=AudioPipelinePreferencePublic)
+async def get_audio_pipeline_preference(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Return the user's advanced audio processing preference."""
+    return {
+        "use_advanced_audio": bool(getattr(current_user, "use_advanced_audio_processing", False))
+    }
+
+@router.put("/me/audio-pipeline", response_model=AudioPipelinePreferencePublic)
+async def update_audio_pipeline_preference(
+    payload: AudioPipelinePreferenceUpdate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Persist the user's preferred audio processing pipeline."""
+    current_user.use_advanced_audio_processing = bool(payload.use_advanced_audio)
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
+    return {
+        "use_advanced_audio": bool(current_user.use_advanced_audio_processing)
+    }
 
 @router.get("/me/capabilities", response_model=Dict[str, Any])
 async def get_user_capabilities(

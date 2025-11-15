@@ -399,7 +399,6 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
             from api.core.database import get_session
             from api.models.user import User
             from api.services.billing import credits
-            from api.services.auphonic_helper import should_use_auphonic
             from sqlmodel import select
             from pydub import AudioSegment
             
@@ -424,8 +423,8 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
                     # charge_for_transcription expects SECONDS, not minutes!
                     duration_seconds = len(audio) / 1000.0  # pydub length is in milliseconds
                     
-                    # Check if user is Pro tier (Auphonic) or other tiers (AssemblyAI)
-                    use_auphonic_flag = should_use_auphonic(user)
+                    # Check if user prefers advanced mastering (Auphonic pipeline)
+                    use_auphonic_flag = bool(getattr(user, "use_advanced_audio_processing", False))
                     
                     logging.info(
                         "[transcription] 💳 Charging credits: user=%s, duration=%.2f seconds (%.2f min), auphonic=%s",
@@ -466,7 +465,6 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
         try:
             from api.core.database import get_session
             from api.models.user import User
-            from api.services.auphonic_helper import should_use_auphonic
             from sqlmodel import select
 
             session = next(get_session())
@@ -478,7 +476,7 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
             else:
                 logging.info(f"[transcription] ✅ Found user: id={user.id}, email={user.email}, tier={getattr(user, 'tier', 'NONE')}")
 
-            if user and should_use_auphonic(user):
+            if user and getattr(user, "use_advanced_audio_processing", False):
                 # Pro user → Auphonic
                 logging.info(f"[transcription] user_id={user_id} tier={getattr(user, 'tier', 'unknown')} → Auphonic")
                 

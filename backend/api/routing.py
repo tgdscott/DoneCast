@@ -70,6 +70,7 @@ media                  = _safe_import("api.routers.media")
 gcs_uploads            = _safe_import("api.routers.gcs_uploads")
 episodes               = _safe_import("api.routers.episodes")
 templates              = _safe_import("api.routers.templates")
+media_bundle_router    = _safe_import("api.routers.media_bundle")
 flubber                = _safe_import("api.routers.flubber")
 intern                 = _safe_import("api.routers.intern")
 users                  = _safe_import("api.routers.users")
@@ -129,6 +130,8 @@ def attach_routers(app: FastAPI) -> dict:
     availability['auth'] = auth is not None
     _maybe(app, media)
     availability['media'] = media is not None
+    _maybe(app, media_bundle_router)
+    availability['media_bundle_router'] = media_bundle_router is not None
     _maybe(app, media_upload_alias)
     availability['media_upload_alias'] = media_upload_alias is not None
     _maybe(app, gcs_uploads)

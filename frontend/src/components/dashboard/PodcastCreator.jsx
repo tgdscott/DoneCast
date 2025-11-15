@@ -62,13 +62,20 @@ export default function PodcastCreator({
     progressPercentage,
     selectedTemplate,
     handleTemplateSelect,
-    uploadedFile,
     uploadedFilename,
     wasRecorded: wasRecordedFromHook,
     selectedPreupload,
     isUploading,
     uploadProgress,
     handleFileChange,
+    mainSegments,
+    segmentsDirty,
+    isBundling,
+    bundleError,
+    removeSegment,
+    updateSegmentProcessingMode,
+    reorderSegments,
+    composeSegments,
     handlePreuploadedSelect,
     fileInputRef,
     uploadStats,
@@ -164,6 +171,9 @@ export default function PodcastCreator({
     cancelBuild,
     buildActive,
     resolveInternVoiceId,
+    useAdvancedAudio,
+    handleAdvancedAudioToggle,
+    isSavingAdvancedAudio,
   } = controller;
 
   // Auto-fill title/description/tags when user reaches Step 5 and conditions met
@@ -234,8 +244,12 @@ export default function PodcastCreator({
   );
 
   const uploadedAudioLabel = React.useMemo(() => {
-    if (uploadedFile) {
-      return formatDisplayName(uploadedFile, { fallback: uploadedFile.name || '' });
+    if (Array.isArray(mainSegments) && mainSegments.length > 0) {
+      if (mainSegments.length === 1) {
+        const segment = mainSegments[0];
+        return formatDisplayName(segment.friendlyName || segment.filename, { fallback: segment.friendlyName || 'Audio segment' });
+      }
+      return `${mainSegments.length} segments`;
     }
     if (selectedPreuploadItem) {
       return formatDisplayName(selectedPreuploadItem, { fallback: '' });
@@ -244,7 +258,7 @@ export default function PodcastCreator({
       return formatDisplayName(uploadedFilename, { fallback: '' });
     }
     return '';
-  }, [uploadedFile, selectedPreuploadItem, uploadedFilename]);
+  }, [mainSegments, selectedPreuploadItem, uploadedFilename]);
 
   const handleDeletePreuploaded = React.useCallback(async (item) => {
     if (!item || !item.id) return;
@@ -420,12 +434,18 @@ export default function PodcastCreator({
         }
         return (
           <StepUploadAudio
-            uploadedFile={uploadedFile}
+            mainSegments={mainSegments}
             uploadedFilename={uploadedFilename}
             isUploading={isUploading}
+            isBundling={isBundling}
+            bundleError={bundleError}
+            segmentsDirty={segmentsDirty}
             uploadProgress={uploadProgress}
             uploadStats={uploadStats}
-            onFileChange={handleFileChange}
+            onFileChange={(file, overrides) => handleFileChange(file, { processingMode: useAdvancedAudio ? 'advanced' : 'standard', ...(overrides || {}) })}
+            onSegmentRemove={removeSegment}
+            onSegmentProcessingChange={updateSegmentProcessingMode}
+            composeSegments={composeSegments}
             fileInputRef={fileInputRef}
             onBack={() => setCurrentStep(1)}
             onNext={() => setCurrentStep(3)}
@@ -446,8 +466,9 @@ export default function PodcastCreator({
             audioDurationSec={audioDurationSec}
             episodeStatus={assembledEpisode?.status}
             wasRecorded={wasRecordedFromHook}
-            useAuphonic={useAuphonic}
-            onAuphonicToggle={setUseAuphonic}
+            useAdvancedAudio={useAdvancedAudio}
+            onAdvancedAudioToggle={handleAdvancedAudioToggle}
+            isAdvancedAudioSaving={isSavingAdvancedAudio}
           />
         );
       case 3:
@@ -455,12 +476,17 @@ export default function PodcastCreator({
           <StepCustomizeSegments
             selectedTemplate={selectedTemplate}
             mediaLibrary={mediaLibrary}
-            uploadedFile={uploadedFile}
+            mainSegments={mainSegments}
+            segmentsDirty={segmentsDirty}
+            isBundlingSegments={isBundling}
+            bundleError={bundleError}
             uploadedAudioLabel={uploadedAudioLabel}
             ttsValues={ttsValues}
             onTtsChange={handleTtsChange}
             onBack={() => setCurrentStep(2)}
             onNext={() => setCurrentStep(4)}
+            onReorderSegments={reorderSegments}
+            onComposeSegments={composeSegments}
             onOpenVoicePicker={(segmentId) => {
               setVoicePickerTargetId(segmentId);
               setShowVoicePicker(true);

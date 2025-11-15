@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { CheckCircle, Download, Loader2, RotateCcw, X } from "lucide-react";
 import { formatDateName } from '../utils/audioUtils';
 import {
@@ -32,6 +33,9 @@ import {
  * @param {Function} props.onFinish - Finish callback
  * @param {Function} props.onStartOver - Start over callback (discard & record again)
  * @param {Function} props.onDiscard - Discard & return to dashboard callback
+ * @param {boolean} props.useAdvancedAudio - Whether advanced audio processing is enabled
+ * @param {Function} props.onAdvancedAudioToggle - Toggle handler for advanced audio processing
+ * @param {boolean} props.isAdvancedAudioSaving - Whether preference is being saved
  */
 export const RecordingPreview = ({
   audioUrl,
@@ -46,7 +50,10 @@ export const RecordingPreview = ({
   maxUploadMb,
   onFinish,
   onStartOver,
-  onDiscard
+  onDiscard,
+  useAdvancedAudio,
+  onAdvancedAudioToggle,
+  isAdvancedAudioSaving,
 }) => {
   const audioRef = useRef(null);
 
@@ -107,6 +114,29 @@ export const RecordingPreview = ({
         <p className="text-xs text-muted-foreground">
           Leave blank to use timestamp
         </p>
+      </div>
+
+      {/* Advanced audio toggle */}
+      <div className="flex flex-col gap-2 rounded-lg border border-slate-200 p-4 bg-slate-50">
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-1">
+            <Label htmlFor="recorder-advanced-audio" className="text-base font-medium">
+              Use Advanced Audio Processing
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              If you aren't using specific podcasting equipment. this is highly recommended to make it sound like you are.
+            </p>
+            {isAdvancedAudioSaving && (
+              <p className="text-xs text-slate-500">Saving your preference…</p>
+            )}
+          </div>
+          <Switch
+            id="recorder-advanced-audio"
+            checked={!!useAdvancedAudio}
+            onCheckedChange={(checked) => onAdvancedAudioToggle?.(Boolean(checked))}
+            disabled={isAdvancedAudioSaving}
+          />
+        </div>
       </div>
 
       {/* Save/Status */}

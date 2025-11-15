@@ -32,13 +32,14 @@ export default function usePodcastCreator({
   wasRecorded = false,
   preselectedStartStep,
 }) {
-  const { user: authUser } = useAuth();
+  const { user: authUser, refreshUser } = useAuth();
   
   const [error, setError] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [capabilities, setCapabilities] = useState({ has_elevenlabs: false, has_google_tts: false, has_any_sfx_triggers: false });
   const [testMode, setTestMode] = useState(false);
-  const [useAuphonic, setUseAuphonic] = useState(false);
+  const [useAdvancedAudio, setUseAdvancedAudio] = useState(() => Boolean(authUser?.use_advanced_audio_processing));
+  const [isSavingAdvancedAudio, setIsSavingAdvancedAudio] = useState(false);
 
   const stepNav = useStepNavigation({
     token,
@@ -171,7 +172,7 @@ export default function usePodcastCreator({
     scheduleDate: publishing.scheduleDate,
     scheduleTime: publishing.scheduleTime,
     handleUploadProcessedCoverAndPreview: mediaManagement.handleUploadProcessedCover,
-    useAuphonic,
+    useAdvancedAudio,
     usage: quota.usage,
     onShowCreditPurchase: (data) => {
       setCreditPurchaseData(data);
@@ -194,6 +195,35 @@ export default function usePodcastCreator({
       };
     };
   }, [assembly.setAutoPublishPending]);
+
+  useEffect(() => {
+    setUseAdvancedAudio(Boolean(authUser?.use_advanced_audio_processing));
+  }, [authUser?.use_advanced_audio_processing]);
+
+  const handleAdvancedAudioToggle = useCallback(
+    async (nextValue) => {
+      const previousValue = useAdvancedAudio;
+      setUseAdvancedAudio(nextValue);
+      setIsSavingAdvancedAudio(true);
+      try {
+        const api = makeApi(token);
+        await api.put('/api/users/me/audio-pipeline', { use_advanced_audio: nextValue });
+        if (typeof refreshUser === 'function') {
+          refreshUser({ force: true });
+        }
+      } catch (err) {
+        setUseAdvancedAudio(previousValue);
+        toast({
+          variant: 'destructive',
+          title: 'Could not update audio pipeline',
+          description: err?.detail?.message || err?.message || 'Please try again.',
+        });
+      } finally {
+        setIsSavingAdvancedAudio(false);
+      }
+    },
+    [token, refreshUser, useAdvancedAudio]
+  );
 
   // Wire assembly values to publishing hook (since assembly is initialized after publishing)
   useEffect(() => {
@@ -303,8 +333,9 @@ export default function usePodcastCreator({
     error,
     statusMessage,
     testMode,
-    useAuphonic,
-    setUseAuphonic,
+    useAdvancedAudio,
+    handleAdvancedAudioToggle,
+    isSavingAdvancedAudio,
     capabilities,
     pendingIntentLabels,
     intentsComplete,

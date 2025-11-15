@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowLeft, Lightbulb, ListChecks } from 'lucide-react';
+import { ArrowLeft, ArrowUp, ArrowDown, Lightbulb, ListChecks, AlertTriangle, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
@@ -8,10 +8,12 @@ import { Label } from '../../ui/label';
 import { Textarea } from '../../ui/textarea';
 import { formatDisplayName, isUuidLike } from '@/lib/displayNames';
 
+const SEGMENT_PLACEHOLDER = 'Audio segment';
+
 export default function StepCustomizeSegments({
   selectedTemplate,
   mediaLibrary,
-  uploadedFile,
+  mainSegments = [],
   uploadedAudioLabel,
   ttsValues,
   onTtsChange,
@@ -20,6 +22,11 @@ export default function StepCustomizeSegments({
   onOpenVoicePicker,
   voiceNameById,
   voicesLoading,
+  segmentsDirty = false,
+  isBundlingSegments = false,
+  bundleError = null,
+  onReorderSegments = () => {},
+  onComposeSegments = () => {},
 }) {
   React.useEffect(() => {
     try {
@@ -34,6 +41,8 @@ export default function StepCustomizeSegments({
 
   const [isGuideOpen, setIsGuideOpen] = React.useState(false);
   const [showValidation, setShowValidation] = React.useState(false);
+
+  const bundleBlocking = Boolean(segmentsDirty || isBundlingSegments || bundleError);
 
   const computeSegmentKey = React.useCallback((segment, index) => {
     if (segment?.id !== undefined && segment?.id !== null) return segment.id;
@@ -67,19 +76,13 @@ export default function StepCustomizeSegments({
   const renderSegmentContent = React.useCallback(
     (segment, { fieldId, isMissing, promptKey }) => {
       if (segment.segment_type === 'content') {
-        // Priority order: explicit label > file name > fallback message
-        const contentLabel = 
-          (uploadedAudioLabel && uploadedAudioLabel.trim()) || 
-          (uploadedFile?.name && uploadedFile.name.trim()) || 
-          (uploadedFile?.friendly_name && uploadedFile.friendly_name.trim()) ||
-          'Audio not selected yet';
-        
+        const contentLabel = (uploadedAudioLabel && uploadedAudioLabel.trim()) || 'Segments not ready yet';
         return (
           <div className="mt-2 bg-blue-50 p-3 rounded-md">
             <p className="text-gray-700 font-semibold">{contentLabel}</p>
-            {contentLabel === 'Audio not selected yet' && (
+            {contentLabel === 'Segments not ready yet' && (
               <p className="text-xs text-gray-500 mt-1">
-                Go back to upload or select your main audio file
+                Go back to Step 2 to upload or re-order your main content segments.
               </p>
             )}
           </div>
@@ -168,7 +171,6 @@ export default function StepCustomizeSegments({
       onTtsChange,
       ttsValues,
       uploadedAudioLabel,
-      uploadedFile,
       voiceNameById,
       voicesLoading,
     ]
@@ -176,10 +178,12 @@ export default function StepCustomizeSegments({
 
   const handleContinue = React.useCallback(
     (event) => {
-      if (!canContinue) {
+      if (!canContinue || bundleBlocking) {
         event?.preventDefault?.();
         event?.stopPropagation?.();
-        setShowValidation(true);
+        if (!canContinue) {
+          setShowValidation(true);
+        }
         const firstMissingKey = missingSegmentKeys[0];
         if (firstMissingKey !== undefined && typeof window !== 'undefined') {
           const fieldId = String(firstMissingKey);
@@ -202,7 +206,7 @@ export default function StepCustomizeSegments({
 
       onNext();
     },
-    [canContinue, missingSegmentKeys, onNext]
+    [canContinue, missingSegmentKeys, onNext, bundleBlocking]
   );
 
   React.useEffect(() => {
@@ -217,6 +221,74 @@ export default function StepCustomizeSegments({
         <CardTitle style={{ color: '#2C3E50' }}>Step 3: Customize Your Episode</CardTitle>
         <p className="text-md text-gray-500 pt-2">Review the structure and fill in the required text for any AI-generated segments.</p>
       </CardHeader>
+
+      <Card className="border border-slate-200 bg-white">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg text-slate-900">Main content order</CardTitle>
+          <p className="text-sm text-slate-500">Intro and outro stay in place—reorder only affects your uploaded segments.</p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {Array.isArray(mainSegments) && mainSegments.length ? (
+            mainSegments.map((segment, index) => (
+              <div
+                key={segment.id || segment.mediaItemId || index}
+                className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div>
+                  <p className="font-semibold text-slate-900">
+                    {index + 1}. {formatDisplayName(segment.friendlyName || segment.filename, { fallback: SEGMENT_PLACEHOLDER })}
+                  </p>
+                  <p className="text-xs text-slate-500">{segment.processingMode === 'advanced' ? 'Advanced mastering' : 'Standard pipeline'}</p>
+                </div>
+                <div className="flex items-center gap-2 self-start sm:self-auto">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => onReorderSegments(index, index - 1)}
+                    disabled={index === 0}
+                  >
+                    <ArrowUp className="h-4 w-4" aria-hidden="true" />
+                    <span className="sr-only">Move up</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => onReorderSegments(index, index + 1)}
+                    disabled={index === mainSegments.length - 1}
+                  >
+                    <ArrowDown className="h-4 w-4" aria-hidden="true" />
+                    <span className="sr-only">Move down</span>
+                  </Button>
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="text-sm text-slate-500 text-center py-2">No uploaded segments yet.</p>
+          )}
+
+          {isBundlingSegments && (
+            <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 flex items-center gap-3">
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              <span>Rebuilding your master audio…</span>
+            </div>
+          )}
+          {!isBundlingSegments && segmentsDirty && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              Segment order changed. We’ll merge the new order automatically—please wait.
+            </div>
+          )}
+          {bundleError && (
+            <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 flex items-center justify-between gap-3">
+              <span>{bundleError}</span>
+              <Button size="sm" variant="outline" onClick={onComposeSegments} disabled={isBundlingSegments}>
+                Retry merge
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="flex justify-end">
         <Dialog open={isGuideOpen} onOpenChange={setIsGuideOpen}>
@@ -297,7 +369,12 @@ export default function StepCustomizeSegments({
           <ArrowLeft className="w-5 h-5 mr-2" />Back to Upload
         </Button>
         <div className="flex flex-col items-end gap-2">
-          {!canContinue && (
+          {bundleBlocking && (
+            <p className="text-sm text-slate-500">
+              Wait for your segments to finish merging before continuing.
+            </p>
+          )}
+          {!bundleBlocking && !canContinue && (
             <p className={cn('text-sm', showValidation ? 'text-red-600' : 'text-slate-500')}>
               {showValidation
                 ? 'Complete the required scripts before continuing.'
@@ -308,12 +385,13 @@ export default function StepCustomizeSegments({
             type="button"
             onClick={handleContinue}
             size="lg"
-            aria-disabled={!canContinue}
+            disabled={!canContinue || bundleBlocking}
+            aria-disabled={!canContinue || bundleBlocking}
             className={cn(
               'px-8 py-3 text-lg font-semibold text-white transition-colors',
-              !canContinue && 'cursor-not-allowed opacity-80'
+              (!canContinue || bundleBlocking) && 'cursor-not-allowed opacity-80'
             )}
-            style={{ backgroundColor: canContinue ? '#2C3E50' : '#94a3b8' }}
+            style={{ backgroundColor: (!canContinue || bundleBlocking) ? '#94a3b8' : '#2C3E50' }}
           >
             Continue to Details
             <ArrowLeft className="w-5 h-5 ml-2 rotate-180" />

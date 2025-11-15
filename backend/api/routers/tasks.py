@@ -176,6 +176,7 @@ class AssembleIn(BaseModel):
     user_id: str
     podcast_id: str | None = None
     intents: Dict[str, Any] | None = None
+    use_auphonic: bool | None = None
 
 
 def _validate_assemble_payload(data: Dict[str, Any]) -> AssembleIn:
@@ -242,7 +243,10 @@ async def assemble_episode_task(request: Request, x_tasks_auth: str | None = Hea
             log.info("event=tasks.assemble.start episode_id=%s pid=%s", payload.episode_id, os.getpid())
             
             # Extract use_auphonic flag from episode_details if present
-            use_auphonic = (payload.episode_details or {}).get('use_auphonic', False)
+            if payload.use_auphonic is None:
+                use_auphonic = (payload.episode_details or {}).get('use_auphonic', False)
+            else:
+                use_auphonic = payload.use_auphonic
             
             result = orchestrate_create_podcast_episode(
                 episode_id=payload.episode_id,
@@ -255,7 +259,7 @@ async def assemble_episode_task(request: Request, x_tasks_auth: str | None = Hea
                 podcast_id=payload.podcast_id or "",
                 intents=payload.intents or None,
                 skip_charge=False,
-                use_auphonic=use_auphonic,
+                use_auphonic=bool(use_auphonic),
             )
             log.info("event=tasks.assemble.done episode_id=%s result=%s", payload.episode_id, result)
         except Exception as exc:  # pragma: no cover - defensive

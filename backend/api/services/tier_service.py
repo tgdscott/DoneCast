@@ -227,9 +227,9 @@ def calculate_processing_cost(
     # Base conversion: 1 minute = 1 credit
     BASE_CREDIT_RATE = 1.0
     
-    # Determine pipeline
+    # Determine pipeline - default to the user's explicit preference if not provided
     if use_auphonic is None:
-        use_auphonic = config.get('audio_pipeline') == 'auphonic'
+        use_auphonic = bool(getattr(user, 'use_advanced_audio_processing', False))
     
     # Calculate base audio cost
     base_audio_credits = audio_duration_minutes * BASE_CREDIT_RATE
@@ -267,32 +267,6 @@ def calculate_processing_cost(
             'elevenlabs': elevenlabs_multiplier if use_elevenlabs_tts else None,
         }
     }
-
-
-def should_use_auphonic(session: Session, user: User) -> bool:
-    """
-    Determine if user should use Auphonic pipeline based on tier configuration.
-    
-    This replaces the hard-coded logic in auphonic_helper.py
-    
-    Args:
-        session: Database session
-        user: User object
-    
-    Returns:
-        True if Auphonic should be used, False otherwise
-    """
-    config = get_tier_config(session, getattr(user, 'tier', 'free') or 'free')
-    pipeline = config.get('audio_pipeline', 'assemblyai')
-    
-    result = pipeline == 'auphonic'
-    
-    log.debug(
-        f"[tier_service] user_id={user.id} tier={getattr(user, 'tier', 'free')} "
-        f"pipeline={pipeline} → auphonic={result}"
-    )
-    
-    return result
 
 
 def get_tts_provider(session: Session, user: User) -> str:
@@ -456,7 +430,6 @@ __all__ = [
     "check_feature_access",
     "get_tier_credits",
     "calculate_processing_cost",
-    "should_use_auphonic",
     "get_tts_provider",
     "update_tier_config",
     "save_tier_config_history",

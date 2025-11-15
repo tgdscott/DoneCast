@@ -724,7 +724,9 @@ def assemble_or_queue(
 ) -> Dict[str, Any]:
     """
     Assemble an episode or queue it for processing.
-    
+    episode_details = dict(episode_details or {})
+    episode_details["use_auphonic"] = bool(use_auphonic)
+
     Processing MUST go through a worker server or Cloud Tasks. Inline processing is NEVER allowed.
     
     Processing priority:
@@ -993,6 +995,7 @@ def assemble_or_queue(
             meta["episode_details"] = episode_details
         if intents:
             meta["intents"] = intents
+        meta["use_auphonic"] = bool(use_auphonic)
         meta = _merge_transcript_metadata_from_upload(session, meta, str(main_content_filename))
         ep.meta_json = _json.dumps(meta)
         session.add(ep)

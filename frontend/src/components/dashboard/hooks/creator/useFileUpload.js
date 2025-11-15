@@ -1,5 +1,6 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { uploadMediaDirect } from '@/lib/directUpload';
+import { makeApi } from '@/lib/apiClient';
 
 /**
  * Manages file upload state for main podcast audio
@@ -13,18 +14,42 @@ import { uploadMediaDirect } from '@/lib/directUpload';
  * @param {Function} options.setStatusMessage - Status message setter from parent
  * @returns {Object} Upload state and handlers
  */
+const DEFAULT_PROCESSING_MODE = 'standard';
+
+const createSegmentRecord = (entry, processingMode = DEFAULT_PROCESSING_MODE) => {
+  const makeId = () => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      try { return crypto.randomUUID(); } catch (_) {}
+    }
+    return `seg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  };
+
+  return {
+    id: makeId(),
+    mediaItemId: entry?.id || null,
+    filename: entry?.filename || null,
+    friendlyName: entry?.friendly_name || entry?.original_filename || entry?.filename || 'Audio segment',
+    processingMode: processingMode === 'advanced' ? 'advanced' : 'standard',
+    createdAt: entry?.created_at || null,
+  };
+};
+
 export default function useFileUpload({
   token,
-  onUploadComplete,
   onPreuploadSelect,
   setError,
   setStatusMessage,
 }) {
-  // File state
-  const [uploadedFile, setUploadedFile] = useState(null);
   const [uploadedFilename, setUploadedFilename] = useState(null);
   const [selectedPreupload, setSelectedPreupload] = useState(null);
   const [wasRecorded, setWasRecorded] = useState(false);
+  const [mainSegments, setMainSegments] = useState([]);
+  const [bundleMediaItem, setBundleMediaItem] = useState(null);
+  const [bundleSignature, setBundleSignature] = useState(null);
+  const [segmentsDirty, setSegmentsDirty] = useState(false);
+  const [bundleError, setBundleError] = useState(null);
+
+  const [isBundling, setIsBundling] = useState(false);
 
   // Upload progress tracking
   const [isUploading, setIsUploading] = useState(false);
@@ -40,6 +65,8 @@ export default function useFileUpload({
   const [transcriptPath, setTranscriptPath] = useState(null);
   const transcriptReadyRef = useRef(false);
 
+  const apiClient = useMemo(() => (token ? makeApi(token) : null), [token]);
+
   // Reset transcript state helper
   const resetTranscriptState = useCallback(() => {
     setTranscriptReady(false);
@@ -47,12 +74,25 @@ export default function useFileUpload({
     transcriptReadyRef.current = false;
   }, []);
 
+  const cleanupBundle = useCallback(async () => {
+    if (!bundleMediaItem?.id || !apiClient) {
+      setBundleMediaItem(null);
+      return;
+    }
+    try {
+      await apiClient.delete(`/api/media/${bundleMediaItem.id}`);
+    } catch (_) {}
+    setBundleMediaItem(null);
+    setBundleSignature(null);
+  }, [bundleMediaItem, apiClient]);
+
   // Main file upload handler
   const handleFileChange = useCallback(
-    async (file) => {
+    async (file, options = {}) => {
       if (!file) return;
 
       const MB = 1024 * 1024;
+      const processingMode = options.processingMode === 'advanced' ? 'advanced' : 'standard';
       
       // Validate file type
       if (!(file.type || '').toLowerCase().startsWith('audio/')) {
@@ -75,8 +115,6 @@ export default function useFileUpload({
         return;
       }
 
-      // Reset state for new upload
-      setUploadedFile(file);
       resetTranscriptState();
       setIsUploading(true);
       setUploadProgress(0);
@@ -90,7 +128,6 @@ export default function useFileUpload({
       } catch {}
 
       try {
-        // Upload to GCS via direct upload endpoint
         const entries = await uploadMediaDirect({
           category: 'main_content',
           file,
@@ -105,31 +142,25 @@ export default function useFileUpload({
           },
         });
 
-        const fname = entries[0]?.filename;
-        setUploadedFilename(fname);
-        
-        // Persist filename to localStorage for recovery
-        try {
-          if (fname) localStorage.setItem('ppp_uploaded_filename', fname);
-        } catch {}
+        const entry = entries[0];
+        if (!entry) {
+          throw new Error('Upload did not return a file reference.');
+        }
+
+        setMainSegments(prev => [...prev, createSegmentRecord(entry, processingMode)]);
+        setSegmentsDirty(true);
+        setSelectedPreupload(null);
 
         setStatusMessage('Upload successful!');
         setUploadProgress(100);
 
-        // Emit upload complete event to resume normal polling after cooldown
         try {
           window.dispatchEvent(new CustomEvent('ppp:upload:complete'));
           localStorage.setItem('ppp_last_upload_time', Date.now().toString());
         } catch {}
-
-        // Notify parent of upload completion
-        if (onUploadComplete) {
-          onUploadComplete({ filename: fname, file });
-        }
       } catch (err) {
         setError(err.message);
         setStatusMessage('');
-        setUploadedFile(null);
         
         try {
           localStorage.removeItem('ppp_uploaded_filename');
@@ -141,35 +172,36 @@ export default function useFileUpload({
         uploadXhrRef.current = null;
         setIsUploading(false);
         
-        // Clear progress UI after animation completes
         setTimeout(() => {
           setUploadProgress(null);
           setUploadStats(null);
         }, 400);
       }
     },
-    [token, setError, setStatusMessage, resetTranscriptState, onUploadComplete]
+    [token, setError, setStatusMessage, resetTranscriptState]
   );
 
   // Pre-uploaded file selection handler (for media library)
   const handlePreuploadedSelect = useCallback(
-    (item) => {
+    async (item) => {
       if (!item) {
-        // Deselect - clear all state
         setSelectedPreupload(null);
         setUploadedFilename(null);
+        setMainSegments([]);
+        setSegmentsDirty(false);
+        setBundleError(null);
+        await cleanupBundle();
         resetTranscriptState();
-
-        // Notify parent of deselection
-        if (onPreuploadSelect) {
-          onPreuploadSelect(null);
-        }
         return;
       }
 
+      await cleanupBundle();
+      setMainSegments([]);
+      setSegmentsDirty(false);
+      setBundleError(null);
+
       const filename = item.filename || null;
       setSelectedPreupload(filename);
-      setUploadedFile(null); // Clear direct upload if switching to preuploaded
 
       if (filename) {
         setUploadedFilename(filename);
@@ -178,56 +210,166 @@ export default function useFileUpload({
         } catch {}
       }
 
-      // Set transcript state from item metadata
       const ready = !!item.transcript_ready;
       setTranscriptReady(ready);
       transcriptReadyRef.current = ready;
-  const path = ready ? item.transcript_path || null : null;
-  try { console.debug('[useFileUpload] set transcript state', { filename, ready, transcript_path: path }); } catch(_) {}
-  setTranscriptPath(path);
+      const path = ready ? item.transcript_path || null : null;
+      setTranscriptPath(path);
 
-      // Notify parent of selection
       if (onPreuploadSelect) {
         onPreuploadSelect(item);
       }
     },
-    [resetTranscriptState, onPreuploadSelect]
+    [cleanupBundle, resetTranscriptState, onPreuploadSelect]
   );
 
   // Cancel/abort upload
   const cancelUpload = useCallback(() => {
-    // Abort in-flight XHR if active
     try {
       if (uploadXhrRef.current && typeof uploadXhrRef.current.abort === 'function') {
         uploadXhrRef.current.abort();
       }
     } catch {}
 
-    // Clear upload state
-    setUploadedFile(null);
+    setMainSegments([]);
+    setSegmentsDirty(false);
     setUploadedFilename(null);
     setUploadProgress(null);
     setUploadStats(null);
     setIsUploading(false);
+    setBundleError(null);
+    cleanupBundle();
     resetTranscriptState();
 
-    // Clear localStorage
     try {
       localStorage.removeItem('ppp_uploaded_filename');
       localStorage.removeItem('ppp_uploaded_hint');
       localStorage.removeItem('ppp_transcript_ready');
     } catch {}
-  }, [resetTranscriptState]);
+  }, [cleanupBundle, resetTranscriptState]);
 
   // Audio duration (set externally after analysis)
   const [audioDurationSec, setAudioDurationSec] = useState(null);
 
+  const desiredSignature = useMemo(
+    () => JSON.stringify(mainSegments.map(seg => `${seg.mediaItemId}:${seg.processingMode}`)),
+    [mainSegments],
+  );
+
+  const composeSegments = useCallback(
+    async (signatureOverride = null) => {
+      if (!apiClient || !mainSegments.length) return null;
+      const signature = signatureOverride ?? desiredSignature;
+
+      setIsBundling(true);
+      setBundleError(null);
+
+      try {
+        await cleanupBundle();
+
+        const payload = {
+          segments: mainSegments.map(seg => ({
+            media_item_id: seg.mediaItemId,
+            filename: seg.filename,
+            processing_mode: seg.processingMode,
+          })),
+        };
+
+        const response = await apiClient.post('/api/media/main-content/bundle', payload);
+        const mediaItem = response?.media_item || response;
+        if (!mediaItem?.filename) {
+          throw new Error('Bundle response missing filename.');
+        }
+
+        setBundleMediaItem(mediaItem);
+        setUploadedFilename(mediaItem.filename);
+        setSegmentsDirty(false);
+        setBundleSignature(signature);
+        setSelectedPreupload(null);
+        resetTranscriptState();
+
+        try {
+          localStorage.setItem('ppp_uploaded_filename', mediaItem.filename);
+        } catch {}
+
+        return mediaItem;
+      } catch (err) {
+        setBundleError(err?.message || 'Failed to combine segments.');
+        setError(err?.message || 'Failed to combine segments.');
+        throw err;
+      } finally {
+        setIsBundling(false);
+      }
+    },
+    [apiClient, cleanupBundle, desiredSignature, mainSegments, resetTranscriptState, setError],
+  );
+
+  useEffect(() => {
+    if (mainSegments.length === 0) {
+      return;
+    }
+    if (selectedPreupload) return;
+    if (isUploading || isBundling || bundleError) return;
+    if (bundleSignature === desiredSignature) return;
+    composeSegments(desiredSignature).catch(() => {});
+  }, [
+    mainSegments.length,
+    selectedPreupload,
+    isUploading,
+    isBundling,
+    bundleError,
+    bundleSignature,
+    desiredSignature,
+    composeSegments,
+  ]);
+
+  useEffect(() => {
+    if (mainSegments.length === 0) {
+      cleanupBundle();
+      setBundleError(null);
+      setSegmentsDirty(false);
+      if (bundleMediaItem) {
+        setUploadedFilename(null);
+        resetTranscriptState();
+      }
+    }
+  }, [mainSegments.length, cleanupBundle, bundleMediaItem, resetTranscriptState]);
+
+  const removeSegment = useCallback((segmentId) => {
+    setMainSegments(prev => prev.filter(seg => seg.id !== segmentId));
+    setSegmentsDirty(true);
+  }, []);
+
+  const updateSegmentProcessingMode = useCallback((segmentId, mode) => {
+    setMainSegments(prev => prev.map(seg => (
+      seg.id === segmentId ? { ...seg, processingMode: mode === 'advanced' ? 'advanced' : 'standard' } : seg
+    )));
+    setSegmentsDirty(true);
+  }, []);
+
+  const reorderSegments = useCallback((startIndex, endIndex) => {
+    setMainSegments(prev => {
+      if (startIndex === endIndex || startIndex < 0 || endIndex < 0 || startIndex >= prev.length || endIndex >= prev.length) {
+        return prev;
+      }
+      const next = [...prev];
+      const [moved] = next.splice(startIndex, 1);
+      next.splice(endIndex, 0, moved);
+      return next;
+    });
+    setSegmentsDirty(true);
+  }, []);
+
   return {
     // File state
-    uploadedFile,
     uploadedFilename,
     selectedPreupload,
     wasRecorded,
+    mainSegments,
+    bundleMediaItem,
+    segmentsDirty,
+    isBundling,
+    bundleError,
     
     // Upload progress
     isUploading,
@@ -247,7 +389,6 @@ export default function useFileUpload({
     uploadXhrRef,
     
     // Setters (for external control)
-    setUploadedFile,
     setUploadedFilename,
     setSelectedPreupload,
     setWasRecorded,
@@ -260,6 +401,10 @@ export default function useFileUpload({
     // Handlers
     handleFileChange,
     handlePreuploadedSelect,
+    removeSegment,
+    updateSegmentProcessingMode,
+    reorderSegments,
+    composeSegments,
     cancelUpload,
     resetTranscriptState,
   };

@@ -23,6 +23,11 @@ class UserBase(SQLModel):
     elevenlabs_api_key: Optional[str] = Field(default=None, description="User-provided ElevenLabs API key for TTS")
     # JSON-encoded user-level audio cleanup & command settings (serialized externally)
     audio_cleanup_settings_json: Optional[str] = Field(default=None, description="User-level settings for silence/filler removal and command keywords")
+    # Preferred audio pipeline (advanced mastering vs standard)
+    use_advanced_audio_processing: bool = Field(
+        default=False,
+        description="If True, route uploads through the advanced mastering pipeline instead of AssemblyAI-only flow",
+    )
     # Optional profile personalization fields
     first_name: Optional[str] = Field(default=None, max_length=80, description="User given name for personalization")
     last_name: Optional[str] = Field(default=None, max_length=120, description="User family name")

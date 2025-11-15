@@ -6,7 +6,9 @@ import StepUploadAudio from '@/components/dashboard/podcastCreatorSteps/StepUplo
 describe('StepUploadAudio step controls', () => {
   const baseFile = new File(['audio'], 'episode.mp3', { type: 'audio/mpeg' });
   const noop = () => {};
+  const composeResolved = () => Promise.resolve();
   const ref = { current: null };
+  const baseSegments = [{ id: 'seg-1', friendlyName: 'Intro', processingMode: 'standard' }];
 
   it('prompts for automation answers before continuing', () => {
     const handleNext = vi.fn();
@@ -14,9 +16,13 @@ describe('StepUploadAudio step controls', () => {
 
     render(
       <StepUploadAudio
-        uploadedFile={baseFile}
+        mainSegments={baseSegments}
+        uploadedFilename="gs://test/file.wav"
         isUploading={false}
         onFileChange={noop}
+        onSegmentRemove={noop}
+        onSegmentProcessingChange={noop}
+        composeSegments={composeResolved}
         fileInputRef={ref}
         onBack={noop}
         onNext={handleNext}
@@ -38,9 +44,13 @@ describe('StepUploadAudio step controls', () => {
 
     render(
       <StepUploadAudio
-        uploadedFile={baseFile}
+        mainSegments={baseSegments}
+        uploadedFilename="gs://test/file.wav"
         isUploading={false}
         onFileChange={noop}
+        onSegmentRemove={noop}
+        onSegmentProcessingChange={noop}
+        composeSegments={composeResolved}
         fileInputRef={ref}
         onBack={noop}
         onNext={handleNext}
