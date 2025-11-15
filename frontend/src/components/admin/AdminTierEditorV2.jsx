@@ -151,10 +151,28 @@ export default function AdminTierEditorV2() {
       // Sort features by order before saving
       const sortedFeatures = [...editedFeatures].sort((a, b) => a.order - b.order);
       
+      // Clean feature definitions - ensure proper types and remove null options for non-select types
+      const cleanedFeatures = sortedFeatures.map(f => {
+        const cleaned = {
+          key: f.key,
+          label: f.label,
+          description: f.description || '',
+          type: f.type || 'text',
+          fieldPath: f.fieldPath,
+          order: f.order || 0,
+          category: f.category || 'general'
+        };
+        // Only include options if type is 'select' and options exist
+        if (f.type === 'select' && f.options && Array.isArray(f.options) && f.options.length > 0) {
+          cleaned.options = f.options;
+        }
+        return cleaned;
+      });
+      
       const updatedData = {
         standardTiers: updatedTiers,
         earlyAccessTiers: pricingData.earlyAccessTiers || null,
-        featureDefinitions: sortedFeatures
+        featureDefinitions: cleanedFeatures
       };
       
       await api.put('/api/admin/pricing', updatedData);
@@ -167,8 +185,44 @@ export default function AdminTierEditorV2() {
       setHasChanges(false);
       await fetchData();
     } catch (e) {
-      const msg = e?.detail?.message || e?.detail || e?.message || 'Failed to save pricing configuration';
-      toast({ title: 'Save Failed', description: msg, variant: 'destructive' });
+      // Handle validation errors from FastAPI
+      let errorMsg = 'Failed to save pricing configuration';
+      
+      // Check for validation error structure from our exception handler
+      if (e?.error?.details) {
+        // Pydantic validation errors - format the error details
+        const details = e.error.details;
+        if (Array.isArray(details) && details.length > 0) {
+          const errorStrings = details.map((err: any) => {
+            const loc = err.loc ? err.loc.join('.') : '';
+            const msg = err.msg || 'Invalid value';
+            return `${loc}: ${msg}`;
+          });
+          errorMsg = `Validation errors:\n${errorStrings.join('\n')}`;
+        } else {
+          errorMsg = e.error.message || errorMsg;
+        }
+      } else if (e?.detail) {
+        // FastAPI HTTPException detail
+        if (Array.isArray(e.detail)) {
+          // Pydantic validation errors directly in detail
+          const errorStrings = e.detail.map((err: any) => {
+            const loc = err.loc ? err.loc.join('.') : '';
+            const msg = err.msg || 'Invalid value';
+            return `${loc}: ${msg}`;
+          });
+          errorMsg = `Validation errors:\n${errorStrings.join('\n')}`;
+        } else if (typeof e.detail === 'object' && e.detail.message) {
+          errorMsg = e.detail.message;
+        } else {
+          errorMsg = typeof e.detail === 'string' ? e.detail : JSON.stringify(e.detail);
+        }
+      } else if (e?.message) {
+        errorMsg = e.message;
+      }
+      
+      console.error('Pricing save error:', e);
+      toast({ title: 'Save Failed', description: errorMsg, variant: 'destructive' });
     } finally {
       setSaving(false);
     }
@@ -219,13 +273,25 @@ export default function AdminTierEditorV2() {
       return;
     }
     
+    // Ensure all required fields have default values
+    const featureToSave = {
+      key: editingFeature.key,
+      label: editingFeature.label,
+      description: editingFeature.description || '',
+      type: editingFeature.type || 'text',
+      fieldPath: editingFeature.fieldPath,
+      order: editingFeature.order || 0,
+      category: editingFeature.category || 'general',
+      options: editingFeature.type === 'select' && editingFeature.options ? editingFeature.options : null
+    };
+    
     if (isEditingExistingFeature) {
       // Update existing feature - find by original key
       const originalKey = editingFeature.key; // Key shouldn't change for existing features
       const existingIndex = editedFeatures.findIndex(f => f.key === originalKey);
       if (existingIndex >= 0) {
         const updated = [...editedFeatures];
-        updated[existingIndex] = editingFeature;
+        updated[existingIndex] = featureToSave;
         setEditedFeatures(updated);
       }
     } else {
@@ -235,7 +301,7 @@ export default function AdminTierEditorV2() {
         return;
       }
       // Add new feature
-      setEditedFeatures([...editedFeatures, editingFeature]);
+      setEditedFeatures([...editedFeatures, featureToSave]);
     }
     
     setShowFeatureDialog(false);
