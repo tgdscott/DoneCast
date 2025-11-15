@@ -68,10 +68,11 @@ def get_pending_deletions(
             days_remaining = 0
         
         # Count published episodes
+        from api.routers.episodes.common import is_published_condition
         published_count = session.exec(
             select(Episode)
             .where(Episode.user_id == user.id)
-            .where(Episode.status == EpisodeStatus.published)
+            .where(is_published_condition())
         ).all()
         
         # Calculate account age

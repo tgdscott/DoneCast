@@ -5,7 +5,7 @@ from ..core.database import get_session
 from ..models.user import User
 from api.routers.auth import get_current_user
 from api.routers.admin.deps import get_current_admin_user
-import os, stripe
+import os, stripe, logging
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from ..core.constants import TIER_LIMITS
@@ -15,6 +15,8 @@ from sqlmodel import select
 from sqlalchemy import func
 from ..services.billing import usage as usage_svc
 from ..core.config import settings
+
+logger = logging.getLogger(__name__)
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
@@ -106,18 +108,32 @@ class SubscriptionStatus(BaseModel):
     applied_upgrade_credit: float | None = None
 
 def _ensure_customer(user: User, session: Session):
+    """Ensure user has a Stripe customer ID, creating one if needed.
+    
+    Raises HTTPException if Stripe API call fails.
+    """
     if not getattr(user, 'stripe_customer_id', None):
-        cust = stripe.Customer.create(email=user.email, metadata={"user_id": str(user.id)})
-        user.stripe_customer_id = cust.id
-        session.add(user)
-        session.commit()
-        return cust.id
+        try:
+            cust = stripe.Customer.create(email=user.email, metadata={"user_id": str(user.id)})
+            user.stripe_customer_id = cust.id
+            session.add(user)
+            session.commit()
+            return cust.id
+        except Exception as e:
+            logger.error(
+                "event=billing.customer_create_failed user_id=%s email=%s error=%s - "
+                "Failed to create Stripe customer",
+                user.id, user.email, str(e),
+                exc_info=True
+            )
+            raise HTTPException(status_code=500, detail=f"Failed to create Stripe customer: {e}")
     return user.stripe_customer_id
 
 class CheckoutSessionResponse(BaseModel):
     """Response for embedded checkout - returns client_secret instead of redirect URL"""
     client_secret: str
     session_id: str
+    proration_error: str | None = None  # Set if proration was needed but failed
 
 @router.post("/checkout/embedded", response_model=CheckoutSessionResponse)
 async def create_embedded_checkout_session(
@@ -167,6 +183,7 @@ async def create_embedded_checkout_session(
         is_plan_upgrade = (prior_tier != 'free' and prior_tier != req.plan_key)
         needs_proration = (same_plan_cycle_change or is_plan_upgrade) and (prior_exp is not None)
         
+        proration_error = None
         if needs_proration:
             try:
                 today = datetime.utcnow().date()
@@ -181,7 +198,13 @@ async def create_embedded_checkout_session(
                 try:
                     price_obj = stripe.Price.retrieve(price_id)
                     unit_amount = Decimal(price_obj['unit_amount']) / Decimal(100)
-                except Exception:
+                except Exception as e:
+                    logger.warning(
+                        "event=billing.proration.price_retrieve_failed user_id=%s price_id=%s error=%s - "
+                        "Failed to retrieve price for proration calculation, defaulting to 0",
+                        current_user.id, price_id, str(e),
+                        exc_info=True
+                    )
                     unit_amount = Decimal('0')
                 
                 prev_sub = crud.get_active_subscription_for_user(session, current_user.id)
@@ -194,8 +217,14 @@ async def create_embedded_checkout_session(
                             prev_cap = Decimal('0')
                         if credit > prev_cap:
                             credit = prev_cap
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(
+                            "event=billing.proration.prev_price_retrieve_failed user_id=%s price_id=%s error=%s - "
+                            "Failed to retrieve previous subscription price for proration cap, continuing without cap",
+                            current_user.id, prev_sub.price_id, str(e),
+                            exc_info=True
+                        )
+                        pass  # non-fatal: continue without price cap
                 
                 if credit > unit_amount:
                     credit = unit_amount
@@ -211,7 +240,25 @@ async def create_embedded_checkout_session(
                     discounts = [{"coupon": coupon.id}]
                     metadata['upgrade_prorated'] = '1'
             except Exception as e:
-                metadata['proration_error'] = str(e)[:150]
+                error_msg = str(e)[:150]
+                logger.error(
+                    "event=billing.proration.failed user_id=%s plan_key=%s prior_tier=%s error=%s - "
+                    "Proration calculation failed - failing checkout to prevent overcharging user",
+                    current_user.id, req.plan_key, prior_tier, error_msg,
+                    exc_info=True
+                )
+                proration_error = error_msg
+                metadata['proration_error'] = error_msg
+                # CRITICAL: Fail checkout if proration was needed but failed
+                # This prevents users from being overcharged (charged full price instead of prorated)
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        f"Unable to calculate prorated credit for your subscription upgrade. "
+                        f"Please try again in a moment or contact support if this persists. "
+                        f"Error: {error_msg}"
+                    )
+                )
         
         if same_plan_cycle_change:
             metadata['cycle_change'] = '1'
@@ -243,7 +290,8 @@ async def create_embedded_checkout_session(
         
         return CheckoutSessionResponse(
             client_secret=str(client_secret),
-            session_id=str(checkout_session.id)
+            session_id=str(checkout_session.id),
+            proration_error=proration_error
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Stripe error: {e}")
@@ -308,7 +356,13 @@ async def create_checkout_session(
                 try:
                     price_obj = stripe.Price.retrieve(price_id)
                     unit_amount = Decimal(price_obj['unit_amount']) / Decimal(100)
-                except Exception:
+                except Exception as e:
+                    logger.warning(
+                        "event=billing.proration.price_retrieve_failed user_id=%s price_id=%s error=%s - "
+                        "Failed to retrieve price for proration calculation, defaulting to 0",
+                        current_user.id, price_id, str(e),
+                        exc_info=True
+                    )
                     unit_amount = Decimal('0')
                 # Retrieve previous active subscription price for stronger cap (old price - 1)
                 prev_sub = crud.get_active_subscription_for_user(session, current_user.id)
@@ -321,8 +375,14 @@ async def create_checkout_session(
                             prev_cap = Decimal('0')
                         if credit > prev_cap:
                             credit = prev_cap
-                    except Exception:
-                        pass  # non-fatal
+                    except Exception as e:
+                        logger.warning(
+                            "event=billing.proration.prev_price_retrieve_failed user_id=%s price_id=%s error=%s - "
+                            "Failed to retrieve previous subscription price for proration cap, continuing without cap",
+                            current_user.id, prev_sub.price_id, str(e),
+                            exc_info=True
+                        )
+                        pass  # non-fatal: continue without price cap
                 if credit > unit_amount:
                     credit = unit_amount
                 if credit > 0:
@@ -336,7 +396,24 @@ async def create_checkout_session(
                     discounts = [{"coupon": coupon.id}]
                     metadata['upgrade_prorated'] = '1'
             except Exception as e:  # pragma: no cover
-                metadata['proration_error'] = str(e)[:150]
+                error_msg = str(e)[:150]
+                logger.error(
+                    "event=billing.proration.failed user_id=%s plan_key=%s prior_tier=%s error=%s - "
+                    "Proration calculation failed - failing checkout to prevent overcharging user",
+                    current_user.id, req.plan_key, prior_tier, error_msg,
+                    exc_info=True
+                )
+                metadata['proration_error'] = error_msg
+                # CRITICAL: Fail checkout if proration was needed but failed
+                # This prevents users from being overcharged (charged full price instead of prorated)
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        f"Unable to calculate prorated credit for your subscription upgrade. "
+                        f"Please try again in a moment or contact support if this persists. "
+                        f"Error: {error_msg}"
+                    )
+                )
         if same_plan_cycle_change:
             metadata['cycle_change'] = '1'
         if is_plan_upgrade:
@@ -393,23 +470,39 @@ async def create_billing_portal(req: PortalRequest, current_user: User = Depends
         raise HTTPException(status_code=500, detail=f"Stripe error: {msg}")
 
 def _episodes_created_this_month(session: Session, user_id) -> int:
+    """Count episodes created this month for the given user.
+    
+    Returns the count of episodes created in the current month.
+    
+    Raises RuntimeError if the query with created_at filter fails (e.g., column missing on old rows).
+    This prevents returning an inflated count (all episodes ever) which would incorrectly show
+    the user has exhausted their monthly quota.
+    """
     from datetime import datetime, timezone
     from calendar import monthrange  # noqa: F401 (future use for resetting logic)
     from ..models.podcast import Episode
     now = datetime.now(timezone.utc)
     start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
-    # created_at may not exist on very old rows; filter defensively
     try:
         return session.exec(
             select(func.count(Episode.id))
             .where(Episode.user_id == user_id)
             .where(Episode.created_at >= start)
         ).one()
-    except Exception:
-        return session.exec(
-            select(func.count(Episode.id))
-            .where(Episode.user_id == user_id)
-        ).one()
+    except Exception as e:
+        # CRITICAL: Do not fall back to counting all episodes - that would inflate monthly usage
+        # Instead, raise an error so the caller can handle it appropriately
+        logger.error(
+            "event=billing.episode_count_failed user_id=%s error=%s - "
+            "Failed to count episodes created this month (created_at filter failed). "
+            "Cannot compute accurate monthly usage. Caller should handle this error.",
+            user_id, str(e),
+            exc_info=True
+        )
+        raise RuntimeError(
+            f"Unable to compute accurate monthly episode count for user {user_id}. "
+            f"The created_at column may be missing or the query failed: {e}"
+        ) from e
 
 
 @router.get("/subscription", response_model=SubscriptionStatus)
@@ -417,15 +510,40 @@ async def get_subscription(current_user: User = Depends(get_current_user), sessi
     tier = getattr(current_user, 'tier', 'free') or 'free'
     limits = TIER_LIMITS.get(tier, TIER_LIMITS['free'])
     max_eps = limits.get('max_episodes_month')
-    used = _episodes_created_this_month(session, current_user.id) if max_eps is not None else None
-    remaining = (max_eps - used) if (max_eps is not None and used is not None) else None
+    used = None
+    remaining = None
+    if max_eps is not None:
+        try:
+            used = _episodes_created_this_month(session, current_user.id)
+            remaining = (max_eps - used) if used is not None else None
+        except RuntimeError as e:
+            # Cannot compute accurate monthly usage - fail the endpoint to prevent misleading data
+            logger.error(
+                "event=billing.subscription.episode_count_unavailable user_id=%s error=%s - "
+                "Cannot compute accurate monthly episode usage. Failing endpoint to prevent displaying incorrect quota information.",
+                current_user.id, str(e),
+                exc_info=True
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Unable to compute your monthly episode usage at this time. "
+                    "Please try again in a moment or contact support if this persists."
+                )
+            )
     # Derive current_period_end from user.subscription_expires_at (renewal date) if present
     cpe = None
     try:
         exp = getattr(current_user, 'subscription_expires_at', None)
         if exp:
             cpe = exp.isoformat()
-    except Exception:
+    except Exception as e:
+        logger.warning(
+            "event=billing.subscription_expires_at_read_failed user_id=%s error=%s - "
+            "Failed to read subscription_expires_at, returning None for current_period_end",
+            current_user.id, str(e),
+            exc_info=True
+        )
         cpe = None
     return SubscriptionStatus(
         plan_key=tier,
@@ -471,15 +589,45 @@ async def get_checkout_result(session_id: str, current_user: User = Depends(get_
                     if amt:
                         applied_credit = float(amt) / 100.0
                         break
-    except Exception:
-        pass
+    except (ValueError, TypeError, KeyError) as e:
+        # Narrow exception handling: only catch expected data structure issues
+        logger.warning(
+            "event=billing.checkout_result.discount_read_failed user_id=%s session_id=%s error=%s - "
+            "Failed to parse discount data from checkout session (data structure issue). "
+            "Returning None, which may incorrectly show 'no credit applied' in UI even if discount was applied.",
+            current_user.id, session_id, str(e),
+            exc_info=True
+        )
+        # Continue with applied_credit = None for data structure issues (non-critical)
+    except Exception as e:
+        # Unexpected errors (network, API issues) should fail the endpoint
+        logger.error(
+            "event=billing.checkout_result.discount_read_failed user_id=%s session_id=%s error=%s - "
+            "Unexpected error reading discount information from checkout session. "
+            "Failing endpoint to prevent incorrect 'no credit applied' display.",
+            current_user.id, session_id, str(e),
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Unable to retrieve applied credit information for this checkout session. "
+                "Please refresh or contact support if this persists."
+            )
+        )
     renewal = None
     try:
         exp = getattr(current_user, 'subscription_expires_at', None)
         if exp:
             renewal = exp.isoformat()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(
+            "event=billing.checkout_result.renewal_date_read_failed user_id=%s session_id=%s error=%s - "
+            "Failed to read subscription_expires_at for renewal date, returning None",
+            current_user.id, session_id, str(e),
+            exc_info=True
+        )
+        # Continue with renewal = None - non-critical field
     return CheckoutResult(plan_key=plan_key, billing_cycle=cycle, renewal_date=renewal, applied_credit=applied_credit, flags=flags)
 
 class ForceSyncResponse(BaseModel):
@@ -629,8 +777,6 @@ async def get_usage(current_user: User = Depends(get_current_user), session: Ses
     # Keep episode limits for now (may be removed in future)
     limits = TIER_LIMITS.get(tier, TIER_LIMITS['free'])
     max_eps = limits.get('max_episodes_month')
-    used = _episodes_created_this_month(session, current_user.id) if max_eps is not None else None
-    remaining = (max_eps - used) if (max_eps is not None and used is not None) else None
     
     # Legacy minutes fields (deprecated, but kept for transition)
     max_minutes = limits.get('max_processing_minutes_month')
@@ -640,12 +786,31 @@ async def get_usage(current_user: User = Depends(get_current_user), session: Ses
         minutes_used = usage_svc.month_minutes_used(session, current_user.id, start_of_month, now)
         minutes_remaining = max_minutes - minutes_used if minutes_used is not None else None
     
+    # Legacy episode fields - handle failure explicitly
+    used_episodes = None
+    remaining_episodes = None
+    if max_eps is not None:
+        try:
+            used_episodes = _episodes_created_this_month(session, current_user.id)
+            remaining_episodes = (max_eps - used_episodes) if used_episodes is not None else None
+        except RuntimeError as e:
+            # Cannot compute accurate monthly usage - log but don't fail the entire usage endpoint
+            # (usage endpoint has other important data like credits)
+            logger.warning(
+                "event=billing.usage.episode_count_unavailable user_id=%s error=%s - "
+                "Cannot compute accurate monthly episode usage. Returning None for episode fields.",
+                current_user.id, str(e),
+                exc_info=True
+            )
+            used_episodes = None
+            remaining_episodes = None
+    
     return {
         "plan_key": tier,
         # Legacy episode fields
         "max_episodes_month": max_eps,
-        "episodes_used_this_month": used,
-        "episodes_remaining_this_month": remaining,
+        "episodes_used_this_month": used_episodes,
+        "episodes_remaining_this_month": remaining_episodes,
         # Legacy minutes fields (deprecated)
         "max_processing_minutes_month": max_minutes,
         "processing_minutes_used_this_month": minutes_used,

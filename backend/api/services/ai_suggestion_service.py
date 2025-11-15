@@ -29,9 +29,23 @@ _log = logging.getLogger(__name__)
 
 
 def _is_dev_env() -> bool:
-    """Check if running in development environment."""
-    val = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower()
-    return val in {"dev", "development", "local", "test", "testing"}
+    """Check if running in development environment.
+    
+    Returns False (safe default) if environment parsing fails, with logging.
+    """
+    try:
+        val = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower()
+        return val in {"dev", "development", "local", "test", "testing"}
+    except Exception as e:
+        import logging
+        log = logging.getLogger(__name__)
+        log.warning(
+            "event=env.check_failed function=_is_dev_env error=%s - "
+            "Environment variable parsing failed, defaulting to False (production mode)",
+            str(e),
+            exc_info=True
+        )
+        return False  # Safe default: treat as production if parsing fails
 
 
 def _get_template_settings(session: Session, podcast_id) -> Dict[str, Any]:

@@ -41,8 +41,21 @@ except Exception:
 router = APIRouter(prefix="/ai", tags=["ai"])
 _log = logging.getLogger(__name__)
 def _is_dev_env() -> bool:
-    val = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower()
-    return val in {"dev", "development", "local", "test", "testing"}
+    """Check if running in development environment.
+    
+    Returns False (safe default) if environment parsing fails, with logging.
+    """
+    try:
+        val = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").strip().lower()
+        return val in {"dev", "development", "local", "test", "testing"}
+    except Exception as e:
+        _log.warning(
+            "event=env.check_failed function=_is_dev_env error=%s - "
+            "Environment variable parsing failed, defaulting to False (production mode)",
+            str(e),
+            exc_info=True
+        )
+        return False  # Safe default: treat as production if parsing fails
 def _gather_user_sfx_entries(session: Session, current_user: User) -> Iterable[Dict[str, Any]]:
     try:
         stmt = (

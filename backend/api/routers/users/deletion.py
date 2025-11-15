@@ -124,11 +124,12 @@ def request_account_deletion(
         )
     
     # Count published episodes for grace period calculation
+    from api.routers.episodes.common import is_published_condition
     published_count = session.exec(
         select(func.count())
         .select_from(Episode)
         .where(Episode.user_id == current_user.id)
-        .where(Episode.status == EpisodeStatus.published)
+        .where(is_published_condition())
     ).one()
     
     # Calculate grace period

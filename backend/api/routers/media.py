@@ -636,6 +636,7 @@ class MainContentItem(BaseModel):
     created_at: Optional[str] = None
     expires_at: Optional[str] = None
     transcript_ready: bool = False
+    transcript_error: Optional[str] = None  # Error message if transcript recovery failed
     intents: Dict = {}
     notify_pending: bool = False
     duration_seconds: Optional[float] = None
@@ -805,6 +806,7 @@ async def list_main_content_uploads(
                 created_at=item.created_at.isoformat() if item.created_at else None,
                 expires_at=expires_at.isoformat() if expires_at else None,
                 transcript_ready=ready,
+                transcript_error=item.transcription_error,
                 intents=intents or {},
                 notify_pending=pending,
                 duration_seconds=duration,

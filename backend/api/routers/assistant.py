@@ -37,8 +37,6 @@ SMTP_HOST = os.getenv("SMTP_HOST", "smtp.mailgun.org")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASS", "")  # Use SMTP_PASS from existing config
-GOOGLE_SHEETS_ENABLED = os.getenv("GOOGLE_SHEETS_ENABLED", "false").lower() == "true"
-FEEDBACK_SHEET_ID = os.getenv("FEEDBACK_SHEET_ID", "")
 
 
 # ============================================================================
@@ -99,11 +97,20 @@ def _ensure_gemini_available() -> bool:
         )
 
 
-def _send_critical_bug_email(feedback: FeedbackSubmission, user: User) -> None:
-    """Send email notification to admin when critical bug is reported."""
+def _send_critical_bug_email(feedback: FeedbackSubmission, user: User) -> Dict[str, Any]:
+    """Send email notification to admin when critical bug is reported.
+    
+    Returns:
+        Dict with 'success' (bool) and 'error' (str, optional) keys.
+        Example: {'success': True} or {'success': False, 'error': 'SMTP not configured'}
+    """
     if not SMTP_USER or not SMTP_PASSWORD:
-        log.warning("SMTP not configured - skipping email notification")
-        return
+        log.warning(
+            "event=assistant.email_failed feedback_id=%s reason=smtp_not_configured - "
+            "SMTP not configured - skipping email notification",
+            str(feedback.id)
+        )
+        return {"success": False, "error": "SMTP not configured"}
     
     try:
         # Create email
@@ -143,87 +150,23 @@ def _send_critical_bug_email(feedback: FeedbackSubmission, user: User) -> None:
             server.login(SMTP_USER, SMTP_PASSWORD)
             server.send_message(msg)
         
-        log.info(f"Critical bug email sent for feedback {feedback.id}")
+        log.info(
+            "event=assistant.email_sent feedback_id=%s admin_email=%s - "
+            "Critical bug email sent successfully",
+            str(feedback.id), ADMIN_EMAIL
+        )
+        return {"success": True}
     except Exception as e:
-        log.error(f"Failed to send critical bug email: {e}")
+        error_msg = str(e)[:200]  # Truncate long errors
+        log.error(
+            "event=assistant.email_failed feedback_id=%s error=%s - "
+            "Failed to send critical bug email",
+            str(feedback.id), error_msg,
+            exc_info=True
+        )
+        return {"success": False, "error": error_msg}
 
 
-def _log_to_google_sheets(feedback: FeedbackSubmission, user: User) -> Optional[int]:
-    """Log feedback to Google Sheets tracking spreadsheet.
-    
-    Note: This requires Google Sheets API to be enabled and credentials configured.
-    If not set up, feedback will still be saved to database - Sheets is just for tracking.
-    """
-    if not GOOGLE_SHEETS_ENABLED or not FEEDBACK_SHEET_ID:
-        log.debug("Google Sheets logging not enabled (set GOOGLE_SHEETS_ENABLED=true)")
-        return None
-    
-    try:
-        # Import here to avoid dependency if not configured
-        from google.oauth2 import service_account
-        from googleapiclient.discovery import build
-        
-        # Try to get credentials - Google Cloud uses Application Default Credentials
-        # which can come from multiple sources:
-        # 1. GOOGLE_APPLICATION_CREDENTIALS env var pointing to JSON file
-        # 2. gcloud auth application-default login
-        # 3. Automatic in Cloud Run/GCE
-        creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        if not creds_path:
-            log.info("GOOGLE_APPLICATION_CREDENTIALS not set - trying default credentials")
-            # Try using default credentials (works in Cloud Run)
-            try:
-                import google.auth
-                creds, _ = google.auth.default(scopes=['https://www.googleapis.com/auth/spreadsheets'])
-            except Exception as e:
-                log.warning(f"Could not get default credentials: {e}")
-                return None
-        else:
-            creds = service_account.Credentials.from_service_account_file(
-                creds_path,
-                scopes=['https://www.googleapis.com/auth/spreadsheets']
-            )
-        
-        service = build('sheets', 'v4', credentials=creds)
-        
-        # Prepare row data
-        row = [
-            feedback.created_at.strftime('%Y-%m-%d %H:%M:%S'),
-            str(feedback.id),
-            user.email,
-            user.first_name or 'Unknown',
-            feedback.type,
-            feedback.severity,
-            feedback.title,
-            feedback.description,
-            feedback.page_url or '',
-            feedback.user_action or '',
-            feedback.error_logs or '',
-            feedback.status,
-        ]
-        
-        # Append to sheet
-        body = {'values': [row]}
-        result = service.spreadsheets().values().append(
-            spreadsheetId=FEEDBACK_SHEET_ID,
-            range='Feedback!A:L',  # Adjust range as needed
-            valueInputOption='RAW',
-            insertDataOption='INSERT_ROWS',
-            body=body
-        ).execute()
-        
-        # Get row number
-        updated_range = result.get('updates', {}).get('updatedRange', '')
-        if updated_range:
-            # Extract row number from range like "Feedback!A123:L123"
-            row_num = int(updated_range.split('!')[1].split(':')[0][1:])
-            log.info(f"Feedback logged to Google Sheets row {row_num}")
-            return row_num
-        
-        return None
-    except Exception as e:
-        log.error(f"Failed to log to Google Sheets: {e}")
-        return None
 
 
 def _detect_bug_report(message: str, context: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
@@ -794,27 +737,18 @@ async def chat_with_assistant(
             log.info(f"Bug report created: {bug_submission_id} - {feedback.title}")
             
             # Send email for critical bugs (non-blocking)
+            email_result = None
             if feedback.severity == "critical":
-                try:
-                    _send_critical_bug_email(feedback, current_user)
+                email_result = _send_critical_bug_email(feedback, current_user)
+                if email_result.get("success"):
                     feedback.admin_notified = True
-                    log.info(f"Critical bug email sent for {bug_submission_id}")
-                except Exception as e:
-                    log.warning(f"Failed to send critical bug email: {e}")
-                    # Continue anyway - email is nice-to-have
+                # Note: email_result can be used to inform user if needed
             
-            # Log to Google Sheets (non-blocking, usually disabled)
-            if GOOGLE_SHEETS_ENABLED:
-                try:
-                    row_num = _log_to_google_sheets(feedback, current_user)
-                    if row_num:
-                        feedback.google_sheet_row = row_num
-                        log.info(f"Bug logged to Google Sheets row {row_num}")
-                except Exception as e:
-                    log.warning(f"Failed to log to Google Sheets: {e}")
-                    # Continue anyway - sheets logging is optional
-            
-            log.info(f"Auto-submitted bug report from chat: {feedback.title} (ID: {feedback.id})")
+            log.info(
+                "event=assistant.bug_auto_submitted feedback_id=%s email_sent=%s - "
+                "Auto-submitted bug report from chat",
+                str(feedback.id), email_result.get("success") if email_result else False
+            )
         except Exception as e:
             log.error(f"Failed to auto-submit bug: {e}", exc_info=True)
             # Don't let bug submission failure crash the chat
@@ -1145,28 +1079,29 @@ async def submit_feedback(
     session.refresh(feedback)
     
     # Send email notification for critical bugs
+    email_result = None
     if feedback.severity == "critical":
-        try:
-            _send_critical_bug_email(feedback, current_user)
+        email_result = _send_critical_bug_email(feedback, current_user)
+        if email_result.get("success"):
             feedback.admin_notified = True
             session.add(feedback)
             session.commit()
-        except Exception as e:
-            log.error(f"Failed to send email notification: {e}")
-    
-    # Log to Google Sheets for tracking
-    try:
-        row_num = _log_to_google_sheets(feedback, current_user)
-        if row_num:
-            feedback.google_sheet_row = row_num
-            session.add(feedback)
-            session.commit()
-    except Exception as e:
-        log.error(f"Failed to log to Google Sheets: {e}")
     
     log.info(f"Feedback submitted: {feedback.type} - {feedback.title} by {current_user.email}")
     
-    return {"id": str(feedback.id), "message": "Feedback submitted successfully"}
+    # Build response message based on email status
+    message = "Feedback submitted successfully"
+    if feedback.severity == "critical" and email_result and not email_result.get("success"):
+        message = (
+            "Bug report recorded. We had trouble sending the notification email, "
+            "but we'll still see it in the dashboard."
+        )
+    
+    return {
+        "id": str(feedback.id),
+        "message": message,
+        "email_sent": email_result.get("success") if email_result else None,
+    }
 
 
 @router.get("/bugs")

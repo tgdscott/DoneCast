@@ -16,7 +16,7 @@ from api.core.database import get_session
 from api.models.website import PodcastWebsite
 from api.models.podcast import Podcast, Episode, EpisodeStatus
 from api.services.website_sections import get_section_definition
-from api.routers.episodes.common import compute_playback_info
+from api.routers.episodes.common import compute_playback_info, is_published_condition
 
 
 router = APIRouter(prefix="/sites", tags=["Public Websites"])
@@ -70,7 +70,7 @@ def _fetch_published_episodes(session: Session, podcast: Podcast, max_count: int
     published_episodes = session.exec(
         select(Episode)
         .where(Episode.podcast_id == podcast.id)
-        .where(Episode.status == EpisodeStatus.published)
+        .where(is_published_condition())
         .order_by(
             desc(
                 case(

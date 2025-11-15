@@ -10,6 +10,7 @@ from api.core.database import get_session
 from api.models.podcast import Episode, EpisodeStatus, Podcast
 from api.services.op3_analytics import get_show_stats_sync
 from api.services.op3_historical_data import get_historical_data
+from api.routers.episodes.common import is_published_condition
 
 router = APIRouter(prefix="/public", tags=["public"])
 
@@ -54,7 +55,7 @@ def public_podcast_analytics(
     first_episode = session.exec(
         select(Episode)
         .where(Episode.podcast_id == podcast.id)
-        .where(Episode.status == EpisodeStatus.published)
+        .where(is_published_condition())
         .order_by(Episode.publish_at.asc())  # type: ignore
         .limit(1)
     ).first()

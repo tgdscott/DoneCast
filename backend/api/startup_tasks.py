@@ -507,6 +507,17 @@ def run_startup_tasks() -> None:
     # Uses SMALL limit (30) to minimize startup time
     with _timing("recover_stuck_episodes"):
         _recover_stuck_processing_episodes(limit=30)
+    
+    # Check for episodes stuck due to Cloud Tasks/worker failures
+    try:
+        from api.services.episodes.cloud_tasks_monitor import check_stuck_episodes
+        with _timing("check_cloud_tasks_failures"):
+            with session_scope() as session:
+                marked = check_stuck_episodes(session, limit=min(_ROW_LIMIT, 50))
+                if marked > 0:
+                    log.info("[startup] Marked %d episodes as error due to Cloud Tasks/worker failures", marked)
+    except Exception as e:
+        log.warning("[startup] Cloud Tasks monitoring check failed (non-critical): %s", e)
 
     if not _HEAVY_ENABLED:
         log.info("[startup] heavy tasks disabled (STARTUP_HEAVY_TASKS=%s)", _HEAVY_FLAG)
