@@ -30,7 +30,8 @@ def _launch_startup_tasks() -> None:
     skip = (os.getenv("SKIP_STARTUP_MIGRATIONS") or "").lower() in {"1","true","yes","on"}
     mode = (os.getenv("STARTUP_TASKS_MODE") or "async").lower()
     blocking_flag = (os.getenv("BLOCKING_STARTUP_TASKS") or "").lower() in {"1","true","yes","on"}
-    sentinel_path = _Path(os.getenv("STARTUP_SENTINEL_PATH", "/tmp/ppp_startup_done"))
+    # Bump sentinel version to force re-run of migrations (v2)
+    sentinel_path = _Path(os.getenv("STARTUP_SENTINEL_PATH", "/tmp/ppp_startup_done_v2"))
     single = (os.getenv("SINGLE_STARTUP_TASKS") or "1").lower() in {"1","true","yes","on"}
     
     if skip:

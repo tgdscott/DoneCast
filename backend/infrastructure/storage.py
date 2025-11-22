@@ -284,13 +284,13 @@ def get_public_audio_url(
 ) -> Optional[str]:
     """Generate signed URL for audio playback.
     
-    Detects storage backend from path format:
-    - Starts with "r2://" or contains R2 bucket name or ".r2.cloudflarestorage.com" → use R2
-    - Starts with "gs://" or contains GCS bucket name → use GCS
+    Detects storage backend from:
+    1. STORAGE_BACKEND env var (if set, takes precedence)
+    2. Path format (gs:// → GCS, r2:// or R2 domain → R2)
     
     Args:
         path: Storage path (e.g., "gs://bucket/file.mp3", "r2://bucket/file.mp3", 
-              or "https://bucket.account.r2.cloudflarestorage.com/key")
+              relative path like "podcasts/show-cover.jpg", or full URL)
         expiration_days: Number of days until URL expires
     
     Returns:
@@ -299,21 +299,54 @@ def get_public_audio_url(
     if not path:
         return None
     
-    # Auto-detect backend from path
-    # Check for R2 indicators: r2:// prefix, R2 bucket name, or R2 domain
-    r2_bucket = os.getenv("R2_BUCKET", "").strip()
-    is_r2 = (
-        path.startswith("r2://") 
-        or (r2_bucket and r2_bucket in path)
-        or ".r2.cloudflarestorage.com" in path.lower()
-    )
+    path_str = str(path).strip()
+    if not path_str:
+        return None
     
-    if is_r2:
-        logger.debug(f"[storage] Generating R2 audio URL for {path}")
-        return r2.get_public_audio_url(path, expiration_days, **kwargs)
+    # Check STORAGE_BACKEND env var first (takes precedence)
+    backend = os.getenv("STORAGE_BACKEND", "").lower().strip()
+    
+    # If path is already a full URL, check if it needs signing
+    if path_str.startswith(('http://', 'https://')):
+        # If it's an R2 URL, let R2 handle signing if needed
+        if backend == "r2" or ".r2.cloudflarestorage.com" in path_str.lower():
+            logger.debug(f"[storage] Generating R2 audio URL for full URL: {path_str[:50]}...")
+            return r2.get_public_audio_url(path_str, expiration_days, **kwargs)
+        # Otherwise, it's already a public URL
+        return path_str
+    
+    # Route based on STORAGE_BACKEND env var or path format
+    if backend == "r2":
+        logger.debug(f"[storage] Using R2 backend (from STORAGE_BACKEND) for path: {path_str[:50]}...")
+        return r2.get_public_audio_url(path_str, expiration_days, **kwargs)
+    elif backend == "gcs":
+        # Only route to GCS if path starts with gs://
+        if path_str.startswith("gs://"):
+            logger.debug(f"[storage] Using GCS backend (from STORAGE_BACKEND) for path: {path_str[:50]}...")
+            return gcs.get_public_audio_url(path_str, expiration_days, **kwargs)
+        else:
+            # Relative path but backend is GCS - this is invalid
+            logger.debug(f"[storage] Relative path '{path_str[:50]}...' provided but STORAGE_BACKEND=gcs - cannot resolve")
+            return None
     else:
-        logger.debug(f"[storage] Generating GCS audio URL for {path}")
-        return gcs.get_public_audio_url(path, expiration_days, **kwargs)
+        # No STORAGE_BACKEND set - auto-detect from path format
+        r2_bucket = os.getenv("R2_BUCKET", "").strip()
+        is_r2 = (
+            path_str.startswith("r2://") 
+            or (r2_bucket and r2_bucket in path_str)
+            or ".r2.cloudflarestorage.com" in path_str.lower()
+        )
+        
+        if is_r2:
+            logger.debug(f"[storage] Auto-detected R2 backend for path: {path_str[:50]}...")
+            return r2.get_public_audio_url(path_str, expiration_days, **kwargs)
+        elif path_str.startswith("gs://"):
+            logger.debug(f"[storage] Auto-detected GCS backend for path: {path_str[:50]}...")
+            return gcs.get_public_audio_url(path_str, expiration_days, **kwargs)
+        else:
+            # Relative path with no backend specified - default to R2 if available, otherwise log warning
+            logger.debug(f"[storage] Relative path '{path_str[:50]}...' - attempting R2 resolution")
+            return r2.get_public_audio_url(path_str, expiration_days, **kwargs)
 
 
 # Backward compatibility aliases

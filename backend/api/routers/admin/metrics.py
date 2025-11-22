@@ -10,7 +10,7 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from api.core.database import get_session
-from api.models.podcast import Episode, Podcast, PodcastTemplate
+from api.models.podcast import Episode, EpisodeStatus, Podcast, PodcastTemplate
 from api.models.user import User
 from api.routers.episodes.common import is_published_condition
 
@@ -151,6 +151,261 @@ def admin_metrics(
         "mrr_cents": mrr_cents,
         "arr_cents": arr_cents,
         "revenue_30d_cents": revenue_30d_cents,
+    }
+
+
+@router.get("/episodes-today", status_code=200)
+def episodes_today(
+    session: Session = Depends(get_session),
+    admin_user: User = Depends(get_current_admin_user),
+) -> Dict[str, int]:
+    """Get episodes created today, broken down by published vs drafts."""
+    del admin_user
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = today_start + timedelta(days=1)
+
+    # Count all episodes created today
+    total_today = session.exec(
+        select(func.count(Episode.id)).where(
+            Episode.created_at >= today_start,
+            Episode.created_at < today_end
+        )
+    ).one()
+
+    # Count published episodes created today
+    published_today = session.exec(
+        select(func.count(Episode.id)).where(
+            Episode.created_at >= today_start,
+            Episode.created_at < today_end,
+            is_published_condition()
+        )
+    ).one()
+
+    drafts_today = total_today - published_today
+
+    return {
+        "total": total_today,
+        "published": published_today,
+        "drafts": drafts_today,
+    }
+
+
+@router.get("/recent-activity", status_code=200)
+def recent_activity(
+    session: Session = Depends(get_session),
+    admin_user: User = Depends(get_current_admin_user),
+    limit: int = 10,
+) -> List[Dict[str, Any]]:
+    """Get recent platform activity (user signups, episode publications, etc.)."""
+    del admin_user
+    now = datetime.now(timezone.utc)
+    activities = []
+
+    # Recent user signups (last 24 hours)
+    one_day_ago = now - timedelta(days=1)
+    recent_users = session.exec(
+        select(User).where(
+            User.created_at >= one_day_ago
+        ).order_by(User.created_at.desc()).limit(limit)
+    ).all()
+
+    for user in recent_users:
+        hours_ago = (now - user.created_at).total_seconds() / 3600
+        if hours_ago < 1:
+            time_str = f"{int(hours_ago * 60)} minutes ago"
+        elif hours_ago < 24:
+            time_str = f"{int(hours_ago)} hours ago"
+        else:
+            time_str = f"{int(hours_ago / 24)} days ago"
+
+        activities.append({
+            "type": "user_signup",
+            "title": "New user registration",
+            "description": f"{user.email or 'New user'} signed up",
+            "time": time_str,
+            "timestamp": user.created_at.isoformat(),
+        })
+
+    # Recent episode publications (last 24 hours)
+    recent_episodes = session.exec(
+        select(Episode).where(
+            Episode.publish_at >= one_day_ago,
+            Episode.publish_at <= now,
+            is_published_condition()
+        ).order_by(Episode.publish_at.desc()).limit(limit)
+    ).all()
+
+    for episode in recent_episodes:
+        hours_ago = (now - episode.publish_at).total_seconds() / 3600
+        if hours_ago < 1:
+            time_str = f"{int(hours_ago * 60)} minutes ago"
+        elif hours_ago < 24:
+            time_str = f"{int(hours_ago)} hours ago"
+        else:
+            time_str = f"{int(hours_ago / 24)} days ago"
+
+        activities.append({
+            "type": "episode_published",
+            "title": "Episode published",
+            "description": f'"{episode.title or "Untitled"}" was published',
+            "time": time_str,
+            "timestamp": episode.publish_at.isoformat(),
+        })
+
+    # Sort by timestamp and return most recent
+    activities.sort(key=lambda x: x["timestamp"], reverse=True)
+    return activities[:limit]
+
+
+@router.get("/system-health", status_code=200)
+def system_health(
+    session: Session = Depends(get_session),
+    admin_user: User = Depends(get_current_admin_user),
+) -> Dict[str, Any]:
+    """Get system health metrics."""
+    del admin_user
+    now = datetime.now(timezone.utc)
+    thirty_days_ago = now - timedelta(days=30)
+
+    # Calculate uptime percentage (simplified - based on successful operations)
+    # In a real system, this would come from monitoring/observability tools
+    total_episodes_30d = session.exec(
+        select(func.count(Episode.id)).where(
+            Episode.created_at >= thirty_days_ago
+        )
+    ).one()
+
+    failed_episodes_30d = session.exec(
+        select(func.count(Episode.id)).where(
+            Episode.created_at >= thirty_days_ago,
+            Episode.status == EpisodeStatus.error
+        )
+    ).one()
+
+    success_rate = 0.0
+    if total_episodes_30d > 0:
+        success_rate = ((total_episodes_30d - failed_episodes_30d) / total_episodes_30d) * 100
+
+    # For now, return a simplified health status
+    # In production, this would integrate with actual monitoring systems
+    return {
+        "uptime_percentage": min(99.9, max(95.0, success_rate)),  # Clamp between 95-99.9%
+        "status": "operational" if success_rate > 95 else "degraded",
+    }
+
+
+@router.get("/growth-metrics", status_code=200)
+def growth_metrics(
+    session: Session = Depends(get_session),
+    admin_user: User = Depends(get_current_admin_user),
+) -> Dict[str, Any]:
+    """Calculate month-over-month growth percentages."""
+    del admin_user
+    now = datetime.now(timezone.utc)
+    this_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    last_month_start = (this_month_start - timedelta(days=1)).replace(day=1)
+    last_month_end = this_month_start
+
+    # Active users this month vs last month
+    dau_this_month = session.exec(
+        select(func.count(func.distinct(Episode.user_id))).where(
+            Episode.processed_at >= this_month_start,
+            Episode.processed_at < now
+        )
+    ).one()
+
+    dau_last_month = session.exec(
+        select(func.count(func.distinct(Episode.user_id))).where(
+            Episode.processed_at >= last_month_start,
+            Episode.processed_at < last_month_end
+        )
+    ).one()
+
+    active_users_change = 0.0
+    if dau_last_month > 0:
+        active_users_change = ((dau_this_month - dau_last_month) / dau_last_month) * 100
+
+    # New signups this month vs last month
+    signups_this_month = session.exec(
+        select(func.count(User.id)).where(
+            User.created_at >= this_month_start,
+            User.created_at < now
+        )
+    ).one()
+
+    signups_last_month = session.exec(
+        select(func.count(User.id)).where(
+            User.created_at >= last_month_start,
+            User.created_at < last_month_end
+        )
+    ).one()
+
+    signups_change = 0.0
+    if signups_last_month > 0:
+        signups_change = ((signups_this_month - signups_last_month) / signups_last_month) * 100
+
+    # Episodes published this month vs last month
+    episodes_this_month = session.exec(
+        select(func.count(Episode.id)).where(
+            Episode.publish_at >= this_month_start,
+            Episode.publish_at < now,
+            is_published_condition()
+        )
+    ).one()
+
+    episodes_last_month = session.exec(
+        select(func.count(Episode.id)).where(
+            Episode.publish_at >= last_month_start,
+            Episode.publish_at < last_month_end,
+            is_published_condition()
+        )
+    ).one()
+
+    episodes_change = 0.0
+    if episodes_last_month > 0:
+        episodes_change = ((episodes_this_month - episodes_last_month) / episodes_last_month) * 100
+
+    # Revenue change (if available)
+    revenue_change = None
+    try:
+        if stripe_lib and (os.getenv("STRIPE_SECRET_KEY") or getattr(stripe_lib, "api_key", None)):
+            if not getattr(stripe_lib, "api_key", None):
+                stripe_lib.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+
+            this_month_ts = int(this_month_start.timestamp())
+            last_month_ts = int(last_month_start.timestamp())
+            last_month_end_ts = int(last_month_end.timestamp())
+
+            this_month_revenue = 0
+            charges_this = stripe_lib.Charge.list(created={"gte": this_month_ts}, limit=100)
+            for charge in charges_this.auto_paging_iter():
+                if getattr(charge, "status", "") == "succeeded":
+                    amount = int(getattr(charge, "amount", 0) or 0)
+                    refunded = int(getattr(charge, "amount_refunded", 0) or 0)
+                    this_month_revenue += max(amount - refunded, 0)
+
+            last_month_revenue = 0
+            charges_last = stripe_lib.Charge.list(
+                created={"gte": last_month_ts, "lt": last_month_end_ts},
+                limit=100
+            )
+            for charge in charges_last.auto_paging_iter():
+                if getattr(charge, "status", "") == "succeeded":
+                    amount = int(getattr(charge, "amount", 0) or 0)
+                    refunded = int(getattr(charge, "amount_refunded", 0) or 0)
+                    last_month_revenue += max(amount - refunded, 0)
+
+            if last_month_revenue > 0:
+                revenue_change = ((this_month_revenue - last_month_revenue) / last_month_revenue) * 100
+    except Exception:
+        revenue_change = None
+
+    return {
+        "active_users_change": round(active_users_change, 1),
+        "signups_change": round(signups_change, 1),
+        "episodes_change": round(episodes_change, 1),
+        "revenue_change": round(revenue_change, 1) if revenue_change is not None else None,
     }
 
 

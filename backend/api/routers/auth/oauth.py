@@ -299,8 +299,10 @@ async def auth_google_callback(request: Request, db_session: Session = Depends(g
             try:
                 admin_settings = load_admin_settings(db_session)
                 user_create.is_active = bool(getattr(admin_settings, "default_user_active", True))
+                user_create.tier = getattr(admin_settings, "default_user_tier", "trial")
             except Exception:
                 user_create.is_active = True
+                user_create.tier = "trial"  # All accounts start as trial
             user = crud.create_user(session=db_session, user_create=user_create)
 
         if is_admin_email(user.email):

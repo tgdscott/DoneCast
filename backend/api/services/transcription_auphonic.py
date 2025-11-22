@@ -57,6 +57,10 @@ def _download_from_gcs(gcs_url: str) -> Path:
         log.info("[auphonic_transcribe] downloading gcs_url=%s to temp=%s", gcs_url, temp_path)
         
         file_bytes = gcs.download_bytes(bucket_name, key)
+        if file_bytes is None:
+            raise AuphonicTranscriptionError(
+                f"Failed to download from GCS: file not found or download returned None for gs://{bucket_name}/{key}"
+            )
         temp_path.write_bytes(file_bytes)
         
         return temp_path

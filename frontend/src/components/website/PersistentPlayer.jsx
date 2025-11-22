@@ -78,16 +78,56 @@ export default function PersistentPlayer() {
       
       setCurrentEpisode(episode);
       setCurrentTime(0);
-      setIsPlaying(true);
       
       // If audio element exists, load and play
       if (audioRef.current) {
+        if (!episode.audio_url) {
+          console.error("[PersistentPlayer] No audio_url in episode:", episode);
+          alert("This episode doesn't have an audio file available.");
+          return;
+        }
+        
+        console.log("[PersistentPlayer] Loading audio:", episode.audio_url);
         audioRef.current.src = episode.audio_url;
         audioRef.current.load();
-        audioRef.current.play().catch(err => {
-          console.error("Failed to play audio:", err);
-          setIsPlaying(false);
-        });
+        
+        // Wait for audio to be ready before playing
+        const playAudio = () => {
+          const playPromise = audioRef.current.play();
+          if (playPromise !== undefined) {
+            playPromise
+              .then(() => {
+                console.log("[PersistentPlayer] Audio playback started");
+                setIsPlaying(true);
+              })
+              .catch(err => {
+                console.error("[PersistentPlayer] Failed to play audio:", err);
+                console.error("[PersistentPlayer] Audio element state:", {
+                  src: audioRef.current.src,
+                  readyState: audioRef.current.readyState,
+                  networkState: audioRef.current.networkState,
+                  error: audioRef.current.error,
+                });
+                setIsPlaying(false);
+                alert(`Failed to play audio: ${err.message || 'Unknown error'}`);
+              });
+          }
+        };
+        
+        // Try to play immediately, or wait for canplay event
+        if (audioRef.current.readyState >= 2) {
+          playAudio();
+        } else {
+          audioRef.current.addEventListener('canplay', playAudio, { once: true });
+          audioRef.current.addEventListener('error', (e) => {
+            console.error("[PersistentPlayer] Audio load error:", e);
+            console.error("[PersistentPlayer] Error details:", audioRef.current.error);
+            setIsPlaying(false);
+            alert(`Failed to load audio: ${audioRef.current.error?.message || 'Unknown error'}`);
+          }, { once: true });
+        }
+      } else {
+        console.error("[PersistentPlayer] Audio element not found!");
       }
     };
 
@@ -124,8 +164,40 @@ export default function PersistentPlayer() {
     const handleDurationChange = () => {
       setDuration(audio.duration);
     };
+    
+    const handleLoadedMetadata = () => {
+      console.log("[PersistentPlayer] Audio metadata loaded, duration:", audio.duration);
+      setDuration(audio.duration);
+    };
+    
+    const handleCanPlay = () => {
+      console.log("[PersistentPlayer] Audio can play - ready to play");
+    };
+    
+    const handleError = (e) => {
+      console.error("[PersistentPlayer] Audio error event:", e);
+      console.error("[PersistentPlayer] Error code:", audio.error?.code);
+      console.error("[PersistentPlayer] Error message:", audio.error?.message);
+      console.error("[PersistentPlayer] Audio src:", audio.src);
+      console.error("[PersistentPlayer] Audio readyState:", audio.readyState);
+      console.error("[PersistentPlayer] Audio networkState:", audio.networkState);
+      setIsPlaying(false);
+      
+      // Show user-friendly error message
+      let errorMsg = "Failed to load audio";
+      if (audio.error) {
+        switch (audio.error.code) {
+          case 1: errorMsg = "Audio loading aborted"; break;
+          case 2: errorMsg = "Network error loading audio"; break;
+          case 3: errorMsg = "Audio decoding error"; break;
+          case 4: errorMsg = "Audio format not supported"; break;
+        }
+      }
+      alert(`${errorMsg}. Please check the console for details.`);
+    };
 
     const handleEnded = () => {
+      console.log("[PersistentPlayer] Audio ended");
       setIsPlaying(false);
       setCurrentTime(0);
       
@@ -156,15 +228,20 @@ export default function PersistentPlayer() {
       }
     };
 
-    const handlePlay = () => setIsPlaying(true);
-    const handlePause = () => setIsPlaying(false);
-    const handleError = () => {
+    const handlePlay = () => {
+      console.log("[PersistentPlayer] Audio play event fired");
+      setIsPlaying(true);
+    };
+    
+    const handlePause = () => {
+      console.log("[PersistentPlayer] Audio pause event fired");
       setIsPlaying(false);
-      console.error("Audio playback error");
     };
 
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('durationchange', handleDurationChange);
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+    audio.addEventListener('canplay', handleCanPlay);
     audio.addEventListener('ended', handleEnded);
     audio.addEventListener('play', handlePlay);
     audio.addEventListener('pause', handlePause);
@@ -173,6 +250,8 @@ export default function PersistentPlayer() {
     return () => {
       audio.removeEventListener('timeupdate', handleTimeUpdate);
       audio.removeEventListener('durationchange', handleDurationChange);
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.removeEventListener('canplay', handleCanPlay);
       audio.removeEventListener('ended', handleEnded);
       audio.removeEventListener('play', handlePlay);
       audio.removeEventListener('pause', handlePause);
@@ -203,14 +282,48 @@ export default function PersistentPlayer() {
 
   // Play/pause handler
   const handlePlayPause = () => {
-    if (!audioRef.current || !currentEpisode) return;
-
+    if (!audioRef.current || !currentEpisode) {
+      console.warn("[PersistentPlayer] Cannot play/pause: missing audio element or episode");
+      return;
+    }
+    
+    if (!currentEpisode.audio_url) {
+      console.error("[PersistentPlayer] No audio_url for episode:", currentEpisode);
+      alert("This episode doesn't have an audio file available.");
+      return;
+    }
+    
     if (isPlaying) {
       audioRef.current.pause();
+      setIsPlaying(false);
+      console.log("[PersistentPlayer] Paused");
     } else {
-      audioRef.current.play().catch(err => {
-        console.error("Failed to play:", err);
-      });
+      // Ensure audio is loaded
+      if (!audioRef.current.src || audioRef.current.src !== currentEpisode.audio_url) {
+        console.log("[PersistentPlayer] Setting audio source:", currentEpisode.audio_url);
+        audioRef.current.src = currentEpisode.audio_url;
+        audioRef.current.load();
+      }
+      
+      const playPromise = audioRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            console.log("[PersistentPlayer] Playback started from play/pause button");
+            setIsPlaying(true);
+          })
+          .catch(err => {
+            console.error("[PersistentPlayer] Failed to play audio from button:", err);
+            console.error("[PersistentPlayer] Audio state:", {
+              src: audioRef.current.src,
+              readyState: audioRef.current.readyState,
+              networkState: audioRef.current.networkState,
+              error: audioRef.current.error,
+            });
+            setIsPlaying(false);
+            alert(`Failed to play audio: ${err.message || 'Unknown error'}`);
+          });
+      }
     }
   };
 
@@ -317,11 +430,11 @@ export default function PersistentPlayer() {
   }, [currentEpisode]);
   
   // CRITICAL: Always render - this should be visible at bottom of page
+  // Show minimal player even when no episode is playing
   if (!currentEpisode) {
-    console.log('[PersistentPlayer] Rendering empty player (no episode)');
     return (
       <div 
-        className="fixed bottom-0 left-0 right-0 bg-slate-900 text-white z-[9999] border-t-2 border-red-500 shadow-2xl h-20 flex items-center justify-center"
+        className="fixed bottom-0 left-0 right-0 bg-slate-900 text-white z-[9999] border-t border-slate-700 shadow-2xl"
         style={{ 
           position: 'fixed', 
           bottom: 0, 
@@ -329,10 +442,13 @@ export default function PersistentPlayer() {
           right: 0, 
           zIndex: 9999,
           backgroundColor: '#0f172a',
-          minHeight: '80px'
+          minHeight: '60px',
+          paddingBottom: 'env(safe-area-inset-bottom)' // iOS safe area
         }}
       >
-        <p className="text-sm text-slate-400 font-semibold">No episode playing</p>
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-center">
+          <p className="text-sm text-slate-400">No episode playing</p>
+        </div>
       </div>
     );
   }

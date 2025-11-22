@@ -273,8 +273,6 @@ export default function StepSelectPreprocessed({
                   const intern = Number((intentsData?.intern?.count) ?? 0);
                   const sfx = Number((intentsData?.sfx?.count) ?? 0);
                   const canInteract = ready && typeof onSelect === 'function';
-                  const deleteHintReady = 'Deleting a ready upload will not refund processing minutes already used.';
-                  const deleteHintPending = 'Delete this upload while it is still processing? No processing minutes have been deducted yet.';
                   const displayName = formatDisplayName(item, { fallback: 'Audio file' }) || 'Audio file';
                   return (
                     <div
@@ -327,7 +325,6 @@ export default function StepSelectPreprocessed({
                                   onDeleteItem(item);
                                 }}
                                 onKeyDown={(event) => event.stopPropagation()}
-                                title={ready ? deleteHintReady : deleteHintPending}
                                 aria-label={`Delete ${displayName}`}
                               >
                                 <Trash2 className="h-4 w-4" />

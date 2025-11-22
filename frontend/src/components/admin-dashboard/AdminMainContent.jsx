@@ -84,6 +84,10 @@ export default function AdminMainContent({
   runSeed,
   seedResult,
   metrics,
+  episodesToday,
+  recentActivity,
+  systemHealth,
+  growthMetrics,
   analyticsLoading,
   handleKillQueue,
   killingQueue,
@@ -265,13 +269,23 @@ export default function AdminMainContent({
 
       {/* Enhanced Analytics Tab */}
       {activeTab === "analytics" && (
-        <AnalyticsTab analytics={analytics} metrics={metrics} analyticsLoading={analyticsLoading} />
+        <AnalyticsTab 
+          analytics={analytics} 
+          metrics={metrics} 
+          growthMetrics={growthMetrics}
+          systemHealth={systemHealth}
+          analyticsLoading={analyticsLoading} 
+        />
       )}
       
       {/* Enhanced Dashboard Overview Tab */}
       {activeTab === "dashboard" && (
         <AdminDashboardTab
           analytics={analytics}
+          episodesToday={episodesToday}
+          recentActivity={recentActivity}
+          systemHealth={systemHealth}
+          growthMetrics={growthMetrics}
           handleKillQueue={handleKillQueue}
           killingQueue={killingQueue}
         />

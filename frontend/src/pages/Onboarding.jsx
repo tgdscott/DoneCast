@@ -16,12 +16,16 @@ export default function Onboarding() {
     setStepIndex,
     handleFinish,
     handleExitDiscard,
+    handleBack,
+    handleStartOver,
     nextDisabled,
     hideNext,
     hideBack,
     showExitDiscard,
+    hasExistingPodcast,
     greetingName,
     prefs,
+    path,
   } = useOnboardingWizard({ token, user, refreshUser, toast, comfort });
 
   return (
@@ -37,6 +41,10 @@ export default function Onboarding() {
       hideBack={hideBack}
       showExitDiscard={showExitDiscard}
       onExitDiscard={handleExitDiscard}
+      hasExistingPodcast={hasExistingPodcast}
+      handleStartOver={handleStartOver}
+      onBack={handleBack}
+      path={path}
     />
   );
 }

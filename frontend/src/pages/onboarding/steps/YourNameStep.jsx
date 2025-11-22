@@ -11,6 +11,9 @@ export default function YourNameStep({ wizard }) {
 
   return (
     <div className="grid gap-4">
+      <p className="text-sm text-muted-foreground mb-2">
+        We'll use your first name to personalize your experience and reminders.
+      </p>
       <div className="grid grid-cols-4 items-center gap-4">
         <Label htmlFor="firstName" className="text-right">
           First name<span className="text-red-600">*</span>

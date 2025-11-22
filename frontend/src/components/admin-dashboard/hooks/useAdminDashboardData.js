@@ -8,6 +8,10 @@ export function useAdminDashboardData({ token, toast }) {
   const [usersLoading, setUsersLoading] = useState(false);
   const [summary, setSummary] = useState(null);
   const [metrics, setMetrics] = useState(null);
+  const [episodesToday, setEpisodesToday] = useState(null);
+  const [recentActivity, setRecentActivity] = useState([]);
+  const [systemHealth, setSystemHealth] = useState(null);
+  const [growthMetrics, setGrowthMetrics] = useState(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [seedResult, setSeedResult] = useState(null);
   const [killingQueue, setKillingQueue] = useState(false);
@@ -79,6 +83,42 @@ export function useAdminDashboardData({ token, toast }) {
         }
       })
       .finally(() => setAnalyticsLoading(false));
+
+    api.get("/api/admin/metrics/episodes-today")
+      .then((data) => setEpisodesToday(data))
+      .catch((error) => {
+        setEpisodesToday(null);
+        if (!handleAdminForbidden(error)) {
+          // optional; do not surface toast
+        }
+      });
+
+    api.get("/api/admin/metrics/recent-activity?limit=10")
+      .then((data) => setRecentActivity(data || []))
+      .catch((error) => {
+        setRecentActivity([]);
+        if (!handleAdminForbidden(error)) {
+          // optional; do not surface toast
+        }
+      });
+
+    api.get("/api/admin/metrics/system-health")
+      .then((data) => setSystemHealth(data))
+      .catch((error) => {
+        setSystemHealth(null);
+        if (!handleAdminForbidden(error)) {
+          // optional; do not surface toast
+        }
+      });
+
+    api.get("/api/admin/metrics/growth-metrics")
+      .then((data) => setGrowthMetrics(data))
+      .catch((error) => {
+        setGrowthMetrics(null);
+        if (!handleAdminForbidden(error)) {
+          // optional; do not surface toast
+        }
+      });
 
     api.get("/api/admin/settings")
       .then(setAdminSettings)
@@ -492,6 +532,10 @@ export function useAdminDashboardData({ token, toast }) {
     usersLoading,
     summary,
     metrics,
+    episodesToday,
+    recentActivity,
+    systemHealth,
+    growthMetrics,
     analyticsLoading,
     seedResult,
     runSeed,

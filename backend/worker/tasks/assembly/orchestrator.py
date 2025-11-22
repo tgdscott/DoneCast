@@ -1022,7 +1022,50 @@ def _finalize_episode(
         logging.info("[assemble] Audio duration: %d ms (%.1f minutes)", episode.duration_ms, episode.duration_ms / 1000 / 60)
     except Exception as dur_err:
         raise RuntimeError(f"[assemble] Could not get audio duration: {dur_err}") from dur_err
-    
+
+    # ========== CHARGE OVERLENGTH SURCHARGE (if applicable) ==========
+    # Check if episode exceeds plan max_minutes limit and charge surcharge
+    try:
+        from api.services.billing.overlength import apply_overlength_surcharge
+        
+        # Get user for surcharge calculation
+        user = session.get(User, episode.user_id)
+        if user and episode.duration_ms:
+            # Convert duration from milliseconds to minutes
+            episode_duration_minutes = episode.duration_ms / 1000.0 / 60.0
+            
+            # Apply overlength surcharge (returns None if no surcharge applies)
+            surcharge_credits = apply_overlength_surcharge(
+                session=session,
+                user=user,
+                episode_id=episode.id,
+                episode_duration_minutes=episode_duration_minutes,
+                correlation_id=f"overlength_{episode.id}",
+            )
+            
+            if surcharge_credits:
+                logging.info(
+                    "[assemble] 💳 Overlength surcharge applied: episode_id=%s, duration=%.2f minutes, surcharge=%.2f credits",
+                    episode.id,
+                    episode_duration_minutes,
+                    surcharge_credits
+                )
+            else:
+                logging.debug(
+                    "[assemble] No overlength surcharge: episode_id=%s, duration=%.2f minutes (within plan limit)",
+                    episode.id,
+                    episode_duration_minutes
+                )
+    except Exception as surcharge_err:
+        logging.error(
+            "[assemble] ⚠️ Failed to apply overlength surcharge (non-fatal): %s",
+            surcharge_err,
+            exc_info=True
+        )
+        # Don't fail the entire assembly if surcharge fails
+        # User still gets their episode, we just lose the surcharge billing record
+    # ========== END OVERLENGTH SURCHARGE ==========
+
     # ========== AUDIO NORMALIZATION (Standard pipeline only) ==========
     # Apply program-loudness normalization when advanced mastering is disabled
     try:
@@ -1229,6 +1272,90 @@ def _finalize_episode(
                 logging.warning(
                     "[assemble] Failed to persist cover image locally", exc_info=True
                 )
+
+    # Upload final transcripts to R2 (FINAL PRODUCTION-READY FILES)
+    # Final transcripts are human-readable formatted versions, not the JSON used during construction
+    # They should be in R2 with the rest of the final episode assets
+    try:
+        from api.core.paths import TRANSCRIPTS_DIR
+        user_id_str = str(episode.user_id).replace("-", "")
+        episode_id_str = str(episode.id).replace("-", "")
+        r2_bucket = os.getenv("R2_BUCKET", "ppp-media").strip()
+        
+        # Look for final transcript files (.final.txt and .txt)
+        # These are created by write_final_transcripts_and_cleanup()
+        final_transcript_files = []
+        if output_filename:
+            stem = Path(output_filename).stem
+            # Check for .final.txt (content-only transcript)
+            final_txt = TRANSCRIPTS_DIR / f"{stem}.final.txt"
+            if final_txt.exists():
+                final_transcript_files.append(("final", final_txt))
+            # Check for .txt (published transcript with intro/outro labels)
+            published_txt = TRANSCRIPTS_DIR / f"{stem}.txt"
+            if published_txt.exists():
+                final_transcript_files.append(("published", published_txt))
+        
+        if final_transcript_files:
+            from infrastructure import r2 as r2_storage
+            transcript_urls = {}
+            
+            for transcript_type, transcript_path in final_transcript_files:
+                try:
+                    r2_transcript_key = f"{user_id_str}/episodes/{episode_id_str}/transcripts/{transcript_path.name}"
+                    
+                    with open(transcript_path, "rb") as f:
+                        r2_transcript_url = r2_storage.upload_fileobj(
+                            r2_bucket, 
+                            r2_transcript_key, 
+                            f, 
+                            content_type="text/plain; charset=utf-8"
+                        )
+                    
+                    if r2_transcript_url and r2_transcript_url.startswith("https://"):
+                        transcript_urls[transcript_type] = r2_transcript_url
+                        logging.info(
+                            "[assemble] ✅ Final transcript (%s) uploaded to R2: %s", 
+                            transcript_type, r2_transcript_url
+                        )
+                    else:
+                        logging.warning(
+                            "[assemble] ⚠️ Final transcript (%s) R2 upload returned invalid URL: %s",
+                            transcript_type, r2_transcript_url
+                        )
+                except Exception as transcript_err:
+                    logging.warning(
+                        "[assemble] ⚠️ Failed to upload final transcript (%s) to R2: %s",
+                        transcript_type, transcript_err, exc_info=True
+                    )
+            
+            # Store transcript URLs in episode metadata
+            if transcript_urls:
+                try:
+                    import json
+                    meta = json.loads(episode.meta_json or "{}")
+                    if "transcripts" not in meta:
+                        meta["transcripts"] = {}
+                    meta["transcripts"].update({
+                        "final_r2_url": transcript_urls.get("final"),
+                        "published_r2_url": transcript_urls.get("published"),
+                    })
+                    episode.meta_json = json.dumps(meta)
+                    logging.info(
+                        "[assemble] ✅ Stored final transcript URLs in episode metadata: %s",
+                        transcript_urls
+                    )
+                except Exception as meta_err:
+                    logging.warning(
+                        "[assemble] ⚠️ Failed to store transcript URLs in metadata: %s",
+                        meta_err, exc_info=True
+                    )
+    except Exception as transcript_upload_err:
+        # Non-critical - episode can still complete without final transcript upload
+        logging.warning(
+            "[assemble] ⚠️ Failed to upload final transcripts to R2 (non-critical): %s",
+            transcript_upload_err, exc_info=True
+        )
 
     # CRITICAL: This commit marks episode as "processed" - MUST succeed or episode stuck forever
     # Verify cover image is set before committing

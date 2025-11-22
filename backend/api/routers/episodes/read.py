@@ -20,6 +20,7 @@ from api.services.episodes import jobs as _svc_jobs
 from .common import _cover_url_for, _final_url_for, _status_value, compute_playback_info, compute_cover_info
 from api.services.episodes import repo as _svc_repo
 from api.services.episodes.transcripts import transcript_endpoints_for_episode
+from api.services.trial_service import can_download_episodes
 import httpx
 from uuid import UUID as _UUID
 from pathlib import Path
@@ -222,6 +223,7 @@ def get_last_numbering(
 
                 # Base query for this user (and optional podcast scope)
                 q = select(Episode).where(Episode.user_id == current_user.id)
+                q = q.where(Episode.episode_number != 0)  # CRITICAL: Exclude placeholder episodes (episode_number=0)
                 if podcast_id:
                         try:
                                 from uuid import UUID as _UUID
@@ -301,6 +303,14 @@ def get_episode_playback_stream(
         ep = _svc_repo.get_episode_by_id(session, eid, user_id=current_user.id)
         if not ep:
                 raise HTTPException(status_code=404, detail="Episode not found")
+        
+        # Check if user can download episodes (trial users cannot download)
+        if not can_download_episodes(current_user):
+                raise HTTPException(
+                        status_code=403,
+                        detail="Episode downloads are not available during your free trial. Subscribe to a plan to download episodes."
+                )
+        
         return _proxy_episode_audio(ep, request, "GET")
 
 
@@ -311,6 +321,12 @@ def head_episode_playback_stream(
         session: Session = Depends(get_session),
         current_user: User = Depends(_resolve_current_user_for_media),
 ):
+        # Check if user can download episodes (trial users cannot download)
+        if not can_download_episodes(current_user):
+                raise HTTPException(
+                        status_code=403,
+                        detail="Episode downloads are not available during your free trial. Subscribe to a plan to download episodes."
+                )
         try:
                 eid = _UUID(str(episode_id))
         except Exception:
@@ -449,10 +465,14 @@ def list_episodes(
         offset: int = Query(0, ge=0, description="Offset for pagination"),
 ):
         # total count (avoid direct Episode.id reference for analyzer compatibility)
+        # CRITICAL: Exclude placeholder episodes (episode_number=0) - they're ONLY for RSS feeds, never shown to users
         try:
                 # Ensure we get a plain integer, not a Row object
                 total = session.execute(
-                        select(func.count()).select_from(Episode).where(Episode.user_id == current_user.id)
+                        select(func.count())
+                        .select_from(Episode)
+                        .where(Episode.user_id == current_user.id)
+                        .where(Episode.episode_number != 0)  # Exclude placeholder episodes
                 ).scalar_one()
         except Exception:
                 total = 0
@@ -461,6 +481,7 @@ def list_episodes(
                 eps = session.execute(
                         select(Episode)
                         .where(Episode.user_id == current_user.id)
+                        .where(Episode.episode_number != 0)  # CRITICAL: Exclude placeholder episodes (episode_number=0)
                         .order_by(_sa_text("publish_at DESC"), _sa_text("processed_at DESC"), _sa_text("created_at DESC"), _sa_text("id DESC"))
                         .offset(offset)
                         .limit(limit)
@@ -470,6 +491,7 @@ def list_episodes(
                 eps = session.execute(
                         select(Episode)
                         .where(Episode.user_id == current_user.id)
+                        .where(Episode.episode_number != 0)  # CRITICAL: Exclude placeholder episodes (episode_number=0)
                         .order_by(_sa_text("processed_at DESC"))
                         .offset(offset)
                         .limit(limit)
@@ -512,18 +534,16 @@ def list_episodes(
                 else:
                         derived_status = base_status
 
-                # Use computed cover info which respects 7-day GCS retention window
+                # Use computed cover info
                 cover_url = cover_info.get("cover_url")
                 cover_source = cover_info.get("cover_source", "none")
-                within_7day_window = cover_info.get("within_7day_window", False)
                 
                 # Log missing covers for debugging
                 if not cover_url and e.cover_path and not str(e.cover_path).lower().startswith(('http://', 'https://')):
                         logger.warning(
-                                "[episodes.list] Missing cover for episode %s, source=%s, within_7day=%s",
+                                "[episodes.list] Missing cover for episode %s, source=%s",
                                 getattr(e, 'id', None),
                                 cover_source,
-                                within_7day_window,
                         )
                 stream_url = playback.get("stream_url")
                 final_audio_url = playback.get("final_audio_url")
@@ -633,6 +653,7 @@ def episodes_summary(
         from uuid import UUID as _UUID
         try:
                 q = select(Episode).where(Episode.user_id == current_user.id)
+                q = q.where(Episode.episode_number != 0)  # CRITICAL: Exclude placeholder episodes (episode_number=0)
                 if podcast_id:
                         pid = _UUID(str(podcast_id))
                         q = q.where(Episode.podcast_id == pid)

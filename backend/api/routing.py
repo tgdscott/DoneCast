@@ -154,6 +154,17 @@ def attach_routers(app: FastAPI) -> dict:
     availability['admin'] = admin is not None
     _maybe(app, podcasts)
     availability['podcasts'] = podcasts is not None
+    if podcasts is None:
+        log.error("CRITICAL: Podcasts router failed to import - podcast endpoints will NOT work")
+    else:
+        log.info("Podcasts router registered successfully")
+        # Log registered podcast routes for debugging
+        podcast_routes = [r for r in app.routes if hasattr(r, 'path') and '/podcasts' in str(getattr(r, 'path', ''))]
+        if podcast_routes:
+            podcast_paths = [f"{getattr(r, 'methods', set())} {str(getattr(r, 'path', 'NO_PATH'))}" for r in podcast_routes[:10]]
+            log.info("Sample registered podcast routes (%d total): %s", len(podcast_routes), podcast_paths)
+        else:
+            log.warning("WARNING: No podcast routes found in registered routes!")
     _maybe(app, importer)
     availability['importer'] = importer is not None
     _maybe(app, public)

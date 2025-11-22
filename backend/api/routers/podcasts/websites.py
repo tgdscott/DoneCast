@@ -8,11 +8,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
+from sqlalchemy import func
 
 from api.core.database import get_session
 from api.models.podcast import Podcast
 from api.models.user import User
 from api.models.website import PodcastWebsite, PodcastWebsiteStatus
+from api.models.website_page import WebsitePage
 from api.routers.auth import get_current_user
 from api.services import podcast_websites
 from api.services.podcast_websites import (
@@ -98,6 +100,12 @@ def _serialize_response(website: PodcastWebsite, content: Optional[PodcastWebsit
     )
 
 
+class WebsiteGenerationRequest(BaseModel):
+    design_vibe: Optional[str] = Field(default=None, description="Desired visual vibe (e.g. 'Modern', 'Retro')")
+    color_preference: Optional[str] = Field(default=None, description="Specific color preferences")
+    additional_notes: Optional[str] = Field(default=None, description="Other design notes")
+
+
 @router.get("", response_model=PodcastWebsiteResponse)
 def get_website(
     podcast_id: UUID,
@@ -114,12 +122,15 @@ def get_website(
 @router.post("", response_model=PodcastWebsiteResponse)
 def generate_website(
     podcast_id: UUID,
+    req: Optional[WebsiteGenerationRequest] = None,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
     podcast = _load_podcast(session, podcast_id, current_user)
     try:
-        website, content = podcast_websites.create_or_refresh_site(session, podcast, current_user)
+        # Convert request model to dict if present
+        design_prefs = req.dict() if req else {}
+        website, content = podcast_websites.create_or_refresh_site(session, podcast, current_user, design_prefs=design_prefs)
     except PodcastWebsiteAIError as exc:
         log.exception("Failed to regenerate website with AI: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc) or "AI website generation failed")
@@ -480,6 +491,7 @@ def reset_website(
     current_user: User = Depends(get_current_user),
 ):
     """Reset website to default settings. Requires confirmation phrase 'here comes the boom'."""
+    # Validate inputs
     podcast = _load_podcast(session, podcast_id, current_user)
     website = session.exec(select(PodcastWebsite).where(PodcastWebsite.podcast_id == podcast.id)).first()
     if website is None:
@@ -492,33 +504,312 @@ def reset_website(
             detail="Invalid confirmation phrase. Type 'here comes the boom' to confirm reset."
         )
     
-    # Reset to default state
+    # Get cover URL and theme - use defaults if extraction fails
+    cover_url = None
+    theme = None
     try:
         cover_url, theme = podcast_websites._derive_visual_identity(podcast)
-        sections_order, sections_config, sections_enabled = podcast_websites._create_default_sections(podcast, cover_url, theme)
-        
-        website.set_sections_order(sections_order)
-        website.set_sections_config(sections_config)
-        website.set_sections_enabled(sections_enabled)
-        
-        # Regenerate CSS from theme
-        if theme:
+    except Exception as e:
+        log.warning("Failed to derive visual identity during reset: %s", e)
+        # Continue with None values - defaults will be used
+    
+    # Create default sections - this should always succeed
+    sections_order, sections_config, sections_enabled = podcast_websites._create_default_sections(
+        podcast, cover_url, theme
+    )
+    
+    # Generate CSS from theme or use defaults
+    css = None
+    if theme:
+        try:
             css = podcast_websites._generate_css_from_theme(theme, podcast.name)
-            website.global_css = css
-        else:
-            website.global_css = None
-        
-        # Reset layout to default
-        user = current_user
-        _, content = podcast_websites.create_or_refresh_site(session, podcast, user)
-        
-        website.status = PodcastWebsiteStatus.draft
-        website.updated_at = datetime.utcnow()
-        session.add(website)
-        session.commit()
-        session.refresh(website)
-        
-        return _serialize_response(website, content)
-    except Exception as exc:
-        log.exception("Failed to reset website for podcast %s: %s", podcast_id, exc)
-        raise HTTPException(status_code=500, detail="Failed to reset website")
+        except Exception as e:
+            log.warning("Failed to generate CSS from theme: %s", e)
+    
+    if not css:
+        # Use default theme for CSS generation
+        default_theme = {
+            "primary_color": "#0f172a",
+            "secondary_color": "#ffffff",
+            "accent_color": "#2563eb",
+            "background_color": "#f8fafc",
+            "text_color": "#ffffff",
+            "mood": "balanced",
+        }
+        try:
+            css = podcast_websites._generate_css_from_theme(default_theme, podcast.name)
+        except Exception as e:
+            log.warning("Failed to generate default CSS: %s", e)
+            css = None
+    
+    # Apply all changes to website
+    website.set_sections_order(sections_order)
+    website.set_sections_config(sections_config)
+    website.set_sections_enabled(sections_enabled)
+    website.global_css = css
+    website.layout_json = "{}"  # Clear legacy layout
+    website.status = PodcastWebsiteStatus.draft
+    website.updated_at = datetime.utcnow()
+    
+    # Delete all pages (reset to single-page site)
+    pages = session.exec(select(WebsitePage).where(WebsitePage.website_id == website.id)).all()
+    for page in pages:
+        session.delete(page)
+    
+    # Save changes
+    session.add(website)
+    session.commit()
+    session.refresh(website)
+    
+    return _serialize_response(website)
+
+
+# ============================================================================
+# Multi-Page Support Endpoints
+# ============================================================================
+
+class CreatePageRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200, description="Page title")
+    slug: Optional[str] = Field(None, max_length=200, description="URL slug (auto-generated from title if not provided)")
+    is_home: bool = Field(default=False, description="Whether this is the home page")
+
+
+class UpdatePageRequest(BaseModel):
+    title: Optional[str] = Field(None, min_length=1, max_length=200)
+    slug: Optional[str] = Field(None, max_length=200)
+    is_home: Optional[bool] = None
+    order: Optional[int] = None
+
+
+class PageResponse(BaseModel):
+    id: UUID
+    website_id: UUID
+    title: str
+    slug: str
+    is_home: bool
+    order: int
+    sections_order: List[str]
+    sections_config: Dict[str, Dict[str, Any]]
+    sections_enabled: Dict[str, bool]
+    created_at: datetime
+    updated_at: datetime
+
+
+def _slugify_page_title(title: str) -> str:
+    """Generate URL-friendly slug from page title."""
+    import re
+    slug = title.lower().strip()
+    slug = re.sub(r'[^\w\s-]', '', slug)
+    slug = re.sub(r'[-\s]+', '-', slug)
+    return slug[:200]
+
+
+@router.get("/pages", response_model=List[PageResponse])
+def list_pages(
+    podcast_id: UUID,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """List all pages for a website."""
+    podcast = _load_podcast(session, podcast_id, current_user)
+    website = session.exec(select(PodcastWebsite).where(PodcastWebsite.podcast_id == podcast.id)).first()
+    if website is None:
+        raise HTTPException(status_code=404, detail="Website not created yet")
+    
+    pages = session.exec(select(WebsitePage).where(WebsitePage.website_id == website.id).order_by(WebsitePage.order, WebsitePage.created_at)).all()
+    
+    return [
+        PageResponse(
+            id=page.id,
+            website_id=page.website_id,
+            title=page.title,
+            slug=page.slug,
+            is_home=page.is_home,
+            order=page.order,
+            sections_order=page.get_sections_order(),
+            sections_config=page.get_sections_config(),
+            sections_enabled=page.get_sections_enabled(),
+            created_at=page.created_at,
+            updated_at=page.updated_at,
+        )
+        for page in pages
+    ]
+
+
+@router.post("/pages", response_model=PageResponse, status_code=201)
+def create_page(
+    podcast_id: UUID,
+    req: CreatePageRequest,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Create a new page for the website."""
+    podcast = _load_podcast(session, podcast_id, current_user)
+    website = session.exec(select(PodcastWebsite).where(PodcastWebsite.podcast_id == podcast.id)).first()
+    if website is None:
+        raise HTTPException(status_code=404, detail="Website not created yet")
+    
+    # Generate slug if not provided
+    slug = req.slug or _slugify_page_title(req.title)
+    
+    # Ensure slug is unique
+    existing = session.exec(select(WebsitePage).where(WebsitePage.website_id == website.id, WebsitePage.slug == slug)).first()
+    if existing:
+        counter = 1
+        base_slug = slug
+        while existing:
+            slug = f"{base_slug}-{counter}"
+            existing = session.exec(select(WebsitePage).where(WebsitePage.website_id == website.id, WebsitePage.slug == slug)).first()
+            counter += 1
+    
+    # If this is set as home, unset other home pages
+    if req.is_home:
+        other_home = session.exec(select(WebsitePage).where(WebsitePage.website_id == website.id, WebsitePage.is_home == True)).first()
+        if other_home:
+            other_home.is_home = False
+            session.add(other_home)
+    
+    # Get max order for positioning
+    # func.max() always returns exactly one row (even if None), so .first() is safe
+    max_order_result = session.exec(select(func.max(WebsitePage.order)).where(WebsitePage.website_id == website.id)).first()
+    max_order = max_order_result if max_order_result is not None else 0
+    
+    page = WebsitePage(
+        website_id=website.id,
+        title=req.title,
+        slug=slug,
+        is_home=req.is_home,
+        order=max_order + 1,
+    )
+    
+    session.add(page)
+    session.commit()
+    session.refresh(page)
+    
+    return PageResponse(
+        id=page.id,
+        website_id=page.website_id,
+        title=page.title,
+        slug=page.slug,
+        is_home=page.is_home,
+        order=page.order,
+        sections_order=page.get_sections_order(),
+        sections_config=page.get_sections_config(),
+        sections_enabled=page.get_sections_enabled(),
+        created_at=page.created_at,
+        updated_at=page.updated_at,
+    )
+
+
+@router.get("/pages/{page_id}", response_model=PageResponse)
+def get_page(
+    podcast_id: UUID,
+    page_id: UUID,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Get a specific page."""
+    podcast = _load_podcast(session, podcast_id, current_user)
+    website = session.exec(select(PodcastWebsite).where(PodcastWebsite.podcast_id == podcast.id)).first()
+    if website is None:
+        raise HTTPException(status_code=404, detail="Website not created yet")
+    
+    page = session.exec(select(WebsitePage).where(WebsitePage.id == page_id, WebsitePage.website_id == website.id)).first()
+    if page is None:
+        raise HTTPException(status_code=404, detail="Page not found")
+    
+    return PageResponse(
+        id=page.id,
+        website_id=page.website_id,
+        title=page.title,
+        slug=page.slug,
+        is_home=page.is_home,
+        order=page.order,
+        sections_order=page.get_sections_order(),
+        sections_config=page.get_sections_config(),
+        sections_enabled=page.get_sections_enabled(),
+        created_at=page.created_at,
+        updated_at=page.updated_at,
+    )
+
+
+@router.patch("/pages/{page_id}", response_model=PageResponse)
+def update_page(
+    podcast_id: UUID,
+    page_id: UUID,
+    req: UpdatePageRequest,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Update a page."""
+    podcast = _load_podcast(session, podcast_id, current_user)
+    website = session.exec(select(PodcastWebsite).where(PodcastWebsite.podcast_id == podcast.id)).first()
+    if website is None:
+        raise HTTPException(status_code=404, detail="Website not created yet")
+    
+    page = session.exec(select(WebsitePage).where(WebsitePage.id == page_id, WebsitePage.website_id == website.id)).first()
+    if page is None:
+        raise HTTPException(status_code=404, detail="Page not found")
+    
+    if req.title is not None:
+        page.title = req.title
+    if req.slug is not None:
+        # Check slug uniqueness
+        existing = session.exec(select(WebsitePage).where(WebsitePage.website_id == website.id, WebsitePage.slug == req.slug, WebsitePage.id != page_id)).first()
+        if existing:
+            raise HTTPException(status_code=400, detail=f"Slug '{req.slug}' is already in use")
+        page.slug = req.slug
+    if req.is_home is not None:
+        if req.is_home:
+            # Unset other home pages
+            other_home = session.exec(select(WebsitePage).where(WebsitePage.website_id == website.id, WebsitePage.is_home == True, WebsitePage.id != page_id)).first()
+            if other_home:
+                other_home.is_home = False
+                session.add(other_home)
+        page.is_home = req.is_home
+    if req.order is not None:
+        page.order = req.order
+    
+    page.updated_at = datetime.utcnow()
+    session.add(page)
+    session.commit()
+    session.refresh(page)
+    
+    return PageResponse(
+        id=page.id,
+        website_id=page.website_id,
+        title=page.title,
+        slug=page.slug,
+        is_home=page.is_home,
+        order=page.order,
+        sections_order=page.get_sections_order(),
+        sections_config=page.get_sections_config(),
+        sections_enabled=page.get_sections_enabled(),
+        created_at=page.created_at,
+        updated_at=page.updated_at,
+    )
+
+
+@router.delete("/pages/{page_id}", status_code=204)
+def delete_page(
+    podcast_id: UUID,
+    page_id: UUID,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a page."""
+    podcast = _load_podcast(session, podcast_id, current_user)
+    website = session.exec(select(PodcastWebsite).where(PodcastWebsite.podcast_id == podcast.id)).first()
+    if website is None:
+        raise HTTPException(status_code=404, detail="Website not created yet")
+    
+    page = session.exec(select(WebsitePage).where(WebsitePage.id == page_id, WebsitePage.website_id == website.id)).first()
+    if page is None:
+        raise HTTPException(status_code=404, detail="Page not found")
+    
+    if page.is_home:
+        raise HTTPException(status_code=400, detail="Cannot delete the home page")
+    
+    session.delete(page)
+    session.commit()
+    return None

@@ -3,11 +3,15 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from sqlalchemy import UniqueConstraint, Column, Text
-from sqlmodel import Field, SQLModel
+from sqlalchemy.orm import Mapped, relationship
+from sqlmodel import Field, SQLModel, Relationship
+
+# Import WebsitePage at runtime for SQLAlchemy relationship resolution  
+from api.models.website_page import WebsitePage
 
 
 class PodcastWebsiteStatus(str, Enum):
@@ -56,6 +60,12 @@ class PodcastWebsite(SQLModel, table=True):
     prompt_log_path: Optional[str] = Field(default=None, description="Last GCS object path recorded for AI prompts")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    # Relationship to pages
+    pages: Mapped[list["WebsitePage"]] = Relationship(
+        back_populates="website",
+        sa_relationship=relationship("WebsitePage", back_populates="website")
+    )
 
     __table_args__ = (
         UniqueConstraint("podcast_id", name="uq_podcast_website_podcast"),

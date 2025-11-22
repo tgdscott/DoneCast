@@ -13,7 +13,7 @@ from sqlmodel import Session, select
 
 from api.core import crud
 from api.core.database import get_session
-from api.models.podcast import Episode, Podcast, MediaItem, PodcastTemplate, EpisodeSection
+from api.models.podcast import Episode, Podcast, MediaItem, PodcastTemplate, EpisodeSection, PodcastDistributionStatus
 from api.models.user import User, UserPublic, UserTermsAcceptance
 from api.models.transcription import MediaTranscript
 from api.core.config import settings
@@ -371,7 +371,7 @@ def admin_verify_user_email(
     now = datetime.utcnow()
     verification = EmailVerification(
         user_id=user.id,
-        code="ADMIN-VERIFIED",
+        code="ADMIN-VER",  # Must be <= 12 chars to fit database column
         jwt_token=None,
         expires_at=now,  # Already expired since it's pre-verified
         verified_at=now,  # Mark as verified immediately
@@ -379,11 +379,20 @@ def admin_verify_user_email(
         created_at=now,
     )
     
+    # CRITICAL: Set user.is_active = True so they can actually log in
+    # This is what the normal verification flow does (see verification.py line 136)
+    user.is_active = True
+    
     session.add(verification)
+    session.add(user)
     commit_with_retry(session)
     session.refresh(verification)
+    try:
+        session.refresh(user)
+    except Exception:
+        pass
     
-    log.info(f"[ADMIN] Created manual email verification for user {user.email} by admin {admin_user.email}")
+    log.info(f"[ADMIN] Created manual email verification for user {user.email} by admin {admin_user.email} and set is_active=True")
     
     return {
         "success": True,
@@ -392,6 +401,7 @@ def admin_verify_user_email(
         "already_verified": False,
         "verified_at": verification.verified_at.isoformat() if verification.verified_at else None,
         "verified_by_admin": admin_user.email,
+        "is_active": user.is_active,
     }
 
 
@@ -541,10 +551,26 @@ def delete_user(
         log.info(f"[ADMIN] Deleted {transcript_count} media transcripts for user {user.id}")
         
         # 2. Media items
-        media_items = session.exec(select(MediaItem).where(MediaItem.user_id == user.id)).all()
-        for item in media_items:
-            session.delete(item)
-        log.info(f"[ADMIN] Deleted {media_count} media items for user {user.id}")
+        # Use savepoint to prevent transaction abort if media item fetch fails (e.g. missing column)
+        media_sp = session.begin_nested()
+        try:
+            media_items = session.exec(select(MediaItem).where(MediaItem.user_id == user.id)).all()
+            for item in media_items:
+                session.delete(item)
+            session.flush()
+            media_sp.commit()
+            log.info(f"[ADMIN] Deleted {media_count} media items for user {user.id}")
+        except Exception as media_err:
+            media_sp.rollback()
+            log.error(f"[ADMIN] Failed to delete media items (skipping): {media_err}")
+            # If ORM fails due to missing columns, try raw SQL deletion as fallback
+            try:
+                log.info("[ADMIN] Attempting raw SQL deletion for media items...")
+                session.execute(text("DELETE FROM mediaitem WHERE user_id = :uid"), {"uid": user.id})
+                session.commit() # Commit immediately to ensure it sticks
+                log.info(f"[ADMIN] Deleted media items via raw SQL for user {user.id}")
+            except Exception as sql_err:
+                log.error(f"[ADMIN] Raw SQL deletion failed too: {sql_err}")
         
         # 3. Episode sections (before episodes due to foreign key)
         sections = session.exec(select(EpisodeSection).where(EpisodeSection.user_id == user.id)).all()
@@ -564,8 +590,72 @@ def delete_user(
             session.delete(template)
         log.info(f"[ADMIN] Deleted {template_count} templates for user {user.id}")
         
-        # 6. Podcasts
+        # 5b. Get podcasts first (before deleting related records to avoid autoflush issues)
         podcasts = session.exec(select(Podcast).where(Podcast.user_id == user.id)).all()
+        podcast_ids = [podcast.id for podcast in podcasts]
+        
+        # 5c. Podcast distribution status (must delete before podcasts due to foreign key podcastdistributionstatus_podcast_id_fkey)
+        # Delete FIRST before websites to avoid autoflush issues
+        dist_status_count = 0
+        if podcast_ids:
+            # Delete by user_id first
+            dist_status_by_user = session.exec(
+                select(PodcastDistributionStatus).where(PodcastDistributionStatus.user_id == user.id)
+            ).all()
+            deleted_dist_ids = {d.id for d in dist_status_by_user}
+            for dist_status in dist_status_by_user:
+                session.delete(dist_status)
+            
+            # Also delete by podcast_id to catch any edge cases
+            dist_status_by_podcast = session.exec(
+                select(PodcastDistributionStatus).where(PodcastDistributionStatus.podcast_id.in_(podcast_ids))
+            ).all()
+            # Only delete if not already deleted
+            for dist_status in dist_status_by_podcast:
+                if dist_status.id not in deleted_dist_ids:
+                    session.delete(dist_status)
+                    deleted_dist_ids.add(dist_status.id)
+            
+            dist_status_count = len(deleted_dist_ids)
+            if dist_status_count > 0:
+                log.info(f"[ADMIN] Marked {dist_status_count} distribution status records for deletion for user {user.id}")
+        
+        # 5d. Podcast websites (must delete before podcasts due to foreign key podcastwebsite_podcast_id_fkey)
+        # Delete by both user_id and podcast_id to ensure we catch all websites
+        website_count = 0
+        if WEBSITE_AVAILABLE:
+            # Delete by user_id
+            websites_by_user = session.exec(
+                select(PodcastWebsite).where(PodcastWebsite.user_id == user.id)
+            ).all()
+            deleted_website_ids = {w.id for w in websites_by_user}
+            for website in websites_by_user:
+                session.delete(website)
+            
+            # Also delete by podcast_id to catch any edge cases
+            if podcast_ids:
+                websites_by_podcast = session.exec(
+                    select(PodcastWebsite).where(PodcastWebsite.podcast_id.in_(podcast_ids))
+                ).all()
+                # Only delete if not already deleted
+                for website in websites_by_podcast:
+                    if website.id not in deleted_website_ids:
+                        session.delete(website)
+                        deleted_website_ids.add(website.id)
+            
+            website_count = len(deleted_website_ids)
+            if website_count > 0:
+                log.info(f"[ADMIN] Marked {website_count} website records for deletion for user {user.id}")
+        
+        # Flush all related record deletions (distribution status + websites) before deleting podcasts
+        if dist_status_count > 0 or (WEBSITE_AVAILABLE and website_count > 0):
+            session.flush()
+            if dist_status_count > 0:
+                log.info(f"[ADMIN] Deleted {dist_status_count} distribution status records for user {user.id}")
+            if WEBSITE_AVAILABLE and website_count > 0:
+                log.info(f"[ADMIN] Deleted {website_count} website records for user {user.id}")
+        
+        # 6. Podcasts (now safe to delete since all referencing records are gone)
         for podcast in podcasts:
             session.delete(podcast)
         log.info(f"[ADMIN] Deleted {podcast_count} podcasts for user {user.id}")
@@ -635,15 +725,7 @@ def delete_user(
             assistant_count = conversation_count + len(guidances) + message_count
             log.info(f"[ADMIN] Deleted {assistant_count} assistant records for user {user.id} ({message_count} messages, {conversation_count} conversations, {len(guidances)} guidance)")
         
-        # 12. Podcast websites
-        if WEBSITE_AVAILABLE:
-            websites = session.exec(select(PodcastWebsite).where(PodcastWebsite.user_id == user.id)).all()
-            website_count = len(websites)
-            for website in websites:
-                session.delete(website)
-            log.info(f"[ADMIN] Deleted {website_count} website records for user {user.id}")
-        
-        # 13. User account (finally!)
+        # 12. User account (finally!)
         session.delete(user)
         log.warning(f"[ADMIN] Deleted user account: {user_email_copy} ({user_id_str})")
         

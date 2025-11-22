@@ -14,6 +14,7 @@ import TermsOfUse from '@/pages/TermsOfUse.jsx';
 import Legal from '@/pages/Legal.jsx';
 import Verify from '@/pages/Verify.jsx';
 import EmailVerification from '@/pages/EmailVerification.jsx';
+import ResetPassword from '@/pages/ResetPassword.jsx';
 import Pricing from '@/pages/Pricing.jsx';
 import PublicPricing from '@/pages/PublicPricing.jsx';
 import PodcastWebsiteBuilder from '@/pages/PodcastWebsiteBuilder.jsx';
@@ -110,9 +111,23 @@ try {
 // Helper to detect if this is a subdomain request (for public websites)
 const isSubdomainRequest = () => {
   if (typeof window === 'undefined') return false;
+  
+  // In dev mode, check for subdomain query parameter
+  if (import.meta.env.DEV) {
+    try {
+      const searchParams = new URL(window.location.href).searchParams;
+      const subdomain = searchParams.get('subdomain');
+      if (subdomain) {
+        return true; // Treat as subdomain request in dev mode
+      }
+    } catch (e) {
+      // Ignore errors parsing URL
+    }
+  }
+  
   const hostname = window.location.hostname;
   
-  // Never treat localhost or IP addresses as subdomains
+  // Never treat localhost or IP addresses as subdomains (unless we have query param, handled above)
   if (hostname === 'localhost' || /^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
     return false;
   }
@@ -126,9 +141,14 @@ const isSubdomainRequest = () => {
   return !reserved.includes(subdomain);
 };
 
+// Wrapper component that checks subdomain at render time (not just router creation time)
+const RootRouteElement = () => {
+  return isSubdomainRequest() ? <PublicWebsite /> : <NewLanding />;
+};
+
 const router = createBrowserRouter([
   // Public website serving (subdomains) - check FIRST before other routes
-  { path: '/', element: isSubdomainRequest() ? <PublicWebsite /> : <NewLanding /> },
+  { path: '/', element: <RootRouteElement /> },
   { path: '/app', element: <AppWithToasterWrapper />, errorElement: <ErrorPage /> },
   { path: '/app/*', element: <AppWithToasterWrapper />, errorElement: <ErrorPage /> },
   { path: '/admin', element: <AppWithToasterWrapper />, errorElement: <ErrorPage /> },
@@ -144,6 +164,7 @@ const router = createBrowserRouter([
   { path: '/legal', element: <Legal /> },
   { path: '/verify', element: <Verify /> },
   { path: '/email-verification', element: <EmailVerification /> },
+  { path: '/reset-password', element: <ResetPassword /> },
   { path: '/signup', element: <Signup /> },
   { path: '/pricing', element: <Pricing /> },
   { path: '/pricing-public', element: <PublicPricing /> },

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
 import string
+import sys
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -32,14 +34,24 @@ class ConfirmEmailPayload(BaseModel):
     token: Optional[str] = None
 
 
-@router.post("/confirm-email", response_model=UserPublic)
+class ConfirmEmailResponse(BaseModel):
+    """Response model for email confirmation."""
+    user: UserPublic
+    access_token: Optional[str] = None  # Only returned when verifying via token link (secure)
+
+
+@router.post("/confirm-email", response_model=ConfirmEmailResponse)
 # @limiter.limit("20/hour")  # DISABLED - breaks FastAPI param detection
 async def confirm_email(
     request: Request,
     payload: ConfirmEmailPayload,
     session: Session = Depends(get_session),
-) -> UserPublic:
-    """Confirm a user's email via 6-digit code or token."""
+) -> ConfirmEmailResponse:
+    """Confirm a user's email via 6-digit code or token.
+    
+    When verifying via token link, returns an access_token for automatic login.
+    When verifying via code, user must log in manually.
+    """
 
     user: Optional[User] = None
     ev: Optional[EmailVerification] = None
@@ -126,7 +138,20 @@ async def confirm_email(
     session.add(user)
     session.commit()
     session.refresh(user)
-    return to_user_public(user)
+    
+    # If verifying via token link, generate access token for automatic login
+    # This is secure because the token proves email ownership
+    access_token = None
+    if payload.token:
+        access_token = create_access_token(
+            data={"sub": user.email},
+            expires_delta=timedelta(days=30)  # Standard token expiry
+        )
+    
+    return ConfirmEmailResponse(
+        user=to_user_public(user),
+        access_token=access_token
+    )
 
 
 class ResendVerificationPayload(BaseModel):
@@ -178,13 +203,48 @@ async def resend_verification(
     body = (
         f"Your Podcast Plus Plus verification code is: {code}\n\n"
         f"Click to verify instantly: {verify_url}\n\n"
-        "This code expires in 15 minutes. If you didn’t request it, you can ignore this email."
+        "This code expires in 15 minutes. If you didn't request it, you can ignore this email."
     )
+    logger = logging.getLogger(__name__)
     try:
-        mailer.send(user.email, subj, body)
-    except Exception:
-        pass
-    return {"status": "ok"}
+        logger.info(
+            "[RESEND_VERIFICATION] Attempting to send verification email to %s (host=%s, user_set=%s, port=%s)",
+            user.email,
+            getattr(mailer, "host", None),
+            bool(getattr(mailer, "user", None)),
+            getattr(mailer, "port", None),
+        )
+        # CRITICAL: Log the exact email address being sent to prevent domain mixups
+        logger.info("[RESEND_VERIFICATION] SENDING TO EMAIL: %s (type=%s, repr=%s)", user.email, type(user.email).__name__, repr(user.email))
+        sent = mailer.send(to=user.email, subject=subj, text=body)
+        if sent:
+            logger.info("[RESEND_VERIFICATION] Verification email sent successfully to %s", user.email)
+            return {"status": "ok", "message": "Verification email sent successfully"}
+        else:
+            logger.error(
+                "[RESEND_VERIFICATION] Email send failed (returned False): to=%s host=%s user_set=%s port=%s sender=%s",
+                user.email,
+                getattr(mailer, "host", None),
+                bool(getattr(mailer, "user", None)),
+                getattr(mailer, "port", None),
+                getattr(mailer, "sender", None),
+            )
+            print(f"[ERROR] Failed to send verification email to {user.email}. Check SMTP configuration.", file=sys.stderr)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to send verification email to {user.email}. Check SMTP configuration and Mailgun domain verification."
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "[RESEND_VERIFICATION] Exception while sending verification email to %s: %s", user.email, exc
+        )
+        print(f"[ERROR] Exception sending verification email to {user.email}: {exc}", file=sys.stderr)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to send verification email: {str(exc)}"
+        )
 
 
 class SendPhoneVerificationPayload(BaseModel):
@@ -416,12 +476,35 @@ async def update_pending_email(
     body = (
         f"Your Podcast Plus Plus verification code is: {code}\n\n"
         f"Click to verify instantly: {verify_url}\n\n"
-        "This code expires in 15 minutes. If you didn’t request it, you can ignore this email."
+        "This code expires in 15 minutes. If you didn't request it, you can ignore this email."
     )
+    logger = logging.getLogger(__name__)
     try:
-        mailer.send(user.email, subj, body)
-    except Exception:
-        pass
+        logger.info(
+            "[UPDATE_PENDING_EMAIL] Attempting to send verification email to %s (host=%s, user_set=%s, port=%s)",
+            user.email,
+            getattr(mailer, "host", None),
+            bool(getattr(mailer, "user", None)),
+            getattr(mailer, "port", None),
+        )
+        sent = mailer.send(to=user.email, subject=subj, text=body)
+        if sent:
+            logger.info("[UPDATE_PENDING_EMAIL] Verification email sent successfully to %s", user.email)
+        else:
+            logger.error(
+                "[UPDATE_PENDING_EMAIL] Email send failed (returned False): to=%s host=%s user_set=%s port=%s sender=%s",
+                user.email,
+                getattr(mailer, "host", None),
+                bool(getattr(mailer, "user", None)),
+                getattr(mailer, "port", None),
+                getattr(mailer, "sender", None),
+            )
+            print(f"[ERROR] Failed to send verification email to {user.email}. Check SMTP configuration.", file=sys.stderr)
+    except Exception as exc:
+        logger.exception(
+            "[UPDATE_PENDING_EMAIL] Exception while sending verification email to %s: %s", user.email, exc
+        )
+        print(f"[ERROR] Exception sending verification email to {user.email}: {exc}", file=sys.stderr)
     return {"status": "ok"}
 
 
@@ -529,4 +612,122 @@ async def reset_password(
     session.commit()
     session.refresh(user)
     return {"status": "ok"}
+
+
+@router.get("/smtp-status")
+async def check_smtp_status() -> dict:
+    """Check SMTP configuration status (for debugging email issues)."""
+    import os
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    host = os.getenv("SMTP_HOST")
+    port = os.getenv("SMTP_PORT", "587")
+    user = os.getenv("SMTP_USER")
+    password_set = bool(os.getenv("SMTP_PASS") or os.getenv("SMTP_PASSWORD"))
+    sender = os.getenv("SMTP_FROM", "no-reply@podcastplusplus.com")
+    
+    status = {
+        "configured": bool(host),
+        "host": host or "NOT SET",
+        "port": port,
+        "user": user or "NOT SET",
+        "password_configured": password_set,
+        "sender": sender,
+        "mailer_initialized": mailer is not None,
+    }
+    
+    if mailer:
+        status.update({
+            "mailer_host": getattr(mailer, "host", None),
+            "mailer_port": getattr(mailer, "port", None),
+            "mailer_user_set": bool(getattr(mailer, "user", None)),
+            "mailer_password_set": bool(getattr(mailer, "password", None)),
+            "mailer_sender": getattr(mailer, "sender", None),
+        })
+    
+    # Try a test connection if configured
+    if host:
+        try:
+            import socket
+            socket.create_connection((host, int(port)), timeout=5)
+            status["connection_test"] = "SUCCESS"
+        except Exception as e:
+            status["connection_test"] = f"FAILED: {str(e)}"
+    else:
+        status["connection_test"] = "SKIPPED (no host configured)"
+    
+    # Don't actually send test emails - just verify connection/auth works
+    # Actual test emails should use /test-email endpoint with real addresses
+    if host and user and password_set:
+        status["test_send"] = "SKIPPED (use /test-email endpoint to send real test emails)"
+    else:
+        status["test_send"] = "SKIPPED (missing configuration)"
+    
+    return status
+
+
+@router.post("/test-email")
+async def test_email_send(
+    payload: dict,
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Send a test email to verify SMTP configuration (admin only).
+    
+    This sends a REAL email and will show actual Mailgun errors if domain isn't verified.
+    """
+    from api.routers.auth.utils import is_admin_email
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    if not is_admin_email(current_user.email):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    test_email = payload.get("email", current_user.email)
+    
+    logger.info(
+        "[TEST_EMAIL] Admin %s requesting test email to %s (host=%s, sender=%s)",
+        current_user.email,
+        test_email,
+        getattr(mailer, "host", None),
+        getattr(mailer, "sender", None),
+    )
+    
+    try:
+        result = mailer.send(
+            to=test_email,
+            subject="Test Email from Podcast Plus Plus",
+            text="This is a test email to verify SMTP configuration. If you receive this, SMTP is working correctly.",
+            html="<p>This is a test email to verify SMTP configuration. If you receive this, SMTP is working correctly.</p>"
+        )
+        
+        if result:
+            logger.info("[TEST_EMAIL] Test email sent successfully to %s", test_email)
+            return {
+                "status": "success",
+                "message": f"Test email sent successfully to {test_email}. Check your inbox (and spam folder).",
+                "mailer_host": getattr(mailer, "host", None),
+                "mailer_sender": getattr(mailer, "sender", None),
+                "note": "If email doesn't arrive, check Mailgun dashboard for domain verification status."
+            }
+        else:
+            logger.error("[TEST_EMAIL] Email send returned False for %s", test_email)
+            return {
+                "status": "failed",
+                "message": "Email send returned False - check SMTP configuration and Mailgun domain verification",
+                "mailer_host": getattr(mailer, "host", None),
+                "mailer_sender": getattr(mailer, "sender", None),
+                "troubleshooting": "Check Cloud Run logs for detailed SMTP errors. Common issue: FROM domain not verified in Mailgun."
+            }
+    except Exception as e:
+        logger.exception("[TEST_EMAIL] Exception sending test email to %s: %s", test_email, e)
+        return {
+            "status": "error",
+            "message": f"Failed to send test email: {str(e)}",
+            "mailer_host": getattr(mailer, "host", None),
+            "mailer_sender": getattr(mailer, "sender", None),
+            "error_type": type(e).__name__,
+        }
 

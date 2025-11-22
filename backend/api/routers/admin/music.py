@@ -215,7 +215,11 @@ async def admin_upload_music_asset(
         
         log.info(f"[admin-music-upload] Uploading: {original} ({len(file_content)} bytes)")
 
-        bucket = os.getenv("MEDIA_BUCKET")
+        # CRITICAL: Music files MUST be uploaded to GCS, NOT R2
+        # Music files are used during episode construction/assembly, so they belong in GCS (production files)
+        # Only final production-ready episodes go to R2 (distribution files)
+        # See docs/STORAGE_STRATEGY.md for full architectural details
+        bucket = os.getenv("MEDIA_BUCKET")  # GCS bucket - DO NOT use R2_BUCKET here!
         if bucket:
             key = f"music/{uuid.uuid4().hex}_{base}"
             
@@ -225,12 +229,14 @@ async def admin_upload_music_asset(
                 temp_path = tmp.name
             
             # Upload to GCS using the temp file
+            # DO NOT use r2_upload_fileobj() or R2_BUCKET for music files!
             with open(temp_path, "rb") as f:
                 stored_uri = gcs_upload_fileobj(
                     bucket,
                     key,
                     f,
                     content_type=(file.content_type or "audio/mpeg"),
+                    force_gcs=True,
                 )
             
             filename_stored = (
@@ -327,7 +333,13 @@ def admin_import_music_asset_by_url(
         if bucket:
             key = f"music/{uuid.uuid4().hex}_{safe_name}"
             content = response.content
-            stored_uri = gcs_upload_bytes(bucket, key, content, content_type=(content_type or "audio/mpeg"))
+            stored_uri = gcs_upload_bytes(
+                bucket, 
+                key, 
+                content, 
+                content_type=(content_type or "audio/mpeg"),
+                force_gcs=True
+            )
             filename_stored = (
                 stored_uri if stored_uri.startswith("gs://") else f"/static/media/{Path(stored_uri).name}"
             )

@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import { Loader2, RefreshCw, ImageOff, Play, CheckCircle2, Clock, AlertTriangle, CalendarClock, Trash2, ArrowLeft, LayoutGrid, List as ListIcon, Search, Undo2, Scissors, Grid3x3, Pencil, RotateCcw, FileText, Wand2 } from "lucide-react";
+import { Loader2, RefreshCw, ImageOff, Play, CheckCircle2, Clock, AlertTriangle, CalendarClock, Trash2, ArrowLeft, LayoutGrid, List as ListIcon, Search, Undo2, Scissors, Grid3x3, Pencil, RotateCcw, FileText, Wand2, Mic } from "lucide-react";
 import EpisodeHistoryPreview from './EpisodeHistoryPreview';
 import FlubberReview from './FlubberReview';
 import ManualEditorModal from './ManualEditorModal';
@@ -11,6 +11,9 @@ import { makeApi, isApiError, assetUrl } from "@/lib/apiClient.js";
 import { useResolvedTimezone } from "@/hooks/useResolvedTimezone";
 import { formatInTimezone } from "@/lib/timezone";
 import { toast } from "@/hooks/use-toast";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog.jsx";
+import { getUserFriendlyError } from "@/lib/errorMessages.js";
+import { EmptyState } from "@/components/ui/empty-state";
 // ------------------------------
 // Utility helpers (pure / outside component to avoid re-creation)
 // ------------------------------
@@ -187,6 +190,7 @@ const deriveEpisodeHint = (episode) => {
 export default function EpisodeHistory({ token, onBack }) {
   // Core lists & fetch state
   const resolvedTimezone = useResolvedTimezone();
+  const { confirmDialog, showConfirm } = useConfirmDialog();
   const formatPublishAtForUser = useCallback(
     (iso, fallback) => formatPublishAt(iso, { fallback, timezone: resolvedTimezone }),
     [resolvedTimezone]
@@ -275,7 +279,7 @@ export default function EpisodeHistory({ token, onBack }) {
       const api = makeApi(token);
       await api.post(`/api/episodes/${ep.id}/retry`, {});
       // Optimistic: mark as processing; refresh shortly
-      setEpisodes(prev => prev.map(e => e.id===ep.id ? { ...e, status:'processing' } : e));
+      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id===ep.id ? { ...e, status:'processing' } : e) : []);
       setTimeout(fetchEpisodes, 1200);
     } catch (e) {
       const msg = isApiError(e) ? (e.detail || e.error || e.message) : String(e);
@@ -287,12 +291,12 @@ export default function EpisodeHistory({ token, onBack }) {
   // One-click publish (makes episode public immediately)
   const quickPublish = async (episodeId) => {
     if(!episodeId) return;
-    setEpisodes(prev => prev.map(e => e.id===episodeId ? { ...e, _publishing:true } : e));
+    setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id===episodeId ? { ...e, _publishing:true } : e) : []);
     try {
   const api = makeApi(token);
   await api.post(`/api/episodes/${episodeId}/publish`, { publish_state:'public' });
       // Do not optimistically flip to published; refresh shortly to reflect actual server state
-      setEpisodes(prev => prev.map(e => e.id===episodeId ? { ...e, _publishing:false } : e));
+      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id===episodeId ? { ...e, _publishing:false } : e) : []);
       // Poll status briefly to surface errors promptly
       const start = Date.now();
       const poll = async () => {
@@ -300,7 +304,14 @@ export default function EpisodeHistory({ token, onBack }) {
           const st = await api.get(`/api/episodes/${episodeId}/publish/status`);
           if (st && (st.status === 'published' || st.last_error)) {
             await fetchEpisodes();
-            if (st.last_error) alert(st.last_error);
+            if (st.last_error) {
+              const errorMsg = getUserFriendlyError({ detail: st.last_error }, { context: 'publish' });
+              toast({ 
+                title: errorMsg.title, 
+                description: errorMsg.description,
+                variant: 'destructive'
+              });
+            }
             return;
           }
         } catch {}
@@ -313,9 +324,13 @@ export default function EpisodeHistory({ token, onBack }) {
       };
       setTimeout(poll, 600);
     } catch(err){
-  const msg = isApiError(err) ? (err.detail || err.error || err.message) : String(err);
-  alert(msg || 'Failed to publish');
-      setEpisodes(prev => prev.map(e => e.id===episodeId ? { ...e, _publishing:false } : e));
+      const errorMsg = getUserFriendlyError(err, { context: 'publish' });
+      toast({
+        title: errorMsg.title,
+        description: errorMsg.description,
+        variant: 'destructive'
+      });
+      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id===episodeId ? { ...e, _publishing:false } : e) : []);
     }
   };
   const openSchedule = (ep) => {
@@ -343,7 +358,7 @@ export default function EpisodeHistory({ token, onBack }) {
     try {
       const api = makeApi(token);
       await api.post(`/api/episodes/${ep.id}/republish`, {});
-      setEpisodes(prev => prev.map(e => e.id===ep.id ? { ...e, _republishing: true } : e));
+      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id===ep.id ? { ...e, _republishing: true } : e) : []);
       setTimeout(fetchEpisodes, 1500);
     } catch (e) {
       const msg = isApiError(e) ? (e.detail || e.error || e.message) : String(e);
@@ -381,10 +396,10 @@ export default function EpisodeHistory({ token, onBack }) {
   // Build ISO (UTC) and trim milliseconds for backend leniency
   let iso = local.toISOString();
   iso = iso.replace(/\.\d{3}Z$/, 'Z');
-      setEpisodes(prev => prev.map(e => e.id===scheduleEp.id ? { ...e, _scheduling:true } : e));
+      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id===scheduleEp.id ? { ...e, _scheduling:true } : e) : []);
   const api = makeApi(token);
   await api.post(`/api/episodes/${scheduleEp.id}/publish`, { publish_state:'public', publish_at: iso, publish_at_local: `${scheduleDate} ${scheduleTime}` });
-      setEpisodes(prev => prev.map(e => e.id===scheduleEp.id ? { ...e, status:'scheduled', publish_at: iso, publish_at_local: `${scheduleDate} ${scheduleTime}`, _scheduling:false } : e));
+      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id===scheduleEp.id ? { ...e, status:'scheduled', publish_at: iso, publish_at_local: `${scheduleDate} ${scheduleTime}`, _scheduling:false } : e) : []);
       setScheduleEp(null);
     } catch(e){
       // Extract string message from error object (never render object directly)
@@ -405,7 +420,7 @@ export default function EpisodeHistory({ token, onBack }) {
         }
       }
       setScheduleError(msg);
-      setEpisodes(prev => prev.map(p => p.id===scheduleEp.id ? { ...p, _scheduling:false } : p));
+      setEpisodes(prev => Array.isArray(prev) ? prev.map(p => p.id===scheduleEp.id ? { ...p, _scheduling:false } : p) : []);
     } finally { setScheduleSubmitting(false); }
   };
   const submitEdit = async () => {
@@ -571,12 +586,21 @@ export default function EpisodeHistory({ token, onBack }) {
       // If the target episode number would collide with another in the same season, offer swap
       if (newSeason != null && newEpisode != null) {
         const conflictEp = episodes.find(e => e.id !== editing.id && (e.season_number ?? null) === newSeason && (e.episode_number ?? null) === newEpisode && (e.podcast_id === editing.podcast_id));
-        if (conflictEp && window.confirm(`Episode number E${newEpisode} is already used in season S${newSeason} by "${conflictEp.title || 'Untitled'}". Swap numbers (that one becomes E${origEpisode || '—'})?`)) {
-          try { await api.patch(`/api/episodes/${conflictEp.id}`, { episode_number: origEpisode }); } catch {}
+        if (conflictEp) {
+          const confirmed = await showConfirm({
+            title: 'Episode Number Conflict',
+            description: `Episode number E${newEpisode} is already used in season S${newSeason} by "${conflictEp.title || 'Untitled'}". Swap numbers (that one becomes E${origEpisode || '—'})?`,
+            confirmText: 'Swap Numbers',
+            cancelText: 'Cancel',
+            variant: 'default'
+          });
+          if (confirmed) {
+            try { await api.patch(`/api/episodes/${conflictEp.id}`, { episode_number: origEpisode }); } catch {}
+          }
         }
       }
       const j = await api.patch(`/api/episodes/${editing.id}`, body);
-      setEpisodes(prev => prev.map(p => p.id===editing.id ? { ...p, ...(j?.episode||{}), ...(j?.episode?{}:{
+      setEpisodes(prev => Array.isArray(prev) ? prev.map(p => p.id===editing.id ? { ...p, ...(j?.episode||{}), ...(j?.episode ? {} : {
         title: body.title ?? p.title,
         description: body.description ?? p.description,
         tags: body.tags ?? p.tags,
@@ -586,7 +610,7 @@ export default function EpisodeHistory({ token, onBack }) {
         season_number: body.season_number ?? p.season_number,
         episode_number: body.episode_number ?? p.episode_number,
         template_id: body.template_id ?? p.template_id,
-      }) } : p));
+      }) } : p) : []);
       // Optional cascades for season change and episode increments
       if ((seasonChanged || episodeIncreased) && episodes && episodes.length) {
         const sorted = [...episodes].sort((a,b)=> episodeSortDate(a) - episodeSortDate(b));
@@ -594,8 +618,14 @@ export default function EpisodeHistory({ token, onBack }) {
         const subsequent = idx>=0 ? sorted.slice(idx+1) : [];
         // Season cascade
         if (seasonChanged && subsequent.length>0) {
-          const apply = window.confirm(`Also change the season to ${newSeason ?? '—'} for ${subsequent.length} episode(s) after this one?`);
-          if (apply) {
+          const confirmed = await showConfirm({
+            title: 'Apply Season Change to Subsequent Episodes?',
+            description: `Also change the season to ${newSeason ?? '—'} for ${subsequent.length} episode(s) after this one?`,
+            confirmText: 'Apply to All',
+            cancelText: 'Skip',
+            variant: 'default'
+          });
+          if (confirmed) {
             for (const e of subsequent) {
               try { await api.patch(`/api/episodes/${e.id}`, { season_number: newSeason }); } catch {}
             }
@@ -604,8 +634,14 @@ export default function EpisodeHistory({ token, onBack }) {
         // Episode increment cascade
         if (episodeIncreased && subsequent.length>0 && origEpisode != null) {
           const delta = newEpisode - origEpisode;
-          const apply = window.confirm(`Increment the episode number by +${delta} for ${subsequent.length} episode(s) after this one?`);
-          if (apply) {
+          const confirmed = await showConfirm({
+            title: 'Increment Episode Numbers?',
+            description: `Increment the episode number by +${delta} for ${subsequent.length} episode(s) after this one?`,
+            confirmText: 'Increment All',
+            cancelText: 'Skip',
+            variant: 'default'
+          });
+          if (confirmed) {
             for (const e of subsequent) {
               const en = (e.episode_number ?? 0) + delta;
               try { await api.patch(`/api/episodes/${e.id}`, { episode_number: en }); } catch {}
@@ -617,8 +653,12 @@ export default function EpisodeHistory({ token, onBack }) {
       // Refresh to recompute duplicate warnings
       try { await fetchEpisodes(); } catch {}
     } catch(e){
-      const msg = isApiError(e) ? (e.detail || e.error || e.message) : String(e);
-      alert(msg || 'Failed to save changes');
+      const errorMsg = getUserFriendlyError(e, { context: 'save' });
+      toast({
+        title: errorMsg.title,
+        description: errorMsg.description,
+        variant: 'destructive'
+      });
     } finally { setSaving(false); }
   };
 
@@ -715,7 +755,12 @@ export default function EpisodeHistory({ token, onBack }) {
     // Store error state for UI
     setAiError(prev => ({ ...prev, [label]: isRetryable ? message : null }));
     
-    alert(message);
+    const errorMsg = getUserFriendlyError({ detail: message }, { context: 'save' });
+    toast({
+      title: errorMsg.title,
+      description: errorMsg.description,
+      variant: 'destructive'
+    });
   };
 
   const associateTemplate = useCallback(async (templateId, { silent = false } = {}) => {
@@ -732,14 +777,18 @@ export default function EpisodeHistory({ token, onBack }) {
     try {
       const api = makeApi(token);
       await api.patch(`/api/episodes/${editing.id}`, { template_id: templateId });
-      setEpisodes(prev => prev.map(e => e.id === editing.id ? { ...e, template_id: templateId } : e));
+      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id === editing.id ? { ...e, template_id: templateId } : e) : []);
       setEditing(prev => prev ? { ...prev, template_id: templateId } : prev);
       setEditValues(v => ({ ...v, template_id: templateId }));
       return findTemplateById(templateId);
     } catch (err) {
       if (!silent) {
-        const msg = isApiError(err) ? (err.detail || err.error || err.message) : String(err);
-        alert(msg || 'Failed to link template.');
+        const errorMsg = getUserFriendlyError(err, { context: 'save', fallback: 'Failed to link template.' });
+        toast({
+          title: errorMsg.title,
+          description: errorMsg.description,
+          variant: 'destructive'
+        });
       }
       throw err;
     }
@@ -936,7 +985,7 @@ export default function EpisodeHistory({ token, onBack }) {
     try {
       const api = makeApi(token);
       await api.post(`/api/episodes/${unpublishEp.id}/unpublish`, { force });
-      setEpisodes(prev => prev.map(e => e.id===unpublishEp.id ? { ...e, status:'processed', publish_at:null } : e));
+      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id===unpublishEp.id ? { ...e, status:'processed', publish_at:null } : e) : []);
       setUnpublishEp(null);
       setTimeout(fetchEpisodes, 800);
     } catch(e){
@@ -948,7 +997,14 @@ export default function EpisodeHistory({ token, onBack }) {
   };
   const handleDeleteEpisode = async (episodeId) => {
     if (!episodeId) return;
-  if (!window.confirm('Delete this episode permanently? This cannot be undone.' + '\nDeleting does not return processing minutes.')) return;
+    const confirmed = await showConfirm({
+      title: 'Delete Episode Permanently?',
+      description: 'This cannot be undone. Deleting does not return processing minutes.',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      variant: 'destructive'
+    });
+    if (!confirmed) return;
     setDeletingIds(prev => new Set(prev).add(episodeId));
     try {
       const api = makeApi(token);
@@ -1001,7 +1057,7 @@ export default function EpisodeHistory({ token, onBack }) {
   }, [episodes, search, statusFilter, sortKey]);
   const renderGrid = () => (
     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
-      {displayEpisodes.map(ep => {
+      {Array.isArray(displayEpisodes) && displayEpisodes.length > 0 ? displayEpisodes.map(ep => {
         const coverUrl = resolveAssetUrl(ep.cover_url) || resolveAssetUrl(`/api/episodes/${ep.id}/cover`);
         // Prioritize a direct public URL if the backend provides it.
         // Otherwise, fall back to existing stream/final URLs.
@@ -1188,7 +1244,11 @@ export default function EpisodeHistory({ token, onBack }) {
             )}
           </div>
         );
-      })}
+      }) : (
+        <div className="col-span-full text-center py-12 text-gray-500">
+          No episodes found
+        </div>
+      )}
     </div>
   );
   const renderList = () => (
@@ -1301,8 +1361,20 @@ export default function EpisodeHistory({ token, onBack }) {
           </div>
         );
       })}
-      {displayEpisodes.length === 0 && (
-        <div className="px-3 py-6 text-center text-sm text-gray-500">No matching episodes.</div>
+      {displayEpisodes.length === 0 && episodes.length > 0 && (
+        <div className="px-3 py-6 text-center">
+          <p className="text-sm text-gray-500 mb-2">No episodes match your search or filters.</p>
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={() => {
+              setSearch('');
+              setStatusFilter('all');
+            }}
+          >
+            Clear Filters
+          </Button>
+        </div>
       )}
     </div>
   );
@@ -1658,8 +1730,18 @@ export default function EpisodeHistory({ token, onBack }) {
         </div>
       )}
       {(!loading && episodes.length === 0) && (
-        <div className="text-gray-500">No episodes yet.</div>
+        <EmptyState
+          title="No Episodes Yet"
+          description="Create your first episode to get started. You can record audio, upload a file, or assemble from pre-processed audio."
+          icon={Mic}
+          action={{
+            label: "Create Your First Episode",
+            onClick: onBack,
+            variant: "default"
+          }}
+        />
       )}
+      {confirmDialog}
     </div>
   );
 }

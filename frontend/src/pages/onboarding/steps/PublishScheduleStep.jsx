@@ -48,7 +48,7 @@ export default function PublishScheduleStep({ wizard }) {
             checked={notSureSchedule}
             onChange={(event) => setNotSureSchedule(event.target.checked)}
           />
-          <Label htmlFor="notSureSchedule">I'm not sure yet</Label>
+          <Label htmlFor="notSureSchedule">Skip this for now</Label>
         </div>
       </div>
     );
@@ -102,6 +102,16 @@ export default function PublishScheduleStep({ wizard }) {
 
   return (
     <div className="space-y-4">
+      {freqUnit === "bi-weekly" && (
+        <p className="text-sm text-muted-foreground mb-2">
+          Pick your first publish date. We'll schedule episodes every 2 weeks from that date.
+        </p>
+      )}
+      {freqUnit === "month" && (
+        <p className="text-sm text-muted-foreground mb-2">
+          Select the day(s) of the month you'd like to publish. You can pick multiple dates.
+        </p>
+      )}
       {months.map((monthDate, index) => {
         const year = monthDate.getFullYear();
         const month = monthDate.getMonth();
@@ -181,13 +191,13 @@ export default function PublishScheduleStep({ wizard }) {
         );
       })}
       <div className="flex items-center gap-2 mt-2">
-        <input
-          id="notSureSchedule2"
-          type="checkbox"
-          checked={notSureSchedule}
-          onChange={(event) => setNotSureSchedule(event.target.checked)}
-        />
-        <Label htmlFor="notSureSchedule2">I'm not sure yet</Label>
+          <input
+            id="notSureSchedule2"
+            type="checkbox"
+            checked={notSureSchedule}
+            onChange={(event) => setNotSureSchedule(event.target.checked)}
+          />
+          <Label htmlFor="notSureSchedule2">Skip this for now</Label>
       </div>
     </div>
   );

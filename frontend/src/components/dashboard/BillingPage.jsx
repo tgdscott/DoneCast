@@ -26,21 +26,50 @@ export default function BillingPage({ token, onBack }) {
   const [annual, setAnnual] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
   const { toast } = (() => { try { return useToast(); } catch { return { toast: () => {} }; } })();
+  // Check localStorage availability
+  const isLocalStorageAvailable = (() => {
+    try {
+      const test = '__localStorage_test__';
+      localStorage.setItem(test, test);
+      localStorage.removeItem(test);
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  // Check BroadcastChannel availability
+  const isBroadcastChannelAvailable = typeof BroadcastChannel !== 'undefined';
+
   const tabIdRef = useRef(null);
   if(!tabIdRef.current) {
-    try { tabIdRef.current = sessionStorage.getItem('ppp_tab_id') || Math.random().toString(36).slice(2); } catch { tabIdRef.current = Math.random().toString(36).slice(2); }
+    if (isLocalStorageAvailable) {
+      try { tabIdRef.current = sessionStorage.getItem('ppp_tab_id') || Math.random().toString(36).slice(2); } catch { tabIdRef.current = Math.random().toString(36).slice(2); }
+    } else {
+      tabIdRef.current = Math.random().toString(36).slice(2);
+    }
   }
   const bcRef = useRef(null);
-  useEffect(()=>{ try { bcRef.current = new BroadcastChannel('ppp_checkout_owner'); bcRef.current.onmessage = (e)=>{
-      if(e?.data?.type === 'owner_claimed' && e.data.owner !== tabIdRef.current) {
-        // Another tab owns; if we have success params, attempt close quickly
-        const params = new URLSearchParams(window.location.search);
-        if(params.get('checkout')==='success') {
-          window.close();
-          setTimeout(()=>{ try { if(!document.hidden) window.location.replace('/'); } catch{} }, 200);
-        }
+  useEffect(()=>{ 
+    if (isBroadcastChannelAvailable) {
+      try { 
+        bcRef.current = new BroadcastChannel('ppp_checkout_owner'); 
+        bcRef.current.onmessage = (e)=>{
+          if(e?.data?.type === 'owner_claimed' && e.data.owner !== tabIdRef.current) {
+            // Another tab owns; if we have success params, attempt close quickly
+            const params = new URLSearchParams(window.location.search);
+            if(params.get('checkout')==='success') {
+              window.close();
+              setTimeout(()=>{ try { if(!document.hidden) window.location.replace('/'); } catch{} }, 200);
+            }
+          }
+        }; 
+      } catch(e) {
+        if (import.meta.env.DEV) console.warn('[BillingPage] BroadcastChannel unavailable:', e);
       }
-    }; } catch{} return ()=>{ try { bcRef.current && bcRef.current.close(); } catch{} } }, []);
+    }
+    return ()=>{ try { bcRef.current && bcRef.current.close(); } catch{} } 
+  }, [isBroadcastChannelAvailable]);
 
   const fetchAll = async () => {
     try {
@@ -69,18 +98,35 @@ export default function BillingPage({ token, onBack }) {
     if(!isSuccess) return; // nothing to do
     (async () => {
       // Ownership: only one tab should handle post-checkout. If another already did, try to close self.
-      try {
-        const owner = localStorage.getItem('ppp_checkout_owner');
-        if(owner && owner !== tabIdRef.current) {
-          // Secondary tab: auto-close/redirect
-          window.close();
-          setTimeout(()=>{ try { if(!document.hidden) window.location.replace('/'); } catch{} }, 150);
-          return;
-        } else if(!owner) {
-          localStorage.setItem('ppp_checkout_owner', tabIdRef.current);
-          try { bcRef.current?.postMessage({ type:'owner_claimed', owner: tabIdRef.current }); } catch{}
+      let isOwner = true;
+      if (isLocalStorageAvailable) {
+        try {
+          const owner = localStorage.getItem('ppp_checkout_owner');
+          if(owner && owner !== tabIdRef.current) {
+            // Secondary tab: auto-close/redirect
+            isOwner = false;
+            window.close();
+            setTimeout(()=>{ try { if(!document.hidden) window.location.replace('/'); } catch{} }, 150);
+            return;
+          } else if(!owner) {
+            localStorage.setItem('ppp_checkout_owner', tabIdRef.current);
+            if (isBroadcastChannelAvailable) {
+              try { bcRef.current?.postMessage({ type:'owner_claimed', owner: tabIdRef.current }); } catch(e) {
+                if (import.meta.env.DEV) console.warn('[BillingPage] Failed to broadcast owner claim:', e);
+              }
+            }
+          }
+        } catch (e) {
+          if (import.meta.env.DEV) console.warn('[BillingPage] localStorage error, continuing without ownership check:', e);
+          // Continue processing even if localStorage fails
         }
-      } catch {}
+      } else {
+        // localStorage unavailable - show warning but continue
+        if (import.meta.env.DEV) console.warn('[BillingPage] localStorage unavailable, processing checkout without tab coordination');
+      }
+      
+      if (!isOwner) return; // Exit early if not owner
+      
       try { toast({ title:'Processing Purchase', description:'Finalizing your subscription...', duration:4000 }); } catch {}
       // Try to capture checkout result (optional)
       if(sessionId) {
@@ -89,8 +135,16 @@ export default function BillingPage({ token, onBack }) {
             const api = makeApi(token);
             const data = await api.get(`/api/billing/checkout_result?session_id=${sessionId}`);
             setCheckoutDetails(data); setShowModal(true);
-            try { const bc = new BroadcastChannel('ppp_billing'); bc.postMessage({ type:'checkout_success', payload:data }); bc.close(); } catch {}
-            try { localStorage.setItem('ppp_last_checkout', JSON.stringify({ ts:Date.now(), data })); } catch {}
+            if (isBroadcastChannelAvailable) {
+              try { const bc = new BroadcastChannel('ppp_billing'); bc.postMessage({ type:'checkout_success', payload:data }); bc.close(); } catch(e) {
+                if (import.meta.env.DEV) console.warn('[BillingPage] Failed to broadcast checkout success:', e);
+              }
+            }
+            if (isLocalStorageAvailable) {
+              try { localStorage.setItem('ppp_last_checkout', JSON.stringify({ ts:Date.now(), data })); } catch(e) {
+                if (import.meta.env.DEV) console.warn('[BillingPage] Failed to save checkout to localStorage:', e);
+              }
+            }
             break;
           } catch {}
           await new Promise(res=>setTimeout(res, 300*(attempt+1)));
@@ -109,7 +163,11 @@ export default function BillingPage({ token, onBack }) {
               refreshUser({ force:true });
               setTimeout(()=>refreshUser({ force:true }), 1200); // double-tap to catch race
               toast({ title:'Subscription Upgraded', description:`You are now on the ${fsData.plan_key} plan.`, duration:5000 });
-              try { const bc = new BroadcastChannel('ppp_billing'); bc.postMessage({ type:'subscription_updated', payload: fsData }); bc.close(); } catch {}
+              if (isBroadcastChannelAvailable) {
+                try { const bc = new BroadcastChannel('ppp_billing'); bc.postMessage({ type:'subscription_updated', payload: fsData }); bc.close(); } catch(e) {
+                  if (import.meta.env.DEV) console.warn('[BillingPage] Failed to broadcast subscription update:', e);
+                }
+              }
             }
           } catch {}
           if(!upgraded) await new Promise(res=>setTimeout(res, 800));
@@ -128,11 +186,29 @@ export default function BillingPage({ token, onBack }) {
               refreshUser({ force:true });
               setTimeout(()=>refreshUser({ force:true }), 1200);
               toast({ title:'Subscription Upgraded', description:`You are now on the ${sub.plan_key} plan.`, duration:5000 });
-              try { const bc = new BroadcastChannel('ppp_billing'); bc.postMessage({ type:'subscription_updated', payload: sub }); bc.close(); } catch {}
+              if (isBroadcastChannelAvailable) {
+                try { const bc = new BroadcastChannel('ppp_billing'); bc.postMessage({ type:'subscription_updated', payload: sub }); bc.close(); } catch(e) {
+                  if (import.meta.env.DEV) console.warn('[BillingPage] Failed to broadcast subscription update:', e);
+                }
+              }
               setPlanPolling(false); return;
             }
-          } catch {}
-          if(tries < 15) setTimeout(poll, 1000); else { setPlanPolling(false); try { toast({ title:'Upgrade Pending', description:'Payment complete. Your plan will reflect the upgrade shortly.', duration:6000 }); } catch {} }
+          } catch (e) {
+            if (import.meta.env.DEV && tries === 1) console.warn('[BillingPage] Polling error:', e);
+          }
+          // Increased from 15 to 30 tries (30 seconds) to catch slow webhooks
+          if(tries < 30) {
+            setTimeout(poll, 1000);
+          } else { 
+            setPlanPolling(false); 
+            try { 
+              toast({ 
+                title:'Upgrade Pending', 
+                description:'Payment complete. Your plan will reflect the upgrade shortly. If it doesn\'t appear within a few minutes, please refresh the page or contact support.', 
+                duration:8000 
+              }); 
+            } catch {} 
+          }
         };
         poll();
       }
@@ -141,7 +217,16 @@ export default function BillingPage({ token, onBack }) {
         try { window.history.replaceState(null,'', window.location.pathname); } catch {}
       }
       // Release ownership after short delay (so manual refresh doesn't spawn duplicates)
-      setTimeout(()=>{ try { const owner = localStorage.getItem('ppp_checkout_owner'); if(owner === tabIdRef.current) localStorage.removeItem('ppp_checkout_owner'); } catch {} }, 5000);
+      if (isLocalStorageAvailable) {
+        setTimeout(()=>{ 
+          try { 
+            const owner = localStorage.getItem('ppp_checkout_owner'); 
+            if(owner === tabIdRef.current) localStorage.removeItem('ppp_checkout_owner'); 
+          } catch (e) {
+            if (import.meta.env.DEV) console.warn('[BillingPage] Failed to release ownership:', e);
+          } 
+        }, 5000);
+      }
       if(isPopup) {
         // Close popup after a brief delay once done.
         setTimeout(()=>{ try { window.close(); } catch{} }, 600);
@@ -152,6 +237,19 @@ export default function BillingPage({ token, onBack }) {
   const startCheckout = async (planKey, billingCycle='monthly') => {
     try {
       setCheckoutLoading(true);
+      
+      // Check if localStorage is available before starting checkout
+      if (!isLocalStorageAvailable) {
+        toast({ 
+          title: 'Storage Unavailable', 
+          description: 'Please enable localStorage in your browser settings to complete checkout. Alternatively, you can complete checkout in a new tab.', 
+          variant: 'destructive',
+          duration: 8000 
+        });
+        setCheckoutLoading(false);
+        return;
+      }
+      
       const api = makeApi(token);
       const data = await api.post('/api/billing/checkout', { plan_key: planKey, billing_cycle: billingCycle });
       // Open popup for checkout

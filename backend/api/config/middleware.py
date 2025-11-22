@@ -84,6 +84,14 @@ def configure_middleware(app: FastAPI, settings: Settings) -> None:
 
     app.add_middleware(ResponseLoggingMiddleware)
     
+    # Request size limit middleware
+    from api.middleware.request_size_limit import RequestSizeLimitMiddleware
+    app.add_middleware(RequestSizeLimitMiddleware)
+    
+    # Performance metrics middleware
+    from api.middleware.metrics import MetricsMiddleware
+    app.add_middleware(MetricsMiddleware)
+    
     # Install exception handlers
     from api.exceptions import install_exception_handlers
     install_exception_handlers(app)

@@ -90,3 +90,7 @@ To verify the fix works:
 - The maintenance job (`update_published_episodes.py`) is now **optional** - it can still be run to update `status` field for consistency, but queries will work correctly without it
 - Consider deprecating the maintenance job if all queries are updated to use `is_published_condition()`
 
+
+
+
+

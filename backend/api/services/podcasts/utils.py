@@ -156,8 +156,9 @@ def save_cover_upload(
         ) from e
 
 
-def build_distribution_context(podcast: "Podcast") -> Dict[str, Optional[str]]:
-    from ...models.podcast import Podcast  # Local import to avoid circular refs
+def build_distribution_context(podcast: "Podcast", session: Optional["Session"] = None) -> Dict[str, Optional[str]]:
+    from ...models.podcast import Podcast, Episode, EpisodeStatus  # Local import to avoid circular refs
+    from sqlmodel import select
 
     if not isinstance(podcast, Podcast):
         raise TypeError("podcast must be a Podcast instance")
@@ -167,9 +168,29 @@ def build_distribution_context(podcast: "Podcast") -> Dict[str, Optional[str]]:
         or getattr(podcast, "rss_url_locked", None)
         or getattr(podcast, "rss_url", None)
     )
+    # If rss_url is still None, use the property directly (it always returns a value)
+    if not rss_url:
+        rss_url = podcast.rss_feed_url
+    
     spreaker_show_id = getattr(podcast, "spreaker_show_id", None)
     spreaker_show_url = f"https://www.spreaker.com/show/{spreaker_show_id}" if spreaker_show_id else None
     encoded_rss = quote_plus(rss_url) if rss_url else ""
+    
+    # Check if podcast has published episodes (required for Apple/Spotify submission)
+    has_published_episodes = False
+    if session:
+        try:
+            published_count = session.exec(
+                select(Episode)
+                .where(Episode.podcast_id == podcast.id)
+                .where(Episode.status == EpisodeStatus.published)
+                .where(Episode.gcs_audio_path != None)  # Must have audio
+            ).all()
+            has_published_episodes = len(published_count) > 0
+        except Exception:
+            # If query fails, assume no episodes (safer default)
+            has_published_episodes = False
+    
     return {
         "rss_feed_url": rss_url,
         "rss_feed_encoded": encoded_rss,
@@ -177,6 +198,7 @@ def build_distribution_context(podcast: "Podcast") -> Dict[str, Optional[str]]:
         "spreaker_show_id": spreaker_show_id or "",
         "spreaker_show_url": spreaker_show_url,
         "podcast_name": getattr(podcast, "name", None) or "",
+        "has_published_episodes": str(has_published_episodes).lower(),  # Convert to string for template compatibility
     }
 
 
@@ -202,8 +224,18 @@ def build_distribution_item_payload(
     disabled_reason: Optional[str] = None
     requires_rss_feed = bool(host_def.get("requires_rss_feed"))
     requires_spreaker_show = bool(host_def.get("requires_spreaker_show"))
-    if requires_rss_feed and not context.get("rss_feed_url"):
-        disabled_reason = host_def.get("rss_missing_help") or "Add your RSS feed first."
+    
+    # Check RSS feed availability and published episodes
+    has_rss_feed = bool(context.get("rss_feed_url"))
+    has_published_episodes = context.get("has_published_episodes", "false").lower() == "true"
+    
+    if requires_rss_feed:
+        if not has_rss_feed:
+            disabled_reason = host_def.get("rss_missing_help") or "Add your RSS feed first."
+        elif not has_published_episodes:
+            # RSS feed exists but no episodes - platforms will reject it
+            disabled_reason = "Publish at least one episode before submitting. Apple Podcasts and Spotify require episodes with audio."
+    
     if requires_spreaker_show and not context.get("spreaker_show_id"):
         disabled_reason = host_def.get("spreaker_missing_help") or "Link your show to Spreaker first."
 

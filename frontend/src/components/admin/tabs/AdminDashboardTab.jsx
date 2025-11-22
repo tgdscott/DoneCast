@@ -8,13 +8,20 @@ import {
   Play,
   CheckCircle,
   AlertTriangle,
-  XCircle,
   MessageSquare,
   Download,
   Settings as SettingsIcon,
 } from "lucide-react";
 
-export default function AdminDashboardTab({ analytics, handleKillQueue, killingQueue }) {
+export default function AdminDashboardTab({ 
+  analytics, 
+  episodesToday, 
+  recentActivity, 
+  systemHealth, 
+  growthMetrics,
+  handleKillQueue, 
+  killingQueue 
+}) {
   const num = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
 
   return (
@@ -29,10 +36,12 @@ export default function AdminDashboardTab({ analytics, handleKillQueue, killingQ
                 <p className="text-2xl font-bold" style={{ color: "#2C3E50" }}>
                   {num(analytics.activeUsers).toLocaleString()}
                 </p>
-                <div className="flex items-center mt-1 text-sm text-green-600">
-                  <TrendingUp className="w-3 h-3 mr-1" />
-                  +12% vs last month
-                </div>
+                {growthMetrics?.active_users_change != null && (
+                  <div className={`flex items-center mt-1 text-sm ${growthMetrics.active_users_change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    <TrendingUp className="w-3 h-3 mr-1" />
+                    {growthMetrics.active_users_change >= 0 ? '+' : ''}{growthMetrics.active_users_change.toFixed(1)}% vs last month
+                  </div>
+                )}
               </div>
               <div className="p-3 rounded-full bg-blue-100">
                 <Users className="w-6 h-6 text-blue-600" />
@@ -53,10 +62,12 @@ export default function AdminDashboardTab({ analytics, handleKillQueue, killingQ
                     <Badge variant="secondary">—</Badge>
                   )}
                 </p>
-                <div className="flex items-center mt-1 text-sm text-green-600">
-                  <TrendingUp className="w-3 h-3 mr-1" />
-                  +18% vs last month
-                </div>
+                {growthMetrics?.revenue_change != null && (
+                  <div className={`flex items-center mt-1 text-sm ${growthMetrics.revenue_change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    <TrendingUp className="w-3 h-3 mr-1" />
+                    {growthMetrics.revenue_change >= 0 ? '+' : ''}{growthMetrics.revenue_change.toFixed(1)}% vs last month
+                  </div>
+                )}
               </div>
               <div className="p-3 rounded-full bg-green-100">
                 <TrendingUp className="w-6 h-6 text-green-600" />
@@ -71,12 +82,14 @@ export default function AdminDashboardTab({ analytics, handleKillQueue, killingQ
               <div>
                 <p className="text-sm font-medium text-gray-600">Episodes Today</p>
                 <p className="text-2xl font-bold" style={{ color: "#2C3E50" }}>
-                  47
+                  {episodesToday ? num(episodesToday.total) : '—'}
                 </p>
-                <div className="flex items-center mt-1 text-sm text-blue-600">
-                  <Play className="w-3 h-3 mr-1" />
-                  23 published, 24 drafts
-                </div>
+                {episodesToday && (
+                  <div className="flex items-center mt-1 text-sm text-blue-600">
+                    <Play className="w-3 h-3 mr-1" />
+                    {num(episodesToday.published)} published, {num(episodesToday.drafts)} drafts
+                  </div>
+                )}
               </div>
               <div className="p-3 rounded-full bg-purple-100">
                 <Play className="w-6 h-6 text-purple-600" />
@@ -90,10 +103,21 @@ export default function AdminDashboardTab({ analytics, handleKillQueue, killingQ
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-gray-600">System Health</p>
-                <p className="text-2xl font-bold text-green-600">98.7%</p>
-                <div className="flex items-center mt-1 text-sm text-green-600">
-                  <CheckCircle className="w-3 h-3 mr-1" />
-                  All systems operational
+                <p className={`text-2xl font-bold ${systemHealth?.status === 'operational' ? 'text-green-600' : 'text-orange-600'}`}>
+                  {systemHealth ? `${systemHealth.uptime_percentage.toFixed(1)}%` : '—'}
+                </p>
+                <div className={`flex items-center mt-1 text-sm ${systemHealth?.status === 'operational' ? 'text-green-600' : 'text-orange-600'}`}>
+                  {systemHealth?.status === 'operational' ? (
+                    <>
+                      <CheckCircle className="w-3 h-3 mr-1" />
+                      All systems operational
+                    </>
+                  ) : (
+                    <>
+                      <AlertTriangle className="w-3 h-3 mr-1" />
+                      System degraded
+                    </>
+                  )}
                 </div>
               </div>
               <div className="p-3 rounded-full bg-green-100">
@@ -119,53 +143,43 @@ export default function AdminDashboardTab({ analytics, handleKillQueue, killingQ
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {[
-                {
-                  icon: Users,
-                  color: "text-blue-600",
-                  bg: "bg-blue-100",
-                  title: "New user registration spike",
-                  description: "23 new users signed up in the last hour",
-                  time: "5 minutes ago",
-                },
-                {
-                  icon: AlertTriangle,
-                  color: "text-orange-600",
-                  bg: "bg-orange-100",
-                  title: "High server load detected",
-                  description: "CPU usage at 78% - monitoring closely",
-                  time: "12 minutes ago",
-                },
-                {
-                  icon: Play,
-                  color: "text-purple-600",
-                  bg: "bg-purple-100",
-                  title: "Episode milestone reached",
-                  description: "Platform just hit 15,000 total episodes published",
-                  time: "1 hour ago",
-                },
-                {
-                  icon: TrendingUp,
-                  color: "text-green-600",
-                  bg: "bg-green-100",
-                  title: "Revenue target exceeded",
-                  description: "Monthly revenue goal reached 5 days early",
-                  time: "2 hours ago",
-                },
-              ].map((activity, index) => (
-                <div
-                  key={index}
-                  className="flex items-start space-x-4 p-4 rounded-lg hover:bg-gray-50 transition-all">
-                  <div className={`p-2 rounded-full ${activity.bg}`}>
-                    <activity.icon className={`w-4 h-4 ${activity.color}`} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-gray-800">{activity.title}</p>
-                    <p className="text-sm text-gray-600">{activity.description}</p>
-                    <p className="text-xs text-gray-500 mt-1">{activity.time}</p>
-                  </div>
+              {recentActivity && recentActivity.length > 0 ? (
+                recentActivity.map((activity, index) => {
+                  let icon, color, bg;
+                  if (activity.type === 'user_signup') {
+                    icon = Users;
+                    color = "text-blue-600";
+                    bg = "bg-blue-100";
+                  } else if (activity.type === 'episode_published') {
+                    icon = Play;
+                    color = "text-purple-600";
+                    bg = "bg-purple-100";
+                  } else {
+                    icon = MessageSquare;
+                    color = "text-gray-600";
+                    bg = "bg-gray-100";
+                  }
+                  
+                  return (
+                    <div
+                      key={index}
+                      className="flex items-start space-x-4 p-4 rounded-lg hover:bg-gray-50 transition-all">
+                      <div className={`p-2 rounded-full ${bg}`}>
+                        {React.createElement(icon, { className: `w-4 h-4 ${color}` })}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-gray-800">{activity.title}</p>
+                        <p className="text-sm text-gray-600">{activity.description}</p>
+                        <p className="text-xs text-gray-500 mt-1">{activity.time}</p>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-center py-8 text-gray-500">
+                  <p>No recent activity</p>
                 </div>
-              ))}
+              )}
             </CardContent>
           </Card>
         </div>
@@ -211,29 +225,33 @@ export default function AdminDashboardTab({ analytics, handleKillQueue, killingQ
             </CardHeader>
             <CardContent className="space-y-4">
               {[
-                { service: "API Gateway", status: "operational", color: "text-green-600", icon: CheckCircle },
-                { service: "Database", status: "operational", color: "text-green-600", icon: CheckCircle },
-                { service: "AI Services", status: "operational", color: "text-green-600", icon: CheckCircle },
-                { service: "File Storage", status: "degraded", color: "text-orange-600", icon: AlertTriangle },
-                { service: "Email Service", status: "down", color: "text-red-600", icon: XCircle },
-              ].map((item, index) => (
-                <div key={index} className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <item.icon className={`w-4 h-4 ${item.color}`} />
-                    <span className="text-sm font-medium text-gray-700">{item.service}</span>
+                { service: "API Gateway", status: systemHealth?.status || "operational" },
+                { service: "Database", status: systemHealth?.status || "operational" },
+                { service: "AI Services", status: systemHealth?.status || "operational" },
+                { service: "File Storage", status: systemHealth?.status || "operational" },
+                { service: "Email Service", status: systemHealth?.status || "operational" },
+              ].map((item, index) => {
+                const isOperational = item.status === "operational";
+                const icon = isOperational ? CheckCircle : AlertTriangle;
+                const color = isOperational ? "text-green-600" : "text-orange-600";
+                
+                return (
+                  <div key={index} className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      {React.createElement(icon, { className: `w-4 h-4 ${color}` })}
+                      <span className="text-sm font-medium text-gray-700">{item.service}</span>
+                    </div>
+                    <Badge
+                      className={`text-xs ${
+                        isOperational
+                          ? "bg-green-100 text-green-800"
+                          : "bg-orange-100 text-orange-800"
+                      }`}>
+                      {item.status}
+                    </Badge>
                   </div>
-                  <Badge
-                    className={`text-xs ${
-                      item.status === "operational"
-                        ? "bg-green-100 text-green-800"
-                        : item.status === "degraded"
-                          ? "bg-orange-100 text-orange-800"
-                          : "bg-red-100 text-red-800"
-                    }`}>
-                    {item.status}
-                  </Badge>
-                </div>
-              ))}
+                );
+              })}
             </CardContent>
           </Card>
         </div>

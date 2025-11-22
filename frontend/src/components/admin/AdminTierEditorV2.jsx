@@ -193,7 +193,7 @@ export default function AdminTierEditorV2() {
         // Pydantic validation errors - format the error details
         const details = e.error.details;
         if (Array.isArray(details) && details.length > 0) {
-          const errorStrings = details.map((err: any) => {
+          const errorStrings = details.map((err) => {
             const loc = err.loc ? err.loc.join('.') : '';
             const msg = err.msg || 'Invalid value';
             return `${loc}: ${msg}`;
@@ -206,7 +206,7 @@ export default function AdminTierEditorV2() {
         // FastAPI HTTPException detail
         if (Array.isArray(e.detail)) {
           // Pydantic validation errors directly in detail
-          const errorStrings = e.detail.map((err: any) => {
+          const errorStrings = e.detail.map((err) => {
             const loc = err.loc ? err.loc.join('.') : '';
             const msg = err.msg || 'Invalid value';
             return `${loc}: ${msg}`;

@@ -71,7 +71,13 @@ def create_signed_resumable(req: SignedResumableRequest):
     else:
         key = filename
 
-    client = storage.Client()  # uses ADC (e.g., Cloud Run service account)
+    # Use cached GCS client if available (performance optimization)
+    from infrastructure.gcs import _get_gcs_client
+    client = _get_gcs_client(force=True)
+    if not client:
+        # Fallback: create client directly if cache is empty
+        client = storage.Client()  # uses ADC (e.g., Cloud Run service account)
+    
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(key)
 

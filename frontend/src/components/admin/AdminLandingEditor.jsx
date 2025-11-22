@@ -84,13 +84,31 @@ export default function AdminLandingEditor({ token }) {
       const keys = path.split('.');
       let current = updated;
       
+      // Navigate to parent object, creating missing paths
       for (let i = 0; i < keys.length - 1; i++) {
+        if (!current[keys[i]]) {
+          current[keys[i]] = {};
+        }
         current = current[keys[i]];
       }
       
-      const array = [...current[keys[keys.length - 1]]];
+      const arrayKey = keys[keys.length - 1];
+      
+      // Validate that target is an array
+      if (!Array.isArray(current[arrayKey])) {
+        console.warn(`Path ${path} does not point to an array`);
+        return prev; // Return unchanged if not an array
+      }
+      
+      // Validate index bounds
+      if (index < 0 || index >= current[arrayKey].length) {
+        console.warn(`Index ${index} out of bounds for array at ${path}`);
+        return prev;
+      }
+      
+      const array = [...current[arrayKey]];
       array[index] = { ...array[index], [field]: value };
-      current[keys[keys.length - 1]] = array;
+      current[arrayKey] = array;
       
       return updated;
     });
@@ -102,13 +120,24 @@ export default function AdminLandingEditor({ token }) {
       const keys = path.split('.');
       let current = updated;
       
+      // Navigate to parent object, creating missing paths
       for (let i = 0; i < keys.length - 1; i++) {
+        if (!current[keys[i]]) {
+          current[keys[i]] = {};
+        }
         current = current[keys[i]];
       }
       
-      const array = [...(current[keys[keys.length - 1]] || [])];
+      const arrayKey = keys[keys.length - 1];
+      
+      // Ensure target is an array (create if missing)
+      if (!Array.isArray(current[arrayKey])) {
+        current[arrayKey] = [];
+      }
+      
+      const array = [...current[arrayKey]];
       array.push(template);
-      current[keys[keys.length - 1]] = array;
+      current[arrayKey] = array;
       
       return updated;
     });
@@ -120,13 +149,32 @@ export default function AdminLandingEditor({ token }) {
       const keys = path.split('.');
       let current = updated;
       
+      // Navigate to parent object
       for (let i = 0; i < keys.length - 1; i++) {
+        if (!current[keys[i]]) {
+          console.warn(`Path ${path} is invalid: ${keys[i]} does not exist`);
+          return prev; // Return unchanged if path doesn't exist
+        }
         current = current[keys[i]];
       }
       
-      const array = [...current[keys[keys.length - 1]]];
+      const arrayKey = keys[keys.length - 1];
+      
+      // Validate that target is an array
+      if (!Array.isArray(current[arrayKey])) {
+        console.warn(`Path ${path} does not point to an array`);
+        return prev; // Return unchanged if not an array
+      }
+      
+      // Validate index bounds
+      if (index < 0 || index >= current[arrayKey].length) {
+        console.warn(`Index ${index} out of bounds for array at ${path}`);
+        return prev;
+      }
+      
+      const array = [...current[arrayKey]];
       array.splice(index, 1);
-      current[keys[keys.length - 1]] = array;
+      current[arrayKey] = array;
       
       return updated;
     });

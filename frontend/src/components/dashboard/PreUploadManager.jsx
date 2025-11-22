@@ -3,11 +3,14 @@ import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 import { Input } from '../ui/input';
 import { Checkbox } from '../ui/checkbox';
+import { Switch } from '../ui/switch';
 import { AlertCircle, AlertTriangle, ArrowLeft, CheckCircle2, Loader2, Upload } from 'lucide-react';
 import { uploadMediaDirect } from '@/lib/directUpload';
 import { useToast } from '@/hooks/use-toast';
 import { convertAudioFileToMp3IfBeneficial } from '@/lib/audioConversion';
 import usePublicConfig from '@/hooks/usePublicConfig';
+import { useAuth } from '@/AuthContext.jsx';
+import { makeApi } from '@/lib/apiClient';
 
 const formatFileSize = (bytes) => {
   if (!Number.isFinite(bytes)) return '';
@@ -30,6 +33,7 @@ export default function PreUploadManager({
   onUploaded = () => {},
 }) {
   const { toast } = useToast();
+  const { user: authUser, refreshUser } = useAuth();
   const { config: publicConfig, error: publicConfigError } = usePublicConfig();
   const [file, setFile] = useState(null);
   const [friendlyName, setFriendlyName] = useState('');
@@ -44,6 +48,8 @@ export default function PreUploadManager({
   const [conversionProgress, setConversionProgress] = useState(null);
   const [submitAfterConvert, setSubmitAfterConvert] = useState(false);
   const [conversionEnabled, setConversionEnabled] = useState(true);
+  const [useAdvancedAudio, setUseAdvancedAudio] = useState(() => Boolean(authUser?.use_advanced_audio_processing));
+  const [isSavingAdvancedAudio, setIsSavingAdvancedAudio] = useState(false);
 
   const CONVERSION_DISABLED_NOTICE =
     'Browser-based audio conversion is disabled. The original file will be uploaded as-is.';
@@ -55,6 +61,33 @@ export default function PreUploadManager({
       setConversionEnabled(true);
     }
   }, [publicConfig, publicConfigError]);
+
+  // Sync advanced audio preference with user data
+  useEffect(() => {
+    setUseAdvancedAudio(Boolean(authUser?.use_advanced_audio_processing));
+  }, [authUser?.use_advanced_audio_processing]);
+
+  const handleAdvancedAudioToggle = async (checked) => {
+    const previousValue = useAdvancedAudio;
+    setUseAdvancedAudio(checked);
+    setIsSavingAdvancedAudio(true);
+    try {
+      const api = makeApi(token);
+      await api.put('/api/users/me/audio-pipeline', { use_advanced_audio: checked });
+      if (typeof refreshUser === 'function') {
+        refreshUser({ force: true });
+      }
+    } catch (err) {
+      setUseAdvancedAudio(previousValue);
+      toast({
+        variant: 'destructive',
+        title: 'Could not update audio pipeline',
+        description: err?.detail?.message || err?.message || 'Please try again.',
+      });
+    } finally {
+      setIsSavingAdvancedAudio(false);
+    }
+  };
 
   useEffect(() => {
     if (!conversionEnabled && converting) {
@@ -73,6 +106,42 @@ export default function PreUploadManager({
       event.target.value = '';
     }
     if (!selected) return;
+    
+    // Validate file BEFORE processing/conversion
+    // Check file type
+    const fileType = (selected.type || '').toLowerCase();
+    const fileName = selected.name.toLowerCase();
+    const isAudioFile = fileType.startsWith('audio/') || 
+                       fileName.endsWith('.mp3') || 
+                       fileName.endsWith('.wav') || 
+                       fileName.endsWith('.m4a') || 
+                       fileName.endsWith('.aac') || 
+                       fileName.endsWith('.ogg') || 
+                       fileName.endsWith('.flac') || 
+                       fileName.endsWith('.opus');
+    
+    if (!isAudioFile) {
+      setError('Please select an audio file. Supported formats: MP3, WAV, M4A, AAC, OGG, FLAC, Opus.');
+      setFile(null);
+      return;
+    }
+    
+    // Check file size (500MB max for main content)
+    const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
+    if (selected.size > MAX_FILE_SIZE) {
+      const sizeMB = (selected.size / (1024 * 1024)).toFixed(1);
+      setError(`File is too large (${sizeMB}MB). Maximum file size is 500MB. Please use a smaller file or compress your audio.`);
+      setFile(null);
+      return;
+    }
+    
+    // Check minimum file size (should be at least 1KB)
+    if (selected.size < 1024) {
+      setError('File is too small. Please select a valid audio file.');
+      setFile(null);
+      return;
+    }
+    
     setFriendlyName('');
     setSuccessMessage('');
     setError('');
@@ -357,6 +426,24 @@ export default function PreUploadManager({
                     />
                   </div>
                 )}
+
+                <div className="flex items-center justify-between gap-4 pt-2 border-t border-slate-200">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-slate-900">Use Advanced Audio Processing</p>
+                    <p className="text-xs text-slate-600">
+                      Enable Auphonic pipeline for professional-grade mastering with filler removal, noise reduction, and leveling.
+                    </p>
+                    {isSavingAdvancedAudio && (
+                      <p className="text-xs text-slate-500">Saving your preference…</p>
+                    )}
+                  </div>
+                  <Switch
+                    id="preupload-advanced-audio-toggle"
+                    checked={useAdvancedAudio}
+                    onCheckedChange={handleAdvancedAudioToggle}
+                    disabled={isSavingAdvancedAudio}
+                  />
+                </div>
               </div>
             )}
 

@@ -27,8 +27,10 @@ export default function PromoCodesTab({ token }) {
     is_active: true,
     max_uses: "",
     expires_at: "",
-    benefit_type: "",
-    benefit_value: "",
+    discount_percentage: "",
+    bonus_credits: "",
+    applies_to_monthly: true,
+    applies_to_yearly: true,
   });
 
   useEffect(() => {
@@ -66,8 +68,10 @@ export default function PromoCodesTab({ token }) {
       is_active: true,
       max_uses: "",
       expires_at: "",
-      benefit_type: "",
-      benefit_value: "",
+      discount_percentage: "",
+      bonus_credits: "",
+      applies_to_monthly: true,
+      applies_to_yearly: true,
     });
     setIsDialogOpen(true);
   };
@@ -81,8 +85,10 @@ export default function PromoCodesTab({ token }) {
       is_active: code.is_active,
       max_uses: code.max_uses?.toString() || "",
       expires_at: code.expires_at ? code.expires_at.slice(0, 16) : "",
-      benefit_type: code.benefit_type || "",
-      benefit_value: code.benefit_value || "",
+      discount_percentage: code.discount_percentage?.toString() || "",
+      bonus_credits: code.bonus_credits?.toString() || "",
+      applies_to_monthly: code.applies_to_monthly !== undefined ? code.applies_to_monthly : true,
+      applies_to_yearly: code.applies_to_yearly !== undefined ? code.applies_to_yearly : true,
     });
     setIsDialogOpen(true);
   };
@@ -120,8 +126,10 @@ export default function PromoCodesTab({ token }) {
         code: formData.code.toUpperCase().trim(),
         max_uses: formData.max_uses ? parseInt(formData.max_uses) : null,
         expires_at: formData.expires_at || null,
-        benefit_type: formData.benefit_type || null,
-        benefit_value: formData.benefit_value || null,
+        discount_percentage: formData.discount_percentage ? parseFloat(formData.discount_percentage) : null,
+        bonus_credits: formData.bonus_credits ? parseFloat(formData.bonus_credits) : null,
+        applies_to_monthly: formData.applies_to_monthly,
+        applies_to_yearly: formData.applies_to_yearly,
       };
 
       const url = editingCode
@@ -188,7 +196,9 @@ export default function PromoCodesTab({ token }) {
               <TableRow>
                 <TableHead>Code</TableHead>
                 <TableHead>Description</TableHead>
-                <TableHead>Benefit</TableHead>
+                <TableHead>Discount</TableHead>
+                <TableHead>Bonus Credits</TableHead>
+                <TableHead>Applies To</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Usage</TableHead>
                 <TableHead>Max Uses</TableHead>
@@ -200,7 +210,7 @@ export default function PromoCodesTab({ token }) {
             <TableBody>
               {promoCodes.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center text-gray-500 py-8">
+                  <TableCell colSpan={11} className="text-center text-gray-500 py-8">
                     No promo codes found. Create one to get started.
                   </TableCell>
                 </TableRow>
@@ -209,7 +219,31 @@ export default function PromoCodesTab({ token }) {
                   <TableRow key={code.id}>
                     <TableCell className="font-mono font-semibold">{code.code}</TableCell>
                     <TableCell className="max-w-xs truncate">{code.description || "—"}</TableCell>
-                    <TableCell className="max-w-xs truncate">{code.benefit_description || "—"}</TableCell>
+                    <TableCell>
+                      {code.discount_percentage ? (
+                        <Badge variant="outline">{code.discount_percentage}%</Badge>
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {code.bonus_credits ? (
+                        <Badge variant="outline">{parseInt(code.bonus_credits).toLocaleString()}</Badge>
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-col gap-1">
+                        {code.applies_to_monthly !== false && (
+                          <Badge variant="secondary" className="text-xs">Monthly</Badge>
+                        )}
+                        {code.applies_to_yearly !== false && (
+                          <Badge variant="secondary" className="text-xs">Yearly</Badge>
+                        )}
+                        {code.applies_to_monthly === false && code.applies_to_yearly === false && "—"}
+                      </div>
+                    </TableCell>
                     <TableCell>
                       {code.is_active ? (
                         <Badge className="bg-green-100 text-green-800">Active</Badge>
@@ -295,27 +329,61 @@ export default function PromoCodesTab({ token }) {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="benefit_type">Benefit Type</Label>
-                <Input
-                  id="benefit_type"
-                  value={formData.benefit_type}
-                  onChange={(e) => setFormData({ ...formData, benefit_type: e.target.value })}
-                  placeholder="e.g., discount, credits, tier_upgrade"
-                  maxLength={50}
-                />
+            <div className="space-y-4 border-t pt-4">
+              <div className="text-sm font-semibold">Discount & Credits</div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="discount_percentage">Discount Percentage</Label>
+                  <Input
+                    id="discount_percentage"
+                    type="number"
+                    value={formData.discount_percentage}
+                    onChange={(e) => setFormData({ ...formData, discount_percentage: e.target.value })}
+                    placeholder="0-100"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                  />
+                  <p className="text-xs text-gray-500">Percentage off subscription (0-100)</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="bonus_credits">Bonus Credits</Label>
+                  <Input
+                    id="bonus_credits"
+                    type="number"
+                    value={formData.bonus_credits}
+                    onChange={(e) => setFormData({ ...formData, bonus_credits: e.target.value })}
+                    placeholder="0"
+                    min="0"
+                    step="0.01"
+                  />
+                  <p className="text-xs text-gray-500">Credits to award when code is used</p>
+                </div>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="benefit_value">Benefit Value</Label>
-                <Input
-                  id="benefit_value"
-                  value={formData.benefit_value}
-                  onChange={(e) => setFormData({ ...formData, benefit_value: e.target.value })}
-                  placeholder="e.g., 20%, 1000 credits, pro"
-                  maxLength={255}
-                />
+                <Label>Applies To</Label>
+                <div className="flex items-center space-x-6">
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="applies_to_monthly"
+                      checked={formData.applies_to_monthly}
+                      onCheckedChange={(checked) => setFormData({ ...formData, applies_to_monthly: checked })}
+                    />
+                    <Label htmlFor="applies_to_monthly">Monthly Subscriptions</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="applies_to_yearly"
+                      checked={formData.applies_to_yearly}
+                      onCheckedChange={(checked) => setFormData({ ...formData, applies_to_yearly: checked })}
+                    />
+                    <Label htmlFor="applies_to_yearly">Yearly Subscriptions</Label>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500">Select which billing cycles this promo code applies to</p>
               </div>
             </div>
 
@@ -366,6 +434,9 @@ export default function PromoCodesTab({ token }) {
     </div>
   );
 }
+
+
+
 
 
 

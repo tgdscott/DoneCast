@@ -301,7 +301,166 @@ def _maybe_generate_transcript(
                     "[assemble] failed GCS download prior to transcription", exc_info=True
                 )
 
-    # Before generating a new transcript, try to find or download an existing JSON
+    # CRITICAL FIX: Query MediaTranscript database FIRST (most reliable association)
+    # This ensures transcripts are found regardless of device/environment/filename variations
+    try:
+        from api.models.transcription import MediaTranscript
+        from api.services.transcription.watchers import _candidate_filenames
+        
+        # Strategy 1: Find MediaItem by base_audio_name, then lookup transcript by media_item_id
+        media_item = None
+        basename = Path(str(base_audio_name)).name
+        
+        # Try to find MediaItem using multiple strategies
+        try:
+            # Strategy 1a: Exact filename match
+            media_item = session.exec(
+                select(MediaItem).where(
+                    MediaItem.user_id == UUID(user_id),
+                    MediaItem.category == MediaCategory.main_content,
+                    MediaItem.filename == base_audio_name
+                )
+            ).first()
+            
+            # Strategy 1b: Filename contains basename (for GCS URLs)
+            if not media_item:
+                all_items = session.exec(
+                    select(MediaItem).where(
+                        MediaItem.user_id == UUID(user_id),
+                        MediaItem.category == MediaCategory.main_content
+                    )
+                ).all()
+                for item in all_items:
+                    filename = str(getattr(item, "filename", "") or "")
+                    if filename.endswith(basename) or basename in filename:
+                        media_item = item
+                        logging.info("[assemble] ✅ Found MediaItem by basename match: id=%s, filename='%s'", media_item.id, filename)
+                        break
+            
+            # Strategy 1c: Use candidate_filenames for robust matching
+            if not media_item:
+                candidates = _candidate_filenames(base_audio_name)
+                for candidate in candidates[:10]:  # Limit to first 10 candidates
+                    media_item = session.exec(
+                        select(MediaItem).where(
+                            MediaItem.user_id == UUID(user_id),
+                            MediaItem.category == MediaCategory.main_content,
+                            MediaItem.filename == candidate
+                        )
+                    ).first()
+                    if media_item:
+                        logging.info("[assemble] ✅ Found MediaItem by candidate filename: id=%s, candidate='%s'", media_item.id, candidate)
+                        break
+        except Exception as find_err:
+            logging.warning("[assemble] Failed to find MediaItem: %s", find_err, exc_info=True)
+        
+        # Strategy 2: Query MediaTranscript by media_item_id (MOST RELIABLE)
+        transcript_record = None
+        if media_item:
+            transcript_record = session.exec(
+                select(MediaTranscript).where(MediaTranscript.media_item_id == media_item.id)
+            ).first()
+            
+            if transcript_record:
+                logging.info("[assemble] ✅ Found MediaTranscript by media_item_id=%s", media_item.id)
+                
+                # Try to load transcript words from metadata JSON
+                try:
+                    meta = json.loads(transcript_record.transcript_meta_json or "{}")
+                    words = meta.get("words")
+                    
+                    if words and isinstance(words, list) and len(words) > 0:
+                        # Transcript words are stored in database - save to local file
+                        out_stem = sanitize_filename(Path(base_audio_name).stem)
+                        out_path = target_dir / f"{out_stem}.json"
+                        out_path.parent.mkdir(parents=True, exist_ok=True)
+                        with open(out_path, "w", encoding="utf-8") as fh:
+                            json.dump(words, fh, ensure_ascii=False, indent=2)
+                        logging.info("[assemble] ✅ Loaded transcript from database (media_item_id=%s): %d words -> %s", 
+                                   media_item.id, len(words), out_path)
+                        return out_path
+                except Exception as meta_err:
+                    logging.warning("[assemble] Failed to parse transcript words from metadata: %s", meta_err)
+                
+                # Fallback: Download from GCS using metadata
+                try:
+                    meta = json.loads(transcript_record.transcript_meta_json or "{}")
+                    gcs_bucket = meta.get("gcs_bucket")
+                    gcs_key = meta.get("gcs_key")
+                    gcs_uri = meta.get("gcs_json")
+                    
+                    if gcs_bucket and gcs_key:
+                        from google.cloud import storage
+                        client = storage.Client()
+                        bucket_obj = client.bucket(gcs_bucket)
+                        blob = bucket_obj.blob(gcs_key)
+                        
+                        if blob.exists():
+                            data = blob.download_as_bytes()
+                            if data:
+                                # Determine filename from key
+                                key_name = Path(gcs_key).name
+                                out_path = target_dir / key_name
+                                out_path.parent.mkdir(parents=True, exist_ok=True)
+                                out_path.write_bytes(data)
+                                logging.info("[assemble] ✅ Downloaded transcript from GCS (via MediaTranscript): gs://%s/%s -> %s", 
+                                           gcs_bucket, gcs_key, out_path)
+                                return out_path
+                except Exception as gcs_err:
+                    logging.warning("[assemble] Failed to download transcript from GCS via metadata: %s", gcs_err)
+        
+        # Strategy 3: Query MediaTranscript by filename (fallback if media_item_id not set)
+        if not media_item or not transcript_record:
+            candidates = _candidate_filenames(base_audio_name)
+            transcript_record = session.exec(
+                select(MediaTranscript).where(MediaTranscript.filename.in_(candidates))
+            ).first()
+            
+            if transcript_record:
+                logging.info("[assemble] ✅ Found MediaTranscript by filename candidates")
+                
+                # Try to load words from metadata
+                try:
+                    meta = json.loads(transcript_record.transcript_meta_json or "{}")
+                    words = meta.get("words")
+                    if words and isinstance(words, list) and len(words) > 0:
+                        out_stem = sanitize_filename(Path(base_audio_name).stem)
+                        out_path = target_dir / f"{out_stem}.json"
+                        out_path.parent.mkdir(parents=True, exist_ok=True)
+                        with open(out_path, "w", encoding="utf-8") as fh:
+                            json.dump(words, fh, ensure_ascii=False, indent=2)
+                        logging.info("[assemble] ✅ Loaded transcript from database (filename match): %d words -> %s", 
+                                   len(words), out_path)
+                        return out_path
+                except Exception as meta_err:
+                    logging.warning("[assemble] Failed to parse transcript words from metadata: %s", meta_err)
+                
+                # Try GCS download
+                try:
+                    meta = json.loads(transcript_record.transcript_meta_json or "{}")
+                    gcs_bucket = meta.get("gcs_bucket")
+                    gcs_key = meta.get("gcs_key")
+                    if gcs_bucket and gcs_key:
+                        from google.cloud import storage
+                        client = storage.Client()
+                        bucket_obj = client.bucket(gcs_bucket)
+                        blob = bucket_obj.blob(gcs_key)
+                        if blob.exists():
+                            data = blob.download_as_bytes()
+                            if data:
+                                key_name = Path(gcs_key).name
+                                out_path = target_dir / key_name
+                                out_path.parent.mkdir(parents=True, exist_ok=True)
+                                out_path.write_bytes(data)
+                                logging.info("[assemble] ✅ Downloaded transcript from GCS (filename match): gs://%s/%s", 
+                                           gcs_bucket, gcs_key)
+                                return out_path
+                except Exception as gcs_err:
+                    logging.warning("[assemble] Failed to download transcript from GCS: %s", gcs_err)
+    except Exception as db_err:
+        logging.warning("[assemble] Database transcript lookup failed (will try filesystem/GCS): %s", db_err, exc_info=True)
+    
+    # Fallback: Try filesystem and GCS search (legacy behavior)
     try:
         stems_try: list[str] = []
         try:
@@ -335,9 +494,11 @@ def _maybe_generate_transcript(
                 ):
                     candidate = d / name
                     if candidate.is_file():
+                        logging.info("[assemble] ✅ Found transcript in local filesystem: %s", candidate)
                         return candidate
             downloaded = _attempt_download_from_bucket(stem)
             if downloaded and downloaded.is_file():
+                logging.info("[assemble] ✅ Found transcript in GCS bucket: %s", downloaded)
                 return downloaded
     except Exception:
         pass
@@ -935,7 +1096,12 @@ def prepare_transcript_context(
             gcs_uri = None
             gcs_key = None
             backend = (os.getenv("STORAGE_BACKEND") or "").strip().lower()
-            bucket = (os.getenv("MEDIA_BUCKET") or (os.getenv("R2_BUCKET") if backend == "r2" else "") or "").strip()
+            # CRITICAL: Production transcripts (JSON) MUST be in GCS, not R2
+            # Production transcripts are used during episode construction (flubber, intern mode, word timestamps)
+            # Final formatted transcripts (.txt) are uploaded to R2 separately after assembly completes
+            # See docs/STORAGE_STRATEGY.md for full architectural details
+            # DO NOT use R2_BUCKET for production transcripts, even if STORAGE_BACKEND=r2
+            bucket = (os.getenv("MEDIA_BUCKET") or os.getenv("TRANSCRIPTS_BUCKET") or "").strip()
             if bucket and dest.exists() and storage_utils and hasattr(storage_utils, "upload_fileobj"):
                 try:
                     user_part = media_context.user_id or "shared"

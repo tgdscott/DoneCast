@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { X, Wand2, Loader2 } from "lucide-react";
+import { X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -181,16 +181,12 @@ export default function SectionConfigModal({
   sectionDef,
   config,
   onSave,
-  onRefine,
-  refining = false,
 }) {
   const [localConfig, setLocalConfig] = useState(config || {});
-  const [refinePrompt, setRefinePrompt] = useState("");
 
   useEffect(() => {
     if (open) {
       setLocalConfig(config || {});
-      setRefinePrompt("");
     }
   }, [open, config]);
 
@@ -203,12 +199,6 @@ export default function SectionConfigModal({
 
   const handleSave = () => {
     onSave(localConfig);
-  };
-
-  const handleRefine = () => {
-    if (refinePrompt.trim()) {
-      onRefine(section.id, refinePrompt.trim());
-    }
   };
 
   if (!sectionDef) return null;
@@ -268,71 +258,6 @@ export default function SectionConfigModal({
             </div>
           )}
 
-          {/* AI Refinement section */}
-          {sectionDef.ai_prompt_hints?.length > 0 && (
-            <div className="border-t border-slate-200 pt-6 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold text-slate-900">
-                  AI Refinement
-                </div>
-                <Badge variant="secondary" className="text-xs">
-                  <Wand2 className="mr-1 h-3 w-3" />
-                  AI Powered
-                </Badge>
-              </div>
-
-              <p className="text-xs text-slate-600">
-                Ask AI to improve this section's content:
-              </p>
-
-              <Textarea
-                placeholder="e.g., Make the headline more exciting, or Expand the description with SEO keywords"
-                value={refinePrompt}
-                onChange={(e) => setRefinePrompt(e.target.value)}
-                rows={3}
-                disabled={refining}
-              />
-
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleRefine}
-                  disabled={!refinePrompt.trim() || refining}
-                  className="flex-1"
-                >
-                  {refining ? (
-                    <>
-                      <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                      Refining...
-                    </>
-                  ) : (
-                    <>
-                      <Wand2 className="mr-2 h-3 w-3" />
-                      Refine with AI
-                    </>
-                  )}
-                </Button>
-              </div>
-
-              {/* AI hints */}
-              {sectionDef.ai_prompt_hints.length > 0 && (
-                <div className="bg-slate-50 rounded-md p-3 space-y-1">
-                  <div className="text-xs font-medium text-slate-700">
-                    Suggestions:
-                  </div>
-                  <ul className="text-xs text-slate-600 space-y-1">
-                    {sectionDef.ai_prompt_hints.map((hint, idx) => (
-                      <li key={idx} className="flex items-start gap-2">
-                        <span className="text-slate-400">•</span>
-                        <span>{hint}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Footer actions */}

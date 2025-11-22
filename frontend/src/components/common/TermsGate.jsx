@@ -15,21 +15,35 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 
 export default function TermsGate() {
-  const { user, acceptTerms, submitTermsConcern, logout } = useAuth();
+  const { user, acceptTerms, submitTermsConcern, logout, refreshUser } = useAuth();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [showConcernDialog, setShowConcernDialog] = useState(false);
   const [concern, setConcern] = useState('');
   const [submittingConcern, setSubmittingConcern] = useState(false);
   const [concernSubmitted, setConcernSubmitted] = useState(false);
-  const versionRequired = user?.terms_version_required || user?.terms_version_accepted || '';
+  // CRITICAL: Only use terms_version_required, never fallback to accepted version
+  // This ensures we only show gate when there's actually a required version that differs
+  const versionRequired = user?.terms_version_required || '';
 
   const handleAccept = async () => {
-    if (!versionRequired) return;
+    if (!versionRequired) {
+      setError('No terms version specified. Please refresh the page.');
+      return;
+    }
     setSubmitting(true);
     setError('');
     try {
-      await acceptTerms(versionRequired);
+      // Accept terms - backend returns updated user
+      const updatedUser = await acceptTerms(versionRequired);
+      
+      // Force refresh user data to ensure we have latest from backend
+      // This prevents race conditions where App.jsx checks before state updates
+      await refreshUser({ force: true });
+      
+      // Small delay to ensure state propagation before React re-renders
+      // This prevents the "pestering" issue where gate might show again briefly
+      await new Promise(resolve => setTimeout(resolve, 100));
     } catch (err) {
       const detail = err?.detail || err?.message || 'Unable to record acceptance. Please try again.';
       setError(detail);

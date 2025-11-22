@@ -95,6 +95,7 @@
 - [Cloud Run Services](architecture/CLOUD_RUN.md) - Containerized deployment
 - [Cloud SQL](architecture/DATABASE.md) - PostgreSQL setup
 - [Cloud Storage](architecture/GCS.md) - Media bucket configuration
+- **[Storage Strategy: GCS vs R2](STORAGE_STRATEGY.md)** - **CRITICAL: When to use GCS vs R2**
 - [Cloud Tasks](architecture/BACKGROUND_JOBS.md) - Async processing
 
 **Audio Pipeline:**

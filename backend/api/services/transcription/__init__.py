@@ -199,6 +199,30 @@ def _store_media_transcript_metadata(
             if target is None and existing:
                 target = existing[0]
 
+            # CRITICAL FIX: Store transcript words directly in metadata JSON for database-only retrieval
+            # This ensures transcripts can be retrieved even if GCS is unavailable
+            if "words" not in payload:
+                # If words are not in payload, try to load from the transcript file that was just created
+                # This happens when transcribe_media_file() calls this function after generating transcript
+                try:
+                    from pathlib import Path as PathLib
+                    stem = PathLib(cleaned).stem if stem is None else stem
+                    # Try to find the transcript JSON file that was just saved
+                    transcript_candidates = [
+                        TRANSCRIPTS_DIR / f"{stem}.json",
+                        TRANSCRIPTS_DIR / f"{PathLib(cleaned).stem}.json",
+                    ]
+                    for candidate in transcript_candidates:
+                        if candidate.exists():
+                            with open(candidate, "r", encoding="utf-8") as fh:
+                                words_data = json.load(fh)
+                                if isinstance(words_data, list) and len(words_data) > 0:
+                                    payload["words"] = words_data
+                                    logger.info("[transcript_save] ✅ Loaded %d words from transcript file into metadata", len(words_data))
+                                    break
+                except Exception as words_load_err:
+                    logger.debug("[transcript_save] Could not load words into metadata (non-critical): %s", words_load_err)
+            
             serialized = json.dumps(payload)
             now = datetime.utcnow()
 
@@ -206,6 +230,8 @@ def _store_media_transcript_metadata(
                 target.filename = cleaned
                 target.transcript_meta_json = serialized
                 target.updated_at = now
+                # CRITICAL FIX: Always update media_item_id if we found a MediaItem
+                # This ensures the association is maintained even if transcript was created before MediaItem existed
                 if media_item_id:
                     target.media_item_id = media_item_id
                 session.add(target)
@@ -337,16 +363,21 @@ def _read_existing_transcript_for(filename: str) -> List[Dict[str, Any]] | None:
 def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Synchronously transcribe a media file and persist transcript artifacts.
     
-    Routes to appropriate transcription service based on user subscription tier:
-    - Pro users → Auphonic (transcription + audio processing)
-    - Other tiers → AssemblyAI (transcription only)
+    Routes to appropriate transcription service based on MediaItem.use_auphonic flag:
+    - use_auphonic=True → Auphonic (transcription + audio processing)
+    - use_auphonic=False/None → AssemblyAI (transcription only)
+    
+    CRITICAL: Only ONE service runs. No fallbacks. Failures fail loudly.
     
     Args:
         filename: GCS URL or local path to audio file
-        user_id: UUID string of user (required for tier-based routing)
+        user_id: UUID string of user (required for MediaItem lookup)
         
     Returns:
         List of word dicts with start/end/word/speaker keys
+        
+    Raises:
+        TranscriptionError: If transcription fails (no fallback)
     """
 
     # DEBUG: Log what we received
@@ -392,111 +423,121 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
         # Fall through to transcribe if idempotency check fails
     # ========== END IDEMPOTENCY CHECK ==========
 
-    # ========== CHARGE CREDITS FOR TRANSCRIPTION (UPFRONT) ==========
-    # We charge upfront even if transcription fails because we pay the API regardless
-    if user_id:
+    # Helper function to charge credits after successful transcription
+    def _charge_for_successful_transcription(user_obj, audio_file_path, use_auphonic_flag):
+        """Charge credits only after transcription succeeds."""
         try:
             from api.core.database import get_session
-            from api.models.user import User
             from api.services.billing import credits
-            from sqlmodel import select
             from pydub import AudioSegment
             
             session = next(get_session())
-            user = session.exec(select(User).where(User.id == user_id)).first()
             
-            if user:
-                # Get audio duration
-                try:
-                    if _is_gcs_url(filename):
-                        # Download from GCS if needed (intermediate files are always in GCS)
-                        local_filename = _download_gcs_to_media(filename)
-                        audio_path = MEDIA_DIR / local_filename
-                    else:
-                        # Local file path
-                        audio_path = MEDIA_DIR / filename
-                    
-                    if not audio_path.exists():
-                        raise FileNotFoundError(f"Audio file not found: {audio_path}")
-                    
-                    audio = AudioSegment.from_file(str(audio_path))
-                    # charge_for_transcription expects SECONDS, not minutes!
-                    duration_seconds = len(audio) / 1000.0  # pydub length is in milliseconds
-                    
-                    # Check if user prefers advanced mastering (Auphonic pipeline)
-                    use_auphonic_flag = bool(getattr(user, "use_advanced_audio_processing", False))
-                    
-                    logging.info(
-                        "[transcription] 💳 Charging credits: user=%s, duration=%.2f seconds (%.2f min), auphonic=%s",
-                        user.id,
-                        duration_seconds,
-                        duration_seconds / 60.0,
-                        use_auphonic_flag
-                    )
-                    
-                    ledger_entry, cost_breakdown = credits.charge_for_transcription(
-                        session=session,
-                        user=user,
-                        duration_seconds=duration_seconds,
-                        use_auphonic=use_auphonic_flag,
-                        episode_id=None,  # Transcription happens before episode is created
-                        correlation_id=f"transcription_{filename}_{uuid.uuid4().hex[:8]}",
-                    )
-                    
-                    logging.info(
-                        "[transcription] ✅ Credits charged: %.2f credits (duration=%.2fs, rate=%.2f credits/sec, auphonic=%s)",
-                        cost_breakdown['total_credits'],
-                        cost_breakdown['duration_seconds'],
-                        cost_breakdown['processing_rate_per_sec'],
-                        use_auphonic_flag
-                    )
-                    
-                except Exception as audio_err:
-                    logging.warning("[transcription] ⚠️ Could not determine audio duration for billing: %s", audio_err)
-                    # Don't fail transcription if billing fails
-                    
+            # Get audio duration
+            try:
+                if not audio_file_path.exists():
+                    raise FileNotFoundError(f"Audio file not found: {audio_file_path}")
+                
+                audio = AudioSegment.from_file(str(audio_file_path))
+                # charge_for_transcription expects SECONDS, not minutes!
+                duration_seconds = len(audio) / 1000.0  # pydub length is in milliseconds
+                
+                logging.info(
+                    "[transcription] 💳 Charging credits: user=%s, duration=%.2f seconds (%.2f min), auphonic=%s",
+                    user_obj.id,
+                    duration_seconds,
+                    duration_seconds / 60.0,
+                    use_auphonic_flag
+                )
+                
+                ledger_entry, cost_breakdown = credits.charge_for_transcription(
+                    session=session,
+                    user=user_obj,
+                    duration_seconds=duration_seconds,
+                    use_auphonic=use_auphonic_flag,
+                    episode_id=None,  # Transcription happens before episode is created
+                    correlation_id=f"transcription_{filename}_{uuid.uuid4().hex[:8]}",
+                )
+                
+                logging.info(
+                    "[transcription] ✅ Credits charged: %.2f credits (duration=%.2fs, rate=%.2f credits/sec, auphonic=%s)",
+                    cost_breakdown['total_credits'],
+                    cost_breakdown['duration_seconds'],
+                    cost_breakdown['processing_rate_per_sec'],
+                    use_auphonic_flag
+                )
+                
+            except Exception as audio_err:
+                logging.warning("[transcription] ⚠️ Could not determine audio duration for billing: %s", audio_err)
+                # Don't fail transcription if billing fails
+                
         except Exception as credits_err:
             logging.error("[transcription] ⚠️ Failed to charge credits (non-fatal): %s", credits_err, exc_info=True)
             # Don't fail transcription if credit charging fails
-    # ========== END CREDIT CHARGING ==========
 
-    # If user_id not provided, fall back to legacy behavior (AssemblyAI)
-    if user_id:
-        try:
-            from api.core.database import get_session
-            from api.models.user import User
-            from sqlmodel import select
+    # CRITICAL: Look up MediaItem to check use_auphonic flag (sole source of truth)
+    if not user_id:
+        raise TranscriptionError(
+            f"user_id is required for transcription routing. Cannot determine which service to use for {filename}"
+        )
+    
+    try:
+        from api.core.database import get_session
+        from api.models.podcast import MediaItem
+        from api.models.user import User
+        from sqlmodel import select
 
-            session = next(get_session())
-            logging.info(f"[transcription] 🔍 Looking up user_id={user_id}")
-            user = session.exec(select(User).where(User.id == user_id)).first()
-
-            if not user:
-                logging.warning(f"[transcription] ⚠️ User not found: user_id={user_id}, falling back to AssemblyAI")
-            else:
-                logging.info(f"[transcription] ✅ Found user: id={user.id}, email={user.email}, tier={getattr(user, 'tier', 'NONE')}")
-
-            if user and getattr(user, "use_advanced_audio_processing", False):
-                # Pro user → Auphonic
-                logging.info(f"[transcription] user_id={user_id} tier={getattr(user, 'tier', 'unknown')} → Auphonic")
-                
-                from api.services.transcription_auphonic import auphonic_transcribe_and_process
-                
+        session = next(get_session())
+        logging.info(f"[transcription] 🔍 Looking up MediaItem for filename={filename}, user_id={user_id}")
+        
+        # Find MediaItem by filename (could be partial match for GCS URLs)
+        filename_search = filename.split("/")[-1] if "/" in filename else filename
+        media_item = session.exec(
+            select(MediaItem)
+            .where(MediaItem.user_id == user_id)
+            .where(MediaItem.filename.contains(filename_search))
+            .order_by(MediaItem.created_at.desc())
+        ).first()
+        
+        if not media_item:
+            raise TranscriptionError(
+                f"MediaItem not found for filename={filename} (searched for '{filename_search}'). "
+                f"Cannot determine transcription service. MediaItem must exist before transcription."
+            )
+        
+        # Get user for charging credits
+        user = session.exec(select(User).where(User.id == user_id)).first()
+        if not user:
+            raise TranscriptionError(f"User not found: user_id={user_id}")
+        
+        # CRITICAL: Check MediaItem.use_auphonic flag (sole source of truth)
+        # This flag is set when the file is uploaded based on the checkbox
+        use_auphonic = getattr(media_item, "use_auphonic", False)
+        logging.info(
+            f"[transcription] MediaItem {media_item.id} → use_auphonic={use_auphonic} "
+            f"(filename={filename})"
+        )
+        
+        if use_auphonic:
+            # Auphonic path - NO FALLBACKS
+            logging.info(f"[transcription] 🎯 ROUTING TO Auphonic (MediaItem.use_auphonic=True)")
+            
+            from api.services.transcription_auphonic import auphonic_transcribe_and_process
+            
+            try:
                 result = auphonic_transcribe_and_process(filename, str(user_id))
-                
-                # Update MediaItem with Auphonic outputs
-                from api.models.podcast import MediaItem
-                
-                # Find MediaItem by filename (could be partial match for GCS URLs)
-                filename_search = filename.split("/")[-1] if "/" in filename else filename
-                media_item = session.exec(
-                    select(MediaItem)
-                    .where(MediaItem.user_id == user.id)
-                    .where(MediaItem.filename.contains(filename_search))
-                    .order_by(MediaItem.created_at.desc())
-                ).first()
-                
-                if media_item:
+            except Exception as auphonic_err:
+                # FAIL LOUDLY - no fallback to AssemblyAI
+                error_msg = (
+                    f"Auphonic transcription FAILED for {filename}. "
+                    f"MediaItem.use_auphonic=True but Auphonic processing failed. "
+                    f"Error: {auphonic_err}"
+                )
+                logging.error(f"[transcription] ❌ {error_msg}", exc_info=True)
+                raise TranscriptionError(error_msg) from auphonic_err
+            
+            # Update MediaItem with Auphonic outputs
+            if media_item:
                     media_item.auphonic_processed = True
                     media_item.auphonic_cleaned_audio_url = result.get("cleaned_audio_url")
                     media_item.auphonic_original_audio_url = result.get("original_audio_url")
@@ -536,28 +577,96 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
                     session.add(media_item)
                     session.commit()
                     logging.info(f"[transcription] Updated MediaItem {media_item.id} with Auphonic outputs")
-                else:
-                    logging.warning(f"[transcription] Could not find MediaItem for filename={filename}")
-                
-                # Notify watchers and return transcript
-                notify_watchers_processed(filename)
-                return result["transcript"]
             
-            elif user:
-                # Free/Creator/Unlimited → AssemblyAI (existing logic below)
-                logging.info(f"[transcription] user_id={user_id} tier={getattr(user, 'tier', 'unknown')} → AssemblyAI")
-            else:
-                logging.warning(f"[transcription] user_id={user_id} not found, using AssemblyAI")
+            # CRITICAL FIX: Store transcript metadata in MediaTranscript table
+            # This ensures transcripts are findable during assembly regardless of device/environment
+            try:
+                transcript_words = result.get("transcript", [])
+                if transcript_words:
+                    # Extract GCS URL from Auphonic result (transcript was uploaded to GCS)
+                    # Format: gs://bucket/transcripts/{user_id}/{stem}.json
+                    from pathlib import Path as PathLib
+                    stem = PathLib(filename).stem
+                    safe_stem = sanitize_filename(stem) or stem
+                    gcs_bucket = os.getenv("TRANSCRIPTS_BUCKET") or os.getenv("MEDIA_BUCKET") or ""
+                    gcs_key = f"transcripts/{user_id}/{stem}.json"
+                    gcs_uri = f"gs://{gcs_bucket}/{gcs_key}" if gcs_bucket else None
+                    
+                    # Store metadata with words included
+                    _store_media_transcript_metadata(
+                        filename,  # Use original filename (GCS URI or local path)
+                        stem=stem,
+                        safe_stem=safe_stem,
+                        bucket=gcs_bucket if gcs_bucket else None,
+                        key=gcs_key if gcs_bucket else None,
+                        gcs_uri=gcs_uri,
+                        gcs_url=None,
+                    )
+                    
+                    # Update MediaTranscript with words if not already included
+                    try:
+                        from api.services.transcription.watchers import _candidate_filenames
+                        candidates = _candidate_filenames(filename)
+                        if filename not in candidates:
+                            candidates.insert(0, filename)
+                        
+                        transcript_record = session.exec(
+                            select(MediaTranscript).where(MediaTranscript.filename.in_(candidates))
+                        ).first()
+                        
+                        if transcript_record:
+                            meta = json.loads(transcript_record.transcript_meta_json or "{}")
+                            if "words" not in meta or not meta.get("words"):
+                                meta["words"] = transcript_words
+                                transcript_record.transcript_meta_json = json.dumps(meta)
+                                if media_item:
+                                    transcript_record.media_item_id = media_item.id
+                                session.add(transcript_record)
+                                session.commit()
+                                logging.info("[transcription] ✅ Updated MediaTranscript with %d words from Auphonic", len(transcript_words))
+                    except Exception as words_update_err:
+                        logging.warning("[transcription] Failed to update MediaTranscript with words (non-critical): %s", words_update_err)
+            except Exception as metadata_err:
+                logging.error("[transcription] ❌ Failed to store Auphonic transcript metadata: %s", metadata_err, exc_info=True)
+                # Don't fail transcription if metadata save fails, but log it loudly
+            
+            # ========== CHARGE CREDITS FOR TRANSCRIPTION (AFTER SUCCESS) ==========
+            # Only charge if transcription succeeded - failures are on us
+            try:
+                # Get audio file path for duration calculation
+                if _is_gcs_url(filename):
+                    local_filename = _download_gcs_to_media(filename)
+                    audio_path = MEDIA_DIR / local_filename
+                else:
+                    audio_path = MEDIA_DIR / filename
+                
+                _charge_for_successful_transcription(user, audio_path, use_auphonic=True)
+            except Exception as charge_err:
+                logging.warning("[transcription] ⚠️ Failed to charge after success (non-fatal): %s", charge_err)
+            # ========== END CREDIT CHARGING ==========
+            
+            # Notify watchers and return transcript
+            notify_watchers_processed(filename)
+            return result["transcript"]
         
-        except Exception as e:
-            logging.error(f"[transcription] ❌ TIER_ROUTING_FAILED user_id={user_id} error_type={type(e).__name__} error={e}", exc_info=True)
-            # Fall through to AssemblyAI on error
-            logging.warning(f"[transcription] ⚠️ Falling back to AssemblyAI after routing error")
-    else:
-        logging.info(f"[transcription] No user_id provided, using AssemblyAI (legacy behavior)")
+        else:
+            # AssemblyAI path - NO FALLBACKS
+            logging.info(f"[transcription] 🎯 ROUTING TO AssemblyAI (MediaItem.use_auphonic=False/None)")
+        
+    except TranscriptionError:
+        # Re-raise TranscriptionError as-is (no fallback)
+        raise
+    except Exception as e:
+        # FAIL LOUDLY - no fallback
+        error_msg = (
+            f"Transcription routing FAILED for {filename}. "
+            f"Error: {e}"
+        )
+        logging.error(f"[transcription] ❌ {error_msg}", exc_info=True)
+        raise TranscriptionError(error_msg) from e
     
-    # Legacy behavior: Use AssemblyAI (Free/Creator/Unlimited tiers or no user_id)
-    # Global safeguard: allow disabling brand-new transcription at runtime.
+    # AssemblyAI transcription path (MediaItem.use_auphonic=False/None)
+    # Global safeguard: allow disabling transcription at runtime.
     raw_toggle = os.getenv("ALLOW_TRANSCRIPTION") or os.getenv("TRANSCRIBE_ENABLED")
 
     # First, if we already have a transcript JSON, reuse it and return early.
@@ -627,22 +736,27 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
                     content_type="application/json; charset=utf-8",
                 )
                 
-                # Handle both GCS (gs://) and R2 (https://) URLs
+                # CRITICAL: Production transcripts (JSON) MUST be stored in GCS, not R2
+                # Production transcripts are used during episode construction (flubber, intern mode, word timestamps)
+                # Final formatted transcripts (.txt) are uploaded to R2 separately after assembly completes
+                # See docs/STORAGE_STRATEGY.md for full architectural details
                 if storage_url:
                     if storage_url.startswith("gs://"):
                         gcs_uri = storage_url
                         gcs_url = f"https://storage.googleapis.com/{bucket}/{key}"
                     else:
-                        # R2 returns https:// URL directly
-                        gcs_url = storage_url
-                        # CRITICAL FIX: Use actual R2 bucket name, not TRANSCRIPTS_BUCKET
-                        # When STORAGE_BACKEND=r2, we use R2_BUCKET env var
-                        storage_backend = os.getenv("STORAGE_BACKEND", "gcs").lower()
-                        if storage_backend == "r2":
-                            actual_bucket = os.getenv("R2_BUCKET", "ppp-media").strip()
-                        else:
-                            actual_bucket = bucket  # Use whatever bucket was resolved
-                        gcs_uri = f"r2://{actual_bucket}/{key}"
+                        # ERROR: Production transcripts should not be in R2
+                        # If storage_url is not gs://, something is wrong
+                        logging.error(
+                            "[transcription] DATA INTEGRITY ERROR: Production transcript storage returned non-GCS URL: %s. "
+                            "Production transcripts (JSON) MUST be stored in GCS (not R2) because they are used during episode construction. "
+                            "Final formatted transcripts (.txt) are uploaded to R2 separately after assembly. "
+                            "Storage backend should be GCS, not R2.",
+                            storage_url
+                        )
+                        # Fallback: construct GCS URI from bucket/key
+                        gcs_uri = f"gs://{bucket}/{key}"
+                        gcs_url = f"https://storage.googleapis.com/{bucket}/{key}"
                 else:
                     gcs_uri = None
                 
@@ -662,11 +776,14 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
 
             # CRITICAL FIX: Use original_filename (GCS URI) not local_name (downloaded file)
             # This ensures database lookups match the filename stored in MediaItem
+            # ALSO: Store transcript words directly in metadata for database-only retrieval
             logging.info(
-                "🔵 [transcript_metadata_save_attempt] BEFORE save - original_filename='%s', stem='%s', gcs_uri='%s'",
-                original_filename, stem, gcs_uri
+                "🔵 [transcript_metadata_save_attempt] BEFORE save - original_filename='%s', stem='%s', gcs_uri='%s', words_count=%d",
+                original_filename, stem, gcs_uri, len(words)
             )
             try:
+                # CRITICAL: Include words in metadata payload for database-only retrieval
+                # This ensures transcripts can be found even if GCS is unavailable
                 _store_media_transcript_metadata(
                     original_filename,  # ← FIX: Was 'filename' before, use original GCS URI
                     stem=stem,
@@ -676,6 +793,32 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
                     gcs_uri=gcs_uri,
                     gcs_url=gcs_url,
                 )
+                # After saving metadata, update it with words if not already included
+                try:
+                    from api.core.database import get_session
+                    from api.models.transcription import MediaTranscript
+                    from sqlmodel import select
+                    from api.services.transcription.watchers import _candidate_filenames
+                    
+                    session = next(get_session())
+                    candidates = _candidate_filenames(original_filename)
+                    if original_filename not in candidates:
+                        candidates.insert(0, original_filename)
+                    
+                    transcript_record = session.exec(
+                        select(MediaTranscript).where(MediaTranscript.filename.in_(candidates))
+                    ).first()
+                    
+                    if transcript_record:
+                        meta = json.loads(transcript_record.transcript_meta_json or "{}")
+                        if "words" not in meta or not meta.get("words"):
+                            meta["words"] = words
+                            transcript_record.transcript_meta_json = json.dumps(meta)
+                            session.add(transcript_record)
+                            session.commit()
+                            logging.info("[transcription] ✅ Updated MediaTranscript with %d words in metadata", len(words))
+                except Exception as words_update_err:
+                    logging.warning("[transcription] Failed to update transcript metadata with words (non-critical): %s", words_update_err)
                 logging.info(
                     "✅ [transcript_metadata_save_attempt] AFTER save SUCCESS - original_filename='%s'",
                     original_filename
@@ -785,6 +928,29 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
         except Exception as mark_err:
             logging.error("[transcription] ❌ Failed to mark MediaItem as ready: %s", mark_err, exc_info=True)
             # Don't fail the entire transcription if this fails
+
+        # ========== CHARGE CREDITS FOR TRANSCRIPTION (AFTER SUCCESS) ==========
+        # Only charge if transcription succeeded - failures are on us
+        if user_id:
+            try:
+                from api.core.database import get_session
+                from api.models.user import User
+                from sqlmodel import select
+                
+                session = next(get_session())
+                user = session.exec(select(User).where(User.id == user_id)).first()
+                
+                if user:
+                    # Use local_name (the audio file that was transcribed)
+                    # local_name could be a full path or just a filename
+                    if Path(local_name).is_absolute():
+                        audio_path = Path(local_name)
+                    else:
+                        audio_path = MEDIA_DIR / local_name
+                    _charge_for_successful_transcription(user, audio_path, use_auphonic=False)
+            except Exception as charge_err:
+                logging.warning("[transcription] ⚠️ Failed to charge after success (non-fatal): %s", charge_err)
+        # ========== END CREDIT CHARGING ==========
 
         notify_watchers_processed(filename)
         return words

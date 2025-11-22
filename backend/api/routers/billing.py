@@ -15,6 +15,8 @@ from sqlmodel import select
 from sqlalchemy import func
 from ..services.billing import usage as usage_svc
 from ..core.config import settings
+from typing import Optional
+from ..models.promo_code import PromoCode
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +88,7 @@ def _resolve_price_id(raw: str) -> str:
 class CheckoutRequest(BaseModel):
     plan_key: str
     billing_cycle: str = "monthly"
+    promo_code: Optional[str] = None
 
 class AddonCreditsRequest(BaseModel):
     plan_key: str
@@ -174,6 +177,80 @@ async def create_embedded_checkout_session(
         metadata = {"user_id": str(current_user.id), "plan_key": req.plan_key, "cycle": req.billing_cycle}
         subscription_data = {"metadata": metadata}
         discounts = []
+
+        # --- Promo Code Validation and Application ---
+        promo_code_obj = None
+        if req.promo_code:
+            promo_code_upper = req.promo_code.strip().upper()
+            promo_code_obj = session.exec(
+                select(PromoCode).where(PromoCode.code == promo_code_upper)
+            ).first()
+            
+            if promo_code_obj:
+                # Validate promo code
+                if not promo_code_obj.is_active:
+                    raise HTTPException(status_code=400, detail="Promo code is not active")
+                if promo_code_obj.expires_at and promo_code_obj.expires_at < datetime.utcnow():
+                    raise HTTPException(status_code=400, detail="Promo code has expired")
+                if promo_code_obj.max_uses is not None and promo_code_obj.usage_count >= promo_code_obj.max_uses:
+                    raise HTTPException(status_code=400, detail="Promo code has reached maximum uses")
+                
+                # Check if user has already used this promo code
+                from api.models.promo_code import PromoCodeUsage
+                existing_usage = session.exec(
+                    select(PromoCodeUsage).where(
+                        PromoCodeUsage.user_id == current_user.id,
+                        PromoCodeUsage.promo_code_id == promo_code_obj.id
+                    )
+                ).first()
+                if existing_usage:
+                    raise HTTPException(status_code=400, detail="You have already used this promo code")
+                
+                # Check if promo code applies to this billing cycle
+                if req.billing_cycle == 'monthly' and not promo_code_obj.applies_to_monthly:
+                    raise HTTPException(status_code=400, detail="Promo code does not apply to monthly subscriptions")
+                if req.billing_cycle == 'annual' and not promo_code_obj.applies_to_yearly:
+                    raise HTTPException(status_code=400, detail="Promo code does not apply to yearly subscriptions")
+                
+                # Apply percentage discount if set
+                if promo_code_obj.discount_percentage and promo_code_obj.discount_percentage > 0:
+                    try:
+                        # Get the price to calculate discount
+                        price_obj = stripe.Price.retrieve(price_id)
+                        unit_amount = Decimal(price_obj['unit_amount']) / Decimal(100)
+                        discount_amount = (unit_amount * Decimal(promo_code_obj.discount_percentage) / Decimal(100)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        
+                        if discount_amount > 0:
+                            coupon = stripe.Coupon.create(
+                                name=f"Promo: {promo_code_obj.code}",
+                                percent_off=float(promo_code_obj.discount_percentage),
+                                duration='once',
+                                metadata={
+                                    "promo_code": promo_code_obj.code,
+                                    "user_id": str(current_user.id),
+                                    "source": "promo_code"
+                                }
+                            )
+                            discounts = [{"coupon": coupon.id}]
+                            metadata['promo_code'] = promo_code_obj.code
+                            metadata['promo_code_id'] = str(promo_code_obj.id)
+                            logger.info(
+                                f"[billing] Applied promo code {promo_code_obj.code} "
+                                f"({promo_code_obj.discount_percentage}% discount) for user {current_user.id}"
+                            )
+                    except Exception as e:
+                        logger.error(
+                            f"[billing] Failed to create Stripe coupon for promo code {promo_code_obj.code}: {e}",
+                            exc_info=True
+                        )
+                        # Don't fail checkout if coupon creation fails, just log it
+                else:
+                    # No discount but promo code is valid - store it for bonus credits
+                    metadata['promo_code'] = promo_code_obj.code
+                    metadata['promo_code_id'] = str(promo_code_obj.id)
+            else:
+                # Promo code not found - don't fail, just ignore it
+                logger.warning(f"[billing] Promo code '{promo_code_upper}' not found for user {current_user.id}")
 
         # --- Upgrade / Proration Logic ---
         prior_tier = getattr(current_user, 'tier', 'free') or 'free'
@@ -334,6 +411,80 @@ async def create_checkout_session(
         metadata = {"user_id": str(current_user.id), "plan_key": req.plan_key, "cycle": req.billing_cycle}
         subscription_data = {"metadata": metadata}
         discounts = []
+
+        # --- Promo Code Validation and Application ---
+        promo_code_obj = None
+        if req.promo_code:
+            promo_code_upper = req.promo_code.strip().upper()
+            promo_code_obj = session.exec(
+                select(PromoCode).where(PromoCode.code == promo_code_upper)
+            ).first()
+            
+            if promo_code_obj:
+                # Validate promo code
+                if not promo_code_obj.is_active:
+                    raise HTTPException(status_code=400, detail="Promo code is not active")
+                if promo_code_obj.expires_at and promo_code_obj.expires_at < datetime.utcnow():
+                    raise HTTPException(status_code=400, detail="Promo code has expired")
+                if promo_code_obj.max_uses is not None and promo_code_obj.usage_count >= promo_code_obj.max_uses:
+                    raise HTTPException(status_code=400, detail="Promo code has reached maximum uses")
+                
+                # Check if user has already used this promo code
+                from api.models.promo_code import PromoCodeUsage
+                existing_usage = session.exec(
+                    select(PromoCodeUsage).where(
+                        PromoCodeUsage.user_id == current_user.id,
+                        PromoCodeUsage.promo_code_id == promo_code_obj.id
+                    )
+                ).first()
+                if existing_usage:
+                    raise HTTPException(status_code=400, detail="You have already used this promo code")
+                
+                # Check if promo code applies to this billing cycle
+                if req.billing_cycle == 'monthly' and not promo_code_obj.applies_to_monthly:
+                    raise HTTPException(status_code=400, detail="Promo code does not apply to monthly subscriptions")
+                if req.billing_cycle == 'annual' and not promo_code_obj.applies_to_yearly:
+                    raise HTTPException(status_code=400, detail="Promo code does not apply to yearly subscriptions")
+                
+                # Apply percentage discount if set
+                if promo_code_obj.discount_percentage and promo_code_obj.discount_percentage > 0:
+                    try:
+                        # Get the price to calculate discount
+                        price_obj = stripe.Price.retrieve(price_id)
+                        unit_amount = Decimal(price_obj['unit_amount']) / Decimal(100)
+                        discount_amount = (unit_amount * Decimal(promo_code_obj.discount_percentage) / Decimal(100)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        
+                        if discount_amount > 0:
+                            coupon = stripe.Coupon.create(
+                                name=f"Promo: {promo_code_obj.code}",
+                                percent_off=float(promo_code_obj.discount_percentage),
+                                duration='once',
+                                metadata={
+                                    "promo_code": promo_code_obj.code,
+                                    "user_id": str(current_user.id),
+                                    "source": "promo_code"
+                                }
+                            )
+                            discounts = [{"coupon": coupon.id}]
+                            metadata['promo_code'] = promo_code_obj.code
+                            metadata['promo_code_id'] = str(promo_code_obj.id)
+                            logger.info(
+                                f"[billing] Applied promo code {promo_code_obj.code} "
+                                f"({promo_code_obj.discount_percentage}% discount) for user {current_user.id}"
+                            )
+                    except Exception as e:
+                        logger.error(
+                            f"[billing] Failed to create Stripe coupon for promo code {promo_code_obj.code}: {e}",
+                            exc_info=True
+                        )
+                        # Don't fail checkout if coupon creation fails, just log it
+                else:
+                    # No discount but promo code is valid - store it for bonus credits
+                    metadata['promo_code'] = promo_code_obj.code
+                    metadata['promo_code_id'] = str(promo_code_obj.id)
+            else:
+                # Promo code not found - don't fail, just ignore it
+                logger.warning(f"[billing] Promo code '{promo_code_upper}' not found for user {current_user.id}")
 
         # --- Upgrade / Proration Logic ---
         prior_tier = getattr(current_user, 'tier', 'free') or 'free'
@@ -507,7 +658,9 @@ def _episodes_created_this_month(session: Session, user_id) -> int:
 
 @router.get("/subscription", response_model=SubscriptionStatus)
 async def get_subscription(current_user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    tier = getattr(current_user, 'tier', 'free') or 'free'
+    # Use effective tier (trial users get "starter" tier limits)
+    from api.services.trial_service import get_effective_tier
+    tier = get_effective_tier(current_user) or 'free'
     limits = TIER_LIMITS.get(tier, TIER_LIMITS['free'])
     max_eps = limits.get('max_episodes_month')
     used = None

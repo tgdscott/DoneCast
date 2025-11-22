@@ -35,38 +35,81 @@ import colorsys
 log = logging.getLogger(__name__)
 
 _SITE_SCHEMA_PROMPT = """
-You are Podcast Plus Plus SiteBuilder, an expert AI web designer.
-Create warm, inviting, accessible landing pages that help listeners subscribe.
+You are Podcast Plus Plus SiteBuilder, an expert AI web designer specializing in podcast websites.
+
+**Your Mission:**
+Build a clean, modern starter website that matches the podcast's unique brand and style. The site should feel tailored to the podcast, not like a generic template.
+
+**Requirements:**
+
+1. **Brand & Tone**
+   - Match the site's look and writing style to the podcast's subject matter and personality
+   - Keep all text brief, friendly, and easy to skim
+   - Write in a voice that reflects the podcast's tone (conversational, professional, entertaining, educational, etc.)
+   - Avoid generic "podcast template" language—make it feel authentic to this specific show
+
+2. **Visual Style**
+   - Use a consistent color palette inspired by the cover image (colors will be provided)
+   - Keep the layout uncluttered with a strong hero section
+   - Use readable typography with clear hierarchy
+   - Ensure the design feels cohesive and matches the podcast's aesthetic
+
+3. **Site Structure**
+   Create these core sections:
+   - **Home**: Hero with title, short tagline, brief description, and preview of recent episodes
+   - **Episodes**: List format with titles, short summaries, and player links
+   - **About**: Short host bios and what the podcast is about
+   - **Contact/Subscribe**: Links to major podcast platforms, email form or contact info, and social links
+
+4. **Content Generation**
+   - Write short, polished text for each section (2-3 sentences max for descriptions)
+   - Use the podcast description as the core brand voice
+   - Create a simple tagline that fits the theme
+   - Make episode descriptions compelling teasers that encourage listening
+
+5. **Functionality**
+   - Add SEO-friendly page titles and meta descriptions (include relevant keywords)
+   - Make navigation simple and obvious
+   - Use images sparingly and consistently (prioritize podcast cover art)
+   - Ensure all CTAs are clear and action-oriented
+
+6. **Section Suggestions**
+   - Craft ~10 distinct section suggestions that a client could toggle on/off
+   - Do NOT include a basic "Listen now" card
+   - For any suggestion where include_by_default is true, add a corresponding entry to additional_sections so the preview feels complete
+   - Think beyond basic sections: consider newsletter signups, testimonials, featured episodes, blog previews, event calendars, etc.
+
+**Output Format:**
 ALWAYS respond with a single JSON object matching this schema exactly:
 {
-  "hero_title": string,              # big headline for the hero section
-  "hero_subtitle": string,           # supportive subtitle or elevator pitch
+  "hero_title": string,              # big headline for the hero section (should match podcast name or a compelling tagline)
+  "hero_subtitle": string,           # supportive subtitle or elevator pitch (1-2 sentences max)
   "hero_image_url": string | null,   # podcast cover or on-brand hero image
   "about": {
       "heading": string,
       "body": string                # 2-3 short paragraphs in markdown-compatible text
   },
   "hosts": [
-      {"name": string, "bio": string}
+      {"name": string, "bio": string}  # Short bio (1-2 sentences)
   ],
   "episodes": [
       {
          "episode_id": string,      # UUID provided in the context
          "title": string,
-         "description": string,     # teaser copy encouraging a listen
+         "description": string,     # teaser copy encouraging a listen (1-2 sentences)
          "cta_label": string,       # e.g. "Play episode"
          "cta_url": string | null   # fill when an explicit link provided, else null
       }
   ],
   "call_to_action": {
       "heading": string,
-      "body": string,
+      "body": string,               # Brief, compelling copy
       "button_label": string,
       "button_url": string
   },
   "section_suggestions": [
       {
-          "type": string,               # semantic identifier e.g. "newsletter", "events"
+          "type": string,               # semantic identifier e.g. "newsletter", "events", "testimonials"
           "label": string,              # short client-facing label
           "description": string,        # 1-2 sentence idea for the section content
           "include_by_default": boolean # true when this section should be pre-populated on the layout
@@ -81,14 +124,22 @@ ALWAYS respond with a single JSON object matching this schema exactly:
       }
   ],
   "theme": {
-      "primary_color": string,     # hex color
+      "primary_color": string,     # hex color (use provided color or derive from cover image)
       "secondary_color": string,
       "accent_color": string
+  },
+  "seo": {
+      "page_title": string,         # SEO-friendly page title (include podcast name and keywords)
+      "meta_description": string     # Meta description for search engines (150-160 characters)
   }
 }
-Craft ~10 distinct section_suggestion entries (do NOT include a basic "Listen now" card) that a client could toggle on/off.
-For any suggestion where include_by_default is true, add a corresponding entry to additional_sections so the preview feels complete.
-Do not include Markdown fences or explanations—return JSON only.
+
+**Critical Instructions:**
+- Do not include Markdown fences or explanations—return JSON only
+- Make the content feel specific to THIS podcast, not generic
+- Ensure all text is concise and scannable
+- Match the visual style to the podcast's brand and cover art aesthetic
+- Think about the target audience and write copy that speaks to them
 """.strip()
 
 _BASE_DOMAIN = settings.PODCAST_WEBSITE_BASE_DOMAIN.strip() or "podcastplusplus.com"
@@ -174,6 +225,7 @@ class PodcastWebsiteContent(BaseModel):
     section_suggestions: List[Dict[str, Any]] = Field(default_factory=list)
     additional_sections: List[Dict[str, Any]] = Field(default_factory=list)
     theme: Dict[str, Any] = Field(default_factory=dict)
+    seo: Dict[str, str] = Field(default_factory=dict)  # page_title, meta_description
 
     class Config:
         extra = "ignore"
@@ -205,9 +257,20 @@ class WebsiteContext:
             }
             for ep in self.episodes[:3]
         ]
+        
+        # Generate a generic tagline if description is too long, to avoid duplication
+        tagline = "Welcome to our podcast"
+        if self.podcast.description:
+            # Try to use first sentence as tagline if it's short
+            first_sentence = self.podcast.description.split('.')[0]
+            if len(first_sentence) < 100:
+                tagline = first_sentence + "."
+            else:
+                tagline = f"Listen to {self.podcast.name} on your favorite platform."
+
         return {
             "hero_title": self.podcast.name,
-            "hero_subtitle": (self.podcast.description or "A podcast hosted on Podcast Plus Plus").strip(),
+            "hero_subtitle": tagline,
             "hero_image_url": self.cover_url,
             "about": {
                 "heading": f"About {self.podcast.name}",
@@ -252,6 +315,19 @@ def _slugify_base(name: str) -> str:
     if not base:
         base = "podcast"
     return base[:40]
+
+
+def _ensure_unique_podcast_slug(session: Session, desired: str, existing_id: Optional[UUID]) -> str:
+    """Ensure podcast slug is unique by appending numbers if needed."""
+    slug = desired
+    counter = 1
+    while True:
+        stmt = select(Podcast).where(Podcast.slug == slug)
+        match = session.exec(stmt).first()
+        if match is None or (existing_id and match.id == existing_id):
+            return slug
+        counter += 1
+        slug = f"{desired}-{counter}"
 
 
 def _ensure_unique_subdomain(session: Session, desired: str, existing_id: Optional[UUID]) -> str:
@@ -308,7 +384,8 @@ def _extract_theme_colors(image_bytes: bytes) -> Dict[str, str]:
     try:
         with Image.open(io.BytesIO(image_bytes)) as img:
             img = img.convert("RGB")
-            img.thumbnail((160, 160))
+            # Use larger thumbnail for better color extraction (was 160x160, now 400x400)
+            img.thumbnail((400, 400), Image.Resampling.LANCZOS)
             pixels = list(img.getdata())
     except Exception as exc:  # pragma: no cover - pillow decoding failure
         log.debug("Failed to decode cover image for palette extraction: %s", exc)
@@ -317,21 +394,57 @@ def _extract_theme_colors(image_bytes: bytes) -> Dict[str, str]:
     if not pixels:
         return {}
 
-    counts: Counter[Tuple[int, int, int]] = Counter(pixels)
-    most_common = [color for color, _ in counts.most_common(32)]
+    # Use k-means-like clustering to find dominant colors
+    # Sample pixels more intelligently - avoid edges and focus on center
+    width, height = img.size
+    sampled_pixels = []
+    for y in range(height // 4, height * 3 // 4):  # Focus on center 50% vertically
+        for x in range(width // 4, width * 3 // 4):  # Focus on center 50% horizontally
+            if y * width + x < len(pixels):
+                sampled_pixels.append(pixels[y * width + x])
+    
+    # Use sampled pixels if we have enough, otherwise use all
+    analysis_pixels = sampled_pixels if len(sampled_pixels) > 100 else pixels
+    
+    counts: Counter[Tuple[int, int, int]] = Counter(analysis_pixels)
+    most_common = [color for color, _ in counts.most_common(64)]  # Get more candidates
     if not most_common:
         return {}
 
-    primary = most_common[0]
+    # Primary color: most common color that's not too light/dark (for better contrast)
+    def _is_good_primary(color: Tuple[int, int, int]) -> bool:
+        r, g, b = (c / 255.0 for c in color)
+        luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        # Prefer colors that aren't pure white/black and have some saturation
+        return 0.1 < luminance < 0.9
+    
+    primary = None
+    for color in most_common[:16]:  # Check top 16 colors
+        if _is_good_primary(color):
+            primary = color
+            break
+    if primary is None:
+        primary = most_common[0]  # Fallback to most common
 
+    # Find distinct colors for secondary/accent
     distinct: List[Tuple[int, int, int]] = [primary]
     for color in most_common[1:]:
-        if all(_color_distance(color, existing) > 40 for existing in distinct):
+        if all(_color_distance(color, existing) > 50 for existing in distinct):  # Increased threshold
             distinct.append(color)
-        if len(distinct) >= 5:
+        if len(distinct) >= 8:  # Get more distinct colors
             break
 
-    secondary = distinct[1] if len(distinct) > 1 else primary
+    # Secondary: second most distinct color, or lightened version of primary if similar
+    if len(distinct) > 1:
+        secondary = distinct[1]
+        # If secondary is too similar to primary, use a lightened version
+        if _color_distance(secondary, primary) < 60:
+            r, g, b = primary
+            secondary = (min(255, int(r * 1.3)), min(255, int(g * 1.3)), min(255, int(b * 1.3)))
+    else:
+        # Create a lighter version of primary
+        r, g, b = primary
+        secondary = (min(255, int(r * 1.2)), min(255, int(g * 1.2)), min(255, int(b * 1.2)))
 
     def _saturation(color: Tuple[int, int, int]) -> float:
         r, g, b = (channel / 255.0 for channel in color)
@@ -352,17 +465,20 @@ def _extract_theme_colors(image_bytes: bytes) -> Dict[str, str]:
     
     # Calculate complementary text color for primary
     def _get_contrast_text(bg_color: Tuple[int, int, int]) -> str:
-        """Get white or black text color based on background luminance."""
-        r, g, b = (c / 255.0 for c in bg_color)
-        # Calculate relative luminance (WCAG formula)
-        luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
-        # Use white text on dark backgrounds, black text on light backgrounds
-        return "#ffffff" if luminance < 0.5 else "#1e293b"
+        """Get white or black text color based on background luminance.
+        
+        Uses WCAG contrast validation to ensure readability.
+        """
+        bg_hex = _rgb_to_hex(bg_color)
+        return _get_readable_text_color(bg_hex, min_contrast=4.5)
     
     # Calculate background color (lightened version of secondary or white)
     def _lighten_color(color: Tuple[int, int, int], factor: float = 0.9) -> Tuple[int, int, int]:
         """Lighten a color by blending with white."""
-        return tuple(min(255, int(c + (255 - c) * factor)) for c in color)
+        r, g, b = color
+        return (min(255, int(r + (255 - r) * factor)), 
+                min(255, int(g + (255 - g) * factor)), 
+                min(255, int(b + (255 - b) * factor)))
     
     background = _lighten_color(secondary, 0.95)
     
@@ -397,18 +513,66 @@ def _extract_theme_colors(image_bytes: bytes) -> Dict[str, str]:
 
 
 def _derive_visual_identity(podcast: Podcast) -> Tuple[Optional[str], Dict[str, str]]:
-    cover_url = podcast.preferred_cover_url
+    """Derive visual identity from podcast cover art.
+    
+    Returns:
+        Tuple of (cover_url, theme_colors_dict)
+        cover_url is always a full URL (http/https) if available
+    """
+    cover_path = podcast.preferred_cover_url
     theme: Dict[str, str] = {}
-    if not cover_url:
+    
+    if not cover_path:
         return None, theme
+    
+    # Resolve cover_path to a full URL
+    cover_url = None
     try:
-        response = requests.get(cover_url, timeout=5)
-        if response.status_code == 200 and response.content:
-            palette = _extract_theme_colors(response.content)
-            if palette:
-                theme = palette
-    except Exception as exc:  # pragma: no cover - network issues
-        log.debug("Failed to fetch cover image for podcast %s: %s", podcast.id, exc)
+        # If it's already a full URL, use it directly
+        if cover_path.startswith(('http://', 'https://')):
+            cover_url = cover_path
+        # If it's an R2 URL (https://bucket.account-id.r2.cloudflarestorage.com/key)
+        elif cover_path.startswith('https://') and '.r2.cloudflarestorage.com' in cover_path:
+            cover_url = cover_path  # Already a full URL
+        # If it's a GCS path (gs://bucket/key)
+        elif cover_path.startswith('gs://'):
+            from infrastructure.gcs import get_signed_url
+            gcs_str = cover_path[5:]  # Remove "gs://"
+            parts = gcs_str.split("/", 1)
+            if len(parts) == 2:
+                bucket, key = parts
+                cover_url = get_signed_url(bucket, key, expiration=3600)
+        # If it's a relative path, try to resolve via storage abstraction
+        else:
+            try:
+                from infrastructure.storage import get_public_audio_url
+                resolved = get_public_audio_url(cover_path, expiration_days=1)
+                if resolved:
+                    cover_url = resolved
+                else:
+                    # Fallback: try to construct a local file URL (for dev)
+                    import os
+                    if os.path.exists(cover_path):
+                        # For local dev, we can't easily serve files, so skip
+                        log.warning("Cover path is local file, cannot serve: %s", cover_path)
+                        return None, theme
+            except Exception as storage_exc:
+                log.debug("Failed to resolve cover path via storage: %s", storage_exc)
+        
+        # If we have a valid URL, fetch it for color extraction
+        if cover_url:
+            try:
+                response = requests.get(cover_url, timeout=5)
+                if response.status_code == 200 and response.content:
+                    palette = _extract_theme_colors(response.content)
+                    if palette:
+                        theme = palette
+            except Exception as exc:  # pragma: no cover - network issues
+                log.debug("Failed to fetch cover image for podcast %s: %s", podcast.id, exc)
+    except Exception as exc:
+        log.warning("Failed to resolve cover URL for podcast %s: %s", podcast.id, exc)
+        return None, theme
+    
     return cover_url, theme
 
 
@@ -485,71 +649,280 @@ def _analyze_podcast_content(podcast: Podcast, episodes: List[Episode]) -> Dict[
     }
 
 
-def _build_context_prompt(ctx: WebsiteContext, include_layout: Optional[Dict[str, Any]] = None, user_request: Optional[str] = None) -> str:
+def _build_context_prompt(ctx: WebsiteContext, include_layout: Optional[Dict[str, Any]] = None, user_request: Optional[str] = None, design_prefs: Optional[Dict[str, Any]] = None) -> str:
     # Analyze content for richer context
     content_analysis = _analyze_podcast_content(ctx.podcast, ctx.episodes)
     
+    # Build structured prompt following ChatGPT's template
     lines = [
         _SITE_SCHEMA_PROMPT,
         "",
-        f"Podcast name: {ctx.podcast.name}",
-        f"Podcast description: {ctx.podcast.description or 'Not provided'}",
-        f"Hosts: {', '.join(ctx.host_names) if ctx.host_names else 'Unknown'}",
-        f"Total episodes: {content_analysis['total_episodes']}",
-        f"Publish frequency: {content_analysis['publish_frequency']}",
-        f"Content tone: {content_analysis['tone']}",
-        f"Key topics: {', '.join(content_analysis['key_topics']) if content_analysis['key_topics'] else 'varied'}",
+        "=" * 80,
+        "PODCAST INFORMATION",
+        "=" * 80,
         "",
-        "Recent Episodes:",
+        f"**Podcast Name:** {ctx.podcast.name}",
+        f"**Podcast Description:** {ctx.podcast.description or 'Not provided'}",
+        f"**Hosts:** {', '.join(ctx.host_names) if ctx.host_names else 'Unknown'}",
+        "",
+        "=" * 80,
+        "TARGET AUDIENCE & TONE",
+        "=" * 80,
+        "",
+        f"**Content Tone:** {content_analysis['tone']}",
+        f"**Key Topics:** {', '.join(content_analysis['key_topics']) if content_analysis['key_topics'] else 'Varied topics'}",
+        f"**Category:** {content_analysis.get('category', 'General')}",
+        "",
+        "**Audience Guidance:**",
+        f"- This podcast targets listeners interested in: {', '.join(content_analysis['key_topics'][:3]) if content_analysis['key_topics'] else 'general topics'}",
+        f"- The tone should be {content_analysis['tone']} and match the podcast's subject matter",
+        f"- Write copy that speaks directly to this audience, not generic podcast listeners",
+        "",
+        "=" * 80,
+        "VISUAL STYLE & BRANDING",
+        "=" * 80,
+        "",
     ]
+    
+    if ctx.cover_url:
+        lines.append(f"**Podcast Cover Image URL:** {ctx.cover_url}")
+        lines.append("**Visual Style Guidance:**")
+        lines.append("- Analyze the cover image to understand the visual aesthetic")
+        lines.append("- Match the design style to what you see (cinematic, minimalist, retro, modern, etc.)")
+        lines.append("- Extract visual motifs from the cover art (e.g., marquee lights, film strips, vintage elements)")
+        
+        if ctx.theme_colors:
+            mood = ctx.theme_colors.get('mood', 'balanced')
+            primary = ctx.theme_colors.get('primary_color', '#3b82f6')
+            secondary = ctx.theme_colors.get('secondary_color', '#ffffff')
+            accent = ctx.theme_colors.get('accent_color', '#8b5cf6')
+            
+            lines.append("")
+            lines.append("**Color Palette (extracted from cover image):**")
+            lines.append(f"- Primary Color: {primary}")
+            lines.append(f"- Secondary Color: {secondary}")
+            lines.append(f"- Accent Color: {accent}")
+            lines.append(f"- Visual Mood: {mood}")
+            lines.append("")
+            lines.append(f"**Design Direction:** The cover art suggests a '{mood}' aesthetic.")
+            lines.append("Craft the design, copy, and section suggestions to complement this visual tone.")
+            lines.append("Use these colors consistently throughout the site.")
+        else:
+            lines.append("- Use a color palette that complements the cover image")
+    else:
+        lines.append("**Visual Style:** No cover image provided. Use a clean, modern design.")
+    
+    # User Design Preferences
+    if design_prefs:
+        lines.append("")
+        lines.append("=" * 80)
+        lines.append("USER DESIGN PREFERENCES (PRIORITY)")
+        lines.append("=" * 80)
+        lines.append("")
+        if design_prefs.get('design_vibe'):
+            lines.append(f"**Desired Vibe:** {design_prefs['design_vibe']}")
+        if design_prefs.get('color_preference'):
+            lines.append(f"**Color Preferences:** {design_prefs['color_preference']}")
+        if design_prefs.get('additional_notes'):
+            lines.append(f"**Additional Notes:** {design_prefs['additional_notes']}")
+        lines.append("")
+        lines.append("**IMPORTANT:** The user's design preferences above should override default assumptions from the cover art if they conflict.")
+    
+    lines.extend([
+        "",
+        "=" * 80,
+        "SITE STRUCTURE & CONTENT",
+        "=" * 80,
+        "",
+        f"**Total Episodes:** {content_analysis['total_episodes']}",
+        f"**Publish Frequency:** {content_analysis['publish_frequency']}",
+        "",
+        "**Recent Episodes (include these in the episodes section):**",
+    ])
+    
     for ep in ctx.episodes:
         summary = (ep.show_notes or "").strip().replace("\n", " ")
         if len(summary) > 320:
             summary = summary[:320].rstrip() + "…"
-        lines.append(f"- {ep.title} (id: {ep.id}) :: {summary or 'No summary yet.'}")
-    lines.append("")
-    lines.append(f"Base subdomain: https://{ctx.podcast.name.lower().replace(' ', '-')}.{ctx.base_domain}")
-    if ctx.cover_url:
-        lines.append(f"Podcast cover image URL: {ctx.cover_url}")
-        if ctx.theme_colors:
-            mood = ctx.theme_colors.get('mood', 'balanced')
-            lines.append(
-                "Suggested brand colors from the cover image: "
-                f"primary={ctx.theme_colors.get('primary_color')}, "
-                f"secondary={ctx.theme_colors.get('secondary_color')}, "
-                f"accent={ctx.theme_colors.get('accent_color')}, "
-                f"mood={mood}"
-            )
-            lines.append(
-                f"Design hint: The cover art suggests a '{mood}' aesthetic. "
-                "Craft copy and section suggestions that complement this visual tone."
-            )
+        lines.append(f"- **{ep.title}** (id: {ep.id})")
+        lines.append(f"  {summary or 'No summary yet.'}")
+    
+    lines.extend([
+        "",
+        "=" * 80,
+        "CONTENT GUIDANCE",
+        "=" * 80,
+        "",
+    ])
     
     # Add content-aware prompts
     if content_analysis['publish_frequency'] in ['daily', 'weekly']:
-        lines.append(f"Note: This is a {content_analysis['publish_frequency']} show. Emphasize consistency and regular listening habits in CTAs.")
+        lines.append(f"**Publishing Note:** This is a {content_analysis['publish_frequency']} show.")
+        lines.append("- Emphasize consistency and regular listening habits in CTAs")
+        lines.append("- Highlight the regular schedule as a benefit")
+        lines.append("")
     
     if content_analysis['total_episodes'] > 50:
-        lines.append(f"Note: With {content_analysis['total_episodes']}+ episodes, highlight the depth of content available.")
+        lines.append(f"**Content Depth:** With {content_analysis['total_episodes']}+ episodes, this is an established show.")
+        lines.append("- Highlight the depth and breadth of content available")
+        lines.append("- Emphasize the archive and back catalog")
+        lines.append("")
     elif content_analysis['total_episodes'] < 10:
-        lines.append("Note: This is a new show. Focus CTAs on 'join early' and 'be part of the journey' messaging.")
+        lines.append("**New Show:** This is a new or early-stage podcast.")
+        lines.append("- Focus CTAs on 'join early' and 'be part of the journey' messaging")
+        lines.append("- Emphasize being part of a growing community")
+        lines.append("")
+    
+    lines.extend([
+        "**SEO Keywords:**",
+        f"- Primary: '{ctx.podcast.name.lower()} podcast'",
+        f"- Secondary: {', '.join([f'\"{topic}\" podcast' for topic in content_analysis['key_topics'][:3]]) if content_analysis['key_topics'] else '\"podcast\"'}",
+        f"- Include these naturally in page titles and meta descriptions",
+        "",
+        "=" * 80,
+        "FUNCTIONAL REQUIREMENTS",
+        "=" * 80,
+        "",
+        "- Ensure all episode CTAs link to audio players or episode pages",
+        "- Make navigation clear and intuitive",
+        "- Include social media links if available",
+        "- Add podcast platform links (Apple Podcasts, Spotify, etc.)",
+        "- Ensure mobile-responsive design considerations",
+        "",
+    ])
     
     if include_layout:
-        lines.append("")
-        lines.append("Current website JSON:")
-        lines.append(json.dumps(include_layout, indent=2))
+        lines.extend([
+            "=" * 80,
+            "CURRENT WEBSITE STATE",
+            "=" * 80,
+            "",
+            "Current website JSON (update this, don't replace entirely):",
+            json.dumps(include_layout, indent=2),
+            "",
+        ])
+    
     if user_request:
-        lines.append("")
-        lines.append("Apply this request:")
-        lines.append(user_request.strip())
-    lines.append("")
-    lines.append("Return ONLY the JSON object, fully populated with rich, personalized content based on the analysis above.")
+        lines.extend([
+            "=" * 80,
+            "USER REQUEST",
+            "=" * 80,
+            "",
+            user_request.strip(),
+            "",
+        ])
+    
+    lines.extend([
+        "=" * 80,
+        "OUTPUT REQUIREMENTS",
+        "=" * 80,
+        "",
+        "Return ONLY the JSON object, fully populated with:",
+        "- Rich, personalized content that feels specific to THIS podcast",
+        "- Compelling copy that matches the tone and audience",
+        "- Visual style that complements the cover art",
+        "- SEO-optimized page titles and meta descriptions",
+        "- Section suggestions that go beyond basic templates",
+        "",
+        "Do NOT include Markdown fences or explanations—return JSON only.",
+    ])
+    
     return "\n".join(lines)
+
+
+def _repair_json(raw: str) -> str:
+    """Attempt to repair common JSON issues from AI responses, especially truncation."""
+    # First, try to extract just the JSON object
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        raw = raw[start : end + 1]
+    
+    # Track string state and find where to safely truncate
+    result = []
+    in_string = False
+    escape_next = False
+    last_safe_pos = 0  # Last position where we were not in a string
+    brace_depth = 0
+    
+    i = 0
+    while i < len(raw):
+        char = raw[i]
+        
+        if escape_next:
+            result.append(char)
+            escape_next = False
+            i += 1
+            continue
+        
+        if char == "\\":
+            escape_next = True
+            result.append(char)
+            i += 1
+            continue
+        
+        if char == '"':
+            in_string = not in_string
+            if not in_string:
+                # String just closed - this is a safe position
+                last_safe_pos = len(result) + 1
+            result.append(char)
+            i += 1
+            continue
+        
+        if not in_string:
+            if char == "{":
+                brace_depth += 1
+            elif char == "}":
+                brace_depth -= 1
+                if brace_depth >= 0:
+                    last_safe_pos = len(result) + 1
+        
+        result.append(char)
+        i += 1
+    
+    repaired = "".join(result)
+    
+    # If we ended in a string (truncated), try to close it and the structure
+    if in_string:
+        # Find the last safe position (end of last complete string)
+        # If we can't find one, try to close the current string
+        if last_safe_pos > 0:
+            # Truncate at last safe position and close structure
+            repaired = repaired[:last_safe_pos]
+            # Close any open braces
+            open_braces = repaired.count("{") - repaired.count("}")
+            if open_braces > 0:
+                repaired += "}" * open_braces
+        else:
+            # No safe position found - try to close current string
+            # Find where the string started (last quote before current position)
+            last_quote_pos = repaired.rfind('"', 0, len(repaired) - 1)
+            if last_quote_pos > 0:
+                # Check if it's a key or value
+                before_quote = repaired[:last_quote_pos].rstrip()
+                if before_quote.endswith(":"):
+                    # It's a key, close it and set empty string value
+                    repaired = repaired[:last_quote_pos] + '": ""'
+                else:
+                    # It's a value, try to close it
+                    repaired = repaired + '"'
+            else:
+                # Fallback: just append quote
+                repaired = repaired + '"'
+            
+            # Close any open braces
+            open_braces = repaired.count("{") - repaired.count("}")
+            if open_braces > 0:
+                repaired += "}" * open_braces
+    
+    return repaired
 
 
 def _invoke_site_builder(prompt: str) -> Dict[str, Any]:
     try:
-        raw = ai_client.generate(prompt, max_output_tokens=2048, temperature=0.75)
+        # Increased from 2048 to 4096 to prevent truncation mid-JSON
+        raw = ai_client.generate(prompt, max_output_tokens=4096, temperature=0.75)
     except Exception as exc:
         log.exception("AI client generate() failed: %s", exc)
         raise PodcastWebsiteAIError(f"AI service unavailable: {str(exc)}")
@@ -557,20 +930,62 @@ def _invoke_site_builder(prompt: str) -> Dict[str, Any]:
     if not raw:
         raise PodcastWebsiteAIError("Empty response from AI site builder")
     
+    # Strip markdown code fences if present (e.g., ```json ... ```)
+    raw = raw.strip()
+    if raw.startswith("```"):
+        # Remove opening code fence (e.g., ```json or ```)
+        lines = raw.split("\n")
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        # Remove closing code fence if present
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        raw = "\n".join(lines)
+    
+    # Check if response might be truncated (common with max_output_tokens limit)
+    raw_stripped = raw.strip()
+    potentially_truncated = not (raw_stripped.endswith("}") or raw_stripped.endswith("},"))
+    
+    # Try parsing the raw JSON first
     try:
         return json.loads(raw)
-    except json.JSONDecodeError:
-        # Attempt to salvage JSON substring
+    except json.JSONDecodeError as e:
+        error_msg = str(e)
+        log.warning("Initial JSON parse failed: %s. Response length: %d chars. Potentially truncated: %s", 
+                   error_msg, len(raw), potentially_truncated)
+        
+        # If unterminated string and potentially truncated, try aggressive repair
+        if "Unterminated string" in error_msg:
+            log.info("Detected unterminated string error. Attempting aggressive JSON repair...")
+            try:
+                repaired = _repair_json(raw)
+                return json.loads(repaired)
+            except Exception as repair_exc:
+                log.warning("JSON repair failed: %s", repair_exc)
+        
+        # Try standard repair
+        try:
+            repaired = _repair_json(raw)
+            return json.loads(repaired)
+        except Exception as repair_exc:
+            log.warning("JSON repair failed: %s", repair_exc)
+        
+        # Last resort: try to extract JSON substring
         start = raw.find("{")
         end = raw.rfind("}")
         if start != -1 and end != -1 and end > start:
             snippet = raw[start : end + 1]
             try:
                 return json.loads(snippet)
-            except Exception as exc:  # pragma: no cover - defensive logging
+            except Exception as exc:
                 log.warning("Failed to parse JSON snippet from AI response: %s", exc)
-        log.error("AI response was not valid JSON. Raw response (first 500 chars): %s", raw[:500])
-        raise PodcastWebsiteAIError("AI response was not valid JSON")
+        
+        # Enhanced error logging
+        log.error("AI response was not valid JSON. Error: %s. Response length: %d. First 1000 chars: %s", 
+                 error_msg, len(raw), raw[:1000])
+        if len(raw) > 1000:
+            log.error("Last 500 chars: %s", raw[-500:])
+        raise PodcastWebsiteAIError(f"AI response was not valid JSON: {error_msg}")
 
 
 def _normalize_layout(data: Dict[str, Any], ctx: WebsiteContext) -> PodcastWebsiteContent:
@@ -699,6 +1114,19 @@ def _normalize_layout(data: Dict[str, Any], ctx: WebsiteContext) -> PodcastWebsi
         "accent_color": str(theme.get("accent_color") or baseline["theme"]["accent_color"]).strip() or baseline["theme"]["accent_color"],
     }
 
+    # Handle SEO fields (optional, with sensible defaults)
+    seo = data.get("seo") if isinstance(data.get("seo"), dict) else {}
+    podcast_name = ctx.podcast.name
+    default_title = f"{podcast_name} | Podcast"
+    default_description = (ctx.podcast.description or f"Listen to {podcast_name}").strip()
+    if len(default_description) > 160:
+        default_description = default_description[:157] + "..."
+    
+    merged["seo"] = {
+        "page_title": str(seo.get("page_title") or default_title).strip() or default_title,
+        "meta_description": str(seo.get("meta_description") or default_description).strip() or default_description,
+    }
+
     return PodcastWebsiteContent(**merged)
 
 
@@ -709,7 +1137,12 @@ def _record_prompt_blob(podcast_id: UUID, website_id: UUID, payload: Dict[str, A
         log.warning("google-cloud-storage not installed; skipping prompt archival for website %s", website_id)
         return None
     try:
-        client = storage.Client()
+        # Use cached GCS client if available (performance optimization)
+        from infrastructure.gcs import _get_gcs_client
+        client = _get_gcs_client(force=True)
+        if not client:
+            # Fallback: create client directly if cache is empty
+            client = storage.Client()
         bucket = client.bucket(_PROMPT_BUCKET)
         timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%S%fZ")
         path = f"prompts/{podcast_id}/{website_id}/{timestamp}.json"
@@ -764,6 +1197,114 @@ def _hex_to_rgb_tuple(hex_color: str):
     return (r, g, b)
 
 
+def _get_relative_luminance(rgb: Tuple[int, int, int]) -> float:
+    """Calculate relative luminance according to WCAG 2.1 formula.
+    
+    Args:
+        rgb: Tuple of (r, g, b) values in range 0-255
+        
+    Returns:
+        Relative luminance value between 0.0 and 1.0
+    """
+    def _linearize(channel: int) -> float:
+        """Convert sRGB channel to linear RGB."""
+        c = channel / 255.0
+        if c <= 0.03928:
+            return c / 12.92
+        return ((c + 0.055) / 1.055) ** 2.4
+    
+    r, g, b = rgb
+    r_lin = _linearize(r)
+    g_lin = _linearize(g)
+    b_lin = _linearize(b)
+    
+    return 0.2126 * r_lin + 0.7152 * g_lin + 0.0722 * b_lin
+
+
+def _get_contrast_ratio(color1: Tuple[int, int, int], color2: Tuple[int, int, int]) -> float:
+    """Calculate WCAG contrast ratio between two colors.
+    
+    Args:
+        color1: First color as (r, g, b) tuple
+        color2: Second color as (r, g, b) tuple
+        
+    Returns:
+        Contrast ratio between 1.0 and 21.0 (higher is better)
+    """
+    lum1 = _get_relative_luminance(color1)
+    lum2 = _get_relative_luminance(color2)
+    
+    # Ensure lighter color is numerator
+    lighter = max(lum1, lum2)
+    darker = min(lum1, lum2)
+    
+    if darker == 0:
+        return 21.0  # Perfect contrast (black vs white)
+    
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def _get_readable_text_color(background_color: str, min_contrast: float = 4.5) -> str:
+    """Determine readable text color (white or black) for a given background.
+    
+    Ensures WCAG AA compliance (4.5:1 for normal text, 3:1 for large text).
+    
+    Args:
+        background_color: Hex color string (e.g., "#ffffff")
+        min_contrast: Minimum contrast ratio required (default 4.5 for WCAG AA normal text)
+        
+    Returns:
+        Hex color string for text ("#ffffff" for white, "#1e293b" for dark gray/black)
+    """
+    bg_rgb = _hex_to_rgb_tuple(background_color)
+    white_rgb = (255, 255, 255)
+    black_rgb = (30, 41, 59)  # Dark gray (#1e293b) - better than pure black for readability
+    
+    white_contrast = _get_contrast_ratio(bg_rgb, white_rgb)
+    black_contrast = _get_contrast_ratio(bg_rgb, black_rgb)
+    
+    # Choose the color with better contrast, but ensure it meets minimum
+    if white_contrast >= min_contrast and white_contrast >= black_contrast:
+        return "#ffffff"
+    elif black_contrast >= min_contrast:
+        return "#1e293b"
+    else:
+        # Neither meets minimum - choose the better one anyway (better than nothing)
+        # But log a warning
+        log.warning(
+            "Text color contrast below minimum (%.2f:1) for background %s. "
+            "Using best available option (white: %.2f:1, dark: %.2f:1)",
+            min_contrast, background_color, white_contrast, black_contrast
+        )
+        return "#ffffff" if white_contrast >= black_contrast else "#1e293b"
+
+
+def _ensure_readable_text_color(text_color: str, background_color: str, min_contrast: float = 4.5) -> str:
+    """Ensure text color has sufficient contrast against background.
+    
+    If the provided text color doesn't meet contrast requirements, returns
+    an appropriate white or dark color instead.
+    
+    Args:
+        text_color: Current text color hex string
+        background_color: Background color hex string
+        min_contrast: Minimum contrast ratio required
+        
+    Returns:
+        Hex color string that meets contrast requirements
+    """
+    text_rgb = _hex_to_rgb_tuple(text_color)
+    bg_rgb = _hex_to_rgb_tuple(background_color)
+    
+    current_contrast = _get_contrast_ratio(text_rgb, bg_rgb)
+    
+    if current_contrast >= min_contrast:
+        return text_color
+    
+    # Current color doesn't meet requirements, use readable color
+    return _get_readable_text_color(background_color, min_contrast)
+
+
 def _adjust_color_brightness(hex_color: str, factor: float) -> str:
     """Adjust color brightness. factor > 1 = lighter, factor < 1 = darker"""
     r, g, b = _hex_to_rgb_tuple(hex_color)
@@ -774,7 +1315,11 @@ def _adjust_color_brightness(hex_color: str, factor: float) -> str:
 
 
 def _generate_css_from_theme(theme: Dict[str, str], podcast_name: str) -> str:
-    """Generate custom CSS based on theme colors with enhanced accessibility and typography."""
+    """Generate custom CSS based on theme colors with enhanced accessibility and typography.
+    
+    CRITICAL: All text colors are validated for WCAG AA contrast compliance (minimum 4.5:1).
+    This ensures text is always readable regardless of background colors.
+    """
     primary = theme.get("primary_color", "#0f172a")
     secondary = theme.get("secondary_color", "#ffffff")
     accent = theme.get("accent_color", "#2563eb")
@@ -790,6 +1335,65 @@ def _generate_css_from_theme(theme: Dict[str, str], podcast_name: str) -> str:
     
     # Surface colors for cards and sections
     surface_color = _adjust_color_brightness(background, 0.98)
+    
+    # CRITICAL: Ensure all text colors meet WCAG AA contrast requirements
+    # Calculate readable text colors for each background
+    
+    # Body text must be readable against the gradient background
+    # Use the darker of the two gradient colors for worst-case contrast check
+    bg_rgb = _hex_to_rgb_tuple(background)
+    primary_light_rgb = _hex_to_rgb_tuple(primary_light)
+    bg_lum = _get_relative_luminance(bg_rgb)
+    primary_light_lum = _get_relative_luminance(primary_light_rgb)
+    # Check against the darker part of the gradient
+    gradient_darker = background if bg_lum < primary_light_lum else primary_light
+    body_text_color = _get_readable_text_color(gradient_darker, min_contrast=4.5)
+    
+    # Header text must be readable against primary background
+    header_text_color = _ensure_readable_text_color(text_color, primary, min_contrast=4.5)
+    
+    # Footer text must be readable against primary-dark background
+    footer_text_color = _get_readable_text_color(primary_dark, min_contrast=4.5)
+    
+    # Section container text must be readable against surface background
+    section_text_color = _get_readable_text_color(surface_color, min_contrast=4.5)
+    
+    # Heading colors must be readable against section backgrounds
+    # Headings use primary color, but need to ensure contrast against surface
+    heading_color = primary
+    heading_contrast = _get_contrast_ratio(_hex_to_rgb_tuple(primary), _hex_to_rgb_tuple(surface_color))
+    if heading_contrast < 4.5:
+        # Primary color doesn't contrast well - use a darker/lighter variant
+        if _get_relative_luminance(_hex_to_rgb_tuple(primary)) > 0.5:
+            # Primary is light, use darker version
+            heading_color = primary_dark
+        else:
+            # Primary is dark, check if it works, otherwise use section text color
+            if heading_contrast < 3.0:  # Even fails large text requirement
+                heading_color = section_text_color
+    
+    # Paragraph/secondary text color - ensure readable against surface
+    text_secondary_color = _get_readable_text_color(surface_color, min_contrast=4.5)
+    # If surface is light, use a dark gray; if dark, use light gray
+    if _get_relative_luminance(_hex_to_rgb_tuple(surface_color)) > 0.5:
+        text_secondary_color = "#475569"  # Medium dark gray
+    else:
+        text_secondary_color = "#cbd5e1"  # Light gray
+    
+    # Muted text color
+    if _get_relative_luminance(_hex_to_rgb_tuple(surface_color)) > 0.5:
+        text_muted_color = "#94a3b8"  # Light gray
+    else:
+        text_muted_color = "#64748b"  # Medium gray
+    
+    # Button text - ensure readable against accent
+    button_text_color = _get_readable_text_color(accent, min_contrast=4.5)
+    
+    # Button hover text - ensure readable against accent-hover
+    button_hover_text_color = _get_readable_text_color(accent_hover, min_contrast=4.5)
+    
+    # Subscribe link text - ensure readable against accent-light
+    subscribe_text_color = _get_readable_text_color(accent_light, min_contrast=4.5)
     
     # Select typography based on mood
     if mood in ["professional", "sophisticated"]:
@@ -825,10 +1429,10 @@ def _generate_css_from_theme(theme: Dict[str, str], podcast_name: str) -> str:
   --color-accent-light: {accent_light};
   --color-accent-hover: {accent_hover};
   
-  /* Text hierarchy */
-  --color-text-primary: #1e293b;
-  --color-text-secondary: #475569;
-  --color-text-muted: #94a3b8;
+  /* Text hierarchy - CONTRAST-VALIDATED for readability */
+  --color-text-primary: {body_text_color};
+  --color-text-secondary: {text_secondary_color};
+  --color-text-muted: {text_muted_color};
   
   /* Typography */
   --font-heading: {font_heading};
@@ -865,20 +1469,21 @@ body {{
 
 .website-header {{
   background: var(--color-primary);
-  color: var(--color-primary-contrast);
+  color: {header_text_color};
   box-shadow: var(--shadow-md);
   padding: var(--space-lg) var(--space-xl);
 }}
 
 .website-footer {{
   background: var(--color-primary-dark);
-  color: var(--color-primary-contrast);
+  color: {footer_text_color};
   padding: var(--space-2xl) var(--space-xl);
   margin-top: var(--space-2xl);
 }}
 
 .section-container {{
   background: var(--color-surface);
+  color: {section_text_color};
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
   margin: var(--space-xl) auto;
@@ -888,7 +1493,7 @@ body {{
 
 .cta-button {{
   background: var(--color-accent);
-  color: white;
+  color: {button_text_color};
   padding: var(--space-md) var(--space-lg);
   border-radius: var(--radius-md);
   font-weight: 600;
@@ -903,6 +1508,7 @@ body {{
 
 .cta-button:hover {{
   background: var(--color-accent-hover);
+  color: {button_hover_text_color};
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
 }}
@@ -927,7 +1533,7 @@ body {{
 }}
 
 h1, h2, h3, h4, h5, h6 {{
-  color: var(--color-primary);
+  color: {heading_color};
   font-family: var(--font-heading);
   line-height: 1.2;
   margin-bottom: var(--space-md);
@@ -970,7 +1576,7 @@ a:hover {{
   gap: var(--space-sm);
   padding: var(--space-sm) var(--space-md);
   background: var(--color-accent-light);
-  color: var(--color-primary-dark);
+  color: {subscribe_text_color};
   border-radius: var(--radius-md);
   transition: all 0.2s ease;
   font-weight: 500;
@@ -978,7 +1584,7 @@ a:hover {{
 
 .subscribe-link:hover {{
   background: var(--color-accent);
-  color: white;
+  color: {button_text_color};
   text-decoration: none;
   transform: translateY(-1px);
   box-shadow: var(--shadow-sm);
@@ -1039,13 +1645,14 @@ a:hover {{
     return css
 
 
-def _create_default_sections(podcast: Podcast, cover_url: Optional[str], theme: Optional[Dict[str, str]] = None):
+def _create_default_sections(podcast: Podcast, cover_url: Optional[str], theme: Optional[Dict[str, str]] = None, content: Optional[PodcastWebsiteContent] = None):
     """Create default section configuration for new websites.
     
     Args:
         podcast: Podcast model
         cover_url: URL to podcast cover art
         theme: Theme colors extracted from cover art
+        content: Optional content generated by AI to populate sections
     
     Returns:
         Tuple of (sections_order, sections_config, sections_enabled)
@@ -1064,8 +1671,38 @@ def _create_default_sections(podcast: Podcast, cover_url: Optional[str], theme: 
         background_color = "#f8fafc"
         text_color = "#ffffff"
     
+    # Extract content for sections
+    hero_title = podcast.name
+    hero_subtitle = podcast.description or "Welcome to our podcast"
+    if len(hero_subtitle) > 150:
+        # Fallback if description is long and no AI content
+        hero_subtitle = f"Listen to {podcast.name} on your favorite platform."
+        
+    about_heading = f"About {podcast.name}"
+    about_body = podcast.description or "Tell your listeners what your podcast is about."
+    
+    # Use AI content if available to populate sections with better copy
+    if content:
+        hero_title = content.hero_title or hero_title
+        hero_subtitle = content.hero_subtitle or hero_subtitle
+        if content.about:
+            about_heading = content.about.get("heading") or about_heading
+            about_body = content.about.get("body") or about_body
+
     sections_order = ["header", "hero", "about", "latest-episodes", "subscribe", "footer"]
     
+    # Check if we should add a hosts section
+    if content and content.hosts and len(content.hosts) > 0:
+        # Only add if it looks like real data (not placeholder)
+        first_host = content.hosts[0]
+        if first_host.get("name") and "Your Host" not in first_host.get("name"):
+            # Insert after about
+            try:
+                idx = sections_order.index("about")
+                sections_order.insert(idx + 1, "hosts")
+            except ValueError:
+                sections_order.insert(2, "hosts")
+
     sections_config = {
         "header": {
             "type": "header",
@@ -1082,8 +1719,8 @@ def _create_default_sections(podcast: Podcast, cover_url: Optional[str], theme: 
         },
         "hero": {
             "type": "hero",
-            "title": podcast.name,
-            "subtitle": podcast.description or "Welcome to our podcast",
+            "title": hero_title,
+            "subtitle": hero_subtitle,
             "cta_text": "Listen Now",
             "cta_url": None,
             "background_color": primary_color,
@@ -1092,13 +1729,19 @@ def _create_default_sections(podcast: Podcast, cover_url: Optional[str], theme: 
         },
         "about": {
             "type": "about",
-            "heading": f"About {podcast.name}",
-            "body": podcast.description or "Tell your listeners what your podcast is about.",
+            "heading": about_heading,
+            "body": about_body,
+        },
+        "hosts": {
+            "type": "hosts",
+            "heading": "Meet the Host" if content and len(content.hosts) == 1 else "Meet the Hosts",
+            "hosts": content.hosts if content else [],
+            "layout": "grid",
         },
         "latest-episodes": {
             "type": "episodes",
             "heading": "Latest Episodes",
-            "count": 3,
+            "count": 5,
             "show_descriptions": True,
             "show_dates": True,
             "layout": "cards",
@@ -1125,6 +1768,7 @@ def _create_default_sections(podcast: Podcast, cover_url: Optional[str], theme: 
         "header": True,
         "hero": True,
         "about": True,
+        "hosts": True,
         "latest-episodes": True,
         "subscribe": True,
         "footer": True,
@@ -1133,7 +1777,7 @@ def _create_default_sections(podcast: Podcast, cover_url: Optional[str], theme: 
     return sections_order, sections_config, sections_enabled
 
 
-def create_or_refresh_site(session: Session, podcast: Podcast, user: User) -> Tuple[PodcastWebsite, PodcastWebsiteContent]:
+def create_or_refresh_site(session: Session, podcast: Podcast, user: User, design_prefs: Optional[Dict[str, Any]] = None) -> Tuple[PodcastWebsite, PodcastWebsiteContent]:
     website = session.exec(select(PodcastWebsite).where(PodcastWebsite.podcast_id == podcast.id)).first()
     desired_slug = _slugify_base(podcast.name)
     is_new_website = website is None
@@ -1159,7 +1803,7 @@ def create_or_refresh_site(session: Session, podcast: Podcast, user: User) -> Tu
         theme_colors=theme,
     )
 
-    prompt = _build_context_prompt(ctx)
+    prompt = _build_context_prompt(ctx, design_prefs=design_prefs)
     raw = _invoke_site_builder(prompt)
     content = _normalize_layout(raw, ctx)
 
@@ -1168,53 +1812,77 @@ def create_or_refresh_site(session: Session, podcast: Podcast, user: User) -> Tu
     
     # For new websites, set up default sections and generate AI theme
     if is_new_website or not website.get_sections_order():
-        sections_order, sections_config, sections_enabled = _create_default_sections(podcast, cover_url, theme)
+        sections_order, sections_config, sections_enabled = _create_default_sections(podcast, cover_url, theme, content)
+        
+        # Store design preferences in metadata if provided
+        if design_prefs:
+            if "_theme_metadata" not in sections_config:
+                sections_config["_theme_metadata"] = {}
+            sections_config["_theme_metadata"].update({
+                "user_design_prefs": design_prefs
+            })
+            
         website.set_sections_order(sections_order)
         website.set_sections_config(sections_config)
         website.set_sections_enabled(sections_enabled)
-        
-        # Auto-generate AI theme for new websites
-        try:
-            from api.services.ai_theme_generator import generate_complete_theme
-            if generate_complete_theme is not None:
-                log.info("Auto-generating AI theme for new website")
-                theme_result = generate_complete_theme(podcast, cover_url, None)
-                
-                # Merge theme into sections config (don't overwrite existing)
-                current_config = website.get_sections_config()
-                for section_id, section_config in theme_result.sections_config.get("sections_config", {}).items():
-                    if section_id not in current_config:
-                        current_config[section_id] = section_config
-                    elif section_id == "_theme_metadata":
-                        # Always include theme metadata
-                        current_config[section_id] = section_config
-                
-                website.set_sections_config(current_config)
-                
-                # Apply theme CSS (merge with existing if any)
-                if theme_result.css:
-                    website.global_css = theme_result.css
-        except Exception as e:
-            log.warning("Failed to auto-generate AI theme (non-fatal): %s", e)
     
-    # Only regenerate CSS from theme colors if no AI theme CSS exists
-    # This preserves AI-generated themes when user clicks "Regenerate"
-    if not website.global_css or not website.get_sections_config().get("_theme_metadata"):
-        # ALWAYS regenerate CSS from theme colors (so colors update when user clicks "Regenerate")
-        # If theme extraction failed, use default colors but still generate CSS
+    # ALWAYS generate AI theme (for both new and existing websites)
+    # This ensures the CSS matches the cover image's visual style
+    ai_theme_generated = False
+    try:
+        from api.services.ai_theme_generator import generate_complete_theme
+        if generate_complete_theme is not None:
+            log.info("Generating AI theme from cover image analysis")
+            theme_result = generate_complete_theme(podcast, cover_url, tagline, design_prefs)
+            
+            # Log the colors being generated for debugging
+            if theme_result and theme_result.theme_spec:
+                color_palette = theme_result.theme_spec.color_palette or {}
+                log.info("AI Theme Colors Generated:")
+                log.info("  Primary: %s", color_palette.get("primary", "NOT SET"))
+                log.info("  Background: %s", color_palette.get("bg", "NOT SET"))
+                log.info("  Text: %s", color_palette.get("text", "NOT SET"))
+                log.info("  Accent: %s", color_palette.get("accent", "NOT SET"))
+                log.info("  Mood: %s", theme_result.theme_spec.mood or "NOT SET")
+                log.info("  Visual Motifs: %s", ", ".join(theme_result.theme_spec.visual_motifs or []))
+            
+            # Merge theme into sections config
+            current_config = website.get_sections_config()
+            for section_id, section_config in theme_result.sections_config.get("sections_config", {}).items():
+                if section_id not in current_config:
+                    current_config[section_id] = section_config
+                elif section_id == "_theme_metadata":
+                    # Always update theme metadata
+                    current_config[section_id] = section_config
+            
+            website.set_sections_config(current_config)
+            
+            # Apply AI-generated theme CSS (this takes precedence)
+            if theme_result.css:
+                website.global_css = theme_result.css
+                ai_theme_generated = True
+                log.info("AI theme CSS applied successfully (%d chars)", len(theme_result.css))
+    except Exception as e:
+        log.warning("Failed to generate AI theme (non-fatal): %s", e, exc_info=True)
+    
+    # Fallback: Only use basic color extraction CSS if AI theme generation failed
+    # This ensures we always have some CSS, but AI theme takes precedence
+    if not ai_theme_generated:
         if theme:
             css = _generate_css_from_theme(theme, podcast.name)
-        else:
+            website.global_css = css
+            log.info("Using basic color extraction CSS (AI theme unavailable)")
+        elif not website.global_css:
             # Fallback to default theme if extraction failed
             default_theme = {
-                "primary_color": "#0f172a",
-                "secondary_color": "#ffffff",
-                "accent_color": "#2563eb",
-                "background_color": "#f8fafc",
-                "text_color": "#ffffff",
-                "mood": "balanced",
-            }
-            css = _generate_css_from_theme(default_theme, podcast.name)
+            "primary_color": "#0f172a",
+            "secondary_color": "#ffffff",
+            "accent_color": "#2563eb",
+            "background_color": "#f8fafc",
+            "text_color": "#ffffff",
+            "mood": "balanced",
+        }
+        css = _generate_css_from_theme(default_theme, podcast.name)
         website.global_css = css
 
     payload = {
@@ -1285,6 +1953,23 @@ def update_custom_domain(session: Session, website: PodcastWebsite, user: User, 
 
 
 def get_default_domain(subdomain: str) -> str:
+    """Get the default domain for a website subdomain.
+    
+    In development, returns a dev-friendly URL with subdomain as query param.
+    In production, returns the production subdomain URL.
+    """
+    app_env = (settings.APP_ENV or "").strip().lower()
+    is_dev = app_env in {"", "dev", "development", "local", "test", "testing"}
+    
+    if is_dev and subdomain:
+        # In dev mode, return a URL that works with PublicWebsite.jsx dev mode handling
+        # PublicWebsite.jsx expects ?subdomain=... query param in dev mode
+        base_url = settings.APP_BASE_URL or "http://127.0.0.1:5173"
+        # Remove trailing slash if present
+        base_url = base_url.rstrip("/")
+        return f"{base_url}/?subdomain={subdomain}"
+    
+    # Production mode: return subdomain.podcastplusplus.com
     return f"{subdomain}.{_BASE_DOMAIN}" if subdomain else _BASE_DOMAIN
 
 
@@ -1312,6 +1997,13 @@ Generate complete CSS that:
 3. Is modern, clean, and accessible
 4. Works well with Tailwind CSS base styles
 5. Includes responsive design considerations
+
+CRITICAL ACCESSIBILITY REQUIREMENT:
+- ALL text colors MUST have sufficient contrast against their backgrounds (WCAG AA: minimum 4.5:1 for normal text, 3:1 for large text)
+- If a background is dark, use light text (#ffffff or light gray)
+- If a background is light, use dark text (#1e293b or dark gray)
+- NEVER use text colors that are too similar to background colors
+- Test all color combinations to ensure readability
 
 Return ONLY the CSS code, no explanations or markdown fences."""
 

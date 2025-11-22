@@ -24,14 +24,10 @@ export default function PublishCadenceStep({ wizard }) {
           value={freqUnit}
           onChange={(event) => setFreqUnit(event.target.value)}
         >
-          <option value="" disabled>
-            select...
-          </option>
-          <option value="day">day</option>
           <option value="week">week</option>
-          <option value="bi-weekly">bi-weekly</option>
+          <option value="day">day</option>
+          <option value="bi-weekly">bi-weekly (every 2 weeks)</option>
           <option value="month">month</option>
-          <option value="year">year</option>
         </select>
       </div>
       {cadenceError && <p className="text-sm text-red-600">{cadenceError}</p>}

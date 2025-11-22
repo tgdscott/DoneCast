@@ -37,6 +37,7 @@ import {
   Library,
   Shield,
 } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import React, { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
 
 import { makeApi, coerceArray } from "@/lib/apiClient";
@@ -69,8 +70,15 @@ const VisualEditor = lazy(() => import("@/components/website/VisualEditor.jsx"))
 
 // Loading fallback component
 const ComponentLoader = () => (
-  <div className="flex items-center justify-center min-h-[400px]">
-    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+  <div className="space-y-6 p-6">
+    <div className="space-y-2">
+      <Skeleton className="h-8 w-64" />
+      <Skeleton className="h-4 w-96" />
+    </div>
+    <div className="grid gap-4">
+      <Skeleton className="h-32 w-full" />
+      <Skeleton className="h-32 w-full" />
+    </div>
   </div>
 );
 
@@ -89,7 +97,7 @@ class LazyLoadErrorBoundary extends React.Component {
     // Check if this is a chunk load error
     if (error?.message?.includes('Failed to fetch dynamically imported module') ||
         error?.message?.includes('Loading chunk')) {
-      console.warn('[LazyLoad] Chunk load error detected, will auto-reload');
+      if (import.meta.env.DEV) console.warn('[LazyLoad] Chunk load error detected, will auto-reload');
       // The Vite plugin will handle reload, but this prevents error boundary crash
     }
   }
@@ -202,14 +210,31 @@ export default function PodcastPlusDashboard() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const preuploadFetchedOnceRef = useRef(false);
   const previousPreuploadContextRef = useRef({ view: currentView, mode: creatorMode });
+  const isNavigatingFromPopStateRef = useRef(false);
+  const viewHistoryRef = useRef(['dashboard']); // Track view history for back button
 
   // SAFETY CHECK: Detect users who bypassed TermsGate (should never happen, but defensive)
+  // CRITICAL: Only check if user data is hydrated to avoid false positives
+  // This prevents "pestering" users who just accepted terms but data hasn't refreshed yet
   useEffect(() => {
-    if (authUser?.terms_version_required && authUser?.terms_version_required !== authUser?.terms_version_accepted) {
+    // Skip check if user data isn't hydrated yet (might be stale)
+    if (!authUser) return;
+    
+    const requiredVersion = authUser?.terms_version_required;
+    const acceptedVersion = authUser?.terms_version_accepted;
+    
+    // Only check if requiredVersion is set and differs from accepted
+    // This prevents false positives when TERMS_VERSION isn't configured
+    if (
+      requiredVersion && 
+      typeof requiredVersion === 'string' && 
+      requiredVersion.trim() !== '' && 
+      requiredVersion !== acceptedVersion
+    ) {
       console.error('[Dashboard Safety Check] User bypassed TermsGate!', {
         email: authUser.email,
-        required: authUser.terms_version_required,
-        accepted: authUser.terms_version_accepted,
+        required: requiredVersion,
+        accepted: acceptedVersion,
       });
       // Force reload to trigger TermsGate check in App.jsx
       toast({
@@ -217,15 +242,156 @@ export default function PodcastPlusDashboard() {
         description: 'Please accept the Terms of Use to continue.',
         variant: 'destructive',
       });
+      // Use shorter delay and ensure we're redirecting to trigger proper check
       setTimeout(() => {
-        window.location.href = '/?force_terms_check=1';
-      }, 2000);
+        window.location.href = '/app';
+      }, 1000);
     }
   }, [authUser, toast]);
 
   const resetPreuploadFetchedFlag = useCallback(() => {
     preuploadFetchedOnceRef.current = false;
   }, []);
+
+  // Store the original setter in a ref so we can wrap it
+  const setCurrentViewRef = useRef(setCurrentView);
+  setCurrentViewRef.current = setCurrentView;
+
+  // Enhanced setCurrentView that tracks history for back button support
+  const setCurrentViewWithHistory = useCallback((newView, skipHistory = false) => {
+    if (isNavigatingFromPopStateRef.current) {
+      // We're restoring from history, don't create new entry
+      isNavigatingFromPopStateRef.current = false;
+      setCurrentViewRef.current(newView);
+      // Update viewHistoryRef to match
+      if (newView === 'dashboard') {
+        viewHistoryRef.current = ['dashboard'];
+      } else {
+        const idx = viewHistoryRef.current.indexOf(newView);
+        if (idx >= 0) {
+          viewHistoryRef.current = viewHistoryRef.current.slice(0, idx + 1);
+        } else {
+          viewHistoryRef.current.push(newView);
+        }
+      }
+      return;
+    }
+
+    const previousView = currentView;
+    setCurrentViewRef.current(newView);
+
+    // Only create history entry if view actually changed and we're not skipping history
+    if (!skipHistory && newView !== previousView) {
+      // Ensure current state has dashboardView before pushing new entry
+      const currentState = window.history.state || {};
+      if (!currentState.dashboardView && previousView) {
+        // Current state doesn't have dashboardView, fix it first
+        window.history.replaceState({ dashboardView: previousView, inApp: true, ...currentState }, '', window.location.href);
+      }
+      
+      if (newView === 'dashboard') {
+        // Going back to dashboard - ensure dashboard is at the end of history stack
+        while (viewHistoryRef.current.length > 1 && viewHistoryRef.current[viewHistoryRef.current.length - 1] !== 'dashboard') {
+          viewHistoryRef.current.pop();
+        }
+        if (viewHistoryRef.current[viewHistoryRef.current.length - 1] !== 'dashboard') {
+          viewHistoryRef.current.push('dashboard');
+        }
+        // Push state to browser history - always create entry when going to dashboard
+        const state = { dashboardView: 'dashboard', previousView, inApp: true };
+        window.history.pushState(state, '', window.location.href);
+      } else {
+        // Going to a new view - ensure dashboard is before it in stack
+        if (viewHistoryRef.current.length === 0 || viewHistoryRef.current[viewHistoryRef.current.length - 1] !== 'dashboard') {
+          viewHistoryRef.current.push('dashboard');
+        }
+        // Remove this view if it's already in the stack (avoid duplicates)
+        const existingIdx = viewHistoryRef.current.indexOf(newView);
+        if (existingIdx >= 0) {
+          viewHistoryRef.current = viewHistoryRef.current.slice(0, existingIdx + 1);
+        } else {
+          viewHistoryRef.current.push(newView);
+        }
+        // Push state to browser history so back button works
+        const state = { dashboardView: newView, previousView, inApp: true };
+        window.history.pushState(state, '', window.location.href);
+      }
+    }
+  }, [currentView]);
+  
+  // Override setCurrentView to use history-aware version
+  // We'll use this in the popstate handler, but for all other calls we need to replace setCurrentView
+  // For now, let's update the popstate handler and key navigation points
+
+  // Handle browser back button for internal navigation
+  useEffect(() => {
+    const handlePopState = (event) => {
+      const currentPath = window.location.pathname;
+      const isAppRoute = currentPath.startsWith('/app') || 
+                        currentPath.startsWith('/dashboard') || 
+                        currentPath.startsWith('/admin') ||
+                        (currentPath === '/' && authUser);
+      
+      // Always ensure we're still in an app route - if not, let App.jsx handle it
+      if (!isAppRoute) {
+        return; // Let App.jsx redirect back to app
+      }
+      
+      // Check if this is a dashboard view navigation
+      if (event.state?.dashboardView) {
+        // Restore the previous view
+        isNavigatingFromPopStateRef.current = true;
+        const targetView = event.state.dashboardView;
+        setCurrentViewRef.current(targetView);
+        
+        // Update history stack to match - find the view in our stack and trim to that point
+        const idx = viewHistoryRef.current.indexOf(targetView);
+        if (idx >= 0) {
+          viewHistoryRef.current = viewHistoryRef.current.slice(0, idx + 1);
+        } else {
+          // View not in stack, rebuild it
+          if (targetView === 'dashboard') {
+            viewHistoryRef.current = ['dashboard'];
+          } else {
+            viewHistoryRef.current = ['dashboard', targetView];
+          }
+        }
+        return;
+      }
+
+      // If no dashboard state but we're still in an app route, restore dashboard
+      // This handles cases where we go back to a state before dashboard tracking started
+      isNavigatingFromPopStateRef.current = true;
+      setCurrentViewRef.current('dashboard');
+      viewHistoryRef.current = ['dashboard'];
+      // Update URL state to include dashboardView so next back press works correctly
+      window.history.replaceState({ dashboardView: 'dashboard', inApp: true }, '', window.location.href);
+    };
+
+    // Use capture phase so we handle it before App.jsx
+    window.addEventListener('popstate', handlePopState, true);
+    return () => {
+      window.removeEventListener('popstate', handlePopState, true);
+    };
+  }, [authUser]);
+
+  // Initialize history state on mount and ensure it always has dashboardView
+  useEffect(() => {
+    // Always ensure current view is tracked in history state
+    const currentState = window.history.state;
+    if (!currentState || !currentState.dashboardView) {
+      // Replace current state to include dashboardView - this ensures every entry has it
+      window.history.replaceState({ dashboardView: currentView, inApp: true }, '', window.location.href);
+    }
+    // Initialize viewHistoryRef with current view
+    if (viewHistoryRef.current.length === 0) {
+      if (currentView === 'dashboard') {
+        viewHistoryRef.current = ['dashboard'];
+      } else {
+        viewHistoryRef.current = ['dashboard', currentView];
+      }
+    }
+  }, []); // Only run once on mount
 
   const proEligibleTiers = useMemo(() => new Set(['pro', 'enterprise', 'business', 'team', 'agency']), []);
   const normalizedTier = (user?.tier || '').toLowerCase();
@@ -365,12 +531,12 @@ export default function PodcastPlusDashboard() {
     
     // Prevent concurrent fetches
     if (fetchingRef.current) {
-      console.log('[Dashboard] Skipping fetchData - already fetching');
+      if (import.meta.env.DEV) console.log('[Dashboard] Skipping fetchData - already fetching');
       return;
     }
     
     fetchingRef.current = true;
-    console.log('[Dashboard] Starting fetchData', { timestamp: Date.now() });
+    if (import.meta.env.DEV) console.log('[Dashboard] Starting fetchData', { timestamp: Date.now() });
     
     try {
       setStatsError(null);
@@ -393,11 +559,11 @@ export default function PodcastPlusDashboard() {
         const reason = templatesRes.reason || {};
         if (reason.status === 401) {
           // Authorization failure -> force logout
-          console.warn('Templates fetch unauthorized, logging out', reason);
+          if (import.meta.env.DEV) console.warn('Templates fetch unauthorized, logging out', reason);
           logout();
           return;
         }
-        console.warn('Failed to load templates (non-fatal):', reason);
+        if (import.meta.env.DEV) console.warn('Failed to load templates (non-fatal):', reason);
         setTemplates([]);
       }
 
@@ -417,11 +583,11 @@ export default function PodcastPlusDashboard() {
       } else {
         const reason = podcastsRes.reason || {};
         if (reason.status === 401) {
-          console.warn('Podcasts fetch unauthorized, logging out', reason);
+          if (import.meta.env.DEV) console.warn('Podcasts fetch unauthorized, logging out', reason);
           logout();
           return;
         }
-        console.warn('Failed to load podcasts (non-fatal):', reason);
+        if (import.meta.env.DEV) console.warn('Failed to load podcasts (non-fatal):', reason);
         setPodcasts([]);
       }
 
@@ -431,19 +597,23 @@ export default function PodcastPlusDashboard() {
       } else {
         const reason = statsRes.reason || {};
         if (reason.status === 401) {
-          console.warn('Stats fetch unauthorized; continuing without stats', reason);
+          if (import.meta.env.DEV) console.warn('Stats fetch unauthorized; continuing without stats', reason);
           setStatsError('You are not authorized to view stats.');
           setStats(null);
         } else {
           // Non-fatal: show a gentle UI message
-          console.warn('Failed to load stats (non-fatal):', reason);
-          setStatsError('Failed to load stats.');
+          if (import.meta.env.DEV) console.warn('Failed to load stats (non-fatal):', reason);
+          setStatsError('Unable to load statistics right now. This won\'t affect your podcast.');
           setStats(null);
         }
       }
     } catch (err) {
       // Unexpected error: don't immediately force logout unless it's a 401
-      console.error("Unexpected error fetching dashboard data:", err);
+      if (import.meta.env.DEV) {
+        console.error("Unexpected error fetching dashboard data:", err);
+      } else {
+        console.error("Unexpected error fetching dashboard data");
+      }
       if (err && err.status === 401) {
         logout();
       } else {
@@ -451,7 +621,7 @@ export default function PodcastPlusDashboard() {
       }
     } finally {
       fetchingRef.current = false;
-      console.log('[Dashboard] Finished fetchData', { timestamp: Date.now() });
+      if (import.meta.env.DEV) console.log('[Dashboard] Finished fetchData', { timestamp: Date.now() });
     }
   }, [token, logout]);
 
@@ -864,8 +1034,8 @@ export default function PodcastPlusDashboard() {
         // Use memoized targetPodcast to prevent re-renders
         const targetPodcast = targetPodcastForBuilder;
         
-        // Debug: Log when targetPodcast changes (using closure to track previous)
-        if (targetPodcast) {
+        // Debug: Log when targetPodcast changes (dev only)
+        if (import.meta.env.DEV && targetPodcast) {
           console.log('[Dashboard] Rendering websiteBuilder', {
             targetPodcastId: targetPodcast.id,
             targetPodcastName: targetPodcast.name,
@@ -1155,15 +1325,15 @@ export default function PodcastPlusDashboard() {
                   </CardHeader>
                   <CardContent>
                     <div className="grid grid-cols-2 gap-3">
-          <Button onClick={() => setCurrentView('podcastManager')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-podcasts"><Podcast className="w-4 h-4 mr-2" />Podcasts</Button>
-                      <Button onClick={() => setCurrentView('templateManager')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-templates"><FileText className="w-4 h-4 mr-2" />Templates</Button>
-                      <Button onClick={() => setCurrentView('mediaLibrary')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-media"><Music className="w-4 h-4 mr-2" />Media</Button>
-          <Button onClick={() => setCurrentView('episodeHistory')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-episodes"><BarChart3 className="w-4 h-4 mr-2" />Episodes</Button>
+          <Button onClick={() => setCurrentViewWithHistory('podcastManager')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-podcasts"><Podcast className="w-4 h-4 mr-2" />Podcasts</Button>
+                      <Button onClick={() => setCurrentViewWithHistory('templateManager')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-templates"><FileText className="w-4 h-4 mr-2" />Templates</Button>
+                      <Button onClick={() => setCurrentViewWithHistory('mediaLibrary')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-media"><Music className="w-4 h-4 mr-2" />Media</Button>
+          <Button onClick={() => setCurrentViewWithHistory('episodeHistory')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-episodes"><BarChart3 className="w-4 h-4 mr-2" />Episodes</Button>
           <Button 
             onClick={() => {
               if (podcasts.length > 0) {
                 setSelectedPodcastId(podcasts[0].id);
-                setCurrentView('analytics');
+                setCurrentViewWithHistory('analytics');
               }
             }} 
             variant="outline" 
@@ -1174,8 +1344,8 @@ export default function PodcastPlusDashboard() {
             <BarChart3 className="w-4 h-4 mr-2" />Analytics
           </Button>
           {/* Import moved under Podcasts */}
-          <Button onClick={() => setCurrentView('billing')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-subscription"><DollarSign className="w-4 h-4 mr-2" />Subscription</Button>
-                      <Button onClick={() => setCurrentView('settings')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-settings"><SettingsIcon className="w-4 h-4 mr-2" />Settings</Button>
+          <Button onClick={() => setCurrentViewWithHistory('billing')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-subscription"><DollarSign className="w-4 h-4 mr-2" />Subscription</Button>
+                      <Button onClick={() => setCurrentViewWithHistory('settings')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-settings"><SettingsIcon className="w-4 h-4 mr-2" />Settings</Button>
                       <Button
                         onClick={() => window.location.href = '/guides'}
                         variant="outline"
@@ -1186,7 +1356,7 @@ export default function PodcastPlusDashboard() {
                         Guides & Help
                       </Button>
                       <Button
-                        onClick={() => setCurrentView('websiteBuilder')}
+                        onClick={() => setCurrentViewWithHistory('websiteBuilder')}
                         variant="outline"
                         className="justify-start text-sm h-10"
                         data-tour-id="dashboard-quicktool-website"
@@ -1376,10 +1546,47 @@ export default function PodcastPlusDashboard() {
       {mobileMenuOpen && (
         <>
           <div 
-            className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+            className="fixed inset-0 bg-black/50 z-40 lg:hidden transition-opacity duration-300 animate-in fade-in"
             onClick={() => setMobileMenuOpen(false)}
           />
-          <div className="fixed top-0 left-0 bottom-0 w-[280px] bg-white shadow-xl z-50 overflow-y-auto lg:hidden safe-top safe-bottom">
+          <div 
+            className="fixed top-0 left-0 bottom-0 w-[280px] bg-white shadow-xl z-50 overflow-y-auto lg:hidden safe-top safe-bottom transform transition-transform duration-300 ease-out animate-in slide-in-from-left"
+            onTouchStart={(e) => {
+              const touch = e.touches[0];
+              const startX = touch.clientX;
+              const drawer = e.currentTarget;
+              
+              const handleTouchMove = (moveEvent) => {
+                const currentX = moveEvent.touches[0].clientX;
+                const deltaX = currentX - startX;
+                
+                // Only allow swiping left (closing)
+                if (deltaX < 0) {
+                  const translateX = Math.max(deltaX, -280);
+                  drawer.style.transform = `translateX(${translateX}px)`;
+                }
+              };
+              
+              const handleTouchEnd = (endEvent) => {
+                const endX = endEvent.changedTouches[0].clientX;
+                const deltaX = endX - startX;
+                
+                // If swiped more than 30% of drawer width, close it
+                if (deltaX < -84) {
+                  setMobileMenuOpen(false);
+                } else {
+                  // Snap back
+                  drawer.style.transform = '';
+                }
+                
+                drawer.removeEventListener('touchmove', handleTouchMove);
+                drawer.removeEventListener('touchend', handleTouchEnd);
+              };
+              
+              drawer.addEventListener('touchmove', handleTouchMove, { passive: true });
+              drawer.addEventListener('touchend', handleTouchEnd);
+            }}
+          >
             <div className="p-4 border-b">
               <div className="flex items-center justify-between mb-4">
                 <Logo size={24} lockup />
@@ -1415,28 +1622,28 @@ export default function PodcastPlusDashboard() {
                 </Button>
               )}
               <Button 
-                onClick={() => { setCurrentView('podcastManager'); setMobileMenuOpen(false); }} 
+                onClick={() => { setCurrentViewWithHistory('podcastManager'); setMobileMenuOpen(false); }} 
                 variant="outline" 
                 className="w-full justify-start touch-target"
               >
                 <Podcast className="w-4 h-4 mr-2" />Podcasts
               </Button>
               <Button 
-                onClick={() => { setCurrentView('templateManager'); setMobileMenuOpen(false); }} 
+                onClick={() => { setCurrentViewWithHistory('templateManager'); setMobileMenuOpen(false); }} 
                 variant="outline" 
                 className="w-full justify-start touch-target"
               >
                 <FileText className="w-4 h-4 mr-2" />Templates
               </Button>
               <Button 
-                onClick={() => { setCurrentView('mediaLibrary'); setMobileMenuOpen(false); }} 
+                onClick={() => { setCurrentViewWithHistory('mediaLibrary'); setMobileMenuOpen(false); }} 
                 variant="outline" 
                 className="w-full justify-start touch-target"
               >
                 <Music className="w-4 h-4 mr-2" />Media
               </Button>
               <Button 
-                onClick={() => { setCurrentView('episodeHistory'); setMobileMenuOpen(false); }} 
+                onClick={() => { setCurrentViewWithHistory('episodeHistory'); setMobileMenuOpen(false); }} 
                 variant="outline" 
                 className="w-full justify-start touch-target"
               >
@@ -1446,7 +1653,7 @@ export default function PodcastPlusDashboard() {
                 onClick={() => { 
                   if (podcasts.length > 0) {
                     setSelectedPodcastId(podcasts[0].id);
-                    setCurrentView('analytics');
+                    setCurrentViewWithHistory('analytics');
                     setMobileMenuOpen(false);
                   }
                 }} 
@@ -1457,14 +1664,14 @@ export default function PodcastPlusDashboard() {
                 <BarChart3 className="w-4 h-4 mr-2" />Analytics
               </Button>
               <Button 
-                onClick={() => { setCurrentView('billing'); setMobileMenuOpen(false); }} 
+                onClick={() => { setCurrentViewWithHistory('billing'); setMobileMenuOpen(false); }} 
                 variant="outline" 
                 className="w-full justify-start touch-target"
               >
                 <DollarSign className="w-4 h-4 mr-2" />Subscription
               </Button>
               <Button 
-                onClick={() => { setCurrentView('settings'); setMobileMenuOpen(false); }} 
+                onClick={() => { setCurrentViewWithHistory('settings'); setMobileMenuOpen(false); }} 
                 variant="outline" 
                 className="w-full justify-start touch-target"
               >
@@ -1478,7 +1685,7 @@ export default function PodcastPlusDashboard() {
                 <BookOpen className="w-4 h-4 mr-2" />Guides & Help
               </Button>
               <Button 
-                onClick={() => { setCurrentView('websiteBuilder'); setMobileMenuOpen(false); }} 
+                onClick={() => { setCurrentViewWithHistory('websiteBuilder'); setMobileMenuOpen(false); }} 
                 variant="outline" 
                 className="w-full justify-start touch-target"
               >

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import random
+import sys
 import threading
 from datetime import datetime, timedelta
 from typing import Optional
@@ -84,15 +85,18 @@ async def register_user(
 
     try:
         admin_settings = load_admin_settings(session)
-        default_active = False
+        # Use admin setting for default active status (but still require email verification)
+        # Note: Users still need to verify email, but is_active controls whether they see the closed-alpha gate
+        default_active = bool(getattr(admin_settings, "default_user_active", False))
         default_tier = admin_settings.default_user_tier
     except Exception:
         default_active = False
-        default_tier = "unlimited"  # Fallback to unlimited if settings can't be loaded
+        default_tier = "trial"  # Fallback to trial if settings can't be loaded - all accounts start as trial
 
     base_user = UserCreate(**user_in.model_dump(exclude={"accept_terms", "terms_version", "promo_code"}))
-    # Users must verify their email before they can log in
-    base_user.is_active = False
+    # Set active status from admin settings
+    # Note: Email verification is still required, but is_active controls closed-alpha gate visibility
+    base_user.is_active = default_active
     # Set tier from admin settings
     base_user.tier = default_tier
 
@@ -127,12 +131,67 @@ async def register_user(
                             f"[REGISTRATION] User {user.email} attempted to use promo code that reached max uses: {promo_code_upper}"
                         )
                     else:
-                        # Valid promo code - save it to user and increment usage
-                        user.promo_code_used = promo_code_upper
-                        promo_code_obj.usage_count += 1
-                        promo_code_obj.updated_at = datetime.utcnow()
-                        session.add(user)
-                        session.add(promo_code_obj)
+                        # Check if user already has a referral code (can only have one)
+                        if user.promo_code_used:
+                            logging.getLogger(__name__).warning(
+                                f"[REGISTRATION] User {user.email} attempted to use promo code {promo_code_upper} "
+                                f"but already has referral code: {user.promo_code_used}"
+                            )
+                        else:
+                            # Valid promo code - save it to user and increment usage
+                            user.promo_code_used = promo_code_upper
+                            promo_code_obj.usage_count += 1
+                            promo_code_obj.updated_at = datetime.utcnow()
+                            
+                            # Record usage to prevent reuse
+                            from api.models.promo_code import PromoCodeUsage
+                            try:
+                                usage = PromoCodeUsage(
+                                    user_id=user.id,
+                                    promo_code_id=promo_code_obj.id,
+                                    context="signup"
+                                )
+                                session.add(usage)
+                            except Exception as e:
+                                # If unique constraint violation, user already used this code
+                                logging.getLogger(__name__).warning(
+                                    f"[REGISTRATION] Failed to record promo code usage: {e}"
+                                )
+                            
+                            session.add(user)
+                            session.add(promo_code_obj)
+                        
+                        # Apply bonus credits if promo code has them
+                        if promo_code_obj.bonus_credits and promo_code_obj.bonus_credits > 0:
+                            try:
+                                from api.services.billing.wallet import add_purchased_credits
+                                from api.services.billing.credits import refund_credits
+                                from api.models.usage import LedgerReason
+                                
+                                # Add credits to wallet
+                                wallet = add_purchased_credits(session, user.id, float(promo_code_obj.bonus_credits))
+                                
+                                # Create ledger entry for bonus credits
+                                refund_credits(
+                                    session=session,
+                                    user_id=user.id,
+                                    credits=float(promo_code_obj.bonus_credits),
+                                    reason=LedgerReason.PROMO_CODE_BONUS,
+                                    notes=f"Bonus credits from promo code: {promo_code_obj.code} (signup)"
+                                )
+                                
+                                logging.getLogger(__name__).info(
+                                    f"[REGISTRATION] Applied {promo_code_obj.bonus_credits} bonus credits "
+                                    f"from promo code {promo_code_obj.code} to user {user.email} at signup"
+                                )
+                            except Exception as e:
+                                # Don't fail registration if credit application fails
+                                logging.getLogger(__name__).warning(
+                                    f"[REGISTRATION] Failed to apply bonus credits from promo code "
+                                    f"{promo_code_obj.code} to user {user.email}: {e}",
+                                    exc_info=True
+                                )
+                        
                         session.commit()
                         session.refresh(user)
                         logging.getLogger(__name__).info(
@@ -242,17 +301,68 @@ async def register_user(
             if not sent:
                 logger = logging.getLogger(__name__)
                 logger.error(
-                    "Signup email send failed (returned False): to=%s host=%s user_set=%s",
+                    "Signup email send failed (returned False): to=%s host=%s user_set=%s port=%s sender=%s",
                     user.email,
                     getattr(mailer, "host", None),
                     bool(getattr(mailer, "user", None)),
+                    getattr(mailer, "port", None),
+                    getattr(mailer, "sender", None),
                 )
+                # Also print to stderr for immediate visibility in logs
+                print(f"[ERROR] Failed to send verification email to {user.email}. Check SMTP configuration.", file=sys.stderr)
         except Exception as exc:
-            logging.getLogger(__name__).exception(
+            logger = logging.getLogger(__name__)
+            logger.exception(
                 "Exception while sending signup email to %s: %s", user.email, exc
             )
+            # Also print to stderr for immediate visibility
+            print(f"[ERROR] Exception sending verification email to {user.email}: {exc}", file=sys.stderr)
 
-    threading.Thread(target=_send_verification, name="send_verification", daemon=True).start()
+    # Try sending synchronously first to catch immediate errors and provide better diagnostics
+    # This helps catch configuration issues early and ensures we log detailed error information
+    logger = logging.getLogger(__name__)
+    email_sent = False
+    email_error = None
+    
+    try:
+        logger.info(
+            "[REGISTRATION] Attempting to send verification email to %s (host=%s, user_set=%s, port=%s)",
+            user.email,
+            getattr(mailer, "host", None),
+            bool(getattr(mailer, "user", None)),
+            getattr(mailer, "port", None),
+        )
+        
+        sent = mailer.send(to=user.email, subject=subj, text=body, html=html_body)
+        if sent:
+            email_sent = True
+            logger.info("[REGISTRATION] Verification email sent successfully to %s", user.email)
+        else:
+            email_error = "Mailer returned False"
+            logger.error(
+                "[REGISTRATION] Email send failed (returned False): to=%s host=%s user_set=%s port=%s sender=%s",
+                user.email,
+                getattr(mailer, "host", None),
+                bool(getattr(mailer, "user", None)),
+                getattr(mailer, "port", None),
+                getattr(mailer, "sender", None),
+            )
+            print(f"[ERROR] Failed to send verification email to {user.email}. Check SMTP configuration.", file=sys.stderr)
+    except Exception as exc:
+        email_error = str(exc)
+        logger.exception(
+            "[REGISTRATION] Exception during email send attempt to %s: %s", user.email, exc
+        )
+        print(f"[ERROR] Exception sending verification email to {user.email}: {exc}", file=sys.stderr)
+    
+    # If synchronous send failed, also try in background thread as fallback
+    # (in case there was a transient issue)
+    if not email_sent:
+        logger.warning(
+            "[REGISTRATION] Synchronous email send failed, attempting background retry for %s",
+            user.email
+        )
+        threading.Thread(target=_send_verification, name="send_verification", daemon=True).start()
 
     return UserRegisterResponse(
         email=user.email,
@@ -283,16 +393,19 @@ async def login_for_access_token(
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    if not verify_password_or_error(form_data.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    # Check if user is active BEFORE checking password
+    # This ensures unverified users get the proper verification message
+    # even if they enter the wrong password
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Please verify your email to sign in. Check your inbox for the verification code, or request a new one if it expired.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not verify_password_or_error(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     if is_admin_email(user.email):
@@ -321,16 +434,19 @@ async def login_for_access_token_json(
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    if not verify_password_or_error(payload.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    # Check if user is active BEFORE checking password
+    # This ensures unverified users get the proper verification message
+    # even if they enter the wrong password
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Please verify your email to sign in. Check your inbox for the verification code, or request a new one if it expired.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not verify_password_or_error(payload.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     if is_admin_email(user.email):

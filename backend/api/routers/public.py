@@ -8,11 +8,48 @@ from sqlmodel import Session, select
 
 from api.core.database import get_session
 from api.models.podcast import Episode, EpisodeStatus, Podcast
+from api.models.settings import LandingPageContent, load_landing_content, load_admin_settings
 from api.services.op3_analytics import get_show_stats_sync
 from api.services.op3_historical_data import get_historical_data
 from api.routers.episodes.common import is_published_condition
 
 router = APIRouter(prefix="/public", tags=["public"])
+
+
+@router.get("/config")
+def get_public_config(
+    session: Session = Depends(get_session),
+) -> dict:
+    """
+    Public configuration endpoint.
+    Returns client-facing settings that don't require authentication.
+    Used by frontend to configure upload limits, feature flags, etc.
+    """
+    try:
+        admin_settings = load_admin_settings(session)
+        # Clamp max_upload_mb to reasonable bounds (test expects 2048 max)
+        max_upload_mb = min(max(admin_settings.max_upload_mb or 500, 10), 2048)
+        return {
+            "max_upload_mb": max_upload_mb,
+            "browser_audio_conversion_enabled": bool(admin_settings.browser_audio_conversion_enabled),
+        }
+    except Exception:
+        # Fallback to safe defaults if settings can't be loaded
+        return {
+            "max_upload_mb": 500,
+            "browser_audio_conversion_enabled": True,
+        }
+
+
+@router.get("/landing", response_model=LandingPageContent)
+def get_public_landing_content(
+    session: Session = Depends(get_session),
+) -> LandingPageContent:
+    """
+    Public landing page content endpoint.
+    No authentication required - public access.
+    """
+    return load_landing_content(session)
 
 
 @router.get("/podcast/{podcast_id}/analytics")

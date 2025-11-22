@@ -79,8 +79,43 @@ export default function Verify() {
           return;
         }
         
-        // Email verified successfully! Now try to auto-login the user.
-        // Check if we have stored credentials from the registration/login flow
+        const verificationData = await res.json();
+        
+        // If backend returned an access token (when verifying via token link), use it to auto-login
+        if (verificationData.access_token) {
+          try {
+            // Store token
+            localStorage.setItem('authToken', verificationData.access_token);
+            
+            // CRITICAL: Pre-fetch user data to ensure AuthContext has fresh data
+            // This prevents race condition where App.jsx renders with stale/null user
+            try {
+              const userRes = await fetch('/api/users/me', {
+                headers: { 'Authorization': `Bearer ${verificationData.access_token}` }
+              });
+              if (userRes.ok) {
+                const userData = await userRes.json();
+                console.log('[Verify] User verified and active:', userData.is_active);
+              }
+            } catch (err) {
+              console.warn('[Verify] Could not pre-fetch user data (will retry):', err);
+            }
+            
+            // Clean up any stored credentials
+            sessionStorage.removeItem('pendingVerificationEmail');
+            sessionStorage.removeItem('pendingVerificationPassword');
+            
+            // Redirect to root with verified flag - let App.jsx handle routing
+            // This ensures new users go through onboarding
+            window.location.href = '/?verified=1';
+            return;
+          } catch (loginErr) {
+            console.error('Auto-login failed:', loginErr);
+            // Fall through to manual login prompt
+          }
+        }
+        
+        // Fallback: Try auto-login with stored credentials (for code-based verification)
         const storedEmail = sessionStorage.getItem('pendingVerificationEmail');
         const storedPassword = sessionStorage.getItem('pendingVerificationPassword');
         
@@ -108,7 +143,6 @@ export default function Verify() {
                 localStorage.setItem('authToken', data.access_token);
                 
                 // CRITICAL: Pre-fetch user data to ensure AuthContext has fresh data
-                // This prevents race condition where App.jsx renders with stale/null user
                 try {
                   const userRes = await fetch('/api/users/me', {
                     headers: { 'Authorization': `Bearer ${data.access_token}` }
@@ -121,8 +155,7 @@ export default function Verify() {
                   console.warn('[Verify] Could not pre-fetch user data (will retry):', err);
                 }
                 
-                // Redirect to root with onboarding flag - let App.jsx handle routing
-                // This ensures new users go through onboarding
+                // Redirect to root with onboarding flag
                 window.location.href = '/?verified=1';
                 return;
               }

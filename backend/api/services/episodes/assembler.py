@@ -623,7 +623,9 @@ def minutes_precheck(
     if user_role in ("admin", "superadmin") or is_admin:
         tier = "unlimited"
     else:
-        tier = getattr(current_user, "tier", "free")
+        # Use effective tier (trial users get "starter" tier limits)
+        from api.services.trial_service import get_effective_tier
+        tier = get_effective_tier(current_user)
     
     limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
     max_minutes = limits.get("max_processing_minutes_month")
@@ -748,7 +750,9 @@ def assemble_or_queue(
     if user_role in ("admin", "superadmin") or is_admin:
         tier = "unlimited"
     else:
-        tier = getattr(current_user, 'tier', 'free')
+        # Use effective tier (trial users get "starter" tier limits)
+        from api.services.trial_service import get_effective_tier
+        tier = get_effective_tier(current_user)
     
     # Get priority for this tier
     try:

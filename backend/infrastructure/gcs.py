@@ -396,32 +396,30 @@ def _generate_signed_url(
     """
     # CRITICAL: For signing URLs, we ALWAYS need GCS client, even if STORAGE_BACKEND=r2
     # Direct uploads and transcripts require GCS, not R2
-    # Create GCS client directly, bypassing STORAGE_BACKEND check
+    # Use cached client if available, otherwise create one (cached for future calls)
     client = None
     storage_backend = (os.getenv("STORAGE_BACKEND") or "").strip().lower()
-    logger.info("Generating signed URL (STORAGE_BACKEND=%s, but GCS client required for signing)", storage_backend)
     
-    try:
-        from google.cloud import storage
-        # Create client with Application Default Credentials (works in Cloud Run)
-        # This bypasses the _get_gcs_client() check that returns None when STORAGE_BACKEND=r2
-        logger.debug("Creating GCS client directly (bypassing STORAGE_BACKEND=%s check)", storage_backend)
-        client = storage.Client()
-        logger.info("✅ Created GCS client for signed URL generation (bypassed STORAGE_BACKEND check)")
-    except Exception as client_err:
-        logger.warning("Direct GCS client creation failed: %s (will try with force=True)", client_err)
-        # Try the standard client getter with force=True as fallback
-        # This bypasses the STORAGE_BACKEND check
+    # Try to use cached client first (much faster than creating new one)
+    client = _get_gcs_client(force=True)
+    if client:
+        logger.debug("Using cached GCS client for signed URL generation")
+    else:
+        # Fallback: try creating client directly if cache is empty
+        logger.info("Generating signed URL (STORAGE_BACKEND=%s, but GCS client required for signing)", storage_backend)
         try:
-            logger.debug("Trying _get_gcs_client(force=True) as fallback")
-            client = _get_gcs_client(force=True)
-            if client:
-                logger.info("✅ Created GCS client using _get_gcs_client(force=True)")
-            else:
-                logger.error("❌ GCS client not available even with force=True - cannot generate signed URL")
-                return None
-        except Exception as force_err:
-            logger.error("❌ Failed to create GCS client even with force=True: %s", force_err, exc_info=True)
+            from google.cloud import storage
+            # Create client with Application Default Credentials (works in Cloud Run)
+            # This bypasses the _get_gcs_client() check that returns None when STORAGE_BACKEND=r2
+            logger.debug("Creating GCS client directly (bypassing STORAGE_BACKEND=%s check)", storage_backend)
+            client = storage.Client()
+            # Cache it for future use
+            global _gcs_client
+            _gcs_client = client
+            logger.info("✅ Created GCS client for signed URL generation (bypassed STORAGE_BACKEND check)")
+        except Exception as client_err:
+            logger.warning("Direct GCS client creation failed: %s", client_err)
+            logger.error("❌ GCS client not available - cannot generate signed URL")
             return None
     
     if not client:
@@ -844,10 +842,10 @@ def upload_bytes(
     return _write_local_bytes(bucket_name, key, data)
 
 
-def download_gcs_bytes(bucket_name: str, key: str) -> Optional[bytes]:
+def download_gcs_bytes(bucket_name: str, key: str, force_gcs: bool = False) -> Optional[bytes]:
     """Download an object from GCS as bytes, falling back to local storage."""
 
-    client = _get_gcs_client()
+    client = _get_gcs_client(force=force_gcs)
     if client:
         try:
             bucket = client.bucket(bucket_name)
@@ -892,7 +890,7 @@ def download_gcs_bytes(bucket_name: str, key: str) -> Optional[bytes]:
     return local_path.read_bytes()
 
 
-def download_bytes(bucket_name: str, key: str) -> Optional[bytes]:
+def download_bytes(bucket_name: str, key: str, force_gcs: bool = False) -> Optional[bytes]:
     """Backwards compatible wrapper for legacy imports.
 
     Several parts of the codebase still import :func:`download_bytes` from this
@@ -909,7 +907,7 @@ def download_bytes(bucket_name: str, key: str) -> Optional[bytes]:
     :func:`download_gcs_bytes` but both names now behave identically.
     """
 
-    return download_gcs_bytes(bucket_name, key)
+    return download_gcs_bytes(bucket_name, key, force_gcs=force_gcs)
 
 
 def blob_exists(bucket_name: str, blob_name: str) -> Optional[bool]:
@@ -1068,11 +1066,11 @@ def _convert_to_cdn_url(signed_url: str) -> str:
         signed_url: Original signed URL from GCS (https://storage.googleapis.com/...)
         
     Returns:
-        CDN-enabled URL (http://34.120.53.200/...) with same signed parameters
+        CDN-enabled URL (https://storage.googleapis.com/... or http://34.120.53.200/...)
         
-    Note: Uses HTTP (not HTTPS) because we're using IP address directly.
-          The signed query parameters provide security, not the transport layer.
-          We can add HTTPS later with a custom domain + SSL cert if needed.
+    Note: For browser-playable content (audio/video), keeps HTTPS to avoid mixed content issues.
+          CDN conversion to IP address uses HTTP, which causes mixed content warnings.
+          For browser content, we keep the original HTTPS URL.
     """
     # Check if CDN is enabled (can be disabled via CDN_ENABLED=False env var)
     try:
@@ -1087,14 +1085,37 @@ def _convert_to_cdn_url(signed_url: str) -> str:
         # If config check fails, default to enabled
         cdn_ip = "34.120.53.200"
     
-    # Replace storage.googleapis.com domain with CDN IP
-    # Keep all query parameters (signed URL tokens) intact
+    # IMPORTANT: For browser-playable content, keep HTTPS to avoid mixed content issues
+    # CDN conversion to IP address uses HTTP, which browsers block on HTTPS pages
+    # Keep the original HTTPS URL for browser compatibility
+    
+    # If URL is already HTTP with IP address (from previous conversion), convert back to HTTPS
+    if signed_url.startswith(f"http://{cdn_ip}"):
+        # Convert HTTP IP-based URL back to HTTPS storage.googleapis.com
+        https_url = signed_url.replace(
+            f"http://{cdn_ip}",
+            "https://storage.googleapis.com"
+        )
+        logger.debug("Converted HTTP CDN URL back to HTTPS for browser compatibility: %s", https_url[:100])
+        return https_url
+    
+    # Keep HTTPS URLs as-is (don't convert to HTTP CDN)
+    if "storage.googleapis.com" in signed_url and signed_url.startswith("https://"):
+        # Skip CDN conversion for browser content - keep HTTPS
+        # This prevents mixed content errors when page is loaded over HTTPS
+        logger.debug("Keeping HTTPS URL for browser compatibility (skipping CDN conversion to avoid mixed content)")
+        return signed_url
+    
+    # For non-HTTPS URLs or if explicitly needed, convert to CDN
+    # (This path is rarely used since GCS always returns HTTPS URLs)
     if "storage.googleapis.com" in signed_url:
         # Use HTTP with IP address (HTTPS would require custom domain + cert)
+        # NOTE: This will cause mixed content issues in browsers - consider keeping HTTPS instead
         cdn_url = signed_url.replace(
             "https://storage.googleapis.com",
             f"http://{cdn_ip}"
         )
+        logger.warning("Converting HTTPS to HTTP CDN URL - this may cause mixed content issues in browsers")
         logger.debug("Converted GCS URL to CDN: %s", cdn_url)
         return cdn_url
     

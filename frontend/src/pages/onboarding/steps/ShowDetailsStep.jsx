@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 export default function ShowDetailsStep({ wizard }) {
   const { formData, handleChange } = wizard;
   const name = (formData.podcastName || "").trim();
+  const [nameBlurred, setNameBlurred] = useState(false);
 
   return (
     <div className="grid gap-4">
@@ -18,9 +19,10 @@ export default function ShowDetailsStep({ wizard }) {
             id="podcastName"
             value={formData.podcastName}
             onChange={handleChange}
+            onBlur={() => setNameBlurred(true)}
             placeholder="Enter your podcast name"
           />
-          {name.length > 0 && name.length < 4 && (
+          {nameBlurred && name.length > 0 && name.length < 4 && (
             <p className="text-xs text-red-600 mt-1">Name must be at least 4 characters</p>
           )}
         </div>

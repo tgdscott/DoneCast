@@ -20,6 +20,7 @@ const DEFAULT_SETTINGS = {
   default_user_tier: 'unlimited',
   max_upload_mb: 500,
   browser_audio_conversion_enabled: false,
+  free_trial_days: 7,
 };
 
 export default function AdminFeatureToggles({ token, initial = null, onSaved, readOnly = false, allowMaintenanceToggle = false }) {
@@ -100,6 +101,20 @@ export default function AdminFeatureToggles({ token, initial = null, onSaved, re
     // debounce-ish: save after small delay to avoid rapid PUT spam
     clearTimeout(onMaxUploadChange._t);
     onMaxUploadChange._t = setTimeout(() => save(next, prev), 400);
+  };
+
+  const onFreeTrialDaysChange = (daysStr) => {
+    const prev = { ...(settings || {}) };
+    let n = parseInt(daysStr, 10);
+    if (!isFinite(n) || isNaN(n)) n = prev.free_trial_days || 7;
+    // clamp sensible bounds
+    if (n < 1) n = 1;
+    if (n > 365) n = 365;
+    const next = { ...prev, free_trial_days: n };
+    setSettings(next);
+    // debounce-ish: save after small delay to avoid rapid PUT spam
+    clearTimeout(onFreeTrialDaysChange._t);
+    onFreeTrialDaysChange._t = setTimeout(() => save(next, prev), 400);
   };
 
   const onDefaultTierChange = (tier) => {
@@ -211,6 +226,27 @@ export default function AdminFeatureToggles({ token, initial = null, onSaved, re
             max={2048}
             value={(settings && settings.max_upload_mb) ?? 500}
             onChange={(e)=> onMaxUploadChange(e.target.value)}
+            disabled={readOnly}
+            className="w-28 border rounded px-2 py-1 text-sm"
+          />
+        </div>
+      </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <Label className="text-base font-medium text-gray-700">Free Trial Length (Days)</Label>
+          <p className="text-sm text-gray-500 mt-1">
+            Length of free trial period for new users (default: 7 days). Trial starts when user completes the new user wizard.
+          </p>
+        </div>
+        <div className="flex items-center space-x-2">
+          {saving && <span className="text-xs text-gray-400">Saving…</span>}
+          {err && <span className="text-xs text-red-500" title={err}>Err</span>}
+          <input
+            type="number"
+            min={1}
+            max={365}
+            value={(settings && settings.free_trial_days) ?? 7}
+            onChange={(e)=> onFreeTrialDaysChange(e.target.value)}
             disabled={readOnly}
             className="w-28 border rounded px-2 py-1 text-sm"
           />

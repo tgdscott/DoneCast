@@ -37,6 +37,10 @@ export default function AdminDashboard() {
     usersLoading,
     summary,
     metrics,
+    episodesToday,
+    recentActivity,
+    systemHealth,
+    growthMetrics,
     analyticsLoading,
     seedResult,
     runSeed,
@@ -382,6 +386,10 @@ export default function AdminDashboard() {
           runSeed={runSeed}
           seedResult={seedResult}
           metrics={metrics}
+          episodesToday={episodesToday}
+          recentActivity={recentActivity}
+          systemHealth={systemHealth}
+          growthMetrics={growthMetrics}
           analyticsLoading={analyticsLoading}
           handleKillQueue={handleKillQueue}
           killingQueue={killingQueue}

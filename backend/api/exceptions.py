@@ -8,7 +8,44 @@ from api.core.logging import get_logger
 from api.core.cors import add_cors_headers_to_response
 
 def error_payload(code: str, message: str, details=None, request: Request | None = None, error_id: str | None = None):
-    out = {"error": {"code": code, "message": message, "details": details}}
+    """Create error payload with user-friendly messages.
+    
+    Maps technical error codes to user-friendly messages while preserving
+    technical details for debugging.
+    """
+    # Map technical error codes to user-friendly messages
+    USER_FRIENDLY_MESSAGES = {
+        "internal_error": "We're experiencing technical difficulties. Please try again in a moment.",
+        "validation_error": "Please check your input and try again.",
+        "rate_limit_exceeded": "Too many requests. Please wait a moment before trying again.",
+        "service_unavailable": "A service we depend on is temporarily unavailable. Please try again shortly.",
+        "http_error": message,  # Use original message for HTTP errors (usually already user-friendly)
+        "circuit_breaker_open": "A service is temporarily unavailable. Please try again in a moment.",
+        "timeout": "The request took too long to complete. Please try again.",
+        "request_too_large": "Your request is too large. Please reduce the size and try again.",
+    }
+    
+    # Determine if error is retryable
+    retryable_codes = {
+        "rate_limit_exceeded",
+        "service_unavailable",
+        "internal_error",
+        "circuit_breaker_open",
+        "timeout",
+    }
+    
+    user_message = USER_FRIENDLY_MESSAGES.get(code, message)
+    
+    out = {
+        "error": {
+            "code": code,
+            "message": user_message,
+            "technical_message": message if user_message != message else None,  # Only include if different
+            "details": details,
+            "retryable": code in retryable_codes,
+        }
+    }
+    
     rid = getattr(getattr(request, "state", None), "request_id", None)
     if rid:
         out["error"]["request_id"] = rid

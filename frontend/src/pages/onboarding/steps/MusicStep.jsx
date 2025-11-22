@@ -13,8 +13,13 @@ export default function MusicStep({ wizard }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        {musicLoading ? "Loading music..." : 'Pick a track or choose "No Music".'}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          {musicLoading ? "Loading music..." : 'Pick a track or choose "No Music".'}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Selected music will fade in during intros and fade out during outros. It won't play during your main content segments. You can adjust all of this later in the Template Editor.
+        </p>
       </div>
       <div className="grid gap-2">
         {musicAssets.map((asset) => {

@@ -33,7 +33,7 @@ def _cover_url_for(path: Optional[str], *, gcs_path: Optional[str] = None) -> Op
     
     Args:
         path: Local path or remote URL (legacy)
-        gcs_path: GCS path (gs://...) or R2 URL (https://...) if available
+        gcs_path: GCS path (gs://...), R2 path (r2://...), or R2 URL (https://...) if available
     """
     # Priority 1: GCS URL (gs://) - generate signed URL
     if gcs_path and str(gcs_path).startswith("gs://"):
@@ -50,6 +50,23 @@ def _cover_url_for(path: Optional[str], *, gcs_path: Optional[str] = None) -> Op
             from api.core.logging import get_logger
             logger = get_logger("api.episodes.common")
             logger.warning("GCS URL generation failed for %s: %s", gcs_path, e)
+            # Fall through to path-based resolution
+    
+    # Priority 1a: R2 path (r2://bucket/key) - generate signed URL
+    if gcs_path and str(gcs_path).startswith("r2://"):
+        try:
+            from infrastructure.r2 import generate_signed_url
+            r2_str = str(gcs_path)[5:]  # Remove "r2://"
+            parts = r2_str.split("/", 1)
+            if len(parts) == 2:
+                bucket, key = parts
+                url = generate_signed_url(bucket, key, expiration=86400)  # 24hr expiry
+                if url:
+                    return url
+        except Exception as e:
+            from api.core.logging import get_logger
+            logger = get_logger("api.episodes.common")
+            logger.warning("R2 URL generation failed for %s: %s", gcs_path, e)
             # Fall through to path-based resolution
     
     # Priority 1b: R2 URL (https://) - generate signed URL (R2 buckets are NOT public by default)
@@ -90,20 +107,77 @@ def _cover_url_for(path: Optional[str], *, gcs_path: Optional[str] = None) -> Op
         # For other HTTPS URLs (non-R2, non-Spreaker), return as-is
         return str(gcs_path)
     
-    # Priority 2: Remote URL - but REJECT Spreaker URLs (push-only relationship)
-    if not path:
-        return None
-    p = str(path)
-    if p.lower().startswith(("http://", "https://")):
-        # CRITICAL: Reject Spreaker URLs - we have a push-only relationship
-        # Only allow R2 URLs (which we control) or other non-Spreaker URLs
-        if "spreaker.com" in p.lower() or "cdn.spreaker.com" in p.lower():
-            from api.core.logging import get_logger
-            logger = get_logger("api.episodes.common")
-            logger.warning("Rejecting Spreaker URL in _cover_url_for: %s", p[:100])
-            return None
-        # Allow R2 URLs and other non-Spreaker URLs
-        return p
+    # Priority 2: Check path for GCS/R2 paths (legacy episodes may have gs:// or r2:// in cover_path)
+    if path:
+        p = str(path)
+        # Handle GCS paths (gs://) in cover_path field
+        if p.startswith("gs://"):
+            try:
+                from infrastructure.gcs import get_signed_url
+                gcs_str = p[5:]  # Remove "gs://"
+                parts = gcs_str.split("/", 1)
+                if len(parts) == 2:
+                    bucket, key = parts
+                    url = get_signed_url(bucket, key, expiration=3600)
+                    if url:
+                        return url
+            except Exception as e:
+                from api.core.logging import get_logger
+                logger = get_logger("api.episodes.common")
+                logger.warning("GCS URL generation failed for cover_path %s: %s", p[:100], e)
+                # Fall through to other checks
+        
+        # Handle R2 paths (r2://) in cover_path field
+        if p.startswith("r2://"):
+            try:
+                from infrastructure.r2 import generate_signed_url
+                r2_str = p[5:]  # Remove "r2://"
+                parts = r2_str.split("/", 1)
+                if len(parts) == 2:
+                    bucket, key = parts
+                    url = generate_signed_url(bucket, key, expiration=86400)  # 24hr expiry
+                    if url:
+                        return url
+            except Exception as e:
+                from api.core.logging import get_logger
+                logger = get_logger("api.episodes.common")
+                logger.warning("R2 URL generation failed for cover_path %s: %s", p[:100], e)
+                # Fall through to other checks
+        
+        # Handle R2 HTTPS URLs in cover_path field
+        if p.lower().startswith(("http://", "https://")):
+            # CRITICAL: Reject Spreaker URLs - we have a push-only relationship
+            if "spreaker.com" in p.lower() or "cdn.spreaker.com" in p.lower():
+                from api.core.logging import get_logger
+                logger = get_logger("api.episodes.common")
+                logger.warning("Rejecting Spreaker URL in cover_path: %s", p[:100])
+                return None
+            # Handle R2 URLs - generate signed URL
+            if ".r2.cloudflarestorage.com" in p.lower():
+                try:
+                    import os
+                    from urllib.parse import unquote
+                    from infrastructure.r2 import generate_signed_url
+                    
+                    # Remove protocol
+                    url_without_proto = p.replace("https://", "").replace("http://", "")
+                    # Split on first slash to separate host from path
+                    if "/" in url_without_proto:
+                        host_part, key_part = url_without_proto.split("/", 1)
+                        # Extract bucket name (first part before first dot)
+                        bucket_name = host_part.split(".")[0]
+                        # URL-decode the key
+                        key = unquote(key_part)
+                        # Generate signed URL (24 hour expiration for covers)
+                        signed_url = generate_signed_url(bucket_name, key, expiration=86400)
+                        if signed_url:
+                            return signed_url
+                except Exception as e:
+                    from api.core.logging import get_logger
+                    logger = get_logger("api.episodes.common")
+                    logger.warning("Failed to generate signed URL for R2 cover_path: %s", e)
+            # For other HTTPS URLs (non-R2, non-Spreaker), return as-is
+            return p
     
     # Priority 3: Local file (only if exists)
     try:
@@ -292,15 +366,12 @@ def compute_playback_info(episode: Any, *, now: Optional[datetime] = None, wrap_
 
 
 def compute_cover_info(episode: Any, *, now: Optional[datetime] = None) -> dict[str, Any]:
-    """Determine cover preference between GCS, local, and Spreaker cover.
+    """Determine cover URL from R2/GCS, local, or remote sources.
 
-    Priority order for cover URLs within 7-day window:
-    1. GCS URL (gcs_cover_path) - original cover during retention
-    2. Local file (cover_path)
-    3. Spreaker cover URL (remote_cover_url)
-
-    After 7 days: Uses Spreaker cover (remote_cover_url) if available.
-    Always falls back to remote_cover_url if all else fails.
+    Priority order for cover URLs:
+    1. R2/GCS URL (gcs_cover_path) - permanent storage
+    2. Local file (cover_path) - for legacy episodes
+    3. Remote URL (cover_path if HTTPS) - for migrated episodes
 
     Returns dict with 'cover_url' key compatible with existing serializers.
     """
@@ -326,55 +397,34 @@ def compute_cover_info(episode: Any, *, now: Optional[datetime] = None) -> dict[
         remote_cover_url
     )
     
-    # Determine if within 7-day window
-    within_7days = False
-    if publish_at and status_str in ("published", "scheduled"):
-        # Only apply grace period after actual publish time
-        if now_utc >= publish_at:
-            days_since_publish = (now_utc - publish_at).days
-            within_7days = days_since_publish < 7
-    
     # Build cover URL based on priority
     cover_url = None
     cover_source = "none"
     
-    # Try gcs_cover_path (GCS or R2)
-    # R2 URLs (https://) are ALWAYS valid and should ALWAYS be used
-    # GCS URLs (gs://) are only valid within 7-day window for published episodes (retention policy)
-    # For unpublished episodes, always use gcs_cover_path if available
+    # Try gcs_cover_path (R2 or GCS) - ALWAYS use if available (no retention window)
     if gcs_cover_path:
         gcs_cover_str = str(gcs_cover_path).strip()
         if gcs_cover_str:  # Only process non-empty strings
             is_r2_url = gcs_cover_str.lower().startswith(("http://", "https://"))
-            is_published = status_str in ("published", "scheduled")
-            
-            # CRITICAL: Always use R2 URLs immediately (they're permanent, no conditions)
-            # For GCS URLs: use if unpublished, or if published and within 7-day window
-            should_use = is_r2_url or (not is_published) or (is_published and within_7days)
             
             logger.debug(
-                "[compute_cover_info] episode_id=%s evaluating gcs_cover_path: is_r2_url=%s is_published=%s within_7days=%s should_use=%s",
-                episode_id, is_r2_url, is_published, within_7days, should_use
+                "[compute_cover_info] episode_id=%s evaluating gcs_cover_path: is_r2_url=%s",
+                episode_id, is_r2_url
             )
             
-            if should_use:
-                cover_url = _cover_url_for(None, gcs_path=gcs_cover_path)
-                if cover_url:
-                    cover_source = "r2" if is_r2_url else "gcs"
-                    logger.debug(
-                        "[compute_cover_info] episode_id=%s ✅ resolved cover_url from gcs_cover_path: %s (source=%s)",
-                        episode_id, cover_url[:100] + "..." if len(cover_url) > 100 else cover_url, cover_source
-                    )
-                else:
-                    logger.error(
-                        "[compute_cover_info] episode_id=%s ❌ CRITICAL: _cover_url_for returned None for gcs_cover_path=%s. "
-                        "This should never happen for R2 URLs. Check _cover_url_for implementation.",
-                        episode_id, gcs_cover_path[:100] + "..." if gcs_cover_path and len(str(gcs_cover_path)) > 100 else gcs_cover_path
-                    )
+            # Always use gcs_cover_path if available (no retention restrictions)
+            cover_url = _cover_url_for(None, gcs_path=gcs_cover_path)
+            if cover_url:
+                cover_source = "r2" if is_r2_url else "gcs"
+                logger.debug(
+                    "[compute_cover_info] episode_id=%s ✅ resolved cover_url from gcs_cover_path: %s (source=%s)",
+                    episode_id, cover_url[:100] + "..." if len(cover_url) > 100 else cover_url, cover_source
+                )
             else:
-                logger.warning(
-                    "[compute_cover_info] episode_id=%s ⚠️ skipping gcs_cover_path (GCS URL outside retention window): is_r2_url=%s is_published=%s within_7days=%s",
-                    episode_id, is_r2_url, is_published, within_7days
+                logger.error(
+                    "[compute_cover_info] episode_id=%s ❌ CRITICAL: _cover_url_for returned None for gcs_cover_path=%s. "
+                    "This should never happen for R2 URLs. Check _cover_url_for implementation.",
+                    episode_id, gcs_cover_path[:100] + "..." if gcs_cover_path and len(str(gcs_cover_path)) > 100 else gcs_cover_path
                 )
     
     # Try local/remote cover_path
@@ -382,13 +432,29 @@ def compute_cover_info(episode: Any, *, now: Optional[datetime] = None) -> dict[
         logger.debug("[compute_cover_info] episode_id=%s trying cover_path: %s", episode_id, cover_path)
         cover_path_str = str(cover_path)
         
-        # First check if it's a URL (R2, HTTPS, etc.)
-        if cover_path_str.lower().startswith(("http://", "https://")):
+        # Check if it's a GCS path (gs://) - handle before treating as local filename
+        if cover_path_str.startswith("gs://"):
+            logger.debug("[compute_cover_info] episode_id=%s cover_path is GCS path, generating signed URL", episode_id)
+            cover_url = _cover_url_for(cover_path)
+            if cover_url:
+                cover_source = "gcs"
+                logger.debug("[compute_cover_info] episode_id=%s ✅ resolved cover_url from cover_path (GCS): %s", episode_id, cover_url)
+            else:
+                logger.warning("[compute_cover_info] episode_id=%s ⚠️ GCS signed URL generation failed for cover_path: %s", episode_id, cover_path_str[:100])
+        # Check if it's a URL (R2, HTTPS, etc.)
+        elif cover_path_str.lower().startswith(("http://", "https://")):
             # It's a URL - let _cover_url_for handle it
             cover_url = _cover_url_for(cover_path)
             if cover_url:
                 cover_source = "r2" if ".r2.cloudflarestorage.com" in cover_path_str.lower() else "remote"
                 logger.debug("[compute_cover_info] episode_id=%s ✅ resolved cover_url from cover_path URL: %s", episode_id, cover_url)
+        # Check if it's an R2 path (r2://)
+        elif cover_path_str.startswith("r2://"):
+            logger.debug("[compute_cover_info] episode_id=%s cover_path is R2 path, generating signed URL", episode_id)
+            cover_url = _cover_url_for(cover_path)
+            if cover_url:
+                cover_source = "r2"
+                logger.debug("[compute_cover_info] episode_id=%s ✅ resolved cover_url from cover_path (R2): %s", episode_id, cover_url)
         else:
             # It's a local filename - check if file exists locally first
             cover_url = _cover_url_for(cover_path)
@@ -469,7 +535,6 @@ def compute_cover_info(episode: Any, *, now: Optional[datetime] = None) -> dict[
     return {
         "cover_url": cover_url,
         "cover_source": cover_source,
-        "within_7day_window": within_7days,
     }
 
 

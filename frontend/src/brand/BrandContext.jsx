@@ -11,7 +11,7 @@ export function BrandProvider({ children }) {
   useEffect(() => {
     if (typeof document === "undefined") return;
     const html = document.documentElement;
-    html.classList.remove("brand-ppp", "brand-nsc", "brand-plusplus");
+    html.classList.remove("brand-ppp", "brand-plusplus");
     html.classList.add(`brand-${brand.key}`);
     html.setAttribute("data-brand", brand.key);
     document.title = brand.name;

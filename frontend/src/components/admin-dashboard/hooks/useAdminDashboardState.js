@@ -12,11 +12,8 @@ const getInitialTab = () => {
 const defaultAdminTierDialog = { open: false, userId: null, userName: "", confirmText: "" };
 
 const defaultSettings = {
-  aiShowNotes: true,
-  guestAccess: false,
-  maxFileSize: "500",
-  autoBackup: true,
-  emailNotifications: true,
+  // Legacy placeholder - no longer used but kept for backward compatibility
+  // Real settings are managed via AdminFeatureToggles component
 };
 
 export function useAdminDashboardState({ users, adminSettings }) {

@@ -3,16 +3,36 @@ from __future__ import annotations
 import os
 import smtplib
 import socket
+import time
 from email.message import EmailMessage
 from typing import Optional
 import logging
+
+from api.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 class Mailer:
     def __init__(self) -> None:
-        self.host = os.getenv("SMTP_HOST")
+        # Read SMTP_HOST directly from environment - do not allow any overrides
+        # Log the actual value read to help debug configuration issues
+        raw_host = os.getenv("SMTP_HOST")
+        self.host = raw_host
+        
+        # Log configuration at startup for debugging
+        if self.host:
+            logger.info("[MAILER] SMTP_HOST configured: %s", self.host)
+            # Warn if host appears to be wrong provider
+            if "sendgrid" in self.host.lower() and "mailgun" not in self.host.lower():
+                logger.warning(
+                    "[MAILER] WARNING: SMTP_HOST is set to '%s' which appears to be SendGrid. "
+                    "If you intended to use Mailgun, check your environment variables.",
+                    self.host
+                )
+        else:
+            logger.info("[MAILER] SMTP_HOST not configured; emails will be logged to stdout")
+        
         self.port = int(os.getenv("SMTP_PORT", "587"))
         self.user = os.getenv("SMTP_USER")
         # Support both SMTP_PASS (documented) and legacy/alternate SMTP_PASSWORD
@@ -72,6 +92,9 @@ class Mailer:
             print(f"[DEV-MAIL] To: {to}\nSubject: {subject}\n\n{text}")
             return True
 
+        # CRITICAL: Log the exact recipient email to catch any domain mixups
+        logger.info("[MAILER] send() called with to=%s (type=%s, repr=%s)", to, type(to).__name__, repr(to))
+        
         msg = EmailMessage()
         if self.sender_name and '<' not in self.sender:
             msg["From"] = f"{self.sender_name} <{self.sender}>"
@@ -79,6 +102,8 @@ class Mailer:
             msg["From"] = self.sender
         msg["To"] = to
         msg["Subject"] = subject
+        # Double-check the To field was set correctly
+        logger.info("[MAILER] EmailMessage To field set to: %s", msg["To"])
         msg.set_content(text)
         if html:
             msg.add_alternative(html, subtype="html")
@@ -115,6 +140,25 @@ class Mailer:
                     "SMTP mail accepted: to=%s from=%s host=%s:%s user_set=%s", to, self.sender, self.host, self.port, bool(self.user)
                 )
             return True
+        except smtplib.SMTPDataError as data_err:
+            # Mailgun returns SMTPDataError for domain verification issues
+            error_code = getattr(data_err, 'smtp_code', '?')
+            error_msg = getattr(data_err, 'smtp_error', str(data_err))
+            logger.error(
+                "SMTPDataError (likely domain verification issue): code=%s msg=%s to=%s from=%s",
+                error_code, error_msg, to, self.sender
+            )
+            # Check for common Mailgun domain verification errors
+            if "domain" in str(error_msg).lower() or "verify" in str(error_msg).lower() or error_code in (550, 553):
+                logger.error(
+                    "MAILGUN DOMAIN VERIFICATION REQUIRED: The FROM domain '%s' must be verified in Mailgun. "
+                    "Go to Mailgun dashboard > Sending > Domains and verify '%s'. "
+                    "Until verified, use Mailgun's sandbox domain for testing.",
+                    self.sender.split('@')[1] if '@' in self.sender else 'UNKNOWN',
+                    self.sender.split('@')[1] if '@' in self.sender else 'UNKNOWN'
+                )
+            print(f"[MAIL-ERROR] SMTPDataError: {error_code} - {error_msg}")
+            return False
         except smtplib.SMTPRecipientsRefused as refused:
             detail = {}
             for rcpt, (code, errmsg) in refused.recipients.items():  # type: ignore[attr-defined]

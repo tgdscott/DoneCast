@@ -25,9 +25,11 @@ from sqlmodel import Session, select, desc
 from api.core.database import get_session
 from api.models.podcast import Podcast, Episode, EpisodeStatus
 from api.models.website import PodcastWebsite, PodcastWebsiteStatus
+from api.models.user import User
 from api.routers.podcasts.categories import APPLE_PODCAST_CATEGORIES_FLAT
 from api.core.config import settings
 from infrastructure.storage import get_public_audio_url
+from api.services.trial_service import can_access_rss_feed
 
 logger = logging.getLogger(__name__)
 
@@ -656,6 +658,27 @@ def get_podcast_feed(
     if not podcast:
         raise HTTPException(status_code=404, detail="Podcast not found")
     
+    # Check if user can access RSS feed (trial expired check)
+    user = session.get(User, podcast.user_id)
+    if user and not can_access_rss_feed(user):
+        # Return empty feed or error message
+        error_feed = f"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+    <channel>
+        <title>{podcast.name or 'Podcast'}</title>
+        <description>Your free trial has expired. Please subscribe to a plan to continue broadcasting your podcast.</description>
+        <link>{_resolve_site_url(session, podcast)}</link>
+    </channel>
+</rss>"""
+        return Response(
+            content=error_feed,
+            media_type="application/rss+xml",
+            headers={
+                "Cache-Control": "public, max-age=300",
+                "Content-Disposition": 'inline; filename="feed.xml"',
+            }
+        )
+    
     # Get all episodes with audio available, regardless of published/scheduled status
     # CRITICAL FIX (Oct 21): Scheduled episodes MUST be playable - they have assembled audio in GCS
     # The publish_at date controls WHEN they appear in podcast apps, but the audio itself
@@ -679,7 +702,36 @@ def get_podcast_feed(
         .where(Episode.gcs_audio_path != None)  # Must have audio in GCS
         .order_by(desc(Episode.publish_at))
     )
-    episodes = session.exec(statement).all()
+    all_episodes = session.exec(statement).all()
+    
+    # CRITICAL: Placeholder episodes (episode_number=0) are ONLY for RSS submission to Apple/Spotify
+    # They should NEVER be shown to users once they have real episodes
+    # Filter out placeholder episodes (episode_number=0) if ANY real episodes exist
+    placeholder_episodes = [
+        ep for ep in all_episodes
+        if ep.episode_number == 0 or (ep.episode_type == "trailer" and ep.title and "coming soon" in ep.title.lower())
+    ]
+    
+    real_episodes = [
+        ep for ep in all_episodes
+        if ep.episode_number != 0 and not (ep.episode_type == "trailer" and ep.title and "coming soon" in ep.title.lower())
+    ]
+    
+    # If we have real episodes, ALWAYS exclude placeholder episodes completely
+    # Only include placeholder episodes if NO real episodes exist (for RSS submission purposes)
+    if real_episodes:
+        episodes = real_episodes
+        logger.info(
+            f"RSS Feed: Excluding {len(placeholder_episodes)} placeholder episode(s) - "
+            f"user has {len(real_episodes)} real episode(s)"
+        )
+    else:
+        # No real episodes yet - include placeholder for RSS submission only
+        episodes = all_episodes
+        logger.info(
+            f"RSS Feed: Including placeholder episode(s) - no real episodes yet "
+            f"(for RSS submission to Apple/Spotify)"
+        )
     
     site_url = _resolve_site_url(session, podcast)
     feed_xml = _generate_podcast_rss(podcast, list(episodes), site_url, str(request.url))

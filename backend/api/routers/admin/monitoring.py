@@ -39,6 +39,57 @@ def check_transcription_health_endpoint(
     return result
 
 
+@router.get("/stuck-operations", response_model=Dict[str, Any])
+def check_stuck_operations(
+    session: Session = Depends(get_session),
+    admin_user: User = Depends(get_current_admin_user),
+) -> Dict[str, Any]:
+    """
+    Check for stuck operations (episodes in processing > 2 hours).
+    
+    Requires admin authentication.
+    
+    Returns:
+        - stuck_count: Number of stuck operations
+        - stuck_episodes: List of stuck episode details (first 10)
+        - action_required: Whether cleanup is needed
+    """
+    del admin_user  # Only need to verify admin status
+    
+    from worker.tasks.maintenance import detect_stuck_episodes
+    
+    stuck = detect_stuck_episodes(session, stuck_threshold_hours=2)
+    
+    return {
+        "stuck_count": len(stuck),
+        "stuck_episodes": stuck[:10],  # Limit to first 10 for response size
+        "action_required": len(stuck) > 0,
+    }
+
+
+@router.post("/stuck-operations/cleanup", response_model=Dict[str, Any])
+def cleanup_stuck_operations(
+    session: Session = Depends(get_session),
+    admin_user: User = Depends(get_current_admin_user),
+) -> Dict[str, Any]:
+    """
+    Mark stuck operations as error state.
+    
+    Requires admin authentication.
+    
+    This will:
+    - Find episodes stuck in processing > 2 hours
+    - Mark them as error with reason "operation_timeout"
+    - Allow users to retry failed operations
+    """
+    del admin_user  # Only need to verify admin status
+    
+    from worker.tasks.maintenance import mark_stuck_episodes_as_error
+    
+    result = mark_stuck_episodes_as_error(session, dry_run=False)
+    return result
+
+
 @router.post("/transcription-health/alert", response_model=Dict[str, Any])
 def force_transcription_alert(
     session: Session = Depends(get_session),

@@ -76,13 +76,69 @@ async def update_episode_metadata(
     if "cover_image_path" in payload_dict:
         cover_image_path = payload_dict.get("cover_image_path")
         if cover_image_path and cover_image_path != getattr(ep, 'cover_path', None):
+            cover_str = str(cover_image_path)
+            
+            # If cover is a GCS URL (gs://), migrate it to R2 immediately
+            # Episode covers should be in R2 (permanent storage), not GCS
+            if cover_str.startswith("gs://"):
+                try:
+                    from infrastructure import gcs, r2 as r2_module
+                    
+                    # Parse GCS path
+                    gcs_str = cover_str[5:]  # Remove "gs://"
+                    parts = gcs_str.split("/", 1)
+                    if len(parts) == 2:
+                        gcs_bucket, gcs_key = parts
+                        
+                        # Download from GCS
+                        logger.info(f"[episodes.write] Migrating cover from GCS to R2 for episode {episode_id}")
+                        cover_bytes = gcs.download_bytes(gcs_bucket, gcs_key)
+                        
+                        if cover_bytes:
+                            # Upload to R2
+                            r2_bucket = os.getenv("R2_BUCKET", "ppp-media").strip()
+                            episode_id_str = str(ep.id)
+                            filename = os.path.basename(gcs_key)
+                            
+                            # Use same structure as assembly: {user_id}/episodes/{episode_id}/cover/{filename}
+                            user_id_str = str(ep.user_id).replace("-", "")
+                            r2_key = f"{user_id_str}/episodes/{episode_id_str}/cover/{filename}"
+                            
+                            # Determine content type
+                            content_type = "image/jpeg"
+                            if filename.lower().endswith(".png"):
+                                content_type = "image/png"
+                            elif filename.lower().endswith(".webp"):
+                                content_type = "image/webp"
+                            
+                            r2_url = r2_module.upload_bytes(r2_bucket, r2_key, cover_bytes, content_type=content_type)
+                            
+                            if r2_url:
+                                logger.info(f"[episodes.write] ✅ Migrated cover to R2: {r2_url}")
+                                cover_image_path = r2_url  # Use R2 URL instead of GCS
+                                cover_str = r2_url
+                            else:
+                                logger.warning(f"[episodes.write] Failed to upload cover to R2, keeping GCS URL")
+                        else:
+                            logger.warning(f"[episodes.write] Failed to download cover from GCS, keeping GCS URL")
+                except Exception as migrate_err:
+                    logger.warning(f"[episodes.write] Failed to migrate cover from GCS to R2: {migrate_err}", exc_info=True)
+                    # Continue with GCS URL - it will still work, just not ideal
+            
             ep.cover_path = cover_image_path
-            # If cover_image_path is an R2 URL (https://), also set gcs_cover_path
+            # Set gcs_cover_path for both R2 URLs (https://) and GCS URLs (gs://)
             # This ensures covers uploaded from Episode History are properly stored and served
-            if cover_image_path and str(cover_image_path).lower().startswith(("http://", "https://")):
-                if ".r2.cloudflarestorage.com" in str(cover_image_path).lower():
-                    # R2 URL - store in gcs_cover_path for proper serving
-                    if hasattr(ep, 'gcs_cover_path'):
+            if cover_image_path:
+                if hasattr(ep, 'gcs_cover_path'):
+                    # R2 URL (https://) - store in gcs_cover_path
+                    if cover_str.lower().startswith(("http://", "https://")):
+                        if ".r2.cloudflarestorage.com" in cover_str.lower():
+                            ep.gcs_cover_path = cover_image_path
+                        else:
+                            # Other HTTPS URL - still store it (might be migrated later)
+                            ep.gcs_cover_path = cover_image_path
+                    # GCS URL (gs://) - also store in gcs_cover_path (will be migrated next time)
+                    elif cover_str.startswith("gs://"):
                         ep.gcs_cover_path = cover_image_path
             # When switching to a freshly uploaded cover, clear remote_cover_url
             if hasattr(ep, 'remote_cover_url'):

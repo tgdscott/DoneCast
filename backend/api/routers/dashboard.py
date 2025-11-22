@@ -64,13 +64,17 @@ def _coerce_int(value: Optional[object]) -> Optional[int]:
 def _compute_local_episode_stats(session: Session, user_id) -> tuple[dict, int]:
     now = datetime.now(timezone.utc)
 
+    # CRITICAL: Exclude placeholder episodes (episode_number=0) - they're ONLY for RSS feeds, never shown to users
     total_episodes = session.exec(
-        select(func.count(Episode.id)).where(Episode.user_id == user_id)
+        select(func.count(Episode.id))
+        .where(Episode.user_id == user_id)
+        .where(Episode.episode_number != 0)  # Exclude placeholder episodes
     ).one()
 
     upcoming_scheduled = session.exec(
         select(func.count(Episode.id)).where(
             Episode.user_id == user_id,
+            Episode.episode_number != 0,  # Exclude placeholder episodes
             Episode.publish_at != None,  # noqa: E711
             Episode.publish_at > now,
         )
@@ -82,6 +86,7 @@ def _compute_local_episode_stats(session: Session, user_id) -> tuple[dict, int]:
     last_published_episode = session.exec(
         select(Episode)
         .where(Episode.user_id == user_id)
+        .where(Episode.episode_number != 0)  # Exclude placeholder episodes
         .where(Episode.publish_at != None)  # noqa: E711
         .where(Episode.publish_at <= now)  # Only published episodes (not scheduled)
         .order_by(desc(Episode.publish_at))
@@ -96,10 +101,10 @@ def _compute_local_episode_stats(session: Session, user_id) -> tuple[dict, int]:
         else:
             pub_dt = pub_dt.astimezone(timezone.utc)
         last_published_at = pub_dt.isoformat().replace('+00:00', 'Z')
-        logger.info(f"[DASHBOARD] Last published episode: {last_published_episode.title} - publish_at: {pub_dt.isoformat()} (UTC), now: {now.isoformat()}")
+        logger.debug(f"[DASHBOARD] Last published episode: {last_published_episode.title} - publish_at: {pub_dt.isoformat()} (UTC)")
         # Calculate days ago for logging
         days_ago = (now - pub_dt).days
-        logger.info(f"[DASHBOARD] Last published episode is {days_ago} days ago")
+        logger.debug(f"[DASHBOARD] Last published episode is {days_ago} days ago")
     else:
         logger.warning(f"[DASHBOARD] No published episodes found for user {user_id}")
 
@@ -107,6 +112,7 @@ def _compute_local_episode_stats(session: Session, user_id) -> tuple[dict, int]:
     last_processed_episode = session.exec(
         select(Episode)
         .where(Episode.user_id == user_id)
+        .where(Episode.episode_number != 0)  # Exclude placeholder episodes
         .where(Episode.processed_at != None)  # noqa: E711
         .order_by(desc(Episode.processed_at))
         .limit(1)
@@ -141,6 +147,7 @@ def _compute_local_episode_stats(session: Session, user_id) -> tuple[dict, int]:
     recent_episodes = session.exec(
         select(Episode)
         .where(Episode.user_id == user_id)
+        .where(Episode.episode_number != 0)  # Exclude placeholder episodes
         .where(Episode.publish_at != None)  # noqa: E711
         .where(Episode.publish_at <= now)  # Only published episodes (not scheduled)
         .order_by(sa_text("publish_at DESC"))
@@ -162,7 +169,7 @@ def _compute_local_episode_stats(session: Session, user_id) -> tuple[dict, int]:
                 "publish_at": pub_dt.isoformat().replace('+00:00', 'Z'),
                 "downloads_all_time": 0,  # Will be populated from OP3 or historical data
             })
-            logger.info(f"[DASHBOARD] Recent episode: {ep.title} - publish_at: {pub_dt.isoformat()} (UTC)")
+            logger.debug(f"[DASHBOARD] Recent episode: {ep.title} - publish_at: {pub_dt.isoformat()} (UTC)")
 
     base = {
         "total_episodes": int(total_episodes or 0),
@@ -171,7 +178,7 @@ def _compute_local_episode_stats(session: Session, user_id) -> tuple[dict, int]:
         "last_assembly_status": last_status,
         "recent_episodes": recent_episodes_data,  # Most recent 3 episodes
     }
-    logger.info(f"[DASHBOARD] Base stats - last_published_at: {last_published_at}, recent_episodes: {len(recent_episodes_data)}")
+    logger.debug(f"[DASHBOARD] Base stats - last_published_at: {last_published_at}, recent_episodes: {len(recent_episodes_data)}")
     return base, int(episodes_last_30d or 0)
 
 
@@ -235,7 +242,7 @@ def dashboard_stats(
             op3_error_message = "RSS feed not configured"
         else:
             rss_url = podcast.rss_feed_url
-            logger.info(f"Fetching OP3 stats for RSS feed: {rss_url}")
+            logger.debug(f"Fetching OP3 stats for RSS feed: {rss_url}")
             
             # Try multiple RSS feed URL variations (OP3 might have registered a different URL)
             # This matches the logic in analytics.py
@@ -252,7 +259,7 @@ def dashboard_stats(
             if hasattr(podcast, 'rss_url') and podcast.rss_url:
                 rss_url_variations.insert(0, podcast.rss_url)  # Try stored URL first
             
-            logger.info(f"Dashboard: Trying RSS URLs for OP3: {rss_url_variations}")
+            logger.debug(f"Dashboard: Trying RSS URLs for OP3: {rss_url_variations}")
             
             # For Cinema IRL, use known show UUID (from OP3.dev screenshot)
             # Show UUID: 285fa80eafd64305b99386b3f7184f88
@@ -260,7 +267,7 @@ def dashboard_stats(
             known_show_uuid = None
             if 'cinema' in podcast_identifier and 'irl' in podcast_identifier:
                 known_show_uuid = "285fa80eafd64305b99386b3f7184f88"
-                logger.info(f"Cinema IRL detected - using known show UUID: {known_show_uuid}")
+                logger.debug(f"Cinema IRL detected - using known show UUID: {known_show_uuid}")
             
             # Use sync wrapper to fetch OP3 stats (handles async internally)
             # Try public OP3.dev first (where data usually is), then fall back to self-hosted
@@ -272,40 +279,36 @@ def dashboard_stats(
             if known_show_uuid:
                 primary_rss_url = rss_url_variations[0]
                 try:
-                    logger.info(f"OP3: Trying known show UUID {known_show_uuid} with RSS URL: {primary_rss_url}")
+                    logger.debug(f"OP3: Trying known show UUID {known_show_uuid} with RSS URL: {primary_rss_url}")
                     stats = get_show_stats_sync(primary_rss_url, days=30, use_public=True, show_uuid=known_show_uuid)
                     if stats and (stats.downloads_30d > 0 or stats.downloads_all_time > 0):
                         op3_show_stats = stats
                         successful_url = primary_rss_url
-                        logger.info(f"OP3: ✅ Found data using known show UUID: {known_show_uuid}")
-                        logger.info(f"OP3: Stats - 7d={stats.downloads_7d}, 30d={stats.downloads_30d}, 365d={stats.downloads_365d}, all-time={stats.downloads_all_time}")
+                        logger.info(f"OP3: ✅ Found data using known show UUID - 7d={stats.downloads_7d}, 30d={stats.downloads_30d}, all-time={stats.downloads_all_time}")
                     elif stats:
-                        logger.info(f"OP3: Known show UUID returned stats but no data, trying RSS URL variations...")
+                        logger.debug(f"OP3: Known show UUID returned stats but no data, trying RSS URL variations...")
                 except Exception as e:
-                    logger.warning(f"OP3: Failed to fetch with known show UUID: {e}, trying RSS URL variations...")
+                    logger.debug(f"OP3: Failed to fetch with known show UUID: {e}, trying RSS URL variations...")
             
-            # If known UUID didn't work or we don't have one, try all RSS URL variations
+            # If known UUID didn't work or we don't have one, try RSS URL variations (stop early when data found)
             if not op3_show_stats or (op3_show_stats.downloads_30d == 0 and op3_show_stats.downloads_all_time == 0):
-                # Try public OP3.dev with all RSS URL variations
+                # Try public OP3.dev with RSS URL variations (stop on first success)
                 for rss_url_var in rss_url_variations:
                     try:
-                        logger.info(f"OP3: Trying public OP3.dev with RSS URL: {rss_url_var}")
+                        logger.debug(f"OP3: Trying public OP3.dev with RSS URL: {rss_url_var}")
                         stats = get_show_stats_sync(rss_url_var, days=30, use_public=True)
                         if stats and (stats.downloads_30d > 0 or stats.downloads_all_time > 0):
                             op3_show_stats = stats
                             successful_url = rss_url_var
-                            logger.info(f"OP3: ✅ Found data on public OP3.dev with URL: {rss_url_var}")
-                            logger.info(f"OP3: Stats - 7d={stats.downloads_7d}, 30d={stats.downloads_30d}, 365d={stats.downloads_365d}, all-time={stats.downloads_all_time}")
-                            break
-                        elif stats:
-                            logger.info(f"OP3: Public OP3.dev returned stats but no data for URL: {rss_url_var}")
+                            logger.info(f"OP3: ✅ Found data on public OP3.dev - 7d={stats.downloads_7d}, 30d={stats.downloads_30d}, all-time={stats.downloads_all_time}")
+                            break  # Stop trying once we find data
                     except Exception as e:
-                        logger.warning(f"OP3: Failed to fetch from public OP3.dev with URL {rss_url_var}: {e}")
+                        logger.debug(f"OP3: Failed to fetch from public OP3.dev with URL {rss_url_var}: {e}")
                         continue
                 
-                # If public OP3.dev has no data, try self-hosted OP3
+                # If public OP3.dev has no data, try self-hosted OP3 (only once, not for each URL)
                 if not op3_show_stats or (op3_show_stats.downloads_30d == 0 and op3_show_stats.downloads_all_time == 0):
-                    logger.info(f"OP3: No data on public OP3.dev, trying self-hosted OP3...")
+                    logger.debug(f"OP3: No data on public OP3.dev, trying self-hosted OP3...")
                     # Use the first URL variation (current format) for self-hosted
                     rss_url_var = rss_url_variations[0]
                     try:
@@ -313,14 +316,13 @@ def dashboard_stats(
                         if stats and (stats.downloads_30d > 0 or stats.downloads_all_time > 0):
                             op3_show_stats = stats
                             successful_url = rss_url_var
-                            logger.info(f"OP3: ✅ Found data on self-hosted OP3 with URL: {rss_url_var}")
-                            logger.info(f"OP3: Stats - 7d={stats.downloads_7d}, 30d={stats.downloads_30d}, 365d={stats.downloads_365d}, all-time={stats.downloads_all_time}")
+                            logger.info(f"OP3: ✅ Found data on self-hosted OP3 - 7d={stats.downloads_7d}, 30d={stats.downloads_30d}, all-time={stats.downloads_all_time}")
                     except Exception as e:
-                        logger.error(f"OP3: Failed to fetch from self-hosted OP3 with URL {rss_url_var}: {e}")
+                        logger.debug(f"OP3: Failed to fetch from self-hosted OP3: {e}")
             
             # Use the successful URL (or first variation if none worked)
             rss_url = successful_url or rss_url_variations[0]
-            logger.info(f"OP3: Using RSS URL: {rss_url} for data merge")
+            logger.debug(f"OP3: Using RSS URL: {rss_url} for data merge")
             
             # ALWAYS set OP3 values (even if 0) so frontend can display them
             op3_episode_stats_map = {}  # Map episode titles to download counts (will be populated from OP3 and historical)
@@ -335,88 +337,59 @@ def dashboard_stats(
                 # Use all_episodes_map if available (has ALL episodes), otherwise fall back to top_episodes
                 if hasattr(op3_show_stats, 'all_episodes_map') and op3_show_stats.all_episodes_map:
                     op3_episode_stats_map = op3_show_stats.all_episodes_map.copy()
-                    logger.info(f"[DASHBOARD] Built OP3 episode map from all_episodes_map with {len(op3_episode_stats_map)} episodes")
+                    logger.debug(f"[DASHBOARD] Built OP3 episode map from all_episodes_map with {len(op3_episode_stats_map)} episodes")
                 elif op3_show_stats.top_episodes:
                     # Fallback: build map from top episodes only
                     for ep_stat in op3_show_stats.top_episodes:
                         title = ep_stat.get('title', '').strip().lower()
                         if title:
                             op3_episode_stats_map[title] = ep_stat.get('downloads_all_time', 0)
-                    logger.info(f"[DASHBOARD] Built OP3 episode map from top_episodes with {len(op3_episode_stats_map)} episodes")
+                    logger.debug(f"[DASHBOARD] Built OP3 episode map from top_episodes with {len(op3_episode_stats_map)} episodes")
                 else:
-                    logger.warning(f"[DASHBOARD] No OP3 episode data available for mapping")
+                    logger.debug(f"[DASHBOARD] No OP3 episode data available for mapping")
                 
                 # CRITICAL FIX: If show-level stats are 0 but we have episode-level data, aggregate from episodes
                 # This happens when OP3 returns episode data but show-level stats are incomplete/zero
                 if (op3_downloads_7d == 0 and op3_downloads_30d == 0 and op3_downloads_365d == 0 and op3_downloads_all_time == 0) and op3_episode_stats_map:
-                    logger.info(f"[DASHBOARD] ⚠️ OP3 show-level stats are 0, but we have {len(op3_episode_stats_map)} episodes with data")
-                    logger.info(f"[DASHBOARD] Attempting to recover stats from weekly_downloads or episode aggregation...")
+                    logger.debug(f"[DASHBOARD] OP3 show-level stats are 0, attempting to recover from episode data...")
                     
                     # First, check if OP3 returned weekly_downloads that we can use for 7d/30d/365d
                     # (OP3 might return weekly data even if monthlyDownloads/downloads_7d are 0)
                     if hasattr(op3_show_stats, 'weekly_downloads') and op3_show_stats.weekly_downloads:
                         weekly_list = op3_show_stats.weekly_downloads
-                        logger.info(f"[DASHBOARD] Found weekly_downloads array with {len(weekly_list)} items: {weekly_list[:10]}...")
                         # Calculate 7d from weekly data (last 7 days)
                         if len(weekly_list) >= 7:
                             op3_downloads_7d = sum(weekly_list[-7:])
-                            logger.info(f"[DASHBOARD] ✅ Calculated 7d downloads from weekly data: {op3_downloads_7d}")
                         # Calculate 30d from weekly data (last 30 days)
                         if len(weekly_list) >= 30:
                             op3_downloads_30d = sum(weekly_list[-30:])
-                            logger.info(f"[DASHBOARD] ✅ Calculated 30d downloads from weekly data: {op3_downloads_30d}")
                         elif len(weekly_list) > 0:
                             # Use all available data as proxy for 30d
                             op3_downloads_30d = sum(weekly_list)
-                            logger.info(f"[DASHBOARD] ✅ Calculated 30d downloads from all weekly data: {op3_downloads_30d}")
                         # Calculate 365d from weekly data
                         if len(weekly_list) >= 365:
                             op3_downloads_365d = sum(weekly_list[-365:])
                         elif len(weekly_list) > 0:
                             op3_downloads_365d = sum(weekly_list)
-                        logger.info(f"[DASHBOARD] ✅ Calculated 365d downloads from weekly data: {op3_downloads_365d}")
                         # Use sum of all weekly data as all-time proxy
                         if len(weekly_list) > 0:
                             op3_downloads_all_time = sum(weekly_list)
-                            logger.info(f"[DASHBOARD] ✅ Using sum of weekly data as all-time proxy: {op3_downloads_all_time}")
                     
                     # If weekly data didn't help, try aggregating from episode data
                     if op3_downloads_all_time == 0:
                         aggregated_all_time = sum(op3_episode_stats_map.values())
                         if aggregated_all_time > 0:
                             op3_downloads_all_time = aggregated_all_time
-                            logger.info(f"[DASHBOARD] ✅ Aggregated all-time downloads from episodes: {op3_downloads_all_time}")
                             # For 365d, use all-time as proxy if we don't have it from weekly data
                             if op3_downloads_365d == 0:
                                 op3_downloads_365d = aggregated_all_time
-                                logger.info(f"[DASHBOARD] Using all-time as proxy for 365d: {op3_downloads_365d}")
-                        else:
-                            logger.warning(f"[DASHBOARD] Episode map exists but all values are 0")
-                
-                # Log COMPLETE OP3 response for debugging
-                logger.info(f"[DASHBOARD] ===== OP3 RESPONSE DEBUG =====")
-                logger.info(f"[DASHBOARD] downloads_7d: {op3_downloads_7d}")
-                logger.info(f"[DASHBOARD] downloads_30d: {op3_downloads_30d}")
-                logger.info(f"[DASHBOARD] downloads_365d: {op3_downloads_365d}")
-                logger.info(f"[DASHBOARD] downloads_all_time: {op3_downloads_all_time}")
-                logger.info(f"[DASHBOARD] top_episodes count: {len(op3_top_episodes)}")
-                logger.info(f"[DASHBOARD] episode_stats_map count: {len(op3_episode_stats_map)}")
-                if op3_top_episodes:
-                    for i, ep in enumerate(op3_top_episodes, 1):
-                        logger.info(f"[DASHBOARD]   Top episode {i}: '{ep.get('title')}' - {ep.get('downloads_all_time', 0)} downloads")
-                if op3_episode_stats_map:
-                    sample_episodes = list(op3_episode_stats_map.items())[:5]
-                    logger.info(f"[DASHBOARD]   Sample episodes from map: {sample_episodes}")
-                logger.info(f"[DASHBOARD] ===== END OP3 RESPONSE =====")
                 
                 if op3_downloads_30d > 0 or op3_downloads_all_time > 0:
-                    logger.info(f"OP3 stats SUCCESS: 7d={op3_downloads_7d}, 30d={op3_downloads_30d}, 365d={op3_downloads_365d}, all-time={op3_downloads_all_time}")
+                    logger.debug(f"OP3 stats: 7d={op3_downloads_7d}, 30d={op3_downloads_30d}, 365d={op3_downloads_365d}, all-time={op3_downloads_all_time}")
                 else:
-                    logger.warning(f"OP3 returned 0 downloads for {rss_url} - will try historical fallback")
-                    logger.warning(f"OP3: This might mean the RSS feed URL doesn't match what OP3 has registered")
-                    logger.warning(f"OP3: Show UUID used: {known_show_uuid if 'known_show_uuid' in locals() else 'none'}")
+                    logger.debug(f"OP3 returned 0 downloads for {rss_url} - will try historical fallback")
             else:
-                logger.warning("OP3 stats fetch returned None - will try historical fallback")
+                logger.debug("OP3 stats fetch returned None - will try historical fallback")
                 op3_downloads_7d = 0
                 op3_downloads_30d = 0
                 op3_downloads_365d = 0
@@ -441,35 +414,29 @@ def dashboard_stats(
                         # Historical data uses 'downloads_all' not 'downloads_all_time'
                         downloads = ep.get('downloads_all', 0) or ep.get('downloads', 0)
                         historical_episode_map[title] = downloads
-                logger.info(f"[DASHBOARD] Built historical episode map with {len(historical_episode_map)} episodes")
+                logger.debug(f"[DASHBOARD] Built historical episode map with {len(historical_episode_map)} episodes")
                 
                 # Only use historical if it has data (Cinema IRL)
                 if historical_all_time > 0:
-                    logger.info(f"Historical data available: 7d={historical_7d}, 30d={historical_30d}, all-time={historical_all_time}")
+                    logger.debug(f"Historical data available: 7d={historical_7d}, 30d={historical_30d}, all-time={historical_all_time}")
                     
                     # Merge: use historical if OP3 is 0, otherwise keep OP3
                     # IMPORTANT: For Cinema IRL, historical data should ALWAYS be used if OP3 has no data
                     if op3_downloads_all_time == 0:
-                        logger.info("Historical fallback ACTIVATED - OP3 has no data, using historical data")
+                        logger.debug("Historical fallback ACTIVATED - OP3 has no data, using historical data")
                         if op3_downloads_7d == 0:
                             op3_downloads_7d = historical_7d
-                            logger.info(f"Historical: Set 7d downloads to {historical_7d}")
                         if op3_downloads_30d == 0:
                             op3_downloads_30d = historical_30d
-                            logger.info(f"Historical: Set 30d downloads to {historical_30d}")
                         if op3_downloads_all_time == 0:
                             op3_downloads_all_time = historical_all_time
-                            logger.info(f"Historical: Set all-time downloads to {historical_all_time}")
                         op3_error_message = None  # Clear error since we have historical data
-                    else:
-                        # OP3 has data - but we should still merge historical for episode-level matching
-                        logger.info(f"OP3 has data (all-time: {op3_downloads_all_time}), but will still use historical for episode matching")
                     
                     # Merge historical episode map into OP3 episode map (prefer OP3, fallback to historical)
                     for title, downloads in historical_episode_map.items():
                         if title not in op3_episode_stats_map:
                             op3_episode_stats_map[title] = downloads
-                    logger.info(f"[DASHBOARD] Merged historical into OP3 episode map - total: {len(op3_episode_stats_map)} episodes")
+                    logger.debug(f"[DASHBOARD] Merged historical into OP3 episode map - total: {len(op3_episode_stats_map)} episodes")
                     
                     # ALWAYS get top episodes from historical if available (even if OP3 has data)
                     # Historical episodes are older and might have more downloads
@@ -507,13 +474,11 @@ def dashboard_stats(
                                 }
                                 for ep in top_historical[:3]
                             ]
-                        logger.info(f"Merged top episodes: {len(op3_top_episodes)} episodes (historical: {len(top_historical)}, OP3: {len(op3_show_stats.top_episodes) if op3_show_stats and op3_show_stats.top_episodes else 0})")
-                    else:
-                        logger.info("Historical data available but no top episodes")
+                        logger.debug(f"Merged top episodes: {len(op3_top_episodes)} episodes")
                 else:
-                    logger.info("Historical data empty - showing zeros")
+                    logger.debug("Historical data empty - showing zeros")
             else:
-                logger.info("No historical data available")
+                logger.debug("No historical data available")
                 historical_episode_map = {}  # Initialize empty if no historical data
             
     except Exception as e:
@@ -583,7 +548,7 @@ def dashboard_stats(
             if historical:
                 historical_all_time = historical.get_total_downloads()
                 if historical_all_time > 0:
-                    logger.info(f"[DASHBOARD] FINAL CHECK: OP3 has 0 downloads, using historical data: all-time={historical_all_time}")
+                    logger.debug(f"[DASHBOARD] FINAL CHECK: OP3 has 0 downloads, using historical data: all-time={historical_all_time}")
                     op3_downloads_all_time = historical_all_time
                     op3_downloads_7d = historical.get_total_downloads(days=7) if op3_downloads_7d == 0 else op3_downloads_7d
                     op3_downloads_30d = historical.get_total_downloads(days=30) if op3_downloads_30d == 0 else op3_downloads_30d
@@ -595,7 +560,7 @@ def dashboard_stats(
                             if title:
                                 downloads = ep.get('downloads_all', 0) or ep.get('downloads', 0)
                                 op3_episode_stats_map[title] = downloads
-                        logger.info(f"[DASHBOARD] FINAL CHECK: Populated episode map from historical data: {len(op3_episode_stats_map)} episodes")
+                        logger.debug(f"[DASHBOARD] FINAL CHECK: Populated episode map from historical data: {len(op3_episode_stats_map)} episodes")
                     # Also ensure historical_episode_map is populated for matching
                     if 'historical_episode_map' not in locals() or not historical_episode_map:
                         historical_episode_map = {}
@@ -605,7 +570,7 @@ def dashboard_stats(
                             if title:
                                 downloads = ep.get('downloads_all', 0) or ep.get('downloads', 0)
                                 historical_episode_map[title] = downloads
-                        logger.info(f"[DASHBOARD] FINAL CHECK: Populated historical_episode_map: {len(historical_episode_map)} episodes")
+                        logger.debug(f"[DASHBOARD] FINAL CHECK: Populated historical_episode_map: {len(historical_episode_map)} episodes")
         except Exception as final_ex:
             logger.warning(f"Failed to load historical data in final check: {final_ex}")
     
@@ -643,7 +608,7 @@ def dashboard_stats(
                 for op3_title, op3_downloads in op3_episode_stats_map.items():
                     if normalize_title(op3_title) == ep_title_normalized:
                         downloads = op3_downloads
-                        logger.info(f"[DASHBOARD] ✅ Matched via normalized title: '{ep_title_raw}' <-> '{op3_title}'")
+                        logger.debug(f"[DASHBOARD] ✅ Matched via normalized title: '{ep_title_raw}' <-> '{op3_title}'")
                         break
         # Try historical data if OP3 didn't have it
         if downloads == 0 and historical_episode_map:
@@ -654,27 +619,16 @@ def dashboard_stats(
                 for hist_title, hist_downloads in historical_episode_map.items():
                     if normalize_title(hist_title) == ep_title_normalized:
                         downloads = hist_downloads
-                        logger.info(f"[DASHBOARD] ✅ Matched via normalized title (historical): '{ep_title_raw}' <-> '{hist_title}'")
+                        logger.debug(f"[DASHBOARD] ✅ Matched via normalized title (historical): '{ep_title_raw}' <-> '{hist_title}'")
                         break
         ep_data['downloads_all_time'] = downloads
         if downloads > 0:
-            logger.info(f"[DASHBOARD] ✅ Matched recent episode '{ep_title_raw}' with {downloads} downloads")
+            logger.debug(f"[DASHBOARD] ✅ Matched recent episode '{ep_title_raw}' with {downloads} downloads")
         else:
-            logger.info(f"[DASHBOARD] ⚠️ No download data found for recent episode '{ep_title_raw}' (normalized: '{ep_title_normalized}')")
-            logger.info(f"[DASHBOARD]   OP3 map has {len(op3_episode_stats_map) if op3_episode_stats_map else 0} episodes, Historical map has {len(historical_episode_map)} episodes")
-            if op3_episode_stats_map:
-                logger.info(f"[DASHBOARD]   OP3 map keys sample (first 10): {list(op3_episode_stats_map.keys())[:10]}")
-            if historical_episode_map:
-                logger.info(f"[DASHBOARD]   Historical map keys sample (first 10): {list(historical_episode_map.keys())[:10]}")
+            logger.debug(f"[DASHBOARD] ⚠️ No download data found for recent episode '{ep_title_raw}'")
     
     # Debug logging to diagnose missing stats
-    logger.info(f"[DASHBOARD] Final Stats - 7d: {op3_downloads_7d}, 30d: {op3_downloads_30d}, 365d: {op3_downloads_365d}, all-time: {op3_downloads_all_time}")
-    logger.info(f"[DASHBOARD] Top episodes count: {len(op3_top_episodes) if op3_top_episodes else 0}")
-    logger.info(f"[DASHBOARD] Recent episodes count: {len(base_stats.get('recent_episodes', []))}")
-    logger.info(f"[DASHBOARD] Last published: {base_stats.get('last_published_at')}, Last assembly: {base_stats.get('last_assembly_status')}")
-    if base_stats.get('recent_episodes'):
-        for ep in base_stats.get('recent_episodes', [])[:3]:
-            logger.info(f"[DASHBOARD] Recent episode: {ep.get('title')} - published: {ep.get('publish_at')}, downloads: {ep.get('downloads_all_time', 0)}")
+    logger.debug(f"[DASHBOARD] Final Stats - 7d: {op3_downloads_7d}, 30d: {op3_downloads_30d}, 365d: {op3_downloads_365d}, all-time: {op3_downloads_all_time}")
     
     # Build response with OP3 data - ALWAYS include all fields at root level
     return {

@@ -94,10 +94,17 @@ def pool_stats(user: User = Depends(get_current_user)) -> dict[str, Any]:
             "pool_recycle": pool_kwargs.get("pool_recycle", 180),
         }
         
+        # Calculate utilization
+        total_capacity = config["total_capacity"]
+        checked_out = stats.get("checked_out", 0) or 0
+        utilization = (checked_out / total_capacity * 100) if total_capacity > 0 else 0
+        
         return {
             "status": "ok",
             "current": stats,
             "configuration": config,
+            "utilization_percent": round(utilization, 2),
+            "warning": utilization > 80,  # Warn if > 80% utilized
         }
     except Exception as e:
         log.error("[health] Pool stats failed: %s", e)
@@ -144,4 +151,43 @@ def active_connections(
             
     except Exception as e:
         log.error("[health] Active connections query failed: %s", e)
+        return {"status": "error", "error": str(e)}
+
+
+@router.get("/api/health/circuit-breakers")
+def circuit_breaker_status() -> dict[str, Any]:
+    """Get status of all circuit breakers.
+    
+    Shows which external services are currently failing.
+    No authentication required - useful for monitoring.
+    """
+    try:
+        from api.core.circuit_breaker import (
+            _assemblyai_breaker,
+            _gemini_breaker,
+            _auphonic_breaker,
+            _elevenlabs_breaker,
+            _gcs_breaker,
+        )
+        
+        breakers = {
+            "assemblyai": _assemblyai_breaker.get_state(),
+            "gemini": _gemini_breaker.get_state(),
+            "auphonic": _auphonic_breaker.get_state(),
+            "elevenlabs": _elevenlabs_breaker.get_state(),
+            "gcs": _gcs_breaker.get_state(),
+        }
+        
+        # Count how many are open
+        open_count = sum(1 for b in breakers.values() if b["state"] == "open")
+        half_open_count = sum(1 for b in breakers.values() if b["state"] == "half_open")
+        
+        return {
+            "status": "degraded" if open_count > 0 else "healthy",
+            "open_count": open_count,
+            "half_open_count": half_open_count,
+            "breakers": breakers,
+        }
+    except Exception as e:
+        log.error("[health] Circuit breaker status failed: %s", e)
         return {"status": "error", "error": str(e)}

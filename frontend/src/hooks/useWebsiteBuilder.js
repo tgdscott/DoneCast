@@ -1,17 +1,39 @@
 /**
  * Custom hook for website builder API operations
- * Extracts all API calls and state management from WebsiteBuilder component
+ * Clean, simple implementation with proper error handling
  */
 
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { makeApi, isApiError } from "@/lib/apiClient";
 
 /**
+ * Extract error message from API error
+ */
+function extractErrorMessage(err) {
+  if (!err) return "An unknown error occurred";
+  
+  if (isApiError(err)) {
+    if (typeof err.detail === 'string') return err.detail;
+    if (err.detail && typeof err.detail === 'object') {
+      return err.detail.message || err.detail.detail || err.detail.error || "An error occurred";
+    }
+    if (typeof err.error === 'string') return err.error;
+    if (err.error && typeof err.error === 'object') {
+      return err.error.message || String(err.error);
+    }
+    if (typeof err.message === 'string') return err.message;
+  }
+  
+  if (err && typeof err === 'object') {
+    return err.message || String(err);
+  }
+  
+  return String(err);
+}
+
+/**
  * Hook for managing website data and operations
- * @param {string} token - Authentication token
- * @param {string} podcastId - Selected podcast ID
- * @returns {Object} Website state and operations
  */
 export function useWebsiteBuilder(token, podcastId) {
   const { toast } = useToast();
@@ -20,59 +42,31 @@ export function useWebsiteBuilder(token, podcastId) {
   const [website, setWebsite] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const loadingRef = useRef(false); // Prevent concurrent loads
-  
-  // Debug: Track hook calls
-  const hookCallCountRef = useRef(0);
-  hookCallCountRef.current += 1;
-  if (hookCallCountRef.current <= 5 || hookCallCountRef.current % 10 === 0) {
-    console.log(`[useWebsiteBuilder] Hook call #${hookCallCountRef.current}`, {
-      podcastId,
-      hasWebsite: !!website,
-      websiteId: website?.id,
-      loading,
-      timestamp: Date.now()
-    });
-  }
 
   const loadWebsite = useCallback(async () => {
     if (!podcastId) {
       setWebsite(null);
-      return;
+      setError(null);
+      return null;
     }
     
-    // Prevent concurrent loads
-    if (loadingRef.current) {
-      console.log('[useWebsiteBuilder] Skipping load - already loading', { podcastId });
-      return;
-    }
-    
-    console.log('[useWebsiteBuilder] Starting loadWebsite', { podcastId, timestamp: Date.now() });
-    loadingRef.current = true;
     setLoading(true);
     setError(null);
     try {
       const data = await api.get(`/api/podcasts/${podcastId}/website`);
-      console.log('[useWebsiteBuilder] Loaded website', { podcastId, websiteId: data?.id });
       setWebsite(data);
       return data;
     } catch (err) {
       if (err && err.status === 404) {
-        console.log('[useWebsiteBuilder] Website not found (404)', { podcastId });
         setWebsite(null);
+        setError(null);
         return null;
-      } else {
-        console.error("[useWebsiteBuilder] Failed to load website", err);
-        const message = isApiError(err) 
-          ? (err.detail || err.message || err.error || "Unable to load site") 
-          : "Unable to load site";
-        setError(message);
-        throw err;
       }
+      const message = extractErrorMessage(err);
+      setError(message);
+      throw err;
     } finally {
       setLoading(false);
-      loadingRef.current = false;
-      console.log('[useWebsiteBuilder] Finished loadWebsite', { podcastId, timestamp: Date.now() });
     }
   }, [api, podcastId]);
 
@@ -84,16 +78,18 @@ export function useWebsiteBuilder(token, podcastId) {
       const data = await api.post(`/api/podcasts/${podcastId}/website`);
       setWebsite(data);
       toast({ 
-        title: "Website drafted", 
-        description: "The AI builder prepared a fresh layout." 
+        title: "Website generated", 
+        description: "Your website has been created successfully." 
       });
       return data;
     } catch (err) {
-      console.error("Failed to generate website", err);
-      const message = isApiError(err) 
-        ? (err.detail || err.message || err.error || "Unable to generate site") 
-        : "Unable to generate site";
+      const message = extractErrorMessage(err);
       setError(message);
+      toast({
+        title: "Failed to generate website",
+        description: message,
+        variant: "destructive"
+      });
       throw err;
     }
   }, [api, podcastId, toast]);
@@ -101,6 +97,7 @@ export function useWebsiteBuilder(token, podcastId) {
   const resetWebsite = useCallback(async () => {
     if (!podcastId) return null;
     
+    setError(null);
     try {
       const data = await api.post(`/api/podcasts/${podcastId}/website/reset`, {
         confirmation_phrase: "here comes the boom"
@@ -112,10 +109,7 @@ export function useWebsiteBuilder(token, podcastId) {
       });
       return data;
     } catch (err) {
-      console.error("Failed to reset website", err);
-      const message = isApiError(err)
-        ? (err.detail || err.error || "Unable to reset")
-        : "Unable to reset";
+      const message = extractErrorMessage(err);
       setError(message);
       toast({
         title: "Failed to reset website",
@@ -139,10 +133,6 @@ export function useWebsiteBuilder(token, podcastId) {
 
 /**
  * Hook for managing website publishing operations
- * @param {string} token - Authentication token
- * @param {string} podcastId - Selected podcast ID
- * @param {Function} onWebsiteUpdated - Callback when website is updated
- * @returns {Object} Publishing state and operations
  */
 export function useWebsitePublishing(token, podcastId, onWebsiteUpdated) {
   const { toast } = useToast();
@@ -150,12 +140,6 @@ export function useWebsitePublishing(token, podcastId, onWebsiteUpdated) {
   
   const [publishing, setPublishing] = useState(false);
   const [publishStatus, setPublishStatus] = useState(null);
-  
-  // Use ref to avoid recreating callbacks when onWebsiteUpdated changes
-  const onWebsiteUpdatedRef = useRef(onWebsiteUpdated);
-  useEffect(() => {
-    onWebsiteUpdatedRef.current = onWebsiteUpdated;
-  }, [onWebsiteUpdated]);
 
   const publish = useCallback(async (isPublished) => {
     if (!podcastId) return;
@@ -167,10 +151,10 @@ export function useWebsitePublishing(token, podcastId, onWebsiteUpdated) {
         await api.post(`/api/podcasts/${podcastId}/website/unpublish`);
         toast({
           title: "Website unpublished",
-          description: "Your website is now in draft mode."
+          description: "Your website is now in draft mode. Click 'Publish Website' to republish it."
         });
       } else {
-        // Publish with automatic domain provisioning
+        // Publish
         const result = await api.post(`/api/podcasts/${podcastId}/website/publish`, {
           auto_provision_domain: true
         });
@@ -183,28 +167,27 @@ export function useWebsitePublishing(token, podcastId, onWebsiteUpdated) {
             description: `Your website will be live at ${result.domain} in about 10-15 minutes while we provision your SSL certificate.`,
             duration: 10000
           });
-          
-          // Start polling for SSL readiness
-          pollDomainStatus();
         } else if (result.ssl_status === 'active') {
           toast({
             title: "🚀 Website is live!",
             description: `Your website is now accessible at ${result.domain}`
           });
+        } else {
+          toast({
+            title: "✅ Website published",
+            description: `Your website is now live at ${result.domain || 'your subdomain'}`
+          });
         }
       }
       
-      // Reload website to get updated status
-      if (onWebsiteUpdatedRef.current) {
-        await onWebsiteUpdatedRef.current();
+      // Always refresh website data after publish/unpublish to get updated status
+      if (onWebsiteUpdated) {
+        await onWebsiteUpdated();
       }
     } catch (err) {
-      console.error("Failed to publish/unpublish website", err);
-      const message = isApiError(err)
-        ? (err.detail || err.message || err.error || "Unable to publish site")
-        : "Unable to publish site";
+      const message = extractErrorMessage(err);
       toast({
-        title: "Error",
+        title: isPublished ? "Failed to unpublish" : "Failed to publish",
         description: message,
         variant: "destructive"
       });
@@ -212,46 +195,7 @@ export function useWebsitePublishing(token, podcastId, onWebsiteUpdated) {
     } finally {
       setPublishing(false);
     }
-  }, [api, podcastId, toast]); // Removed onWebsiteUpdated from deps
-
-  const pollDomainStatus = useCallback(async () => {
-    if (!podcastId) return;
-    
-    const checkStatus = async () => {
-      try {
-        const status = await api.get(`/api/podcasts/${podcastId}/website/domain-status`);
-        
-        if (status.is_ready) {
-          toast({
-            title: "✅ Your website is now live!",
-            description: `Visit ${status.domain} to see it in action.`,
-            duration: 10000
-          });
-          if (onWebsiteUpdatedRef.current) {
-            await onWebsiteUpdatedRef.current();
-          }
-          return true; // Stop polling
-        }
-        return false; // Continue polling
-      } catch (err) {
-        console.error("Failed to check domain status", err);
-        return true; // Stop polling on error
-      }
-    };
-    
-    // Poll every 30 seconds for up to 20 minutes
-    const maxAttempts = 40;
-    let attempts = 0;
-    
-    const intervalId = setInterval(async () => {
-      attempts++;
-      const shouldStop = await checkStatus();
-      
-      if (shouldStop || attempts >= maxAttempts) {
-        clearInterval(intervalId);
-      }
-    }, 30000); // 30 seconds
-  }, [api, podcastId, toast]); // Removed onWebsiteUpdated from deps
+  }, [api, podcastId, toast, onWebsiteUpdated]);
 
   return {
     publishing,
@@ -262,11 +206,6 @@ export function useWebsitePublishing(token, podcastId, onWebsiteUpdated) {
 
 /**
  * Hook for managing custom domain operations
- * @param {string} token - Authentication token
- * @param {string} podcastId - Selected podcast ID
- * @param {Function} onWebsiteUpdated - Callback when website is updated
- * @param {string} customDomain - Current custom domain value (optional, for initializing domain draft)
- * @returns {Object} Domain state and operations
  */
 export function useWebsiteDomain(token, podcastId, onWebsiteUpdated, customDomain = null) {
   const { toast } = useToast();
@@ -274,20 +213,6 @@ export function useWebsiteDomain(token, podcastId, onWebsiteUpdated, customDomai
   
   const [savingDomain, setSavingDomain] = useState(false);
   const [domainDraft, setDomainDraft] = useState(customDomain || "");
-  
-  // Use ref to avoid recreating callbacks when onWebsiteUpdated changes
-  const onWebsiteUpdatedRef = useRef(onWebsiteUpdated);
-  useEffect(() => {
-    onWebsiteUpdatedRef.current = onWebsiteUpdated;
-  }, [onWebsiteUpdated]);
-  
-  // Update domain draft when custom_domain changes
-  useEffect(() => {
-    const newDomain = customDomain || "";
-    if (domainDraft !== newDomain) {
-      setDomainDraft(newDomain);
-    }
-  }, [customDomain, domainDraft]);
 
   const saveDomain = useCallback(async (domain) => {
     if (!podcastId) return;
@@ -297,8 +222,8 @@ export function useWebsiteDomain(token, podcastId, onWebsiteUpdated, customDomai
       const payload = { custom_domain: domain?.trim() ? domain.trim() : null };
       const data = await api.patch(`/api/podcasts/${podcastId}/website/domain`, payload);
       
-      if (onWebsiteUpdatedRef.current) {
-        await onWebsiteUpdatedRef.current();
+      if (onWebsiteUpdated) {
+        await onWebsiteUpdated();
       }
       
       toast({
@@ -309,10 +234,7 @@ export function useWebsiteDomain(token, podcastId, onWebsiteUpdated, customDomai
       });
       return data;
     } catch (err) {
-      console.error("Failed to update domain", err);
-      const message = isApiError(err)
-        ? (err.detail || err.message || err.error || "Unable to update domain")
-        : "Unable to update domain";
+      const message = extractErrorMessage(err);
       toast({
         title: "Error",
         description: message,
@@ -322,7 +244,7 @@ export function useWebsiteDomain(token, podcastId, onWebsiteUpdated, customDomai
     } finally {
       setSavingDomain(false);
     }
-  }, [api, podcastId, toast]); // Removed onWebsiteUpdated from deps
+  }, [api, podcastId, toast, onWebsiteUpdated]);
 
   return {
     domainDraft,
@@ -334,10 +256,6 @@ export function useWebsiteDomain(token, podcastId, onWebsiteUpdated, customDomai
 
 /**
  * Hook for managing AI chat operations
- * @param {string} token - Authentication token
- * @param {string} podcastId - Selected podcast ID
- * @param {Function} onWebsiteUpdated - Callback when website is updated
- * @returns {Object} Chat state and operations
  */
 export function useWebsiteChat(token, podcastId, onWebsiteUpdated) {
   const { toast } = useToast();
@@ -345,12 +263,6 @@ export function useWebsiteChat(token, podcastId, onWebsiteUpdated) {
   
   const [chatting, setChatting] = useState(false);
   const [chatMessage, setChatMessage] = useState("");
-  
-  // Use ref to avoid recreating callbacks when onWebsiteUpdated changes
-  const onWebsiteUpdatedRef = useRef(onWebsiteUpdated);
-  useEffect(() => {
-    onWebsiteUpdatedRef.current = onWebsiteUpdated;
-  }, [onWebsiteUpdated]);
 
   const sendChatMessage = useCallback(async (message) => {
     if (!podcastId || !message?.trim()) return null;
@@ -361,8 +273,8 @@ export function useWebsiteChat(token, podcastId, onWebsiteUpdated) {
         message: message.trim()
       });
       
-      if (onWebsiteUpdatedRef.current) {
-        await onWebsiteUpdatedRef.current();
+      if (onWebsiteUpdated) {
+        await onWebsiteUpdated();
       }
       
       setChatMessage("");
@@ -372,10 +284,7 @@ export function useWebsiteChat(token, podcastId, onWebsiteUpdated) {
       });
       return data;
     } catch (err) {
-      console.error("Failed to apply update", err);
-      const message = isApiError(err)
-        ? (err.detail || err.message || err.error || "Unable to update site")
-        : "Unable to update site";
+      const message = extractErrorMessage(err);
       toast({
         title: "Error",
         description: message,
@@ -385,7 +294,7 @@ export function useWebsiteChat(token, podcastId, onWebsiteUpdated) {
     } finally {
       setChatting(false);
     }
-  }, [api, podcastId, toast]); // Removed onWebsiteUpdated from deps
+  }, [api, podcastId, toast, onWebsiteUpdated]);
 
   return {
     chatting,
@@ -397,22 +306,12 @@ export function useWebsiteChat(token, podcastId, onWebsiteUpdated) {
 
 /**
  * Hook for managing CSS operations
- * @param {string} token - Authentication token
- * @param {string} podcastId - Selected podcast ID
- * @param {Function} onWebsiteUpdated - Callback when website is updated
- * @returns {Object} CSS state and operations
  */
 export function useWebsiteCSS(token, podcastId, onWebsiteUpdated) {
   const { toast } = useToast();
   const api = useMemo(() => makeApi(token), [token]);
   
   const [cssEditorLoading, setCSSEditorLoading] = useState(false);
-  
-  // Use ref to avoid recreating callbacks when onWebsiteUpdated changes
-  const onWebsiteUpdatedRef = useRef(onWebsiteUpdated);
-  useEffect(() => {
-    onWebsiteUpdatedRef.current = onWebsiteUpdated;
-  }, [onWebsiteUpdated]);
 
   const saveCSS = useCallback(async (css) => {
     if (!podcastId) return;
@@ -421,8 +320,8 @@ export function useWebsiteCSS(token, podcastId, onWebsiteUpdated) {
     try {
       await api.patch(`/api/podcasts/${podcastId}/website/css`, { css });
       
-      if (onWebsiteUpdatedRef.current) {
-        await onWebsiteUpdatedRef.current();
+      if (onWebsiteUpdated) {
+        await onWebsiteUpdated();
       }
       
       toast({
@@ -430,19 +329,17 @@ export function useWebsiteCSS(token, podcastId, onWebsiteUpdated) {
         description: "Your custom styles have been saved."
       });
     } catch (err) {
-      console.error("Failed to update CSS", err);
+      const message = extractErrorMessage(err);
       toast({
         title: "Failed to update CSS",
-        description: isApiError(err)
-          ? (err.detail || err.error || "Unable to save CSS")
-          : "Unable to save CSS",
+        description: message,
         variant: "destructive"
       });
       throw err;
     } finally {
       setCSSEditorLoading(false);
     }
-  }, [api, podcastId, toast]); // Removed onWebsiteUpdated from deps
+  }, [api, podcastId, toast, onWebsiteUpdated]);
 
   const generateAICSS = useCallback(async (prompt) => {
     if (!podcastId || !prompt?.trim()) return;
@@ -454,8 +351,8 @@ export function useWebsiteCSS(token, podcastId, onWebsiteUpdated) {
         ai_prompt: prompt
       });
       
-      if (onWebsiteUpdatedRef.current) {
-        await onWebsiteUpdatedRef.current();
+      if (onWebsiteUpdated) {
+        await onWebsiteUpdated();
       }
       
       toast({
@@ -464,19 +361,17 @@ export function useWebsiteCSS(token, podcastId, onWebsiteUpdated) {
       });
       return result;
     } catch (err) {
-      console.error("Failed to generate CSS", err);
+      const message = extractErrorMessage(err);
       toast({
         title: "Failed to generate CSS",
-        description: isApiError(err)
-          ? (err.detail || err.error || "Unable to generate CSS")
-          : "Unable to generate CSS",
+        description: message,
         variant: "destructive"
       });
       throw err;
     } finally {
       setCSSEditorLoading(false);
     }
-  }, [api, podcastId, toast]); // Removed onWebsiteUpdated from deps
+  }, [api, podcastId, toast, onWebsiteUpdated]);
 
   return {
     cssEditorLoading,
@@ -487,22 +382,12 @@ export function useWebsiteCSS(token, podcastId, onWebsiteUpdated) {
 
 /**
  * Hook for managing AI theme generation
- * @param {string} token - Authentication token
- * @param {string} podcastId - Selected podcast ID
- * @param {Function} onWebsiteUpdated - Callback when website is updated
- * @returns {Object} Theme generation state and operations
  */
 export function useWebsiteAITheme(token, podcastId, onWebsiteUpdated) {
   const { toast } = useToast();
   const api = useMemo(() => makeApi(token), [token]);
   
   const [generatingTheme, setGeneratingTheme] = useState(false);
-  
-  // Use ref to avoid recreating callbacks when onWebsiteUpdated changes
-  const onWebsiteUpdatedRef = useRef(onWebsiteUpdated);
-  useEffect(() => {
-    onWebsiteUpdatedRef.current = onWebsiteUpdated;
-  }, [onWebsiteUpdated]);
 
   const generateAITheme = useCallback(async () => {
     if (!podcastId) return;
@@ -511,8 +396,8 @@ export function useWebsiteAITheme(token, podcastId, onWebsiteUpdated) {
     try {
       const result = await api.post(`/api/podcasts/${podcastId}/website/generate-ai-theme`);
       
-      if (onWebsiteUpdatedRef.current) {
-        await onWebsiteUpdatedRef.current();
+      if (onWebsiteUpdated) {
+        await onWebsiteUpdated();
       }
       
       toast({
@@ -521,19 +406,7 @@ export function useWebsiteAITheme(token, podcastId, onWebsiteUpdated) {
       });
       return result;
     } catch (err) {
-      console.error("Failed to generate AI theme", err);
-      let message = "Unable to generate theme";
-      if (isApiError(err)) {
-        if (typeof err.detail === 'string') {
-          message = err.detail;
-        } else if (err.detail && typeof err.detail === 'object') {
-          message = err.detail.message || err.detail.detail || err.detail.error || message;
-        } else if (err.error) {
-          message = typeof err.error === 'string' ? err.error : String(err.error);
-        } else if (err.message) {
-          message = typeof err.message === 'string' ? err.message : String(err.message);
-        }
-      }
+      const message = extractErrorMessage(err);
       toast({
         title: "Failed to generate theme",
         description: message,
@@ -543,11 +416,10 @@ export function useWebsiteAITheme(token, podcastId, onWebsiteUpdated) {
     } finally {
       setGeneratingTheme(false);
     }
-  }, [api, podcastId, toast]); // Removed onWebsiteUpdated from deps
+  }, [api, podcastId, toast, onWebsiteUpdated]);
 
   return {
     generatingTheme,
     generateAITheme,
   };
 }
-

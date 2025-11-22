@@ -262,12 +262,8 @@ export default function PodcastCreator({
 
   const handleDeletePreuploaded = React.useCallback(async (item) => {
     if (!item || !item.id) return;
-    const ready = !!item.transcript_ready;
-    const confirmationMessage = ready
-      ? 'This upload is marked Ready. Deleting it will not refund the processing minutes already used. Continue?'
-      : 'Delete this upload while it is still processing? No processing minutes have been deducted yet.';
     if (typeof window !== 'undefined') {
-      const confirmed = window.confirm(confirmationMessage);
+      const confirmed = window.confirm('Delete this upload?');
       if (!confirmed) return;
     }
 

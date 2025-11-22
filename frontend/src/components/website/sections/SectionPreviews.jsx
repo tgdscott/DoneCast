@@ -54,17 +54,19 @@ export function HeroSectionPreview({ config, enabled, podcast }) {
   const displaySubtitle = subtitle || podcast?.description || "A captivating tagline that hooks listeners";
   const coverUrl = podcast?.cover_url;
   
-  // Debug logging for cover image - FORCE string conversion
+  // Debug logging for cover image (dev only)
   useEffect(() => {
-    console.log('[HeroSection] ===== COVER IMAGE DEBUG =====');
-    console.log('[HeroSection] Cover URL (raw):', coverUrl);
-    console.log('[HeroSection] Cover URL (type):', typeof coverUrl);
-    console.log('[HeroSection] Cover URL (truthy?):', !!coverUrl);
-    console.log('[HeroSection] Show cover art:', show_cover_art);
-    console.log('[HeroSection] Show cover art (type):', typeof show_cover_art);
-    console.log('[HeroSection] Podcast object:', JSON.stringify(podcast || {}));
-    console.log('[HeroSection] Should show image?', (show_cover_art !== false) && coverUrl);
-    console.log('[HeroSection] ============================');
+    if (import.meta.env.DEV) {
+      console.log('[HeroSection] ===== COVER IMAGE DEBUG =====');
+      console.log('[HeroSection] Cover URL (raw):', coverUrl);
+      console.log('[HeroSection] Cover URL (type):', typeof coverUrl);
+      console.log('[HeroSection] Cover URL (truthy?):', !!coverUrl);
+      console.log('[HeroSection] Show cover art:', show_cover_art);
+      console.log('[HeroSection] Show cover art (type):', typeof show_cover_art);
+      console.log('[HeroSection] Podcast object:', JSON.stringify(podcast || {}));
+      console.log('[HeroSection] Should show image?', (show_cover_art !== false) && coverUrl);
+      console.log('[HeroSection] ============================');
+    }
   }, [coverUrl, show_cover_art, podcast]);
 
   // Use CSS variables from AI theme if available, otherwise use config values
@@ -96,20 +98,22 @@ export function HeroSectionPreview({ config, enabled, podcast }) {
             const shouldShowCover = show_cover_art !== false;
             const shouldShow = hasCoverUrl && shouldShowCover;
             
-            console.log('[HeroSection] Render check:', {
-              hasCoverUrl,
-              coverUrlValue: coverUrl,
-              shouldShowCover,
-              show_cover_art,
-              finalShouldShow: shouldShow
-            });
-            
-            if (!shouldShow) {
-              console.warn('[HeroSection] ⚠️ Cover image NOT rendering:', {
-                reason: !hasCoverUrl ? 'NO_COVER_URL' : 'SHOW_COVER_ART_FALSE',
-                coverUrl: coverUrl || 'MISSING',
-                show_cover_art
+            if (import.meta.env.DEV) {
+              console.log('[HeroSection] Render check:', {
+                hasCoverUrl,
+                coverUrlValue: coverUrl,
+                shouldShowCover,
+                show_cover_art,
+                finalShouldShow: shouldShow
               });
+              
+              if (!shouldShow) {
+                console.warn('[HeroSection] ⚠️ Cover image NOT rendering:', {
+                  reason: !hasCoverUrl ? 'NO_COVER_URL' : 'SHOW_COVER_ART_FALSE',
+                  coverUrl: coverUrl || 'MISSING',
+                  show_cover_art
+                });
+              }
             }
             
             return shouldShow ? (
@@ -120,20 +124,24 @@ export function HeroSectionPreview({ config, enabled, podcast }) {
                   className="w-64 h-64 md:w-80 md:h-80 rounded-2xl shadow-2xl object-cover"
                   style={{ border: '2px solid #10b981' }} // Green border to confirm it's rendering
                   onError={(e) => {
-                    console.error('[HeroSection] ❌ IMAGE LOAD ERROR:', {
-                      src: coverUrl,
-                      error: e.target.error,
-                      naturalWidth: e.target.naturalWidth,
-                      naturalHeight: e.target.naturalHeight
-                    });
+                    if (import.meta.env.DEV) {
+                      console.error('[HeroSection] ❌ IMAGE LOAD ERROR:', {
+                        src: coverUrl,
+                        error: e.target.error,
+                        naturalWidth: e.target.naturalWidth,
+                        naturalHeight: e.target.naturalHeight
+                      });
+                    }
                     e.target.style.border = '4px solid red';
                   }}
                   onLoad={(e) => {
-                    console.log('[HeroSection] ✅ IMAGE LOADED SUCCESSFULLY:', {
-                      src: coverUrl,
-                      naturalWidth: e.target.naturalWidth,
-                      naturalHeight: e.target.naturalHeight
-                    });
+                    if (import.meta.env.DEV) {
+                      console.log('[HeroSection] ✅ IMAGE LOADED SUCCESSFULLY:', {
+                        src: coverUrl,
+                        naturalWidth: e.target.naturalWidth,
+                        naturalHeight: e.target.naturalHeight
+                      });
+                    }
                   }}
                 />
               </div>
@@ -149,7 +157,7 @@ export function HeroSectionPreview({ config, enabled, podcast }) {
           
           {/* Title and content on the right */}
           <div className="space-y-6 order-2 md:order-2">
-            <h1 className="text-4xl md:text-5xl font-bold leading-tight">{displayTitle}</h1>
+            <h1 className="text-4xl md:text-5xl font-bold leading-tight hero-title">{displayTitle}</h1>
             {displaySubtitle && <p className="text-lg md:text-xl opacity-90">{displaySubtitle}</p>}
             {cta_text && cta_url && (
               <div className="pt-4">
@@ -232,29 +240,31 @@ export function LatestEpisodesSectionPreview({ config, enabled, podcast, episode
   const endIndex = startIndex + episodesPerPage;
   const displayEpisodes = (episodes?.length > 0) ? episodes.slice(startIndex, endIndex) : [];
   
-  // Debug logging
+  // Debug logging (dev only)
   useEffect(() => {
-    const totalEpisodes = episodes?.length || 0;
-    const shouldShowPagination = totalEpisodes > episodesPerPage;
-    console.log('[LatestEpisodes] ===== EPISODE DEBUG =====');
-    console.log('[LatestEpisodes] Total episodes received:', totalEpisodes);
-    console.log('[LatestEpisodes] Episodes per page:', episodesPerPage);
-    console.log('[LatestEpisodes] Total pages:', totalPages);
-    console.log('[LatestEpisodes] Current page:', currentPage);
-    console.log('[LatestEpisodes] Display episodes count:', displayEpisodes.length);
-    console.log('[LatestEpisodes] Start index:', startIndex, 'End index:', endIndex);
-    console.log('[LatestEpisodes] Should show pagination?', shouldShowPagination, `(${totalEpisodes} > ${episodesPerPage})`);
-    if (totalEpisodes > 0) {
-      console.log('[LatestEpisodes] First episode:', episodes[0]?.title, episodes[0]?.publish_date);
-      console.log('[LatestEpisodes] Last episode:', episodes[totalEpisodes - 1]?.title, episodes[totalEpisodes - 1]?.publish_date);
-      if (totalEpisodes >= 200) {
-        console.log('[LatestEpisodes] ✅ Episode 200 exists:', episodes[199]?.title);
+    if (import.meta.env.DEV) {
+      const totalEpisodes = episodes?.length || 0;
+      const shouldShowPagination = totalEpisodes > episodesPerPage;
+      console.log('[LatestEpisodes] ===== EPISODE DEBUG =====');
+      console.log('[LatestEpisodes] Total episodes received:', totalEpisodes);
+      console.log('[LatestEpisodes] Episodes per page:', episodesPerPage);
+      console.log('[LatestEpisodes] Total pages:', totalPages);
+      console.log('[LatestEpisodes] Current page:', currentPage);
+      console.log('[LatestEpisodes] Display episodes count:', displayEpisodes.length);
+      console.log('[LatestEpisodes] Start index:', startIndex, 'End index:', endIndex);
+      console.log('[LatestEpisodes] Should show pagination?', shouldShowPagination, `(${totalEpisodes} > ${episodesPerPage})`);
+      if (totalEpisodes > 0) {
+        console.log('[LatestEpisodes] First episode:', episodes[0]?.title, episodes[0]?.publish_date);
+        console.log('[LatestEpisodes] Last episode:', episodes[totalEpisodes - 1]?.title, episodes[totalEpisodes - 1]?.publish_date);
+        if (totalEpisodes >= 200) {
+          console.log('[LatestEpisodes] ✅ Episode 200 exists:', episodes[199]?.title);
+        }
+        if (totalEpisodes >= 204) {
+          console.log('[LatestEpisodes] ✅ Episode 204 exists:', episodes[203]?.title);
+        }
       }
-      if (totalEpisodes >= 204) {
-        console.log('[LatestEpisodes] ✅ Episode 204 exists:', episodes[203]?.title);
-      }
+      console.log('[LatestEpisodes] ========================');
     }
-    console.log('[LatestEpisodes] ========================');
   }, [episodes?.length, episodesPerPage, totalPages, currentPage, startIndex, endIndex, displayEpisodes.length, episodes]);
   
   // Reset to page 1 only if current page is invalid (e.g., episodes list shrunk)
@@ -498,23 +508,38 @@ export function LatestEpisodesSectionPreview({ config, enabled, podcast, episode
                     </p>
                   )}
                   
-                  {/* Audio Player */}
-                  {episode.audio_url && (
-                    <div className="mt-4">
-                      <audio
-                        controls
-                        className="w-full max-w-md"
-                        preload="none"
-                        style={{ height: '40px' }}
-                      >
-                        <source src={episode.audio_url} type="audio/mpeg" />
-                        Your browser does not support the audio element.
-                      </audio>
-                    </div>
-                  )}
-                  
-                  {!episode.audio_url && (
-                    <Button size="sm" variant="outline" disabled>
+                  {/* Play Button - triggers persistent player */}
+                  {episode.audio_url ? (
+                    <Button 
+                      size="sm" 
+                      variant="default"
+                      className="mt-4 bg-purple-600 hover:bg-purple-700 text-white"
+                      onClick={() => {
+                        if (import.meta.env.DEV) {
+                          console.log('[LatestEpisodes] Play button clicked for episode:', episode.title);
+                          console.log('[LatestEpisodes] Episode audio_url:', episode.audio_url);
+                        }
+                        if (!episode.audio_url) {
+                          if (import.meta.env.DEV) {
+                            console.warn('[LatestEpisodes] Episode has no audio_url!');
+                          }
+                          alert('This episode does not have an audio file available.');
+                          return;
+                        }
+                        // Trigger play in persistent player
+                        window.dispatchEvent(new CustomEvent('add-to-queue', {
+                          detail: { episode }
+                        }));
+                        window.dispatchEvent(new CustomEvent('play-episode', {
+                          detail: { episode }
+                        }));
+                      }}
+                    >
+                      <Radio className="mr-2 h-3 w-3" />
+                      Play Episode
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="outline" disabled className="mt-4">
                       <Radio className="mr-2 h-3 w-3" /> Audio unavailable
                     </Button>
                   )}
@@ -707,9 +732,10 @@ export function TestimonialsSectionPreview({ config, enabled }) {
 /**
  * Header Section Preview
  */
-export function HeaderSectionPreview({ config, enabled, podcast }) {
+export function HeaderSectionPreview({ config, enabled, podcast, pages = [] }) {
   const {
     show_logo = true,
+    logo_url,
     logo_text,
     show_navigation = true,
     show_player = false,
@@ -721,6 +747,19 @@ export function HeaderSectionPreview({ config, enabled, podcast }) {
   
   // Use config logo_text or fall back to podcast title
   const displayLogoText = logo_text || podcast?.title || "Podcast Name";
+  
+  // Priority: config.logo_url > podcast.cover_url
+  const logoImageUrl = logo_url || podcast?.cover_url;
+  
+  // Auto-populate navigation from pages (sorted by order)
+  const navigationItems = pages
+    .filter(page => !page.is_home)
+    .sort((a, b) => (a.order || 0) - (b.order || 0))
+    .map(page => ({
+      title: page.title,
+      slug: page.slug,
+      href: `/${page.slug}`,
+    }));
 
   const heightClasses = {
     compact: "py-2",
@@ -741,9 +780,9 @@ export function HeaderSectionPreview({ config, enabled, podcast }) {
         {/* Logo */}
         {show_logo && (
           <div className="flex items-center gap-3">
-            {podcast?.cover_url ? (
+            {logoImageUrl ? (
               <img
-                src={podcast.cover_url}
+                src={logoImageUrl}
                 alt={displayLogoText}
                 className="w-10 h-10 rounded-lg object-cover"
                 onError={(e) => {
@@ -755,17 +794,69 @@ export function HeaderSectionPreview({ config, enabled, podcast }) {
                 🎙️
               </div>
             )}
-            <span className="font-bold text-lg">{displayLogoText}</span>
+            <a href="/" className="font-bold text-lg hover:opacity-80 transition-opacity">{displayLogoText}</a>
           </div>
         )}
 
-        {/* Navigation */}
+        {/* Navigation - Auto-populated from pages */}
         {show_navigation && (
           <nav className="hidden md:flex gap-6 text-sm font-medium">
-            <a href="#home" className="opacity-70 hover:opacity-100 cursor-pointer transition-opacity">Home</a>
-            <a href="#episodes" className="opacity-70 hover:opacity-100 cursor-pointer transition-opacity">Episodes</a>
-            <a href="#about" className="opacity-70 hover:opacity-100 cursor-pointer transition-opacity">About</a>
-            <a href="#contact" className="opacity-70 hover:opacity-100 cursor-pointer transition-opacity">Contact</a>
+            {navigationItems.length > 0 ? (
+              navigationItems.map((item) => (
+                <a 
+                  key={item.slug} 
+                  href={item.href} 
+                  className="opacity-70 hover:opacity-100 cursor-pointer transition-opacity"
+                >
+                  {item.title}
+                </a>
+              ))
+            ) : (
+              // Default navigation if no pages exist (single-page site) - scroll to sections
+              <>
+                <a 
+                  href="#hero" 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const heroSection = document.querySelector('[data-section-id="hero"]') || document.querySelector('.hero');
+                    if (heroSection) {
+                      heroSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    } else {
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }
+                  }}
+                  className="opacity-70 hover:opacity-100 cursor-pointer transition-opacity"
+                >
+                  Home
+                </a>
+                <a 
+                  href="#latest-episodes" 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const episodesSection = document.querySelector('[data-section-id="latest-episodes"]') || document.querySelector('[data-section-id="episodes"]');
+                    if (episodesSection) {
+                      episodesSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                  }}
+                  className="opacity-70 hover:opacity-100 cursor-pointer transition-opacity"
+                >
+                  Episodes
+                </a>
+                <a 
+                  href="#about" 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const aboutSection = document.querySelector('[data-section-id="about"]');
+                    if (aboutSection) {
+                      aboutSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                  }}
+                  className="opacity-70 hover:opacity-100 cursor-pointer transition-opacity"
+                >
+                  About
+                </a>
+              </>
+            )}
           </nav>
         )}
 

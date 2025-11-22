@@ -80,7 +80,7 @@ async def publish_website(
         raise HTTPException(status_code=400, detail="Website subdomain not set")
     
     # Update website status to published
-    website.status = PodcastWebsiteStatus.PUBLISHED
+    website.status = PodcastWebsiteStatus.published
     db.add(website)
     db.commit()
     db.refresh(website)
@@ -149,9 +149,10 @@ async def unpublish_website(
         raise HTTPException(status_code=404, detail="Website not created yet")
     
     # Update status to draft
-    website.status = PodcastWebsiteStatus.DRAFT
+    website.status = PodcastWebsiteStatus.draft
     db.add(website)
     db.commit()
+    db.refresh(website)
     
     return {"success": True, "message": "Website unpublished successfully"}
 

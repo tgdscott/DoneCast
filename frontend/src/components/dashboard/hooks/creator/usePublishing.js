@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from '@/hooks/use-toast';
 import { makeApi, isApiError } from '@/lib/apiClient';
 
@@ -311,6 +311,40 @@ export default function usePublishing({
         
         setStatusMessage(msg);
         toast({ title: 'Success!', description: msg });
+        
+        // Gentle prompt to guide users to website builder after first episode
+        if (!wasPrivate && !scheduled && selectedTemplate?.podcast_id) {
+          try {
+            const api = makeApi(token);
+            // Check if this is the first published episode for this podcast
+            const summary = await api.get('/api/episodes/summary');
+            // Check episode count for this podcast
+            const episodes = await api.get(`/api/episodes/?limit=1`);
+            const isFirstEpisode = (summary?.total || 0) === 1;
+            
+            if (isFirstEpisode) {
+              // Check if website exists
+              try {
+                await api.get(`/api/podcasts/${selectedTemplate.podcast_id}/website`);
+                // Website exists, no prompt needed
+              } catch (err) {
+                // Website doesn't exist (404) - show gentle prompt
+                if (err?.status === 404) {
+                  setTimeout(() => {
+                    toast({
+                      title: "🎉 First episode published!",
+                      description: "Want to create a website for your podcast? You don't have to, but you can customize it anytime in Website Builder. Go to Quick Tools → Website Builder to get started.",
+                      duration: 8000,
+                    });
+                  }, 2000); // Delay to not overwhelm user
+                }
+              }
+            }
+          } catch (err) {
+            // Silently fail - this is a nice-to-have feature
+            console.log('[usePublishing] Could not check for website prompt:', err);
+          }
+        }
         
         try {
           if (assembledEpisode?.id) setLastAutoPublishedEpisodeId(assembledEpisode.id);

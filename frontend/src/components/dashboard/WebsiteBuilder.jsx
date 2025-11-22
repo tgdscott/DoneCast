@@ -1,7 +1,8 @@
-import { useEffect, useState, useCallback, useRef } from "react";
-import { ArrowLeft, Loader2, Layout, Palette, RotateCcw } from "lucide-react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { ArrowLeft, Loader2, Layout, Palette, RotateCcw, RefreshCcw, Podcast } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import VisualEditor from "@/components/website/VisualEditor";
 import WebsitePreview from "@/components/website/WebsitePreview";
@@ -19,7 +20,7 @@ import {
   useWebsiteAITheme,
 } from "@/hooks/useWebsiteBuilder";
 
-export default function WebsiteBuilder({ token, podcasts, onBack, allowCustomDomain }) {
+export default function WebsiteBuilder({ token, podcasts, onBack, allowCustomDomain, onNavigateToPodcastManager }) {
   const [selectedPodcastId, setSelectedPodcastId] = useState(() => (podcasts && podcasts[0] ? podcasts[0].id : ""));
   const [builderMode, setBuilderMode] = useState("visual"); // "visual" | "ai"
   const [showCSSEditor, setShowCSSEditor] = useState(false);
@@ -37,15 +38,9 @@ export default function WebsiteBuilder({ token, podcasts, onBack, allowCustomDom
     resetWebsite,
   } = useWebsiteBuilder(token, selectedPodcastId);
 
-  // Create stable callback for website updates using useRef to avoid stale closures
-  const loadWebsiteRef = useRef(loadWebsite);
-  useEffect(() => {
-    loadWebsiteRef.current = loadWebsite;
-  }, [loadWebsite]);
-  
   const handleWebsiteUpdate = useCallback(async () => {
-    await loadWebsiteRef.current();
-  }, []); // Stable callback that always uses latest loadWebsite
+    await loadWebsite();
+  }, [loadWebsite]);
 
   const {
     publishing,
@@ -78,28 +73,21 @@ export default function WebsiteBuilder({ token, podcasts, onBack, allowCustomDom
   } = useWebsiteAITheme(token, selectedPodcastId, handleWebsiteUpdate);
 
 
-  // Track if we've initialized to prevent loops
-  const initializedRef = useRef(false);
-  const lastLoadedPodcastIdRef = useRef(null);
-  
-  // Auto-select first podcast if none selected (only once)
+  // Auto-select first podcast if none selected
   useEffect(() => {
-    if (!initializedRef.current && !selectedPodcastId && podcasts && podcasts.length > 0) {
-      initializedRef.current = true;
+    if (!selectedPodcastId && podcasts && podcasts.length > 0) {
       setSelectedPodcastId(podcasts[0].id);
     }
-  }, [selectedPodcastId]); // Only depend on selectedPodcastId, not podcasts array
+  }, [selectedPodcastId, podcasts]);
 
-  // Load website when podcast changes (only once per podcastId)
+  // Load website when podcast changes
   useEffect(() => {
-    if (selectedPodcastId && lastLoadedPodcastIdRef.current !== selectedPodcastId) {
-      lastLoadedPodcastIdRef.current = selectedPodcastId;
-      loadWebsiteRef.current().catch(err => {
+    if (selectedPodcastId) {
+      loadWebsite().catch(() => {
         // Error already handled in loadWebsite
       });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPodcastId]); // Only depend on selectedPodcastId
+  }, [selectedPodcastId, loadWebsite]);
 
   // Handlers
   const handleGenerate = async () => {
@@ -216,21 +204,35 @@ export default function WebsiteBuilder({ token, podcasts, onBack, allowCustomDom
 
       <Card className="border border-slate-200 shadow-sm">
         <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-semibold text-slate-900">AI Website Builder</CardTitle>
+          <CardTitle className="text-2xl font-semibold text-slate-900">Website Builder</CardTitle>
           <CardDescription className="text-sm text-slate-600">
-            Spin up a shareable site for any of your podcasts, chat with the AI to tweak sections, and publish instantly on a custom subdomain.
+            Create a beautiful website for your podcast. Drag & drop sections, customize colors and fonts, and publish instantly.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           {podcasts.length === 0 ? (
-            <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-600">
-              Create a podcast first and it will appear here for website generation.
-            </div>
+            <EmptyState
+              title="No Podcasts Yet"
+              description="Create your first podcast show to start building a website. Once you have a podcast, you can customize and publish your website here."
+              icon={Podcast}
+              action={{
+                label: "Create Your First Podcast",
+                onClick: () => {
+                  if (onNavigateToPodcastManager) {
+                    onNavigateToPodcastManager();
+                  } else {
+                    // Fallback: navigate via URL
+                    window.location.href = '/dashboard?view=podcastManager';
+                  }
+                },
+                variant: "default"
+              }}
+            />
           ) : (
             <div className="grid gap-4 md:grid-cols-[minmax(0,320px)_1fr]">
-              <div className="space-y-4">
+                <div className="space-y-4">
                 <div className="space-y-2">
-                  <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Podcast</label>
+                  <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Select Podcast</label>
                   <Select value={selectedPodcastId} onValueChange={setSelectedPodcastId}>
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Choose a podcast" />
@@ -243,6 +245,9 @@ export default function WebsiteBuilder({ token, podcasts, onBack, allowCustomDom
                       ))}
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-slate-500">
+                    Select a podcast to build its website. The website will auto-generate when you enter the builder.
+                  </p>
                 </div>
 
                 <WebsiteControls
@@ -325,7 +330,7 @@ export default function WebsiteBuilder({ token, podcasts, onBack, allowCustomDom
 
           {error && (
             <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {error}
+              {typeof error === 'string' ? error : (error?.message || String(error))}
             </div>
           )}
         </CardContent>

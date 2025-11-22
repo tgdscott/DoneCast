@@ -33,13 +33,96 @@ export default function App() {
     const { toast } = useToast();
     const [adminCheck, setAdminCheck] = useState({ checked: false, allowed: false });
     // Podcast existence check always declared so hooks order stable
-    const [podcastCheck, setPodcastCheck] = React.useState({ loading: true, count: 0, fetched: false });
+    const [podcastCheck, setPodcastCheck] = React.useState({ loading: true, count: 0, fetched: false, error: false });
+    // Onboarding completion check - ensures user completed all 13 steps before dashboard access
+    const [onboardingCheck, setOnboardingCheck] = React.useState({ loading: true, completed: false, fetched: false, error: false });
     const { layoutKey } = useLayout();
 
     // Initialize global bug report capture system (runs once at app start)
     useEffect(() => {
         initBugReportCapture();
     }, []);
+
+    // Prevent back button from navigating away from the app (but allow internal navigation)
+    useEffect(() => {
+        if (!isAuthenticated || !hydrated) return;
+
+        // Track when we first entered the authenticated app
+        // Store this in sessionStorage so it persists across page reloads
+        const APP_ENTRY_KEY = 'ppp_app_entry_url';
+        let appEntryUrl = sessionStorage.getItem(APP_ENTRY_KEY);
+        
+        if (!appEntryUrl) {
+            // First time entering the app - mark this as the entry point
+            appEntryUrl = window.location.href;
+            sessionStorage.setItem(APP_ENTRY_KEY, appEntryUrl);
+            // Mark current state as being in the app
+            window.history.replaceState({ inApp: true }, '', window.location.href);
+        } else {
+            // Already have an entry point - just mark current state
+            if (!window.history.state?.inApp) {
+                window.history.replaceState({ inApp: true }, '', window.location.href);
+            }
+        }
+
+        const handlePopState = (event) => {
+            const currentPath = window.location.pathname;
+            const currentUrl = window.location.href;
+            
+            // Check if we're still in the app (internal routes)
+            const isAppRoute = currentPath.startsWith('/app') || 
+                              currentPath.startsWith('/dashboard') || 
+                              currentPath.startsWith('/admin') ||
+                              (currentPath === '/' && isAuthenticated);
+            
+            // If we're still in the app, allow the navigation (let React Router and dashboard handle it)
+            if (isAppRoute) {
+                // Check if this is a dashboard internal navigation (has dashboardView state)
+                if (event.state?.dashboardView) {
+                    // This is handled by dashboard's own popstate handler, don't interfere
+                    return;
+                }
+                // If we're in an app route but don't have dashboardView, dashboard handler will fix it
+                // Just ensure we mark inApp flag
+                const currentState = window.history.state || {};
+                if (!currentState.inApp) {
+                    // Preserve dashboardView if it exists, otherwise let dashboard handler add it
+                    window.history.replaceState({ ...currentState, inApp: true }, '', currentUrl);
+                }
+                return; // Allow normal navigation - dashboard handler will restore view if needed
+            }
+            
+            // If we're navigating outside the app, redirect back to entry point
+            // This prevents going back to external sites (like Google, etc.)
+            const entryUrl = new URL(appEntryUrl);
+            const targetPath = entryUrl.pathname || '/app';
+            
+            // Check if we're on the same domain - if so, use history API to avoid reload
+            const currentHost = window.location.hostname;
+            const entryHost = entryUrl.hostname;
+            
+            if (currentHost === entryHost || currentHost === 'localhost' || currentHost === '127.0.0.1') {
+                // Same domain - use history API to navigate without reload
+                window.history.pushState({ inApp: true, dashboardView: 'dashboard' }, '', targetPath);
+                // Use a small timeout to let React Router process, then trigger navigation if needed
+                setTimeout(() => {
+                    // If we're still not on the right path, force it (shouldn't happen but safety net)
+                    if (window.location.pathname !== targetPath) {
+                        window.location.pathname = targetPath;
+                    }
+                }, 0);
+            } else {
+                // Different domain - must use full navigation to prevent leaving
+                window.location.pathname = targetPath;
+            }
+        };
+
+        // Use capture phase to run before React Router's handler
+        window.addEventListener('popstate', handlePopState, true);
+        return () => {
+            window.removeEventListener('popstate', handlePopState, true);
+        };
+    }, [isAuthenticated, hydrated]);
 
     // Handle navigation messages from popped-out AI Assistant window
     useEffect(() => {
@@ -92,7 +175,7 @@ export default function App() {
                             window.history.replaceState({}, '', newUrl.toString());
                         }
                     } else {
-                        console.warn('[App] Magic link token exchange failed:', response.status);
+                        if (import.meta.env.DEV) console.warn('[App] Magic link token exchange failed:', response.status);
                         // Remove invalid token from URL
                         const newUrl = new URL(window.location.href);
                         newUrl.searchParams.delete('token');
@@ -146,12 +229,46 @@ export default function App() {
                 const data = await api.get('/api/podcasts/');
                 if(!cancelled) {
                     const items = Array.isArray(data) ? data : (data.items || []);
-                    setPodcastCheck({ loading:false, count: items.length, fetched: true });
+                    setPodcastCheck({ loading:false, count: items.length, fetched: true, error: false });
                 }
-            } catch { if(!cancelled) setPodcastCheck({ loading:false, count:0, fetched: true }); }
+            } catch (err) {
+                // If API call fails, don't assume user has no podcasts - they might have existing podcasts
+                // Set error flag so we don't redirect to onboarding on API failures
+                if(!cancelled) {
+                    console.error('[App] Failed to fetch podcasts for onboarding check:', err);
+                    setPodcastCheck({ loading:false, count: 0, fetched: true, error: true });
+                }
+            }
         })();
         return () => { cancelled = true; };
     }, [isAuthenticated, token, podcastCheck.fetched, hydrated]);
+
+    // Check onboarding completion status - CRITICAL: Users MUST complete all 13 steps before dashboard access
+    useEffect(() => {
+        if(!isAuthenticated || onboardingCheck.fetched || !hydrated || !user) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const api = makeApi(token);
+                const status = await api.get('/api/assistant/onboarding/status');
+                if(!cancelled) {
+                    setOnboardingCheck({ 
+                        loading: false, 
+                        completed: status.completed || false, 
+                        fetched: true, 
+                        error: false 
+                    });
+                }
+            } catch (err) {
+                // If API call fails, assume onboarding not complete (safer default)
+                if(!cancelled) {
+                    console.error('[App] Failed to check onboarding status:', err);
+                    setOnboardingCheck({ loading: false, completed: false, fetched: true, error: true });
+                }
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [isAuthenticated, token, onboardingCheck.fetched, hydrated, user]);
 
     // Admin preflight: verify backend allows /api/admin/* before rendering AdminDashboard
     useEffect(() => {
@@ -269,6 +386,12 @@ export default function App() {
         }
         if (podcastCheck.loading) return <div className="flex items-center justify-center h-screen">Preparing your workspace...</div>;
         
+        // CRITICAL: Wait for podcast check AND onboarding check to complete before making routing decisions
+        // This prevents false positives when API calls are still in progress or have failed
+        if (!podcastCheck.fetched || !onboardingCheck.fetched) {
+            return <div className="flex items-center justify-center h-screen">Preparing your workspace...</div>;
+        }
+        
         // CRITICAL: Check onboarding FIRST before anything else (including ToS)
         // This ensures new users who just verified their email go through onboarding
         const params = new URLSearchParams(window.location.search);
@@ -277,9 +400,36 @@ export default function App() {
         const skipOnboarding = onboardingParam === '0' || params.get('skip_onboarding') === '1';
         const justVerified = params.get('verified') === '1';
         
+        // Skip onboarding for admin users - they should have direct access to dashboard/admin panel
+        const userIsAdmin = isAdmin(user);
+        
+        // CRITICAL: Users MUST complete all 13 onboarding steps before accessing dashboard
+        // This checks backend status: has podcast, has template, AND terms accepted
+        // EXCEPTION: Admin users skip onboarding regardless of completion status
+        // IMPORTANT: Only redirect if we've successfully fetched onboarding status
+        // If API call failed (error: true), don't redirect - assume user might have completed onboarding
+        // CRITICAL: If forceOnboarding is set (e.g., from reset), always show onboarding regardless of completion status
+        if (
+            (onboardingCheck.fetched && 
+            !onboardingCheck.error && 
+            !onboardingCheck.completed && 
+            !skipOnboarding && 
+            !userIsAdmin) ||
+            (forceOnboarding && !skipOnboarding && !userIsAdmin)
+        ) {
+            if (import.meta.env.DEV) {
+                console.log('[App] Redirecting to onboarding - user has not completed all 13 steps or forced onboarding');
+            }
+            return <Onboarding />;
+        }
+        
         // CRITICAL: Users with ZERO podcasts MUST complete onboarding - no escape routes
         // This ensures every user creates at least one podcast before accessing dashboard
-        if (podcastCheck.count === 0 && !skipOnboarding) {
+        // EXCEPTION: Admin users skip onboarding regardless of podcast count
+        // IMPORTANT: Only redirect if we've successfully fetched podcasts AND count is 0
+        // This prevents redirecting users with existing podcasts due to API errors
+        // If API call failed (error: true), don't redirect - assume user might have podcasts
+        if (podcastCheck.fetched && !podcastCheck.error && podcastCheck.count === 0 && !skipOnboarding && !userIsAdmin) {
             return <Onboarding />;
         }
         
@@ -289,30 +439,54 @@ export default function App() {
         
         // Users with podcasts OR just verified their email OR explicitly requested onboarding
         // should go through onboarding BEFORE seeing ToS or dashboard
-        if (!skipOnboarding && !completedFlag && (forceOnboarding || justVerified)) {
+        // EXCEPTION: Admin users skip onboarding regardless of verification status
+        if (!skipOnboarding && !completedFlag && !userIsAdmin && (forceOnboarding || justVerified)) {
             return <Onboarding />;
         }
         
+        // CRITICAL: Terms acceptance check - MUST happen AFTER onboarding check
+        // Terms are the LAST step (step 13) of onboarding, so users must complete onboarding first
         // If Terms require acceptance, gate here AFTER onboarding check
+        // CRITICAL: Only check if user data is hydrated (fresh from backend)
+        // This prevents showing gate with stale data after user accepts terms
         const requiredVersion = user?.terms_version_required;
         const acceptedVersion = user?.terms_version_accepted;
         
-        // Debug logging to track Terms bypass issues
-        if (import.meta.env.DEV || requiredVersion) {
+        // Debug logging to track Terms bypass issues (dev only to avoid console spam)
+        if (import.meta.env.DEV && requiredVersion) {
             console.log('[TermsGate Check]', {
                 email: user?.email,
                 requiredVersion,
                 acceptedVersion,
                 match: requiredVersion === acceptedVersion,
-                shouldShowGate: !!(requiredVersion && requiredVersion !== acceptedVersion)
+                shouldShowGate: !!(requiredVersion && requiredVersion !== acceptedVersion),
+                hydrated: hydrated
             });
         }
         
         // CRITICAL: Block access if terms not accepted (strict comparison)
-        // FIX (Oct 21): Only enforce if requiredVersion is actually set AND is a non-empty string
-        // This prevents null/undefined from blocking users when TERMS_VERSION isn't configured
-        if (requiredVersion && typeof requiredVersion === 'string' && requiredVersion.trim() !== '' && requiredVersion !== acceptedVersion) {
-            console.warn('[TermsGate] Blocking user - terms acceptance required:', user?.email);
+        // Only enforce if:
+        // 1. User data is hydrated (fresh from backend)
+        // 2. requiredVersion is set AND is a non-empty string
+        // 3. requiredVersion differs from acceptedVersion
+        // This prevents:
+        // - Blocking users when TERMS_VERSION isn't configured (requiredVersion is null/empty)
+        // - Showing gate with stale data before refresh completes
+        // - Pestering users who already accepted terms
+        if (
+            hydrated && // Only check with fresh data
+            requiredVersion && 
+            typeof requiredVersion === 'string' && 
+            requiredVersion.trim() !== '' && 
+            requiredVersion !== acceptedVersion
+        ) {
+            if (import.meta.env.DEV) {
+                console.warn('[TermsGate] Blocking user - terms acceptance required:', {
+                    email: user?.email,
+                    required: requiredVersion,
+                    accepted: acceptedVersion
+                });
+            }
             return <TermsGate />;
         }
         

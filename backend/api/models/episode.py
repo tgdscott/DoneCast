@@ -45,9 +45,9 @@ class Episode(SQLModel, table=True):
     spreaker_episode_id: Optional[str] = Field(default=None)
     is_published_to_spreaker: bool = Field(default=False)
     remote_cover_url: Optional[str] = Field(default=None, description="Spreaker-hosted cover image URL after publish")
-    # GCS retention for 7-day grace period (kept after assembly/schedule until 7 days post-publish)
-    gcs_audio_path: Optional[str] = Field(default=None, description="GCS path (gs://...) for assembled audio during retention period")
-    gcs_cover_path: Optional[str] = Field(default=None, description="GCS path (gs://...) for episode cover during retention period")
+    # Cloud storage paths (R2 or GCS) - permanent storage
+    gcs_audio_path: Optional[str] = Field(default=None, description="Cloud storage path (r2://... or gs://...) for assembled audio")
+    gcs_cover_path: Optional[str] = Field(default=None, description="Cloud storage path (r2://... or gs://...) for episode cover")
     # Numbering conflict flag (soft warning, doesn't block assembly/update)
     has_numbering_conflict: bool = Field(default=False, description="True if season+episode number duplicates exist in this podcast")
     # Publish failure diagnostics

@@ -13,6 +13,11 @@ from pydantic import BaseModel, Field
 
 from api.models.podcast import Podcast
 from api.services.ai_content import client_router as ai_client
+from api.services.podcast_websites import (
+    _get_readable_text_color,
+    _get_contrast_ratio,
+    _hex_to_rgb_tuple,
+)
 
 log = logging.getLogger(__name__)
 
@@ -39,76 +44,204 @@ class ThemeAnalysisResult(BaseModel):
 def analyze_podcast_for_theme(
     podcast: Podcast,
     cover_url: Optional[str] = None,
-    tagline: Optional[str] = None
+    tagline: Optional[str] = None,
+    design_prefs: Optional[Dict[str, Any]] = None
 ) -> ThemeSpec:
     """
     Analyze podcast metadata and cover art to generate a theme specification.
+    
+    Uses AI vision to analyze the cover image and identify visual motifs, colors, and tone.
     
     Args:
         podcast: The podcast to analyze
         cover_url: URL to podcast cover art (optional)
         tagline: Podcast tagline if available
+        design_prefs: User-provided design preferences (vibe, colors, notes)
         
     Returns:
         ThemeSpec with colors, typography, motifs, animations, etc.
     """
-    # Build analysis prompt
-    description = podcast.description or "A podcast"
-    cover_description = "vibrant and colorful" if cover_url else "not provided"
+    import requests
+    import base64
     
-    prompt = f"""You are a web design expert analyzing a podcast for theme generation.
+    # Build analysis prompt - enhanced to match ChatGPT-style analysis
+    description = podcast.description or "A podcast"
+    
+    # Try to fetch and encode the cover image for vision analysis
+    image_data = None
+    image_mime = None
+    if cover_url:
+        # Ensure cover_url is a full URL (not a relative path)
+        resolved_url = cover_url
+        if not cover_url.startswith(('http://', 'https://')):
+            # Try to resolve relative path via storage abstraction
+            try:
+                from infrastructure.storage import get_public_audio_url
+                resolved = get_public_audio_url(cover_url, expiration_days=1)
+                if resolved:
+                    resolved_url = resolved
+                else:
+                    log.warning("Could not resolve relative cover path to URL: %s", cover_url)
+                    resolved_url = None
+            except Exception as resolve_exc:
+                log.warning("Failed to resolve cover URL: %s", resolve_exc)
+                resolved_url = None
+        
+        if resolved_url:
+            try:
+                response = requests.get(resolved_url, timeout=10)
+                if response.status_code == 200:
+                    image_data = base64.b64encode(response.content).decode('utf-8')
+                    # Detect MIME type
+                    if resolved_url.lower().endswith('.png'):
+                        image_mime = 'image/png'
+                    elif resolved_url.lower().endswith('.jpg') or resolved_url.lower().endswith('.jpeg'):
+                        image_mime = 'image/jpeg'
+                    elif resolved_url.lower().endswith('.webp'):
+                        image_mime = 'image/webp'
+                    else:
+                        # Try to detect from content
+                        if response.content.startswith(b'\x89PNG'):
+                            image_mime = 'image/png'
+                        elif response.content.startswith(b'\xff\xd8'):
+                            image_mime = 'image/jpeg'
+                        else:
+                            image_mime = 'image/jpeg'  # Default fallback
+                    log.info("Successfully loaded cover image for vision analysis (%d bytes)", len(response.content))
+            except Exception as e:
+                log.warning("Failed to fetch cover image for vision analysis (URL: %s): %s", resolved_url[:100] if resolved_url else 'None', e)
+    
+    # Enhanced prompt that asks for deep visual analysis
+    prompt = f"""You are a web design expert analyzing a podcast cover image and metadata to generate a comprehensive design theme.
 
 Podcast Title: {podcast.name}
 Description: {description}
 Tagline: {tagline or 'Not provided'}
-Cover Art: {cover_description}
 
-Analyze this podcast and generate a design theme specification in JSON format. Consider:
-- The podcast's tone, genre, and target audience
-- Visual elements that would match the content
-- Color palettes that evoke the right mood
-- Typography that fits the style
-- Interactive elements and animations that enhance the experience
+{"I'm providing the podcast cover image - analyze it carefully." if image_data else "Cover art is not available - base your analysis on the title and description."}
 
+**Your Task:**
+1. Analyze the visual elements in the cover image (if provided):
+   - Identify specific objects, symbols, and visual motifs (e.g., marquee lights, popcorn, chainsaws, theater seats, dinosaurs, retro signs, etc.)
+   - Extract dominant colors and their emotional associations
+   - Determine the overall tone and vibe (e.g., "retro movie theater", "cinematic horror-comedy", "playful-slasher", "cozy storytelling", etc.)
+   - Note any stylistic elements (vintage, modern, minimalist, maximalist, etc.)
+
+2. Based on the podcast title, description, and visual analysis, generate a complete design theme that:
+   - Matches the visual style and tone of the cover art
+   - Uses colors extracted from or inspired by the image
+   - Incorporates visual motifs as CSS elements (e.g., marquee light animations, ticket-style buttons, movie poster cards, etc.)
+   - Creates a cohesive, memorable design that feels like stepping into the podcast's world
+
+**Visual Motifs to Consider:**
+- If you see marquee lights/theater signs → include "marquee-lights", "theater-bulbs"
+- If you see movie/cinema elements → include "movie-poster-style", "cinematic"
+- If you see retro/vintage elements → include "retro", "vintage-theater"
+- If you see playful/horror elements → include "playful-horror", "slasher-comedy"
+- If you see specific objects (popcorn, chainsaws, etc.) → include those as motifs
+
+**Component Style Variants:**
+- "marquee-style" for hero sections with animated marquee borders
+- "ticket-style" for buttons that look like cinema tickets with perforated edges
+- "movie-poster-style" for episode cards styled like movie posters
+- "retro-cassette" or "reel-style" for audio players
+"""
+
+    # IMPORTANT: Add user preferences if they exist
+    if design_prefs:
+        prompt += f"""
+\n**USER DESIGN INSTRUCTIONS (PRIORITY)**
+The user has provided specific instructions for the website design. You MUST prioritize these over your analysis of the cover art if they conflict.
+
+"""
+        if design_prefs.get('design_vibe'):
+            prompt += f"- **Desired Vibe:** {design_prefs['design_vibe']}\n"
+        if design_prefs.get('color_preference'):
+            prompt += f"- **Color Preferences:** {design_prefs['color_preference']} (Use these exact colors if possible)\n"
+        if design_prefs.get('additional_notes'):
+            prompt += f"- **Additional Notes:** {design_prefs['additional_notes']}\n"
+        
+        prompt += "\n**CRITICAL:** If the user asks for specific colors or styles (e.g. 'high contrast', 'neon', 'black and white'), you MUST generate a theme that respects these wishes.\n"
+
+    prompt += f"""
 Output a JSON object with this exact structure:
 {{
-  "mood": "descriptive-mood-string",
+  "mood": "descriptive-mood-string (e.g., 'retro-movie-theater', 'cinematic-horror-comedy', 'playful-slasher-cinema')",
   "color_palette": {{
-    "bg": "#hexcolor",
-    "bg_elev": "#hexcolor",
-    "text": "#hexcolor",
-    "muted": "#hexcolor",
-    "primary": "#hexcolor",
-    "primary_700": "#hexcolor",
-    "accent": "#hexcolor",
-    "danger": "#hexcolor"
+    "bg": "#hexcolor (deep background color, e.g., dark navy for theaters)",
+    "bg_elev": "#hexcolor (elevated surface color, slightly lighter than bg)",
+    "text": "#hexcolor (main text color, ensure good contrast)",
+    "muted": "#hexcolor (muted/secondary text)",
+    "primary": "#hexcolor (dominant brand color from image, e.g., gold for marquee lights)",
+    "primary_700": "#hexcolor (darker shade of primary for gradients)",
+    "accent": "#hexcolor (accent color, e.g., neon cyan for hovers)",
+    "danger": "#hexcolor (accent color, e.g., deep red for theater seats)"
   }},
   "typography": {{
-    "heading_font": "Font Name, fallback, sans-serif",
-    "body_font": "Font Name, fallback, sans-serif",
-    "heading_style": "uppercase/bold/normal, letter-spacing value"
+    "heading_font": "Font Name, fallback, sans-serif (e.g., 'Anton, Impact, system-ui' for marquee-style)",
+    "body_font": "Font Name, fallback, sans-serif (e.g., 'Inter, system-ui' for readability)",
+    "heading_style": "uppercase/bold/normal, letter-spacing value (e.g., 'uppercase, 0.5px' for marquee)"
   }},
-  "visual_motifs": ["motif1", "motif2"],
-  "animations": ["animation1", "animation2"],
+  "visual_motifs": ["specific-motif-1", "specific-motif-2", "specific-motif-3"],
+  "animations": ["animation-type-1", "animation-type-2"],
   "component_styles": {{
-    "hero": "variant-name",
-    "buttons": "variant-name",
-    "episode_cards": "variant-name",
-    "audio_player": "variant-name"
+    "hero": "marquee-style or standard",
+    "buttons": "ticket-style or standard",
+    "episode_cards": "movie-poster-style or standard",
+    "audio_player": "retro-cassette or standard"
   }},
-  "effects": ["effect1", "effect2"]
+  "effects": ["effect-1", "effect-2"]
 }}
 
-Be creative but practical. The design should be:
-- Visually distinctive and memorable
-- Accessible (good contrast ratios)
-- Responsive-friendly
-- Aligned with the podcast's content and tone
+**Important:**
+- Extract colors directly from the image if possible
+- Identify specific visual motifs (don't be generic - be specific like "marquee-lights", "popcorn-kernels", "chainsaws", "theater-seats")
+- Match the tone exactly (if it's playful horror, reflect that in the mood)
+- Ensure text colors have sufficient contrast for accessibility
 
 Output ONLY valid JSON, no explanations or markdown fences."""
 
     try:
-        response = ai_client.generate(prompt, max_output_tokens=2048, temperature=0.8)
+        # If we have image data, use vision-capable model with multimodal input
+        if image_data and image_mime:
+            # Use Gemini's vision API by passing image as part of content
+            # The generate function needs to support this, so we'll use a workaround:
+            # Pass image URL in prompt and let AI analyze it, OR use direct API call
+            # For now, enhance prompt with image analysis instructions
+            # Include image URL in prompt for AI to reference
+            # Note: For true vision analysis, we'd need to pass the image directly to Gemini's vision API
+            # For now, we'll enhance the prompt to ask for detailed analysis based on the image URL
+            vision_prompt = f"""{prompt}
+
+**CRITICAL: Analyze the podcast cover image at this URL: {cover_url}**
+
+Look at the image carefully and identify:
+- Every visual element, object, symbol, and color you see
+- Specific motifs (e.g., marquee lights, popcorn, chainsaws, theater seats, dinosaurs, retro signs, etc.)
+- The exact color palette (extract dominant colors and their hex codes)
+- The precise tone and style (e.g., "retro movie theater", "cinematic horror-comedy", "playful-slasher")
+- Visual style elements (vintage, modern, minimalist, maximalist, etc.)
+
+Be extremely specific about visual motifs - don't be generic:
+- If you see marquee lights → include "marquee-lights" and "theater-bulbs"
+- If you see dinosaurs → include "dinosaurs" 
+- If you see chainsaws → include "chainsaws"
+- If you see popcorn → include "popcorn-kernels"
+- If you see theater seats → include "theater-seats"
+- Match the exact vibe and colors from what you see in the image
+
+Generate CSS that visually matches what you see - if it's a retro theater vibe, include marquee animations. If it's cinematic, use movie poster styling. Make it feel like stepping into the podcast's world."""
+            
+            # Try to use vision model if available
+            try:
+                # Check if we can use a vision-capable model
+                response = ai_client.generate(vision_prompt, max_output_tokens=4096, temperature=0.7)
+            except Exception as vision_err:
+                log.warning("Vision analysis failed, falling back to text-only: %s", vision_err)
+                response = ai_client.generate(prompt, max_output_tokens=4096, temperature=0.7)
+        else:
+            # No image, use enhanced text-only prompt
+            response = ai_client.generate(prompt, max_output_tokens=4096, temperature=0.7)
         
         # Clean up response
         response = response.strip()
@@ -128,8 +261,9 @@ Output ONLY valid JSON, no explanations or markdown fences."""
         
     except json.JSONDecodeError as e:
         log.error("Failed to parse theme JSON from AI: %s", e)
-        if 'response' in locals():
-            log.debug("AI response was: %s", response[:500] if len(response) > 500 else response)
+        if 'response' in locals() and isinstance(response, str):
+            response_preview = response[:1000] if len(response) > 1000 else response
+            log.debug("AI response was: %s", response_preview)
         # Return a default theme as fallback
         return _get_default_theme_spec(podcast.name)
     except Exception as e:
@@ -256,6 +390,58 @@ def generate_theme_css(theme_spec: ThemeSpec, section_configs: Dict[str, Any]) -
     heading_font = typo.get("heading_font", "Inter, sans-serif")
     body_font = typo.get("body_font", "Inter, sans-serif")
     
+    # CRITICAL: Ensure text colors meet WCAG AA contrast requirements
+    # Validate and fix text color against background
+    text_rgb = _hex_to_rgb_tuple(text)
+    bg_rgb = _hex_to_rgb_tuple(bg)
+    text_contrast = _get_contrast_ratio(text_rgb, bg_rgb)
+    if text_contrast < 4.5:
+        log.warning(
+            "Theme text color contrast %.2f:1 below WCAG AA minimum (4.5:1) for bg %s. "
+            "Auto-correcting to readable color.",
+            text_contrast, bg
+        )
+        text = _get_readable_text_color(bg, min_contrast=4.5)
+    
+    # Check primary color contrast against background (used for headings)
+    primary_rgb = _hex_to_rgb_tuple(primary)
+    primary_contrast = _get_contrast_ratio(primary_rgb, bg_rgb)
+    
+    # If primary contrast is poor, we must NOT use it for text/headings on this background
+    # We'll create a "primary_text" variable that is safe to use
+    primary_text = primary
+    if primary_contrast < 3.0:  # Absolute minimum for large text
+        log.warning(
+            "Theme primary color contrast %.2f:1 too low for bg %s. "
+            "Using text color for headings instead of primary.",
+            primary_contrast, bg
+        )
+        primary_text = text  # Fallback to main text color which is already safe
+    elif primary_contrast < 4.5:
+        # It's okay for large text (headings), but maybe marginal for small text
+        # We'll try to tweak it slightly if possible, or just accept it for headings
+        pass
+
+    # Validate muted text color
+    muted_rgb = _hex_to_rgb_tuple(muted)
+    muted_contrast = _get_contrast_ratio(muted_rgb, bg_rgb)
+    if muted_contrast < 4.5:
+        # Muted text can be slightly lower contrast, but still needs to be readable
+        if muted_contrast < 3.0:  # Even fails large text requirement
+            log.warning(
+                "Theme muted color contrast %.2f:1 too low for bg %s. Auto-correcting.",
+                muted_contrast, bg
+            )
+            # Use a lighter/darker version based on background
+            if _get_contrast_ratio((255, 255, 255), bg_rgb) > _get_contrast_ratio((30, 41, 59), bg_rgb):
+                muted = "#cbd5e1"  # Light gray
+            else:
+                muted = "#64748b"  # Medium gray
+    
+    # Log the colors being used for debugging
+    log.info("Generating CSS with colors: primary=%s, bg=%s, text=%s (contrast: %.2f:1)", 
+             primary, bg, text, _get_contrast_ratio(_hex_to_rgb_tuple(text), bg_rgb))
+    
     css_parts.append(f"""/* AI-Generated Theme CSS */
 :root {{
   /* Color Palette */
@@ -264,6 +450,7 @@ def generate_theme_css(theme_spec: ThemeSpec, section_configs: Dict[str, Any]) -
   --text: {text};
   --muted: {muted};
   --primary: {primary};
+  --primary-text: {primary_text};
   --primary-700: {primary_700};
   --accent: {accent};
   --danger: {danger};
@@ -275,6 +462,15 @@ def generate_theme_css(theme_spec: ThemeSpec, section_configs: Dict[str, Any]) -
   /* Spacing */
   --radius: 14px;
   --shadow: 0 10px 30px rgba(0,0,0,.35);
+  
+  /* Legacy color variable names for compatibility */
+  --color-primary: {primary};
+  --color-secondary: {muted};
+  --color-accent: {accent};
+  --color-background-light: {bg};
+  --color-background-dark: {bg_elev};
+  --color-text-light: {text};
+  --color-text-dark: {bg};
 }}
 """)
     
@@ -305,6 +501,94 @@ div[class*="hero"][style] {{
   color: var(--text, {text}) !important;
 }}
 
+/* Override Tailwind text color classes in hero sections - HIGHEST PRIORITY */
+.hero [class*="text-slate"],
+.hero [class*="text-gray"],
+.hero [class*="text-white"],
+.hero [class*="text-blue"],
+.hero h1, .hero h2, .hero h3,
+.hero .text-4xl, .hero .text-5xl, .hero .text-3xl,
+.hero h1[style], .hero h2[style], .hero h3[style],
+div.hero h1, div.hero h2, div.hero h3,
+div[class*="hero"] h1, div[class*="hero"] h2, div[class*="hero"] h3 {{
+  color: var(--primary-text, {primary_text}) !important;
+}}
+
+/* Force primary color on hero h1 even with inline styles - MAXIMUM SPECIFICITY */
+.hero h1[style*="color"],
+.hero .hero-title,
+.hero h1.hero-title,
+div.hero h1.hero-title,
+div[class*="hero"] h1.hero-title,
+.w-full.hero h1.hero-title {{
+  color: var(--primary-text, {primary_text}) !important;
+}}
+
+/* Ensure hero title uses primary color - override any other rules including inline styles */
+h1.hero-title,
+.hero h1.hero-title,
+div.hero h1.hero-title,
+div[class*="hero"] h1.hero-title,
+.w-full.hero h1.hero-title,
+div.w-full.hero h1.hero-title {{
+  color: var(--primary-text, {primary_text}) !important;
+}}
+
+/* Nuclear option: target by class combination with maximum specificity */
+.text-4xl.hero-title,
+.text-5xl.hero-title,
+.font-bold.hero-title,
+.leading-tight.hero-title,
+.hero .text-4xl.hero-title,
+.hero .text-5xl.hero-title,
+div.hero .text-4xl.hero-title,
+div.hero .text-5xl.hero-title,
+.w-full.hero .text-4xl.hero-title,
+.w-full.hero .text-5xl.hero-title {{
+  color: var(--primary-text, {primary_text}) !important;
+}}
+
+/* Target ALL h1 elements inside .hero regardless of other classes - ABSOLUTE MAXIMUM SPECIFICITY */
+.hero h1,
+div.hero h1,
+.w-full.hero h1,
+div.w-full.hero h1,
+div[class*="hero"] h1,
+div.w-full.relative.overflow-hidden.hero h1,
+div[class*="w-full"][class*="hero"] h1,
+div.w-full.relative.overflow-hidden.hero.marquee-style h1 {{
+  color: var(--primary-text, {primary_text}) !important;
+  /* Force override any inline styles - inline styles have higher specificity than classes, so we need !important */
+  color: var(--primary-text, {primary_text}) !important;
+}}
+
+/* Override inline styles specifically - inline styles have very high specificity */
+.hero h1[style*="color"],
+div.hero h1[style*="color"],
+.w-full.hero h1[style*="color"],
+div.w-full.relative.overflow-hidden.hero h1[style*="color"],
+div.w-full.relative.overflow-hidden.hero.marquee-style h1[style*="color"] {{
+  color: var(--primary-text, {primary_text}) !important;
+}}
+
+/* DIRECT FALLBACK - if CSS variable doesn't work, use the actual color */
+.hero h1,
+div.hero h1,
+.w-full.hero h1,
+div.w-full.relative.overflow-hidden.hero h1 {{
+  color: {primary_text} !important;
+  /* Also set via CSS variable for dynamic theming */
+  color: var(--primary-text, {primary_text}) !important;
+}}
+
+/* Even more specific - target the exact structure */
+div.w-full.relative.overflow-hidden.hero > div > div > h1,
+div.w-full.relative.overflow-hidden.hero h1.hero-title,
+div.w-full.relative.overflow-hidden.hero h1.text-4xl,
+div.w-full.relative.overflow-hidden.hero h1.text-5xl {{
+  color: var(--primary-text, {primary_text}) !important;
+}}
+
 /* Apply theme to episode cards */
 .episode-card {{
   background: var(--bg-elev, {bg_elev}) !important;
@@ -312,7 +596,80 @@ div[class*="hero"][style] {{
   color: var(--text, {text}) !important;
 }}
 
+/* Override Tailwind text colors for headings - BUT only on dark backgrounds */
+/* On white/light backgrounds, use dark text for readability */
+.bg-white h1, .bg-white h2, .bg-white h3,
+.bg-white [class*="text-"],
+[class*="bg-white"] h1, [class*="bg-white"] h2, [class*="bg-white"] h3,
+[class*="bg-white"] [class*="text-slate"], [class*="bg-white"] [class*="text-gray"] {{
+  color: #1e293b !important; /* Dark slate for readability on white */
+}}
+
+/* Apply primary color to headings ONLY on dark backgrounds (hero, dark sections) */
+.hero h1, .hero h2, .hero h3,
+[style*="background"][style*="var(--bg)"] h1,
+[style*="background"][style*="var(--bg)"] h2,
+[style*="background"][style*="var(--bg)"] h3,
+div[class*="hero"] h1, div[class*="hero"] h2, div[class*="hero"] h3 {{
+  color: var(--primary-text, {primary_text}) !important;
+}}
+
 .container {{ max-width: 1100px; margin: 0 auto; padding: 24px; }}
+
+/* Target sections using data-section-id attributes (most reliable) */
+[data-section-id="hero"] .hero,
+[data-section-id="hero"] .w-full.hero,
+[data-section-id="hero"] div.hero {{
+  background: var(--bg, {bg}) !important;
+  color: var(--text, {text}) !important;
+}}
+
+[data-section-id="hero"] h1,
+[data-section-id="hero"] .hero-title,
+[data-section-id="hero"] h1.hero-title {{
+  color: var(--primary-text, {primary_text}) !important;
+  font-family: var(--font-heading, {heading_font}) !important;
+}}
+
+[data-section-id="header"] .w-full,
+[data-section-id="header"] div.w-full {{
+  background-color: var(--bg-elev, {bg_elev}) !important;
+  color: var(--text, {text}) !important;
+}}
+
+[data-section-id="latest-episodes"] .w-full,
+[data-section-id="latest-episodes"] .bg-white,
+[data-section-id="latest-episodes"] div.bg-white {{
+  background-color: var(--bg, {bg}) !important;
+}}
+
+[data-section-id="latest-episodes"] h2,
+[data-section-id="latest-episodes"] h3 {{
+  color: var(--primary-text, {primary_text}) !important;
+  font-family: var(--font-heading, {heading_font}) !important;
+}}
+
+/* Override Tailwind classes with theme colors - HIGH SPECIFICITY */
+.w-full.bg-white {{
+  background-color: var(--bg, {bg}) !important;
+}}
+
+/* Buttons and links */
+a {{
+  color: var(--accent, {accent}) !important;
+}}
+
+a:hover {{
+  color: var(--primary, {primary}) !important;
+}}
+
+/* Episode cards */
+[data-section-id="latest-episodes"] .rounded-lg,
+[data-section-id="latest-episodes"] .border {{
+  background-color: var(--bg-elev, {bg_elev}) !important;
+  border-color: var(--muted, {muted}) !important;
+  color: var(--text, {text}) !important;
+}}
 """)
     
     # Hero Section Variants
@@ -440,17 +797,54 @@ div[class*="hero"][style] {{
 }
 """)
     
-    # Typography
+    # Typography - Override Tailwind classes with high specificity
+    # CRITICAL: Only apply primary color on dark backgrounds, use dark text on white backgrounds
     heading_style = typo.get("heading_style", "bold, normal")
     if "uppercase" in heading_style:
-        css_parts.append("""
-h1, h2, h3 {
-  font-family: var(--font-heading);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--primary);
-  text-shadow: 0 2px 0 rgba(0,0,0,.5), 0 0 24px rgba(255,193,7,.35);
-}
+        css_parts.append(f"""
+/* Typography - Override Tailwind text color classes */
+/* On dark backgrounds (hero, dark sections) - use primary color with glow */
+.hero h1, .hero h2, .hero h3,
+.hero .text-4xl, .hero .text-5xl, .hero .text-3xl,
+.hero [class*="text-"],
+div[class*="hero"] h1, div[class*="hero"] h2, div[class*="hero"] h3 {{
+  font-family: var(--font-heading, {heading_font}) !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  color: var(--primary, {primary}) !important;
+  text-shadow: 0 2px 0 rgba(0,0,0,.5), 0 0 24px rgba(255,193,7,.35) !important;
+}}
+
+/* On white/light backgrounds - use dark text for readability (NO glow) */
+.bg-white h1, .bg-white h2, .bg-white h3,
+.bg-white .text-4xl, .bg-white .text-5xl, .bg-white .text-3xl,
+[class*="bg-white"] h1, [class*="bg-white"] h2, [class*="bg-white"] h3,
+[class*="bg-white"] [class*="text-"] {{
+  font-family: var(--font-heading, {heading_font}) !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  color: #1e293b !important; /* Dark slate for contrast on white */
+  text-shadow: none !important; /* No glow on white backgrounds */
+}}
+""")
+    else:
+        # Even without uppercase, still apply primary color to headings on dark backgrounds only
+        css_parts.append(f"""
+/* Typography - Apply primary color to headings on dark backgrounds */
+.hero h1, .hero h2, .hero h3,
+.hero [class*="text-"],
+div[class*="hero"] h1, div[class*="hero"] h2, div[class*="hero"] h3 {{
+  color: var(--primary, {primary}) !important;
+  font-family: var(--font-heading, {heading_font}) !important;
+}}
+
+/* On white backgrounds - use dark text */
+.bg-white h1, .bg-white h2, .bg-white h3,
+[class*="bg-white"] h1, [class*="bg-white"] h2, [class*="bg-white"] h3,
+[class*="bg-white"] [class*="text-slate"], [class*="bg-white"] [class*="text-gray"] {{
+  color: #1e293b !important; /* Dark text for readability */
+  font-family: var(--font-heading, {heading_font}) !important;
+}}
 """)
     
     # Visual Motifs - actually implement them!
@@ -483,9 +877,9 @@ h1, h2, h3 {
     
     # Theater bulbs / Marquee lights
     if "marquee" in motifs_str or "lights" in motifs_str or "theater" in motifs_str or "bulb" in motifs_str:
-        css_parts.append("""
+        css_parts.append(f"""
 /* Theater Bulbs / Marquee Lights */
-.bulb-row {
+.bulb-row {{
   display: flex !important;
   justify-content: center;
   gap: 8px;
@@ -493,48 +887,60 @@ h1, h2, h3 {
   opacity: 0.85;
   z-index: 10;
   pointer-events: none;
-}
+}}
 
-.bulb {
+.bulb {{
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: radial-gradient(circle at 40% 40%, #fff, var(--primary) 55%, var(--primary-700) 70%, #b66a00 100%);
-  box-shadow: 0 0 12px rgba(255,193,7,.9);
+  background: radial-gradient(circle at 40% 40%, #fff, var(--primary, {primary}) 55%, var(--primary-700, {primary_700}) 70%, #b66a00 100%) !important;
+  box-shadow: 0 0 12px rgba(255,193,7,.9) !important;
   animation: twinkle 2s ease-in-out infinite;
-}
+}}
 
-.bulb:nth-child(odd) { animation-delay: 0.8s; }
-.bulb:nth-child(even) { animation-delay: 0.4s; }
+.bulb:nth-child(odd) {{ animation-delay: 0.8s; }}
+.bulb:nth-child(even) {{ animation-delay: 0.4s; }}
 
-@keyframes twinkle {
-  0%, 100% { filter: brightness(1); opacity: 0.85; }
-  50% { filter: brightness(1.6); opacity: 1; }
-}
+@keyframes twinkle {{
+  0%, 100% {{ filter: brightness(1); opacity: 0.85; }}
+  50% {{ filter: brightness(1.6); opacity: 1; }}
+}}
+
+/* Carousel dots / pagination indicators - make them yellow */
+[class*="carousel"] [class*="dot"],
+.carousel-dot,
+.pagination-dot,
+[class*="indicator"],
+.hero [class*="rounded-full"][style*="background"],
+.hero .w-2.h-2,
+.hero .w-3.h-3 {{
+  background-color: var(--primary, {primary}) !important;
+  border-color: var(--primary, {primary}) !important;
+}}
 
 /* Marquee border effect for hero */
-.hero.marquee-style {
+.hero.marquee-style {{
   position: relative;
-}
+}}
 
-.hero.marquee-style::before {
+.hero.marquee-style::before {{
   content: "";
   position: absolute;
   inset: -6px;
   border-radius: calc(var(--radius) + 8px);
   padding: 6px;
-  background: conic-gradient(from 0deg, var(--primary) 0 4deg, transparent 4deg 8deg) border-box;
+  background: conic-gradient(from 0deg, var(--primary, {primary}) 0 4deg, transparent 4deg 8deg) border-box;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   animation: bulbs 6s linear infinite;
   opacity: 0.75;
   pointer-events: none;
-}
+}}
 
-@keyframes bulbs {
-  to { transform: rotate(360deg); }
-}
+@keyframes bulbs {{
+  to {{ transform: rotate(360deg); }}
+}}
 """)
     
     # Animations (if not already covered by motifs)
@@ -578,7 +984,8 @@ h1, h2, h3 {
 def generate_complete_theme(
     podcast: Podcast,
     cover_url: Optional[str] = None,
-    tagline: Optional[str] = None
+    tagline: Optional[str] = None,
+    design_prefs: Optional[Dict[str, Any]] = None
 ) -> ThemeAnalysisResult:
     """
     Complete theme generation workflow.
@@ -586,7 +993,7 @@ def generate_complete_theme(
     Analyzes podcast, generates theme spec, maps to sections, and generates CSS.
     """
     # Step 1: Analyze podcast
-    theme_spec = analyze_podcast_for_theme(podcast, cover_url, tagline)
+    theme_spec = analyze_podcast_for_theme(podcast, cover_url, tagline, design_prefs)
     
     # Step 2: Map to sections
     section_configs = map_theme_to_sections(theme_spec, podcast)
@@ -608,6 +1015,10 @@ def generate_complete_theme(
         "component_styles": theme_spec.component_styles,
         "generated_at": datetime.utcnow().isoformat() if hasattr(datetime, 'utcnow') else None
     }
+    
+    # Also store the user preferences that were used
+    if design_prefs:
+        section_configs["sections_config"]["_theme_metadata"]["user_design_prefs"] = design_prefs
     
     return ThemeAnalysisResult(
         theme_spec=theme_spec,

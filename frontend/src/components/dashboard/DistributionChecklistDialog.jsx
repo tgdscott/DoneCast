@@ -48,6 +48,7 @@ export default function DistributionChecklistDialog({ open, onOpenChange, podcas
   const [items, setItems] = useState([]);
   const [notesDraft, setNotesDraft] = useState({});
   const [rssFeedUrl, setRssFeedUrl] = useState("");
+  const [hasPublishedEpisodes, setHasPublishedEpisodes] = useState(false);
   const [savingKeys, setSavingKeys] = useState({});
   const [openKeys, setOpenKeys] = useState({});
 
@@ -76,6 +77,7 @@ export default function DistributionChecklistDialog({ open, onOpenChange, podcas
         setItems(list);
         setNotesDraft(Object.fromEntries(list.map((item) => [item.key, item.notes || ""])));
         setRssFeedUrl(data?.rss_feed_url || "");
+        setHasPublishedEpisodes(data?.has_published_episodes || false);
       })
       .catch((err) => {
         if (aborted) return;
@@ -172,16 +174,23 @@ export default function DistributionChecklistDialog({ open, onOpenChange, podcas
               instructions, and keep track of what has been completed.
             </p>
             {rssFeedUrl ? (
-              <div className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="font-medium">RSS feed:</span>
-                <code className="rounded bg-muted px-2 py-1 text-xs break-all">{rssFeedUrl}</code>
-                <Button type="button" variant="outline" size="sm" onClick={handleCopyFeed}>
-                  <Icons.Clipboard className="mr-2 h-4 w-4" /> Copy
-                </Button>
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="font-medium">RSS feed:</span>
+                  <code className="rounded bg-muted px-2 py-1 text-xs break-all">{rssFeedUrl}</code>
+                  <Button type="button" variant="outline" size="sm" onClick={handleCopyFeed}>
+                    <Icons.Clipboard className="mr-2 h-4 w-4" /> Copy
+                  </Button>
+                </div>
+                {!hasPublishedEpisodes && (
+                  <div className="text-xs text-yellow-700 dark:text-yellow-300">
+                    Note: Apple Podcasts and Spotify require at least one published episode before accepting your RSS feed.
+                  </div>
+                )}
               </div>
             ) : (
               <div className="text-sm text-muted-foreground">
-                Publish your first episode to generate the RSS feed automatically.
+                RSS feed URL will be available after podcast creation.
               </div>
             )}
           </DialogDescription>

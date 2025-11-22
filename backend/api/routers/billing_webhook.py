@@ -174,6 +174,8 @@ async def stripe_webhook(request: Request):
             metadata = cs.get('metadata') or {}
             user_id = metadata.get('user_id')
             purchase_type = metadata.get('type')
+            promo_code_str = metadata.get('promo_code')
+            promo_code_id_str = metadata.get('promo_code_id')
             
             if user_id and customer_id:
                 user = session.get(User, user_id)
@@ -181,6 +183,106 @@ async def stripe_webhook(request: Request):
                     user.stripe_customer_id = customer_id
                     session.add(user)
                     session.commit()
+            
+            # Handle promo code bonus credits and usage tracking
+            if promo_code_str and user_id:
+                try:
+                    from uuid import UUID
+                    from ..models.promo_code import PromoCode, PromoCodeUsage
+                    from ..services.billing.wallet import add_purchased_credits
+                    from ..services.billing.credits import refund_credits
+                    from ..models.usage import LedgerReason
+                    
+                    user_uuid = UUID(str(user_id))
+                    promo_code_obj = None
+                    
+                    # Try to find promo code by ID first, then by code
+                    if promo_code_id_str:
+                        try:
+                            promo_code_uuid = UUID(str(promo_code_id_str))
+                            promo_code_obj = session.get(PromoCode, promo_code_uuid)
+                        except Exception:
+                            pass
+                    
+                    if not promo_code_obj:
+                        from sqlmodel import select
+                        promo_code_obj = session.exec(
+                            select(PromoCode).where(PromoCode.code == promo_code_str.upper())
+                        ).first()
+                    
+                    usage_recorded = False
+                    if promo_code_obj:
+                        # Record usage to prevent reuse (idempotent - check if already exists)
+                        try:
+                            from sqlmodel import select
+                            existing_usage = session.exec(
+                                select(PromoCodeUsage).where(
+                                    PromoCodeUsage.user_id == user_uuid,
+                                    PromoCodeUsage.promo_code_id == promo_code_obj.id
+                                )
+                            ).first()
+                            if not existing_usage:
+                                usage = PromoCodeUsage(
+                                    user_id=user_uuid,
+                                    promo_code_id=promo_code_obj.id,
+                                    context="checkout"
+                                )
+                                session.add(usage)
+                                session.commit()
+                                usage_recorded = True
+                            else:
+                                # Usage already recorded (shouldn't happen due to validation, but handle gracefully)
+                                logger.warning(
+                                    f"[webhook] Promo code {promo_code_obj.code} already recorded for user {user_id}"
+                                )
+                        except Exception as e:
+                            # If unique constraint violation, user already used this code
+                            logger.warning(f"[webhook] Failed to record promo code usage (may already exist): {e}")
+                            session.rollback()
+                    
+                    if promo_code_obj and promo_code_obj.bonus_credits and promo_code_obj.bonus_credits > 0:
+                        # Apply bonus credits
+                        wallet = add_purchased_credits(session, user_uuid, float(promo_code_obj.bonus_credits))
+                        
+                        # Create ledger entry for bonus credits
+                        refund_credits(
+                            session=session,
+                            user_id=user_uuid,
+                            credits=float(promo_code_obj.bonus_credits),
+                            reason=LedgerReason.PROMO_CODE_BONUS,
+                            notes=f"Bonus credits from promo code: {promo_code_obj.code}"
+                        )
+                        
+                        logger.info(
+                            f"[webhook] Applied {promo_code_obj.bonus_credits} bonus credits from promo code "
+                            f"{promo_code_obj.code} to user {user_id}"
+                        )
+                        
+                        # Create notification
+                        try:
+                            note = Notification(
+                                user_id=user_uuid,
+                                type="billing",
+                                title="Promo Code Bonus Credits",
+                                body=f"You've received {int(promo_code_obj.bonus_credits):,} bonus credits from promo code {promo_code_obj.code}!"
+                            )
+                            session.add(note)
+                            session.commit()
+                        except Exception as e:
+                            logger.warning(f"[webhook] Failed to create notification for promo code bonus: {e}")
+                    
+                    # Increment usage count for promo code (only if we successfully recorded new usage)
+                    if promo_code_obj and usage_recorded:
+                        promo_code_obj.usage_count += 1
+                        promo_code_obj.updated_at = datetime.datetime.utcnow()
+                        session.add(promo_code_obj)
+                        session.commit()
+                        logger.info(
+                            f"[webhook] Incremented usage count for promo code {promo_code_obj.code} "
+                            f"(now {promo_code_obj.usage_count})"
+                        )
+                except Exception as e:
+                    logger.error(f"[webhook] Error processing promo code bonus credits: {e}", exc_info=True)
             
             # Handle addon credits purchase
             if purchase_type == 'addon_credits' and user_id:

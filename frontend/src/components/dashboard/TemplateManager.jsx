@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Plus, Edit, Trash2, Loader2, ArrowLeft, Bot } from "lucide-react";
+import { Plus, Edit, Trash2, Loader2, ArrowLeft, Bot, FileText } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useState, useEffect } from "react";
 import TemplateEditor from "./TemplateEditor"; // We will use the editor as a sub-component
 import { makeApi } from "@/lib/apiClient";
@@ -125,7 +126,17 @@ export default function TemplateManager({ onBack, token, setCurrentView }) {
                 ))}
               </div>
             ) : (
-              <p>No templates found. Get started by creating one!</p>
+              <EmptyState
+                title="No Templates Yet"
+                description="Templates define the structure of your episodes. Create your first template to get started with episode creation."
+                icon={FileText}
+                action={{
+                  label: "Create Your First Template",
+                  onClick: handleCreateNew,
+                  variant: "default",
+                  icon: Plus
+                }}
+              />
             )}
           </CardContent>
         </Card>

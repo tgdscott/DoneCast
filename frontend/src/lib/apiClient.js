@@ -177,15 +177,31 @@ async function req(path, opts = {}) {
   const url = buildApiUrl(path);
   const requestId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   
-  // Start tracking if warmup callbacks are available
-  if (warmupStartRequest) {
+  // Exclude upload endpoints from warmup tracking - these are expected to take time
+  // Upload endpoints have progress indicators, so users know they're working
+  const isUploadRequest = path && (
+    path.includes('/upload/') ||
+    path.includes('/media/upload') ||
+    path.includes('/merge') ||
+    opts.body instanceof FormData
+  );
+  
+  // Start tracking if warmup callbacks are available (but not for uploads)
+  if (warmupStartRequest && !isUploadRequest) {
     warmupStartRequest(requestId);
   }
   
   try {
+    // When FormData is used, don't set Content-Type - let browser set it with boundary
+    const isFormData = opts.body instanceof FormData;
+    const headers = { ...(opts.headers || {}) };
+    if (isFormData && headers['Content-Type']) {
+      delete headers['Content-Type'];
+    }
+    
     const res = await fetch(url, {
       credentials: "include",
-      headers: { ...(opts.headers || {}) },
+      headers,
       ...opts,
     });
     // Try to parse JSON if content-type hints it, otherwise allow empty
@@ -201,8 +217,8 @@ async function req(path, opts = {}) {
     }
     return canJson ? data : { ok: true, data };
   } finally {
-    // End tracking when request completes (success or failure)
-    if (warmupEndRequest) {
+    // End tracking when request completes (success or failure) - but not for uploads
+    if (warmupEndRequest && !isUploadRequest) {
       warmupEndRequest(requestId);
     }
   }
@@ -228,7 +244,18 @@ export function makeApi(token) {
     put: (p, body, opts={}) => req(p, { ...opts, method: "PUT", headers: authFor({ 'Content-Type': 'application/json', ...(opts.headers||{}) }), body: jsonBody(body) }),
     patch: (p, body, opts={}) => req(p, { ...opts, method: "PATCH", headers: authFor({ 'Content-Type': 'application/json', ...(opts.headers||{}) }), body: jsonBody(body) }),
     del: (p, body, opts={}) => req(p, { ...opts, method: "DELETE", headers: authFor({ 'Content-Type': 'application/json', ...(opts.headers||{}) }), body: jsonBody(body) }),
-    raw: (p, opts={}) => req(p, { ...opts, headers: authFor(opts.headers) }),
+    raw: (p, opts={}) => {
+      // When FormData is used, don't set Content-Type - let the browser set it with boundary
+      const isFormData = opts.body instanceof FormData;
+      const headers = isFormData 
+        ? authFor({ ...(opts.headers || {}) }) // Don't set Content-Type for FormData
+        : authFor(opts.headers);
+      // Remove Content-Type from headers if FormData is detected (browser will set it)
+      if (isFormData && headers['Content-Type']) {
+        delete headers['Content-Type'];
+      }
+      return req(p, { ...opts, headers });
+    },
   };
 }
 

@@ -128,6 +128,15 @@ def publish(session: Session, current_user, episode_id: UUID, derived_show_id: O
         session.commit()
         session.refresh(ep)
         
+        # Hide coming soon episode if this is a real episode being published
+        if ep.status == EpisodeStatus.published and ep.episode_type != "trailer":
+            try:
+                from ...services.episodes.coming_soon import hide_coming_soon_episode_if_needed
+                hide_coming_soon_episode_if_needed(session, ep.podcast_id)
+            except Exception as hide_err:
+                # Non-fatal - log but don't fail publish
+                logger.warning(f"Failed to hide coming soon episode (non-fatal): {hide_err}")
+        
         # Send SMS notification if user has opted in
         try:
             user = session.get(User, current_user.id)

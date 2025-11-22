@@ -102,7 +102,7 @@ export default function LoginModal({ onClose, initialMode = 'login' }) {
   const [promoCode, setPromoCode] = useState('');
   const [error, setError] = useState('');
   const [errorTone, setErrorTone] = useState('error');
-  const [mode, setMode] = useState(initialMode); // 'login' | 'register' | 'verify'
+  const [mode, setMode] = useState(initialMode); // 'login' | 'register' | 'verify' | 'forgot-password'
   const [verifyCode, setVerifyCode] = useState('');
   const [verificationEmail, setVerificationEmail] = useState('');
   const [verifyExpiresAt, setVerifyExpiresAt] = useState(null); // timestamp ms
@@ -116,6 +116,8 @@ export default function LoginModal({ onClose, initialMode = 'login' }) {
   const [termsInfo, setTermsInfo] = useState({ version: fallbackTermsVersion, url: '/terms' });
   const [termsLoading, setTermsLoading] = useState(false);
   const [registerSubmitting, setRegisterSubmitting] = useState(false);
+  const [resetRequested, setResetRequested] = useState(false);
+  const [resetSubmitting, setResetSubmitting] = useState(false);
 
   // Check for referral code in URL query parameter
   useEffect(() => {
@@ -326,27 +328,73 @@ export default function LoginModal({ onClose, initialMode = 'login' }) {
     }
   };
 
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    clearError();
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      showError('Email is required.');
+      emailRef.current?.focus();
+      return;
+    }
+    setResetSubmitting(true);
+    try {
+      const res = await fetch(apiUrl('/api/auth/request-password-reset'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: trimmedEmail }),
+        credentials: 'include',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setResetRequested(true);
+        showError('If an account exists with that email, a password reset link has been sent. Check your inbox.', 'info');
+      } else {
+        // Still show success message for security (don't reveal if email exists)
+        setResetRequested(true);
+        showError('If an account exists with that email, a password reset link has been sent. Check your inbox.', 'info');
+      }
+    } catch (err) {
+      showError('Failed to send reset email. Please try again.');
+    } finally {
+      setResetSubmitting(false);
+    }
+  };
+
   const submitDisabled =
     mode === 'login'
       ? !email.trim() || !password
       : mode === 'register'
         ? registerSubmitting || !email.trim() || !password
-        : false;
+        : mode === 'forgot-password'
+          ? resetSubmitting || !email.trim() || resetRequested
+          : false;
 
   const submitText =
-    mode === 'login' ? 'Sign In' : registerSubmitting ? 'Creating…' : 'Create Account';
+    mode === 'login' 
+      ? 'Sign In' 
+      : mode === 'register'
+        ? registerSubmitting ? 'Creating…' : 'Create Account'
+        : mode === 'forgot-password'
+          ? resetRequested ? 'Email Sent' : resetSubmitting ? 'Sending…' : 'Send Reset Link'
+          : '';
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <Card className="w-full max-w-md mx-4">
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>{mode === 'login' ? 'Sign In' : 'Create Account'}</CardTitle>
+          <CardTitle>
+            {mode === 'login' ? 'Sign In' 
+              : mode === 'register' ? 'Create Account'
+              : mode === 'forgot-password' ? 'Reset Password'
+              : 'Sign In'}
+          </CardTitle>
           <Button variant="ghost" size="sm" onClick={onClose}>
             <X className="w-4 h-4" />
           </Button>
         </CardHeader>
         <CardContent>
-          {mode !== 'verify' && (
+          {mode !== 'verify' && mode !== 'forgot-password' && (
             <form onSubmit={mode === 'login' ? handleEmailLogin : handleRegister} className="space-y-4">
               {error && (
                 <div
@@ -376,31 +424,33 @@ export default function LoginModal({ onClose, initialMode = 'login' }) {
                   inputMode="email"
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <div className="relative">
-                  <Input
-                    ref={passwordRef}
-                    id="password"
-                    type={showPassword ? 'text' : 'password'}
-                    autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="pr-20"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="absolute inset-y-1 right-1 h-7 px-2 text-xs"
-                    onClick={() => setShowPassword((prev) => !prev)}
-                    aria-pressed={showPassword}
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  >
-                    {showPassword ? 'Hide' : 'Show'}
-                  </Button>
+              {mode !== 'forgot-password' && (
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password</Label>
+                  <div className="relative">
+                    <Input
+                      ref={passwordRef}
+                      id="password"
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="pr-20"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute inset-y-1 right-1 h-7 px-2 text-xs"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-pressed={showPassword}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? 'Hide' : 'Show'}
+                    </Button>
+                  </div>
                 </div>
-              </div>
+              )}
               {mode === 'register' && (
                 <div className="space-y-2">
                   <Label htmlFor="promoCode">Promo Code (Optional)</Label>
@@ -418,16 +468,36 @@ export default function LoginModal({ onClose, initialMode = 'login' }) {
               <Button type="submit" className="w-full" disabled={submitDisabled}>
                 {submitText}
               </Button>
+              {mode === 'login' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('forgot-password');
+                    clearError();
+                    setResetRequested(false);
+                  }}
+                  className="w-full text-xs text-blue-600 hover:underline"
+                >
+                  Forgot password?
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
-                  setMode((m) => (m === 'login' ? 'register' : 'login'));
+                  setMode((m) => {
+                    if (m === 'forgot-password') return 'login';
+                    return m === 'login' ? 'register' : 'login';
+                  });
                   clearError();
                   setRegisterSubmitting(false);
+                  setResetRequested(false);
                 }}
                 className="w-full text-xs text-blue-600 hover:underline"
               >
-                {mode === 'login' ? 'Need an account? Sign up' : 'Have an account? Sign in'}
+                {mode === 'login' ? 'Need an account? Sign up' 
+                  : mode === 'register' ? 'Have an account? Sign in'
+                  : mode === 'forgot-password' ? 'Back to sign in'
+                  : 'Have an account? Sign in'}
               </button>
             </form>
           )}
@@ -566,7 +636,59 @@ export default function LoginModal({ onClose, initialMode = 'login' }) {
               </div>
             </div>
           )}
-          {mode !== 'verify' && (
+          {mode === 'forgot-password' && (
+            <form onSubmit={handleForgotPassword} className="space-y-4">
+              {error && (
+                <div
+                  className={`rounded-md border px-3 py-2 text-sm ${
+                    errorTone === 'info'
+                      ? 'border-blue-200 bg-blue-50 text-blue-700'
+                      : errorTone === 'success'
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : 'border-red-200 bg-red-50 text-red-700'
+                  }`}
+                  role="alert"
+                  aria-live="assertive"
+                >
+                  {error}
+                </div>
+              )}
+              <div className="space-y-2">
+                <Label htmlFor="reset-email">Email</Label>
+                <Input
+                  ref={emailRef}
+                  id="reset-email"
+                  type="email"
+                  autoComplete="email"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  inputMode="email"
+                  disabled={resetRequested}
+                />
+              </div>
+              {resetRequested && (
+                <div className="text-sm text-muted-foreground">
+                  Check your email for a password reset link. The link expires in 30 minutes.
+                </div>
+              )}
+              <Button type="submit" className="w-full" disabled={submitDisabled}>
+                {submitText}
+              </Button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('login');
+                  clearError();
+                  setResetRequested(false);
+                }}
+                className="w-full text-xs text-blue-600 hover:underline"
+              >
+                Back to sign in
+              </button>
+            </form>
+          )}
+          {mode !== 'verify' && mode !== 'forgot-password' && (
             <div className="relative my-4">
               <div className="absolute inset-0 flex items-center">
                 <span className="w-full border-t" />

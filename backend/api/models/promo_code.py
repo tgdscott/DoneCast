@@ -1,5 +1,6 @@
 from sqlmodel import SQLModel, Field, Relationship
 from sqlalchemy.orm import relationship
+from sqlalchemy import UniqueConstraint
 from datetime import datetime
 from uuid import UUID, uuid4
 from typing import Optional, List
@@ -8,6 +9,24 @@ from typing import Optional, List
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .user import User
+
+
+class PromoCodeUsage(SQLModel, table=True):
+    """Tracks which users have used which promo codes (prevents reuse)."""
+    __tablename__ = "promocodeusage"
+    __table_args__ = (
+        UniqueConstraint("user_id", "promo_code_id", name="uq_user_promo_code"),
+    )
+    
+    id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
+    user_id: UUID = Field(foreign_key="user.id", index=True)
+    promo_code_id: UUID = Field(foreign_key="promocode.id", index=True)
+    used_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    context: str = Field(default="checkout", description="Where code was used: 'signup' or 'checkout'")
+    
+    # Relationships
+    user: Optional["User"] = Relationship()
+    promo_code: Optional["PromoCode"] = Relationship()
 
 
 class PromoCode(SQLModel, table=True):
@@ -27,6 +46,12 @@ class PromoCode(SQLModel, table=True):
     # Future: benefit_type could be used to specify what kind of benefit (discount, credits, tier_upgrade, etc.)
     benefit_type: Optional[str] = Field(default=None, max_length=50, description="Type of benefit (e.g., 'discount', 'credits', 'tier_upgrade')")
     benefit_value: Optional[str] = Field(default=None, max_length=255, description="Value of the benefit (e.g., '20%', '1000 credits', 'pro')")
+    
+    # Discount and credit fields
+    discount_percentage: Optional[float] = Field(default=None, ge=0.0, le=100.0, description="Percentage discount (0-100) for subscription")
+    bonus_credits: Optional[float] = Field(default=None, ge=0.0, description="Bonus credits to award when promo code is used")
+    applies_to_monthly: bool = Field(default=True, description="Whether this promo code applies to monthly subscriptions")
+    applies_to_yearly: bool = Field(default=True, description="Whether this promo code applies to yearly subscriptions")
 
 
 class PromoCodeCreate(SQLModel):
@@ -40,6 +65,10 @@ class PromoCodeCreate(SQLModel):
     created_by: Optional[str] = None
     benefit_type: Optional[str] = None
     benefit_value: Optional[str] = None
+    discount_percentage: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    bonus_credits: Optional[float] = Field(default=None, ge=0.0)
+    applies_to_monthly: bool = True
+    applies_to_yearly: bool = True
 
 
 class PromoCodeUpdate(SQLModel):
@@ -51,6 +80,10 @@ class PromoCodeUpdate(SQLModel):
     expires_at: Optional[datetime] = None
     benefit_type: Optional[str] = None
     benefit_value: Optional[str] = None
+    discount_percentage: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    bonus_credits: Optional[float] = Field(default=None, ge=0.0)
+    applies_to_monthly: Optional[bool] = None
+    applies_to_yearly: Optional[bool] = None
 
 
 class PromoCodePublic(SQLModel):
@@ -68,4 +101,8 @@ class PromoCodePublic(SQLModel):
     created_by: Optional[str] = None
     benefit_type: Optional[str] = None
     benefit_value: Optional[str] = None
+    discount_percentage: Optional[float] = None
+    bonus_credits: Optional[float] = None
+    applies_to_monthly: bool = True
+    applies_to_yearly: bool = True
 

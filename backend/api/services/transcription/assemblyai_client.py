@@ -96,8 +96,15 @@ def upload_audio(
     headers = {"authorization": stripped_key, "content-type": "application/octet-stream"}
     http = session or _get_session()
     
+    # Circuit breaker protection
+    from api.core.circuit_breaker import get_circuit_breaker
+    breaker = get_circuit_breaker("assemblyai")
+    
+    def _upload():
+        return http.post(f"{base_url}/upload", headers=headers, data=_stream_file(p))
+    
     try:
-        resp = http.post(f"{base_url}/upload", headers=headers, data=_stream_file(p))
+        resp = breaker.call(_upload)
     except requests.exceptions.SSLError as ssl_err:
         # SSL errors are common on Windows - provide helpful diagnostic
         import logging
@@ -150,7 +157,7 @@ def start_transcription(
         "filter_profanity": False,
         "language_detection": False,
         "custom_spelling": [],
-        "multichannel": False,
+        "multichannel": params.get("multichannel", False) if params else False,
     }
     if params:
         payload.update(params)
@@ -174,7 +181,15 @@ def start_transcription(
         pass
     headers_json = {"authorization": api_key.strip()}
     http = session or _get_session()
-    create = http.post(f"{base_url}/transcript", json=payload, headers=headers_json)
+    
+    # Circuit breaker protection
+    from api.core.circuit_breaker import get_circuit_breaker
+    breaker = get_circuit_breaker("assemblyai")
+    
+    def _start():
+        return http.post(f"{base_url}/transcript", json=payload, headers=headers_json)
+    
+    create = breaker.call(_start)
     if create.status_code != 200:
         if create.status_code == 401:
             raise AssemblyAITranscriptionError(
@@ -202,7 +217,15 @@ def get_transcription(
     """Fetch current transcript status JSON."""
     headers_json = {"authorization": api_key.strip()}
     http = session or _get_session()
-    poll = http.get(f"{base_url}/transcript/{job_id}", headers=headers_json)
+    
+    # Circuit breaker protection
+    from api.core.circuit_breaker import get_circuit_breaker
+    breaker = get_circuit_breaker("assemblyai")
+    
+    def _get():
+        return http.get(f"{base_url}/transcript/{job_id}", headers=headers_json)
+    
+    poll = breaker.call(_get)
     if poll.status_code != 200:
         if poll.status_code == 401:
             raise AssemblyAITranscriptionError(

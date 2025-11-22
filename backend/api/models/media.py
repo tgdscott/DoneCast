@@ -57,8 +57,12 @@ class MediaItem(SQLModel, table=True):
     transcript_ready: bool = Field(default=False, description="True when transcription is complete and file is ready for episode assembly")
     transcription_error: Optional[str] = Field(default=None, description="Error message if transcription failed or detected instrumental/silence")
     
-    # Auphonic integration fields (Pro tier only)
-    auphonic_processed: bool = Field(default=False, description="True if Auphonic processed this file (Pro tier)")
+    # CRITICAL: Sole source of truth for transcription routing
+    # Set when file is uploaded based on checkbox. Determines Auphonic vs AssemblyAI.
+    use_auphonic: bool = Field(default=False, description="True if Auphonic transcription was requested (set by upload checkbox)")
+    
+    # Auphonic integration fields
+    auphonic_processed: bool = Field(default=False, description="True if Auphonic processed this file")
     auphonic_cleaned_audio_url: Optional[str] = Field(default=None, description="GCS URL of Auphonic's cleaned/processed audio")
     auphonic_original_audio_url: Optional[str] = Field(default=None, description="GCS URL of original audio (kept for failure diagnosis)")
     auphonic_output_file: Optional[str] = Field(default=None, description="GCS URL of single Auphonic output file")

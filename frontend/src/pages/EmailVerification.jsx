@@ -131,13 +131,15 @@ export default function EmailVerification() {
       });
 
       if (res.ok) {
+        const data = await res.json().catch(() => ({}));
         setExpiresAt(Date.now() + 15 * 60 * 1000);
         setCode('');
         setError(''); // Clear any existing errors
-        // Show success in a non-error way
+        // Show success message
+        setError('Verification code sent! Check your email (including spam folder).');
         setTimeout(() => {
-          setError(''); // Make sure error stays clear
-        }, 100);
+          setError(''); // Clear success message after 5 seconds
+        }, 5000);
       } else {
         const data = await res.json().catch(() => ({}));
         // Handle both string and array error formats from FastAPI

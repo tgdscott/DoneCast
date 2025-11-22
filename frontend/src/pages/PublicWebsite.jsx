@@ -21,36 +21,36 @@ export default function PublicWebsite() {
         // In dev mode, allow subdomain via query param
         if (import.meta.env.DEV && previewSubdomain) {
           subdomain = previewSubdomain;
-          console.log('[PublicWebsite] Dev mode: using subdomain from query param:', subdomain);
+          if (import.meta.env.DEV) console.log('[PublicWebsite] Dev mode: using subdomain from query param:', subdomain);
         } else {
           // Extract subdomain from hostname (production mode)
           const hostname = window.location.hostname;
-          console.log('[PublicWebsite] Current hostname:', hostname);
+          if (import.meta.env.DEV) console.log('[PublicWebsite] Current hostname:', hostname);
           
           // Parse subdomain (e.g., "cinema-irl" from "cinema-irl.podcastplusplus.com")
           const parts = hostname.split('.');
           
           // Check if this is a subdomain request (not the root domain)
           if (parts.length < 3) {
-            console.log('[PublicWebsite] Not a subdomain, redirecting to dashboard');
+            if (import.meta.env.DEV) console.log('[PublicWebsite] Not a subdomain, redirecting to dashboard');
             navigate('/dashboard');
             return;
           }
           
           subdomain = parts[0];
-          console.log('[PublicWebsite] Detected subdomain:', subdomain);
+          if (import.meta.env.DEV) console.log('[PublicWebsite] Detected subdomain:', subdomain);
           
           // Check for reserved subdomains that shouldn't serve websites
           const reserved = ['www', 'api', 'admin', 'app', 'dev', 'test', 'staging'];
           if (reserved.includes(subdomain)) {
-            console.log('[PublicWebsite] Reserved subdomain, redirecting');
+            if (import.meta.env.DEV) console.log('[PublicWebsite] Reserved subdomain, redirecting');
             navigate('/dashboard');
             return;
           }
         }
         
         if (!subdomain) {
-          console.log('[PublicWebsite] No subdomain found');
+          if (import.meta.env.DEV) console.log('[PublicWebsite] No subdomain found');
           navigate('/dashboard');
           return;
         }
@@ -63,7 +63,7 @@ export default function PublicWebsite() {
         // In production, try published first, then preview
         let response;
         if (import.meta.env.DEV && searchParams.get('subdomain')) {
-          console.log('[PublicWebsite] Dev mode: using preview endpoint');
+          if (import.meta.env.DEV) console.log('[PublicWebsite] Dev mode: using preview endpoint');
           response = await fetch(`${apiBase}/api/sites/${subdomain}/preview`);
         } else {
           // Try published endpoint first
@@ -71,7 +71,7 @@ export default function PublicWebsite() {
           
           // If not published, try preview endpoint (shows draft websites)
           if (!response.ok && response.status === 404) {
-            console.log('[PublicWebsite] Published website not found, trying preview...');
+            if (import.meta.env.DEV) console.log('[PublicWebsite] Published website not found, trying preview...');
             response = await fetch(`${apiBase}/api/sites/${subdomain}/preview`);
           }
         }
@@ -86,23 +86,30 @@ export default function PublicWebsite() {
         
         const data = await response.json();
         
-        // CRITICAL: Log episode count FIRST before any processing
-        const episodeCount = data.episodes?.length || 0;
-        console.log('========================================');
-        console.log('[PublicWebsite] EPISODE COUNT:', episodeCount);
-        console.log('[PublicWebsite] Episode 200 exists?', episodeCount >= 200);
-        console.log('[PublicWebsite] Episode 204 exists?', episodeCount >= 204);
-        if (episodeCount > 0) {
-          console.log('[PublicWebsite] First episode:', data.episodes[0]?.title);
-          console.log('[PublicWebsite] Last episode:', data.episodes[episodeCount - 1]?.title);
+        // Debug logging (dev only)
+        if (import.meta.env.DEV) {
+          const episodeCount = data.episodes?.length || 0;
+          console.log('========================================');
+          console.log('[PublicWebsite] EPISODE COUNT:', episodeCount);
+          console.log('[PublicWebsite] Episode 200 exists?', episodeCount >= 200);
+          console.log('[PublicWebsite] Episode 204 exists?', episodeCount >= 204);
+          if (episodeCount > 0) {
+            console.log('[PublicWebsite] First episode:', data.episodes[0]?.title);
+            console.log('[PublicWebsite] Last episode:', data.episodes[episodeCount - 1]?.title);
+          }
+          console.log('[PublicWebsite] Podcast cover_url:', data.podcast_cover_url);
+          console.log('[PublicWebsite] Sections:', data.sections?.map(s => s.id) || []);
+          console.log('========================================');
         }
-        console.log('[PublicWebsite] Podcast cover_url:', data.podcast_cover_url);
-        console.log('[PublicWebsite] Sections:', data.sections?.map(s => s.id) || []);
-        console.log('========================================');
         setWebsiteData(data);
         
       } catch (err) {
-        console.error('[PublicWebsite] Error loading website:', err);
+        // Always log errors, but keep them minimal in production
+        if (import.meta.env.DEV) {
+          console.error('[PublicWebsite] Error loading website:', err);
+        } else {
+          console.error('[PublicWebsite] Error loading website');
+        }
         setError(err.message);
       } finally {
         setLoading(false);
@@ -126,10 +133,26 @@ export default function PublicWebsite() {
       styleTag.id = 'podcast-website-custom-css';
       styleTag.textContent = websiteData.global_css;
       // Insert at the end of head to ensure it overrides other styles
-      document.head.appendChild(styleTag);
+      // If Tailwind is loaded, insert after it
+      const tailwindLink = document.querySelector('link[href*="tailwind"]');
+      if (tailwindLink && tailwindLink.nextSibling) {
+        document.head.insertBefore(styleTag, tailwindLink.nextSibling);
+      } else {
+        document.head.appendChild(styleTag);
+      }
 
-      console.log('[PublicWebsite] Injected custom CSS, length:', websiteData.global_css.length);
-      console.log('[PublicWebsite] CSS preview:', websiteData.global_css.substring(0, 200));
+      if (import.meta.env.DEV) {
+        console.log('[PublicWebsite] Injected custom CSS, length:', websiteData.global_css.length);
+        console.log('[PublicWebsite] CSS preview:', websiteData.global_css.substring(0, 500));
+        
+        // Debug: Check if CSS variables are defined
+        const rootStyles = window.getComputedStyle(document.documentElement);
+        console.log('[PublicWebsite] CSS Variables:', {
+          '--primary': rootStyles.getPropertyValue('--primary'),
+          '--bg': rootStyles.getPropertyValue('--bg'),
+          '--text': rootStyles.getPropertyValue('--text'),
+        });
+      }
 
       // Cleanup on unmount
       return () => {
@@ -139,7 +162,7 @@ export default function PublicWebsite() {
         }
       };
     } else {
-      console.warn('[PublicWebsite] No global_css found in website data');
+      if (import.meta.env.DEV) console.warn('[PublicWebsite] No global_css found in website data');
     }
   }, [websiteData]);
 
@@ -197,7 +220,8 @@ export default function PublicWebsite() {
                 description: websiteData.podcast_description,
                 cover_url: websiteData.podcast_cover_url,
                 rss_url: websiteData.podcast_rss_feed_url,
-              }} 
+              }}
+              pages={websiteData.pages || []}
             />;
           })()}
         </div>
@@ -209,7 +233,7 @@ export default function PublicWebsite() {
           const SectionComponent = getSectionPreviewComponent(section.id);
           
           if (!SectionComponent) {
-            console.warn(`[PublicWebsite] No component found for section ID: ${section.id}`);
+            if (import.meta.env.DEV) console.warn(`[PublicWebsite] No component found for section ID: ${section.id}`);
             return null;
           }
           
@@ -227,8 +251,8 @@ export default function PublicWebsite() {
             },
           };
           
-          // Debug logging for hero section
-          if (section.id === 'hero') {
+          // Debug logging for hero section (dev only)
+          if (import.meta.env.DEV && section.id === 'hero') {
             console.log('[PublicWebsite] Hero section config:', section.config);
             console.log('[PublicWebsite] Podcast cover_url being passed:', websiteData.podcast_cover_url);
             console.log('[PublicWebsite] Podcast object:', sectionProps.podcast);
@@ -242,10 +266,14 @@ export default function PublicWebsite() {
               podcast_title: websiteData.podcast_title
             }));
             sectionProps.episodes = episodesWithPodcast;
-            console.log(`[PublicWebsite] ${section.id} section - episodes count:`, episodesWithPodcast.length);
+            if (import.meta.env.DEV) console.log(`[PublicWebsite] ${section.id} section - episodes count:`, episodesWithPodcast.length);
           }
           
-          return <SectionComponent {...sectionProps} />;
+          return (
+            <div data-section-id={section.id} key={section.id}>
+              <SectionComponent {...sectionProps} />
+            </div>
+          );
         })}
       </main>
       

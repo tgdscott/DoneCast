@@ -64,3 +64,7 @@ python backend/fix_episode_status_and_covers.py --fix-all
 2. Test cover upload again - check browser console for detailed error message
 3. If 422 persists, check backend logs for validation error details
 
+
+
+
+

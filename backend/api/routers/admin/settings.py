@@ -84,8 +84,9 @@ def get_comprehensive_tier_config(
     del admin_user
     
     # Define tiers
-    tier_names = ["free", "starter", "creator", "pro", "unlimited"]
+    tier_names = ["trial", "free", "starter", "creator", "pro", "unlimited"]
     tiers_metadata = [
+        {"tier_name": "trial", "display_name": "Trial", "is_public": True, "sort_order": -1},
         {"tier_name": "free", "display_name": "Free", "is_public": True, "sort_order": 0},
         {"tier_name": "starter", "display_name": "Starter", "is_public": True, "sort_order": 1},
         {"tier_name": "creator", "display_name": "Creator", "is_public": True, "sort_order": 2},

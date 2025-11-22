@@ -78,6 +78,10 @@ def create_promo_code(
         created_by=admin_user.email if admin_user else None,
         benefit_type=promo_code.benefit_type,
         benefit_value=promo_code.benefit_value,
+        discount_percentage=promo_code.discount_percentage,
+        bonus_credits=promo_code.bonus_credits,
+        applies_to_monthly=promo_code.applies_to_monthly,
+        applies_to_yearly=promo_code.applies_to_yearly,
     )
     session.add(db_promo_code)
     commit_with_retry(session)
@@ -115,6 +119,14 @@ def update_promo_code(
         promo_code.benefit_type = update.benefit_type
     if update.benefit_value is not None:
         promo_code.benefit_value = update.benefit_value
+    if update.discount_percentage is not None:
+        promo_code.discount_percentage = update.discount_percentage
+    if update.bonus_credits is not None:
+        promo_code.bonus_credits = update.bonus_credits
+    if update.applies_to_monthly is not None:
+        promo_code.applies_to_monthly = update.applies_to_monthly
+    if update.applies_to_yearly is not None:
+        promo_code.applies_to_yearly = update.applies_to_yearly
     
     promo_code.updated_at = datetime.utcnow()
     session.add(promo_code)

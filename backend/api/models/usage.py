@@ -27,6 +27,7 @@ class LedgerReason(str, Enum):
     STORAGE = "STORAGE"  # Cloud storage charges
     AUPHONIC_PROCESSING = "AUPHONIC_PROCESSING"  # Auphonic-specific processing
     AI_METADATA_GENERATION = "AI_METADATA_GENERATION"  # AI-generated titles, descriptions, tags
+    PROMO_CODE_BONUS = "PROMO_CODE_BONUS"  # Bonus credits from promo code
 
 
 class ProcessingMinutesLedger(SQLModel, table=True):

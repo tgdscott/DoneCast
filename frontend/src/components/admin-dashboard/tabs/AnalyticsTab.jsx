@@ -7,7 +7,7 @@ import { TrendingUp, Users, Calendar, Play, Download } from "lucide-react";
 
 const safeNumber = (value) => (typeof value === "number" && isFinite(value) ? value : 0);
 
-export default function AnalyticsTab({ analytics, metrics, analyticsLoading }) {
+export default function AnalyticsTab({ analytics, metrics, growthMetrics, systemHealth, analyticsLoading }) {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -41,10 +41,12 @@ export default function AnalyticsTab({ analytics, metrics, analyticsLoading }) {
                     <p className="text-3xl font-bold" style={{ color: "#2C3E50" }}>
                       {safeNumber(analytics.activeUsers).toLocaleString()}
                     </p>
-                    <div className="flex items-center mt-2 text-sm">
-                      <TrendingUp className="w-4 h-4 text-green-600 mr-1" />
-                      <span className="text-green-600">+12% from last month</span>
-                    </div>
+                    {growthMetrics?.active_users_change != null && (
+                      <div className={`flex items-center mt-2 text-sm ${growthMetrics.active_users_change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        <TrendingUp className="w-4 h-4 mr-1" />
+                        <span>{growthMetrics.active_users_change >= 0 ? '+' : ''}{growthMetrics.active_users_change.toFixed(1)}% from last month</span>
+                      </div>
+                    )}
                   </div>
                   <div className="p-3 rounded-full bg-blue-100">
                     <Users className="w-8 h-8 text-blue-600" />
@@ -64,10 +66,12 @@ export default function AnalyticsTab({ analytics, metrics, analyticsLoading }) {
                     <p className="text-3xl font-bold" style={{ color: "#2C3E50" }}>
                       {safeNumber(analytics.newSignups).toLocaleString()}
                     </p>
-                    <div className="flex items-center mt-2 text-sm">
-                      <TrendingUp className="w-4 h-4 text-green-600 mr-1" />
-                      <span className="text-green-600">+8% from last month</span>
-                    </div>
+                    {growthMetrics?.signups_change != null && (
+                      <div className={`flex items-center mt-2 text-sm ${growthMetrics.signups_change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        <TrendingUp className="w-4 h-4 mr-1" />
+                        <span>{growthMetrics.signups_change >= 0 ? '+' : ''}{growthMetrics.signups_change.toFixed(1)}% from last month</span>
+                      </div>
+                    )}
                   </div>
                   <div className="p-3 rounded-full bg-green-100">
                     <Calendar className="w-8 h-8 text-green-600" />
@@ -87,17 +91,21 @@ export default function AnalyticsTab({ analytics, metrics, analyticsLoading }) {
                     <p className="text-3xl font-bold" style={{ color: "#2C3E50" }}>
                       {safeNumber(analytics.totalEpisodes).toLocaleString()}
                     </p>
-                    <div className="flex items-center mt-2 text-sm">
-                      <TrendingUp className="w-4 h-4 text-green-600 mr-1" />
-                      <span className="text-green-600">+23% from last month</span>
-                    </div>
+                    {growthMetrics?.episodes_change != null && (
+                      <div className={`flex items-center mt-2 text-sm ${growthMetrics.episodes_change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        <TrendingUp className="w-4 h-4 mr-1" />
+                        <span>{growthMetrics.episodes_change >= 0 ? '+' : ''}{growthMetrics.episodes_change.toFixed(1)}% from last month</span>
+                      </div>
+                    )}
                   </div>
                   <div className="p-3 rounded-full bg-purple-100">
                     <Play className="w-8 h-8 text-purple-600" />
                   </div>
                 </div>
                 <div className="mt-4 pt-4 border-t border-gray-200">
-                  <div className="text-xs text-gray-600">This month: 1,247 episodes</div>
+                  <div className="text-xs text-gray-600">
+                    Published: {safeNumber(analytics.publishedEpisodes).toLocaleString()} total
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -114,10 +122,12 @@ export default function AnalyticsTab({ analytics, metrics, analyticsLoading }) {
                         <Badge variant="secondary">—</Badge>
                       )}
                     </p>
-                    <div className="flex items-center mt-2 text-sm">
-                      <TrendingUp className="w-4 h-4 text-green-600 mr-1" />
-                      <span className="text-green-600">+15% from last month</span>
-                    </div>
+                    {growthMetrics?.revenue_change != null && (
+                      <div className={`flex items-center mt-2 text-sm ${growthMetrics.revenue_change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        <TrendingUp className="w-4 h-4 mr-1" />
+                        <span>{growthMetrics.revenue_change >= 0 ? '+' : ''}{growthMetrics.revenue_change.toFixed(1)}% from last month</span>
+                      </div>
+                    )}
                   </div>
                   <div className="p-3 rounded-full bg-green-100">
                     <TrendingUp className="w-8 h-8 text-green-600" />
@@ -230,19 +240,10 @@ export default function AnalyticsTab({ analytics, metrics, analyticsLoading }) {
             <CardTitle style={{ color: "#2C3E50" }}>Top Performing Content</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {[
-              { title: "Tech Talk Weekly", downloads: "12.4K", growth: "+23%" },
-              { title: "Mindful Moments", downloads: "8.7K", growth: "+18%" },
-              { title: "Business Insights", downloads: "6.2K", growth: "+15%" },
-            ].map((podcast, index) => (
-              <div key={index} className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-gray-800">{podcast.title}</p>
-                  <p className="text-sm text-gray-600">{podcast.downloads} downloads</p>
-                </div>
-                <Badge className="bg-green-100 text-green-800">{podcast.growth}</Badge>
-              </div>
-            ))}
+            <div className="text-center py-8 text-gray-500">
+              <p>Top performing content metrics coming soon</p>
+              <p className="text-xs mt-2">This will show podcasts with highest download counts</p>
+            </div>
           </CardContent>
         </Card>
 
@@ -251,34 +252,9 @@ export default function AnalyticsTab({ analytics, metrics, analyticsLoading }) {
             <CardTitle style={{ color: "#2C3E50" }}>User Engagement</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-3">
-              <div>
-                <div className="flex justify-between text-sm mb-1">
-                  <span>Daily Active Users</span>
-                  <span className="font-medium">78%</span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div className="bg-blue-500 h-2 rounded-full" style={{ width: "78%" }}></div>
-                </div>
-              </div>
-              <div>
-                <div className="flex justify-between text-sm mb-1">
-                  <span>Weekly Retention</span>
-                  <span className="font-medium">65%</span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div className="bg-green-500 h-2 rounded-full" style={{ width: "65%" }}></div>
-                </div>
-              </div>
-              <div>
-                <div className="flex justify-between text-sm mb-1">
-                  <span>Monthly Retention</span>
-                  <span className="font-medium">42%</span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div className="bg-orange-500 h-2 rounded-full" style={{ width: "42%" }}></div>
-                </div>
-              </div>
+            <div className="text-center py-8 text-gray-500">
+              <p>User engagement metrics coming soon</p>
+              <p className="text-xs mt-2">This will show retention and engagement statistics</p>
             </div>
           </CardContent>
         </Card>
@@ -289,21 +265,23 @@ export default function AnalyticsTab({ analytics, metrics, analyticsLoading }) {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="text-center">
-              <div className="text-3xl font-bold text-green-600 mb-2">98.7%</div>
+              <div className={`text-3xl font-bold mb-2 ${systemHealth?.status === 'operational' ? 'text-green-600' : 'text-orange-600'}`}>
+                {systemHealth ? `${systemHealth.uptime_percentage.toFixed(1)}%` : '—'}
+              </div>
               <p className="text-sm text-gray-600">Uptime (30 days)</p>
             </div>
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
-                <span>Avg Response Time</span>
-                <span className="font-medium">245ms</span>
+                <span>System Status</span>
+                <span className={`font-medium ${systemHealth?.status === 'operational' ? 'text-green-600' : 'text-orange-600'}`}>
+                  {systemHealth?.status || 'Unknown'}
+                </span>
               </div>
               <div className="flex justify-between">
-                <span>Error Rate</span>
-                <span className="font-medium text-green-600">0.03%</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Active Connections</span>
-                <span className="font-medium">1,247</span>
+                <span>Success Rate</span>
+                <span className="font-medium text-green-600">
+                  {systemHealth ? `${systemHealth.uptime_percentage.toFixed(1)}%` : '—'}
+                </span>
               </div>
             </div>
           </CardContent>

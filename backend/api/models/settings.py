@@ -39,12 +39,13 @@ class AdminSettings(BaseModel):
 
     test_mode: bool = False
     default_user_active: bool = True
-    default_user_tier: str = "unlimited"  # Default tier for new users
+    default_user_tier: str = "trial"  # Default tier for new users - all accounts start as trial
     # Maximum upload size for main content (in MB). Exposed publicly for client hints.
     max_upload_mb: int = 500
     maintenance_mode: bool = False
     maintenance_message: Optional[str] = None
     browser_audio_conversion_enabled: bool = True
+    free_trial_days: int = 7  # Length of free trial in days (configurable in admin settings)
 
 
 def load_admin_settings(session: Session) -> AdminSettings:

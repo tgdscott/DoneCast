@@ -52,6 +52,7 @@ class DistributionChecklistResponse(SQLModel):
     podcast_name: str
     rss_feed_url: Optional[str] = None
     spreaker_show_url: Optional[str] = None
+    has_published_episodes: bool = False
     items: List[DistributionChecklistItem] = Field(default_factory=list)
 
 
@@ -75,7 +76,7 @@ async def get_distribution_checklist(
     ).all()
     status_map = {str(row.platform_key): row for row in status_rows if getattr(row, "platform_key", None)}
 
-    context = build_distribution_context(podcast)
+    context = build_distribution_context(podcast, session)
     # Build payload dicts then validate into models to satisfy type-checkers
     payloads: List[dict[str, Any]] = [
         build_distribution_item_payload(
@@ -95,11 +96,14 @@ async def get_distribution_checklist(
         i for i in raw_items if i.status == DistributionStatus.completed
     ]
 
+    has_published_episodes = context.get("has_published_episodes", "false").lower() == "true"
+    
     return DistributionChecklistResponse(
         podcast_id=podcast.id,
         podcast_name=podcast.name,
         rss_feed_url=context.get("rss_feed_url"),
         spreaker_show_url=context.get("spreaker_show_url"),
+        has_published_episodes=has_published_episodes,
         items=items,
     )
 
@@ -141,7 +145,7 @@ async def update_distribution_checklist_item(
     session.commit()
     session.refresh(status_row)
 
-    context = build_distribution_context(podcast)
+    context = build_distribution_context(podcast, session)
     # Validate payload into model for type safety
     return DistributionChecklistItem.model_validate(
         build_distribution_item_payload(host_def, status_row, context)

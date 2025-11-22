@@ -19,8 +19,12 @@ import {
   Lightbulb,
   ClipboardList,
   HelpCircle,
+  LogOut,
+  RotateCcw,
 } from "lucide-react";
 import ComfortControls from "./ComfortControls.jsx";
+import OnboardingSidebar from "./OnboardingSidebar.jsx";
+import { useAuth } from "@/AuthContext.jsx";
 
 /**
  * @typedef {{ id: string; title: string; description?: string; render: () => React.ReactNode; validate?: () => boolean | Promise<boolean>; tip?: string; }} OnboardingStep
@@ -45,13 +49,70 @@ function FadeSlide({ children, keyProp }) {
   );
 }
 
-export default function OnboardingWrapper({ steps, index, setIndex, onComplete, prefs, greetingName, nextDisabled = false, hideNext = false, hideBack = false, showExitDiscard = false, onExitDiscard }) {
+export default function OnboardingWrapper({ steps, index, setIndex, onComplete, prefs, greetingName, nextDisabled = false, hideNext = false, hideBack = false, showExitDiscard = false, onExitDiscard, hasExistingPodcast = false, onBack, path = "new", handleStartOver }) {
+  const { token, user, logout } = useAuth();
   const step = steps[index];
   const total = steps.length;
   const pct = Math.round(((index + 1) / total) * 100);
   const isLast = index === total - 1;
   const contentRef = useRef(null);
   const headingRef = useRef(null);
+  const popupWindowRef = useRef(null);
+  
+  // Check if we're at the first import step (rss step) - allow back button even at index 0
+  const isFirstImportStep = path === "import" && step?.id === "rss" && index === 0;
+
+  // Open Mike's popup window for assistance
+  const openMikePopup = () => {
+    // Check if popup is already open
+    if (popupWindowRef.current && !popupWindowRef.current.closed) {
+      popupWindowRef.current.focus();
+      return;
+    }
+    
+    // Open new popup window
+    const width = 600;
+    const height = 700;
+    const left = Math.max(0, (window.screen.width - width) / 2);
+    const top = Math.max(0, (window.screen.height - height) / 2);
+    
+    const popup = window.open(
+      '/mike',
+      'MikeCzech',
+      `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=no,status=no,toolbar=no,menubar=no,location=no,alwaysRaised=yes`
+    );
+    
+    if (popup) {
+      popupWindowRef.current = popup;
+      
+      // Listen for popup ready message
+      const handlePopupReady = (event) => {
+        if (event.origin !== window.location.origin) return;
+        if (event.data?.type === 'mike-popup-ready' && popup && !popup.closed) {
+          // Send initialization data to popup
+          popup.postMessage({
+            type: 'mike-popup-init',
+            token,
+            user,
+          }, window.location.origin);
+        }
+      };
+      
+      window.addEventListener('message', handlePopupReady);
+      
+      // Clean up when popup closes
+      const checkClosed = setInterval(() => {
+        if (popup.closed) {
+          clearInterval(checkClosed);
+          popupWindowRef.current = null;
+          window.removeEventListener('message', handlePopupReady);
+        }
+      }, 500);
+    } else {
+      // Popup blocked - could show a toast or message
+      console.warn('Popup blocked - please allow popups to use Mike');
+    }
+  };
 
   const AUTOSAVE_IDLE_MS = 15000; // milliseconds of inactivity before showing the saved cue
   const AUTOSAVE_DISPLAY_MS = 2000; // how long the saved cue remains visible
@@ -61,6 +122,60 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
   const [liveMsg, setLiveMsg] = useState("");
   const saveTimer = useRef(null);
   const hideTimer = useRef(null);
+
+  // Track completed steps (steps that have been successfully moved past)
+  // A step is completed if we've moved past it (not including current step)
+  const completedSteps = useMemo(() => {
+    const completed = new Set();
+    // All steps before the current one are considered completed
+    for (let i = 0; i < index; i++) {
+      completed.add(i);
+    }
+    return completed;
+  }, [index]);
+
+  // Map step icons for sidebar
+  const stepIconMap = useMemo(() => {
+    const map = {
+      welcome: HandHeart,
+      showDetails: FileText,
+      format: FileText,
+      coverArt: ImageIcon,
+      introOutro: Sparkles,
+      music: Sparkles,
+      elevenlabs: Sparkles,
+      publishDay: CheckCircle2,
+      finish: CheckCircle2,
+      rss: Globe,
+      analyze: FileText,
+      assets: ImageIcon,
+      yourName: User,
+      choosePath: GitBranch,
+      publishCadence: Repeat,
+      publishSchedule: CalendarDays,
+      ttsReview: Sparkles,
+      skipNotice: Info,
+      confirm: CheckCircle2,
+      importing: Repeat,
+      importSuccess: CheckCircle2,
+    };
+    return map;
+  }, []);
+
+  // Prepare steps with icons for sidebar
+  const stepsWithIcons = useMemo(() => {
+    return steps.map((step) => ({
+      ...step,
+      icon: stepIconMap[step.id] || null,
+    }));
+  }, [steps, stepIconMap]);
+
+  function handleSidebarStepClick(stepIndex) {
+    // Only allow navigation to completed steps (including current)
+    if (completedSteps.has(stepIndex)) {
+      setIndex(stepIndex);
+    }
+  }
 
   const baseText = prefs.largeText ? "text-[18px] md:text-[18px]" : "text-[15px] md:text-[16px]";
   const hc = prefs.highContrast ? "bg-white text-black [&_.btn]:!bg-black [&_.btn]:!text-white [&_.btn-outline]:!border-black [&_.btn-outline]:!text-black [&_a]:underline" : "";
@@ -82,7 +197,12 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
   }
 
   function handleBack() {
-    if (index > 0) setIndex(index - 1);
+    // Use custom back handler if provided, otherwise use default
+    if (onBack) {
+      onBack();
+    } else {
+      if (index > 0) setIndex(index - 1);
+    }
   }
 
   // Map step ids to small icons
@@ -117,7 +237,6 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
       steps: [
         "Have your show name, a short description, and any cover art handy.",
         "If you're importing, keep the RSS URL nearby.",
-        "Prefer a walkthrough? Use the Guides button below to open the full getting started article.",
       ],
     },
     yourName: {
@@ -153,11 +272,12 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
       ],
     },
     music: {
-      headline: "Choose music rules",
-      summary: "Music rules control when theme tracks fade in or out across segments.",
+      headline: "Choose background music",
+      summary: "Select background music that will fade in during intros and fade out during outros. This won't play during your main content segments.",
       steps: [
-        "Pick a library track now—we'll let you fine-tune timing inside the Template Editor.",
-        "Unsure? Select “Let Plus Plus decide” and we'll recommend something calm to start.",
+        "By default, music only plays during intro and outro segments—not during your main content.",
+        "You can adjust timing, volume, and which segments use music later in the Template Editor.",
+        "Pick a track from the library or choose 'No Music' if you prefer to skip this for now.",
       ],
     },
     elevenlabs: {
@@ -172,8 +292,33 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
       headline: "Set your cadence",
       summary: "We use this to schedule reminders and auto-build episode timelines.",
       steps: [
-        "Weekly cadence works best for most shows; bi-weekly expects every other week.",
+        "Weekly cadence works best for most shows. Bi-weekly means every 2 weeks.",
         "Not sure yet? Pick your best guess—you can change it any time.",
+      ],
+    },
+    website: {
+      headline: "Create your website",
+      summary: "We're generating a simple website for your podcast so people can find and listen to your show.",
+      steps: [
+        "Your website will be created automatically with your podcast name, description, and cover art.",
+        "You can customize it later in Website Builder, but for now you'll have a URL to share.",
+      ],
+    },
+    distributionRequired: {
+      headline: "Distribute to Apple & Spotify",
+      summary: "These are the two largest podcasting platforms. We strongly recommend submitting now.",
+      steps: [
+        "Apple Podcasts is required for Siri and the iOS Podcasts app.",
+        "Spotify reaches Android, desktop, and smart speaker listeners.",
+        "You can skip and do this later, but submitting now helps listeners find your podcast sooner.",
+      ],
+    },
+    distributionOptional: {
+      headline: "Other platforms",
+      summary: "Additional platforms help you reach more listeners.",
+      steps: [
+        "Add these platforms with one click if you want broader distribution.",
+        "You can always add or remove platforms later in Settings → Distribution.",
       ],
     },
     publishSchedule: {
@@ -286,9 +431,21 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
       <header className="border-b bg-card/40 backdrop-blur-sm">
         <div className="container mx-auto px-4 py-6">
           <div className="flex flex-col gap-3">
-            <h1 className="text-xl md:text-2xl font-semibold">
-              New Podcast Setup
-            </h1>
+            <div className="flex items-center justify-between">
+              <h1 className="text-xl md:text-2xl font-semibold">
+                New Podcast Setup
+              </h1>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={logout}
+                className="text-muted-foreground hover:text-foreground"
+                aria-label="Logout"
+              >
+                <LogOut className="h-4 w-4 mr-2" />
+                <span className="hidden sm:inline">Logout</span>
+              </Button>
+            </div>
             <div className="flex items-center justify-end gap-3">
               <ComfortControls
                 largeText={prefs.largeText}
@@ -302,9 +459,19 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
       </header>
 
       {/* Main content grid */}
-      <main className="container mx-auto px-4 py-8 grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Step content (2 cols) */}
-        <section className="md:col-span-2 space-y-6">
+      <main className="container mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Sidebar navigation (left) */}
+        <div className="lg:col-span-3">
+          <OnboardingSidebar
+            steps={stepsWithIcons}
+            currentIndex={index}
+            completedSteps={completedSteps}
+            onStepClick={handleSidebarStepClick}
+          />
+        </div>
+
+        {/* Step content (middle) */}
+        <section className="lg:col-span-6 space-y-6">
           <div className="space-y-2">
             {/* Optional greeting on Step 2 when name is known */}
             {greetingName && (index === 1) && (
@@ -367,7 +534,7 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
               <Button
                 variant="outline"
                 onClick={handleBack}
-                disabled={index === 0}
+                disabled={index === 0 && !isFirstImportStep}
                 className="rounded-[var(--radius)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring h-11 min-h-[44px] px-5 btn-outline text-foreground"
               >
                 <ChevronLeft className="mr-2 h-4 w-4" /> Back
@@ -414,8 +581,8 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
           )}
         </section>
 
-        {/* Right rail (1 col) */}
-        <aside className="space-y-4">
+        {/* Right rail (help cards) */}
+        <aside className="lg:col-span-3 space-y-4">
           {activeGuide && (
             <Card data-tour-id="onboarding-dynamic-guide">
               <CardHeader className="flex flex-row items-center gap-2 pb-2">
@@ -460,36 +627,58 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
               <CardTitle className="text-base">Need a hand?</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground mb-3">
-                We're here to help. Browse quick guides or reach out.
-              </p>
-              <div className="flex gap-2">
-                <Button variant="outline" className="rounded-[var(--radius)] h-11 min-h-[44px] px-5" asChild>
-                  <a href="/guides" target="_blank" rel="noreferrer">Guides</a>
-                </Button>
-                <Button className="rounded-[var(--radius)] h-11 min-h-[44px] px-5 text-white" asChild>
-                  <a href="/contact" target="_blank" rel="noreferrer">Contact</a>
-                </Button>
-                <Button
-                  variant="secondary"
-                  className="rounded-[var(--radius)] h-11 min-h-[44px] px-5"
-                  onClick={() => {
-                    const ok = window.confirm(
-                      "You can skip this for now, but you will either have to complete this later or enter in everything manually to create podcast episodes."
-                    );
-                    if (ok) {
-                      try { localStorage.setItem('ppp.onboarding.completed', '1'); } catch {}
-                      try { localStorage.removeItem('ppp.onboarding.step'); } catch {}
-                      // Add onboarding=0 so App.jsx gating does not relaunch the wizard when user has 0 podcasts
-                      try { window.location.assign('/dashboard?onboarding=0'); } catch {}
-                    }
-                  }}
+              <div className="flex flex-col gap-2">
+                <Button 
+                  className="rounded-[var(--radius)] h-11 min-h-[44px] px-5 text-white w-full" 
+                  onClick={openMikePopup}
                 >
-                  Skip for now
+                  Contact Us
                 </Button>
+                {hasExistingPodcast && (
+                  <Button
+                    variant="secondary"
+                    className="rounded-[var(--radius)] h-11 min-h-[44px] px-5 w-full"
+                    onClick={() => {
+                      const ok = window.confirm(
+                        "You can skip this for now, but you will either have to complete this later or enter in everything manually to create podcast episodes."
+                      );
+                      if (ok) {
+                        try { localStorage.setItem('ppp.onboarding.completed', '1'); } catch {}
+                        try { localStorage.removeItem('ppp.onboarding.step'); } catch {}
+                        // Add onboarding=0 so App.jsx gating does not relaunch the wizard when user has 0 podcasts
+                        try { window.location.assign('/dashboard?onboarding=0'); } catch {}
+                      }
+                    }}
+                  >
+                    Skip for now
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>
+
+          {/* Start Over Button */}
+          {handleStartOver && (
+            <Card className="border-red-200 bg-red-50/50">
+              <CardHeader className="flex flex-row items-center gap-2 pb-2">
+                <RotateCcw className="h-5 w-5 text-red-600" />
+                <CardTitle className="text-base text-red-900">Start Over</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-red-700 mb-3">
+                  Clear all progress and start the wizard from the beginning.
+                </p>
+                <Button
+                  variant="destructive"
+                  className="rounded-[var(--radius)] h-11 min-h-[44px] px-5 w-full"
+                  onClick={handleStartOver}
+                >
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  Start Over
+                </Button>
+              </CardContent>
+            </Card>
+          )}
         </aside>
       </main>
     </div>

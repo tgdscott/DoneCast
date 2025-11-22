@@ -346,7 +346,7 @@ export default function Features() {
         </div>
       </footer>
 
-      <style jsx>{`
+      <style>{`
         .feature-category-section {
           margin-bottom: 4rem;
         }

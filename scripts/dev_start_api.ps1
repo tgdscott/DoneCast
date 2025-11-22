@@ -29,6 +29,16 @@ if ($null -eq $gcloudCmd) {
 $adcPath = "$env:APPDATA\gcloud\application_default_credentials.json"
 $needsAuth = $true
 
+# First verify gcloud is working
+try {
+  $null = & gcloud --version 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Error "gcloud command is not working properly. Try running 'gcloud --version' manually to diagnose."
+  }
+} catch {
+  Write-Error "Cannot execute gcloud command. Error: $_"
+}
+
 if (Test-Path $adcPath) {
   # Try a quick gcloud command to verify credentials are valid
   try {
@@ -36,6 +46,8 @@ if (Test-Path $adcPath) {
     if ($LASTEXITCODE -eq 0 -and $authTest -match '^ya29\.') {
       Write-Host "   Existing credentials are valid" -ForegroundColor Green
       $needsAuth = $false
+    } else {
+      Write-Host "   Existing credentials are expired or invalid" -ForegroundColor Yellow
     }
   } catch {
     # Credentials exist but invalid, need re-auth
@@ -47,15 +59,50 @@ if ($needsAuth) {
   Write-Host "   Authenticating with Google Cloud..." -ForegroundColor Cyan
   Write-Host "   (Required for Cloud SQL Proxy and GCS access)" -ForegroundColor Gray
   Write-Host ""
+  Write-Host "   Using manual authentication method (avoids localhost port issues)..." -ForegroundColor Gray
+  Write-Host "   A URL will be displayed - copy it and paste into your browser to authenticate." -ForegroundColor Gray
+  Write-Host ""
   
   try {
-    & gcloud auth application-default login --quiet
+    # Use --no-launch-browser to avoid localhost:8085 connection issues
+    # This method is more reliable and avoids firewall/port binding problems
+    & gcloud auth application-default login --no-launch-browser
+    
     if ($LASTEXITCODE -ne 0) {
-      Write-Error "Google Cloud authentication failed. Cannot start API without credentials."
+      Write-Host ""
+      Write-Host "   Authentication failed (exit code: $LASTEXITCODE)" -ForegroundColor Red
+      Write-Host ""
+      Write-Host "   Troubleshooting tips:" -ForegroundColor Yellow
+      Write-Host "   1. Make sure you completed the browser authentication flow" -ForegroundColor Gray
+      Write-Host "   2. Try running manually: gcloud auth application-default login --no-launch-browser" -ForegroundColor Gray
+      Write-Host "   3. Check Windows Firewall settings if using browser-based auth" -ForegroundColor Gray
+      Write-Error "Cannot start API without valid Google Cloud credentials."
+    } else {
+      # Verify credentials actually work
+      Write-Host ""
+      Write-Host "   Verifying credentials..." -ForegroundColor Gray
+      try {
+        $verifyToken = & gcloud auth application-default print-access-token 2>&1
+        if ($LASTEXITCODE -eq 0 -and $verifyToken -match '^ya29\.') {
+          Write-Host "   Google Cloud authentication successful" -ForegroundColor Green
+        } else {
+          Write-Host "   Warning: Authentication completed but credentials may not be valid" -ForegroundColor Yellow
+          Write-Host "   Try running: gcloud auth application-default login --no-launch-browser" -ForegroundColor Yellow
+        }
+      } catch {
+        Write-Host "   Warning: Could not verify credentials: $($_.Exception.Message)" -ForegroundColor Yellow
+      }
     }
-    Write-Host "   Google Cloud authentication successful" -ForegroundColor Green
   } catch {
-    Write-Error "Failed to authenticate with Google Cloud: $_"
+    $errorDetails = $_.Exception.Message
+    Write-Host ""
+    Write-Host "   Authentication error: $errorDetails" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "   Troubleshooting tips:" -ForegroundColor Yellow
+    Write-Host "   1. Try running manually: gcloud auth application-default login --no-launch-browser" -ForegroundColor Gray
+    Write-Host "   2. Check Windows Firewall settings for localhost ports" -ForegroundColor Gray
+    Write-Host "   3. Check if antivirus is blocking localhost connections" -ForegroundColor Gray
+    Write-Error "Failed to authenticate with Google Cloud: $errorDetails"
   }
 }
 
@@ -89,29 +136,6 @@ try {
   Import-DotEnv $envFile
 
   Write-Host "Google Cloud credentials ready" -ForegroundColor Green
-  
-  # Check if CELERY_EAGER is in .env.local file (even if not set as env var)
-  $celeryEagerInFile = $false
-  if (Test-Path $envFile) {
-    try {
-      $envLines = Get-Content -Path $envFile -ErrorAction SilentlyContinue
-      foreach ($line in $envLines) {
-        $trimmed = $line.Trim()
-        if ($trimmed -and -not $trimmed.StartsWith('#')) {
-          if ($trimmed -match '^CELERY_EAGER\s*=') {
-            # Found CELERY_EAGER line - extract value and check if it's 1 or true
-            $value = ($trimmed -split '=', 2)[1].Trim().Trim('"').Trim("'")
-            if ($value -eq '1' -or $value -eq 'true') {
-              $celeryEagerInFile = $true
-              break
-            }
-          }
-        }
-      }
-    } catch {
-      # Ignore errors reading the file
-    }
-  }
 
   # Auto-whitelist current IP for Cloud SQL direct access (no proxy needed)
   Write-Host ""
@@ -174,53 +198,9 @@ try {
   Write-Host "Starting uvicorn" -ForegroundColor Cyan
   Write-Host "Host: $apiHost" -ForegroundColor Gray
   Write-Host "Port: $apiPort" -ForegroundColor Gray
-  
-  # Check worker server configuration
-  $workerUrl = $env:WORKER_URL_BASE
-  $useWorkerInDev = $env:USE_WORKER_IN_DEV
-  $celeryEager = $env:CELERY_EAGER
-  $allowInlineFallback = $env:ALLOW_ASSEMBLY_INLINE_FALLBACK
-  
   Write-Host ""
-  Write-Host "Episode Assembly Configuration:" -ForegroundColor Cyan
-  
-  # Check if worker server is properly configured
-  $workerConfigured = $workerUrl -and ($useWorkerInDev -eq 'true' -or $useWorkerInDev -eq '1')
-  
-  Write-Host "  WORKER_URL_BASE: $(if ($workerUrl) { $workerUrl } else { 'not set' })" -ForegroundColor $(if ($workerUrl) { 'Green' } else { 'Yellow' })
-  Write-Host "  USE_WORKER_IN_DEV: $(if ($useWorkerInDev) { $useWorkerInDev } else { 'not set (default: false)' })" -ForegroundColor $(if ($useWorkerInDev -eq 'true' -or $useWorkerInDev -eq '1') { 'Green' } else { 'Yellow' })
-  
-  # CELERY_EAGER is completely ignored - assembly code doesn't use it anymore
-  # Episodes always go through worker server or Cloud Tasks when configured
-  if ($workerConfigured) {
-    # Worker is configured - episodes will go to worker server
-    Write-Host ""
-    Write-Host "  ✅ Worker server configured - episodes will be sent to worker server" -ForegroundColor Green
-    if ($celeryEager -or $celeryEagerInFile) {
-      $source = if ($celeryEagerInFile) { " (in .env.local file)" } else { " (environment variable)" }
-      Write-Host "     Note: CELERY_EAGER is set$source but has no effect - worker server is used instead" -ForegroundColor Gray
-    }
-  } else {
-    # Worker is NOT configured - CELERY_EAGER would matter, but inline processing is disabled anyway
-    if ($celeryEager -or $celeryEagerInFile) {
-      $source = if ($celeryEagerInFile) { " (found in .env.local file)" } else { " (from environment)" }
-      Write-Host "  CELERY_EAGER: $(if ($celeryEager) { $celeryEager } else { '1' })$source" -ForegroundColor Yellow
-    } else {
-      Write-Host "  CELERY_EAGER: not set" -ForegroundColor Gray
-    }
-    
-    if (-not $workerUrl) {
-      Write-Host ""
-      Write-Host "  ❌ No WORKER_URL_BASE configured - episodes will NOT process" -ForegroundColor Red
-      Write-Host "     Inline processing is disabled. Set WORKER_URL_BASE to use worker server" -ForegroundColor Yellow
-    } elseif ($useWorkerInDev -ne 'true' -and $useWorkerInDev -ne '1') {
-      Write-Host ""
-      Write-Host "  ❌ USE_WORKER_IN_DEV is not enabled - episodes will NOT process" -ForegroundColor Red
-      Write-Host "     Set USE_WORKER_IN_DEV=true to enable worker server in dev mode" -ForegroundColor Yellow
-    }
-  }
-  
-  Write-Host ""
+
+  $env:CELERY_EAGER = if ($env:CELERY_EAGER) { $env:CELERY_EAGER } else { '1' }
 
   & $pythonExe -m uvicorn api.app:app --host $apiHost --port $apiPort --env-file $envFile
 } finally {

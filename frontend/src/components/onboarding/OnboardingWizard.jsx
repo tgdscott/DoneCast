@@ -30,6 +30,7 @@ export default function OnboardingWizard(){
     'category',
     'audience',
     'cover',
+    'design',
     // New step: intro/outro with voice selection
     'greeting',
     'audioSetup',
@@ -43,7 +44,7 @@ export default function OnboardingWizard(){
   const [lastName, setLastName] = useState('');
 
   // IMPORT path steps
-  const IMPORT_STEPS = ['rss', 'confirm', 'importing', 'analyze', 'assets', 'importSuccess'];
+  const IMPORT_STEPS = ['rss', 'confirm', 'importing', 'analyze', 'assets', 'design', 'importSuccess'];
   const [importStep, setImportStep] = useState(IMPORT_STEPS[0]);
 
   // --- Shared state for new path ---
@@ -76,6 +77,11 @@ export default function OnboardingWizard(){
   const [coverMode, setCoverMode] = useState('later');
   const [coverFile, setCoverFile] = useState(null);
   const [skipCoverNow, setSkipCoverNow] = useState(false);
+  // Design preferences
+  const [designVibe, setDesignVibe] = useState('Clean & Minimal');
+  const [colorPreference, setColorPreference] = useState('');
+  const [additionalNotes, setAdditionalNotes] = useState('');
+  
   // Music assets (Phase 1)
   const [musicAssets, setMusicAssets] = useState([]); // fetched list
   const [musicLoading, setMusicLoading] = useState(false);
@@ -448,6 +454,19 @@ export default function OnboardingWizard(){
           });
         }
       } catch {}
+
+      // Initialize Website with Design Preferences
+      try {
+        await makeApi(token).post(`/api/podcasts/${podcastId}/website`, {
+          design_vibe: designVibe,
+          color_preference: colorPreference,
+          additional_notes: additionalNotes
+        });
+      } catch (webErr) {
+        console.warn("Failed to initialize website during onboarding:", webErr);
+        // Don't block completion if website init fails, user can do it later
+      }
+
       setNewStep('success');
     } catch(e){ setError(e.message);} finally { setSaving(false);} }
 
@@ -462,6 +481,27 @@ export default function OnboardingWizard(){
       setImportStep('importing');
       setTimeout(()=> setImportStep('analyze'), 1200); // simulate progress
     } catch(e){ setError(e.message); }
+  }
+
+  async function handleSaveImportDesignPrefs() {
+    setSaving(true);
+    try {
+      if (importResult && (importResult.podcast_id || importResult.id)) {
+        const pid = importResult.podcast_id || importResult.id;
+        await makeApi(token).post(`/api/podcasts/${pid}/website`, {
+          design_vibe: designVibe,
+          color_preference: colorPreference,
+          additional_notes: additionalNotes
+        });
+      }
+      setImportStep('importSuccess');
+    } catch (e) {
+      console.error("Failed to save website design prefs:", e);
+      // Proceed anyway so user doesn't get stuck
+      setImportStep('importSuccess');
+    } finally {
+      setSaving(false);
+    }
   }
 
   // --- Branch selection screen ---
@@ -639,8 +679,48 @@ export default function OnboardingWizard(){
               </div>
             )}
             {(() => { const canProceed = coverMode !== 'upload' || !!coverFile || !!skipCoverNow; return (
-              <NavButtons onBack={()=> setNewStep('audience')} onNext={()=> setNewStep('audioSetup')} nextDisabled={!canProceed} />
+              <NavButtons onBack={()=> setNewStep('audience')} onNext={()=> setNewStep('design')} nextDisabled={!canProceed} />
             ); })()}
+          </div>
+        )}
+        {newStep==='design' && (
+          <div>
+            <h2 className="text-xl font-semibold mb-2">Website Style</h2>
+            <p className="text-sm text-gray-600 mb-4">We'll build a website for your podcast. Help us get the look right.</p>
+            
+            <div className="mb-4">
+              <label className="block text-xs font-semibold mb-1 uppercase tracking-wide">Visual Vibe</label>
+              <div className="grid grid-cols-2 gap-2">
+                {['Clean & Minimal', 'Bold & Energetic', 'Professional & Corporate', 'Warm & Friendly', 'Dark & Cinematic', 'Retro & Vintage'].map(v => (
+                  <button key={v} onClick={()=>setDesignVibe(v)} className={`p-3 border rounded text-sm text-left ${designVibe===v ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-400' : 'hover:bg-gray-50'}`}>
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-xs font-semibold mb-1 uppercase tracking-wide">Color Preferences</label>
+              <input 
+                value={colorPreference} 
+                onChange={e=>setColorPreference(e.target.value)} 
+                className="w-full border rounded p-2 text-sm" 
+                placeholder="e.g. Navy blue and gold, Pastels, Black and white" 
+              />
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-xs font-semibold mb-1 uppercase tracking-wide">Additional Notes</label>
+              <textarea 
+                value={additionalNotes} 
+                onChange={e=>setAdditionalNotes(e.target.value)} 
+                rows={2} 
+                className="w-full border rounded p-2 text-sm" 
+                placeholder="Anything else about the look and feel?" 
+              />
+            </div>
+
+            <NavButtons onBack={()=> setNewStep('cover')} onNext={()=> setNewStep('greeting')} />
           </div>
         )}
     {newStep==='greeting' && (
@@ -679,7 +759,7 @@ export default function OnboardingWizard(){
               </select>
               {voicesLoading && <div className="text-xs text-gray-500 mt-1">Loading voices…</div>}
             </div>
-            <NavButtons onBack={()=> setNewStep('cover')} onNext={async ()=>{ await createTemplateFromGreeting(); setNewStep('audioSetup'); }} />
+            <NavButtons onBack={()=> setNewStep('design')} onNext={async ()=>{ await createTemplateFromGreeting(); setNewStep('audioSetup'); }} />
           </div>
         )}
     {newStep==='audioSetup' && (
@@ -797,15 +877,60 @@ export default function OnboardingWizard(){
             <input type="file" multiple className="mb-4" onChange={e=> setImportAssets(Array.from(e.target.files||[]))} />
             <div className="flex justify-between">
               <button onClick={()=> setImportStep('analyze')} className="text-gray-500">Back</button>
-              <button onClick={()=> setImportStep('importSuccess')} className="px-4 py-2 bg-blue-600 text-white rounded">Continue</button>
+              <button onClick={()=> setImportStep('design')} className="px-4 py-2 bg-blue-600 text-white rounded">Continue</button>
+            </div>
+          </div>
+        )}
+        {importStep==='design' && (
+          <div>
+            <h2 className="text-xl font-semibold mb-2">Website Style</h2>
+            <p className="text-sm text-gray-600 mb-4">We'll create a website for your podcast. Help us get the look right.</p>
+            
+            <div className="mb-4">
+              <label className="block text-xs font-semibold mb-1 uppercase tracking-wide">Visual Vibe</label>
+              <div className="grid grid-cols-2 gap-2">
+                {['Clean & Minimal', 'Bold & Energetic', 'Professional & Corporate', 'Warm & Friendly', 'Dark & Cinematic', 'Retro & Vintage'].map(v => (
+                  <button key={v} onClick={()=>setDesignVibe(v)} className={`p-3 border rounded text-sm text-left ${designVibe===v ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-400' : 'hover:bg-gray-50'}`}>
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-xs font-semibold mb-1 uppercase tracking-wide">Color Preferences</label>
+              <input 
+                value={colorPreference} 
+                onChange={e=>setColorPreference(e.target.value)} 
+                className="w-full border rounded p-2 text-sm" 
+                placeholder="e.g. Navy blue and gold, Pastels, Black and white" 
+              />
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-xs font-semibold mb-1 uppercase tracking-wide">Additional Notes</label>
+              <textarea 
+                value={additionalNotes} 
+                onChange={e=>setAdditionalNotes(e.target.value)} 
+                rows={2} 
+                className="w-full border rounded p-2 text-sm" 
+                placeholder="Anything else about the look and feel?" 
+              />
+            </div>
+
+            <div className="flex justify-between">
+              <button onClick={()=> setImportStep('assets')} className="text-gray-500">Back</button>
+              <button disabled={saving} onClick={handleSaveImportDesignPrefs} className="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50">
+                {saving ? 'Saving...' : 'Continue'}
+              </button>
             </div>
           </div>
         )}
         {importStep==='importSuccess' && (
           <div className="text-center">
             <h2 className="text-3xl font-bold mb-4">Import complete</h2>
-            <p className="mb-6">Success! {importResult?.podcast_name || 'Your show'} imported. Next, build a template to match your structure.</p>
-            <a href="/" className="px-6 py-3 bg-blue-600 text-white rounded">Go to Template Builder</a>
+            <p className="mb-6">Success! {importResult?.podcast_name || 'Your show'} imported. Your website and first template are ready.</p>
+            <a href="/" className="px-6 py-3 bg-blue-600 text-white rounded">Go to Dashboard</a>
           </div>
         )}
       </div>

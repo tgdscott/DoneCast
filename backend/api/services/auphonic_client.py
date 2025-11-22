@@ -102,8 +102,12 @@ class AuphonicClient:
             saved_content_type = session.headers.pop("Content-Type", None)
             headers = {"Authorization": f"bearer {self.api_key}"}  # Note: lowercase "bearer"
         
-        try:
-            resp = session.request(
+        # Circuit breaker protection
+        from api.core.circuit_breaker import get_circuit_breaker
+        breaker = get_circuit_breaker("auphonic")
+        
+        def _make_request():
+            return session.request(
                 method,
                 url,
                 json=json,
@@ -112,6 +116,9 @@ class AuphonicClient:
                 headers=headers,
                 timeout=timeout,
             )
+        
+        try:
+            resp = breaker.call(_make_request)
             
             # Log request details
             log.info(

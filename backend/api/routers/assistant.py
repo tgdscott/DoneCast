@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/assistant", tags=["assistant"])
 
 # Use Gemini/Vertex AI instead of OpenAI
-from api.services.ai_content.client_router import generate as gemini_generate
+from api.services.ai_content.client_router import generate as gemini_generate, generate_podcast_cover_image
 
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@podcastplusplus.com")
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.mailgun.org")
@@ -56,6 +56,18 @@ class ChatResponse(BaseModel):
     highlight: Optional[str] = None  # CSS selector or element ID to highlight
     highlight_message: Optional[str] = None  # Message to show near highlighted element
     generated_image: Optional[str] = None  # Base64 data URL for generated podcast cover
+
+
+class GenerateCoverRequest(BaseModel):
+    podcast_name: str
+    podcast_description: Optional[str] = None
+    prompt: Optional[str] = None  # Optional custom prompt, otherwise auto-generated
+    artistic_direction: Optional[str] = None  # User's additional artistic direction (colors, fonts, style, etc.)
+
+
+class GenerateCoverResponse(BaseModel):
+    image: str  # Base64 data URL
+    prompt: str  # The prompt used for generation
 
 
 class FeedbackRequest(BaseModel):
@@ -398,8 +410,10 @@ Your Capabilities (ONLY for Podcast Plus Plus):
    - When user needs cover art, ask about their podcast theme/topic
    - Generate professional 1400x1400px square cover images
    - Respond with: GENERATE_IMAGE: [detailed prompt describing the cover]
+   - IMPORTANT: Use the podcast description/theme to inform visual style, colors, and design elements
+   - CRITICAL: Include ONLY the podcast name as text on the image - do NOT include the description text
    - Example: User asks "Can you create cover art?" → Ask about podcast, then:
-     "GENERATE_IMAGE: Professional podcast cover art, square format, bold text reading 'Bloom and Gloom', vibrant purple and green floral design, modern typography, gardening theme with decorative flowers, clean layout suitable for small thumbnails"
+     "GENERATE_IMAGE: Professional podcast cover art, square format, bold text reading 'Bloom and Gloom' (ONLY include the name as text), vibrant purple and green floral design, modern typography, gardening theme with decorative flowers, clean layout suitable for small thumbnails"
 
 Platform Knowledge (Podcast Plus Plus specific - CRITICAL UPDATES):
 - Users upload audio files (recordings or pre-recorded shows)
@@ -941,10 +955,14 @@ async def chat_with_assistant(
                 clean_response = parts[0].strip()
                 image_prompt = parts[1].strip()
                 
-                # Add negative prompt to avoid common issues
-                negative_prompt = "text, watermark, signature, blurry, low quality, distorted"
+                # Log the prompt extracted from AI response
+                log.info("=" * 80)
+                log.info("COVER ART GENERATION FROM AI ASSISTANT:")
+                log.info(f"AI-Generated Prompt ({len(image_prompt)} chars): {image_prompt}")
+                log.info("=" * 80)
                 
-                log.info(f"Generating podcast cover image: {image_prompt[:100]}...")
+                # Add negative prompt to avoid common issues (but allow podcast name text)
+                negative_prompt = "watermark, signature, blurry, low quality, distorted, unwanted text overlay"
                 generated_image = generate_podcast_cover_image(
                     image_prompt,
                     aspect_ratio="1:1",
@@ -954,7 +972,7 @@ async def chat_with_assistant(
                 if generated_image:
                     clean_response += "\n\n✅ Here's your podcast cover! You can download it or generate a new one with different ideas."
                 else:
-                    clean_response += "\n\n❌ Sorry, I had trouble generating the image. This feature requires Vertex AI Imagen to be configured."
+                    clean_response += "\n\n❌ Sorry, I had trouble generating the image. This feature requires Gemini API to be configured."
                     
             except Exception as e:
                 log.error(f"Image generation failed: {e}", exc_info=True)
@@ -1104,6 +1122,84 @@ async def submit_feedback(
     }
 
 
+@router.post("/generate-cover", response_model=GenerateCoverResponse)
+async def generate_cover_art(
+    request: GenerateCoverRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generate a podcast cover image using AI.
+    
+    If no custom prompt is provided, generates one based on podcast name and description.
+    """
+    try:
+        # Log user input
+        log.info("=" * 80)
+        log.info("COVER ART GENERATION REQUEST:")
+        log.info(f"Podcast Name: {request.podcast_name}")
+        log.info(f"Podcast Description: {request.podcast_description or '(none)'}")
+        log.info(f"Custom Prompt Provided: {bool(request.prompt)}")
+        if request.prompt:
+            log.info(f"User's Custom Prompt: {request.prompt}")
+        log.info("=" * 80)
+        
+        # Generate prompt if not provided
+        if request.prompt:
+            prompt = request.prompt
+            log.info("Using user-provided custom prompt")
+        else:
+            # Auto-generate prompt from podcast info
+            # Use description for visual style/content, but only include name as text on image
+            description_part = f" The description of the podcast is: {request.podcast_description}." if request.podcast_description else ""
+            prompt = f"Please produce a piece of professional podcast cover art, size 1400x1400 pixels, for a podcast named '{request.podcast_name}'.{description_part} Use the description to inform the visual style, theme, colors, and overall feel of the image. IMPORTANT: Include ONLY the podcast name '{request.podcast_name}' as text on the image - do NOT include the description text. Place the podcast name prominently and make it clearly readable."
+            
+            # Add user's artistic direction if provided
+            if request.artistic_direction:
+                prompt = f"{prompt}\n\nAdditional artistic direction: {request.artistic_direction}"
+                log.info(f"Added artistic direction: {request.artistic_direction}")
+            
+            log.info("Auto-generated prompt from podcast name/description")
+        
+        # Add negative prompt to avoid common issues (but allow podcast name text)
+        negative_prompt = "watermark, signature, blurry, low quality, distorted, unwanted text overlay"
+        
+        log.info(f"FINAL PROMPT ({len(prompt)} chars): {prompt}")
+        log.info(f"NEGATIVE PROMPT: {negative_prompt}")
+        generated_image = generate_podcast_cover_image(
+            prompt,
+            aspect_ratio="1:1",
+            negative_prompt=negative_prompt
+        )
+        
+        if not generated_image:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to generate cover image. This feature requires Gemini API to be configured."
+            )
+        
+        return GenerateCoverResponse(
+            image=generated_image,
+            prompt=prompt
+        )
+        
+    except HTTPException:
+        raise
+    except RuntimeError as e:
+        # Handle specific runtime errors (like API key issues) with better messages
+        error_msg = str(e)
+        log.error(f"Cover generation error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=error_msg if error_msg else "Failed to generate cover image. Please check your API configuration."
+        )
+    except Exception as e:
+        log.error(f"Cover generation error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate cover image: {str(e)}"
+        )
+
+
 @router.get("/bugs")
 async def get_known_bugs(
     current_user: User = Depends(get_current_user),
@@ -1204,6 +1300,57 @@ async def get_guidance_status(
             "has_published_episode": guidance.has_published_episode,
         },
         "completed_onboarding": guidance.completed_onboarding_at is not None,
+    }
+
+
+@router.get("/onboarding/status")
+async def get_onboarding_status(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """
+    Check if user has completed all 13 onboarding steps.
+    
+    Onboarding is complete when:
+    1. User has at least one podcast
+    2. User has at least one template
+    3. User has accepted current terms (terms_version_accepted matches terms_version_required)
+    
+    This is used to gate dashboard access - users MUST complete all steps before accessing dashboard.
+    """
+    from api.models.podcast import Podcast, PodcastTemplate
+    
+    # Check if user has podcasts
+    podcasts = session.exec(
+        select(Podcast).where(Podcast.user_id == current_user.id)
+    ).all()
+    has_podcast = len(podcasts) > 0
+    
+    # Check if user has templates
+    templates = session.exec(
+        select(PodcastTemplate).where(PodcastTemplate.user_id == current_user.id)
+    ).all()
+    has_template = len(templates) > 0
+    
+    # Check if terms are accepted
+    from api.core.config import settings
+    required_version = settings.TERMS_VERSION
+    accepted_version = current_user.terms_version_accepted
+    terms_accepted = (
+        not required_version or  # No terms required
+        (required_version and accepted_version == required_version)  # Terms match
+    )
+    
+    # Onboarding is complete if all three conditions are met
+    completed = has_podcast and has_template and terms_accepted
+    
+    return {
+        "completed": completed,
+        "has_podcast": has_podcast,
+        "has_template": has_template,
+        "terms_accepted": terms_accepted,
+        "required_terms_version": required_version,
+        "accepted_terms_version": accepted_version,
     }
 
 

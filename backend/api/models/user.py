@@ -15,7 +15,7 @@ class UserBase(SQLModel):
     email: EmailStr = Field(unique=True, index=True)
     is_active: bool = True
     google_id: Optional[str] = Field(default=None, unique=True)
-    tier: str = Field(default="free")
+    tier: str = Field(default="trial")
     spreaker_access_token: Optional[str] = Field(default=None)
     spreaker_refresh_token: Optional[str] = Field(default=None)
     stripe_customer_id: Optional[str] = Field(default=None, index=True)
@@ -64,6 +64,9 @@ class User(UserBase, table=True):
     is_deleted_view: bool = Field(default=False, description="User-facing deleted state - blocks login, appears deleted to user")
     # Referrer user ID (user who referred this user via affiliate code)
     referred_by_user_id: Optional[UUID] = Field(default=None, foreign_key="user.id", index=True, description="User who referred this user")
+    # Free trial fields
+    trial_started_at: Optional[datetime] = Field(default=None, description="When the free trial started (when user completed wizard)")
+    trial_expires_at: Optional[datetime] = Field(default=None, index=True, description="When the free trial expires")
 
     # This creates the link back to the templates that belong to this user
     templates: List["PodcastTemplate"] = Relationship(back_populates="user")

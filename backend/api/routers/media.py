@@ -5,7 +5,7 @@ import subprocess
 import os
 from collections import defaultdict
 from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Form
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict
 from uuid import UUID
 from pathlib import Path
@@ -40,7 +40,8 @@ async def upload_media_files(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
     files: List[UploadFile] = File(...),
-    friendly_names: Optional[str] = Form(None)
+    friendly_names: Optional[str] = Form(None),
+    use_auphonic: Optional[bool] = Form(False)  # CRITICAL: Sole source of truth for transcription routing
 ):
     """Upload one or more media files with optional friendly names."""
     created_items = []
@@ -188,55 +189,80 @@ async def upload_media_files(
                 raise HTTPException(status_code=413, detail=f"File exceeds maximum size of {max_bytes / MB:.1f} MB")
         
         try:
-            # **CRITICAL**: Intermediate files (uploads) ALWAYS go to GCS, not R2
-            # R2 is only for final files (assembled episodes)
-            # This ensures worker servers can download intermediate files for processing
-            from infrastructure import gcs
-            # Determine storage key based on category
-            if category == MediaCategory.main_content:
-                # Main content goes to media_uploads for worker access
-                storage_key = f"{current_user.id.hex}/media_uploads/{safe_filename}"
-            else:
-                # Other categories go to media/{category}
-                storage_key = f"{current_user.id.hex}/media/{category.value}/{safe_filename}"
-            
-            log.info("[upload.storage] Uploading %s to GCS bucket %s, key: %s", 
-                    category.value, gcs_bucket, storage_key)
-            
-            # Upload directly to GCS from memory - NO local file write, NO R2
-            # CRITICAL: allow_fallback=False to ensure files are ALWAYS uploaded to GCS
             from io import BytesIO
             file_stream = BytesIO(file_content)
             final_content_type = file.content_type or ("audio/mpeg" if category != MediaCategory.podcast_cover and category != MediaCategory.episode_cover else "image/jpeg")
-            storage_url = gcs.upload_fileobj(
-                gcs_bucket,
-                storage_key,
-                file_stream,
-                content_type=final_content_type,
-                allow_fallback=False,  # Require GCS - no local fallback
-                force_gcs=True  # Force GCS even if STORAGE_BACKEND=r2 (intermediate files must go to GCS)
-            )
             
-            # Store GCS URL - intermediate files always go to GCS (not R2)
-            # URL format: gs://bucket/key
-            if not storage_url:
-                log.error("[upload.storage] CRITICAL: GCS upload returned None for %s - this should never happen with allow_fallback=False", category.value)
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to upload {category.value} to GCS - upload returned None"
-                )
-            elif storage_url.startswith("gs://"):
-                final_filename = storage_url
-                log.info("[upload.storage] SUCCESS: %s uploaded to GCS: %s", category.value, storage_url)
+            # **CRITICAL**: Episode covers are FINAL ASSETS, not intermediate files
+            # They should go to R2 (permanent storage) like assembled episodes
+            # This ensures covers work permanently without expiration
+            if category == MediaCategory.episode_cover:
+                from infrastructure import r2 as r2_module
+                r2_bucket = os.getenv("R2_BUCKET", "ppp-media").strip()
+                # Use structure: covers/episode/{user_id}/{filename}
+                # When assigned to a specific episode, it can be migrated to {user_id}/episodes/{episode_id}/cover/{filename}
+                # For now, this generic path works and ensures covers are in R2 (permanent storage)
+                storage_key = f"covers/episode/{current_user.id.hex}/{safe_filename}"
+                
+                log.info("[upload.storage] Uploading episode_cover to R2 bucket %s, key: %s", r2_bucket, storage_key)
+                
+                r2_url = r2_module.upload_bytes(r2_bucket, storage_key, file_content, content_type=final_content_type)
+                if not r2_url:
+                    log.error("[upload.storage] CRITICAL: R2 upload returned None for episode_cover")
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Failed to upload episode cover to R2 - upload returned None"
+                    )
+                final_filename = r2_url
+                log.info("[upload.storage] SUCCESS: episode_cover uploaded to R2: %s", r2_url)
                 log.info("[upload.storage] MediaItem will be saved with filename='%s'", final_filename)
             else:
-                # Upload returned a local path or invalid URL (should not happen with allow_fallback=False)
-                log.error("[upload.storage] CRITICAL: GCS upload returned invalid URL: %s", storage_url)
-                log.error("[upload.storage] Expected gs:// URL, but got: %s", storage_url)
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to upload {category.value} to GCS - upload returned invalid URL: {storage_url}"
+                # **CRITICAL**: Intermediate files (uploads) ALWAYS go to GCS, not R2
+                # R2 is only for final files (assembled episodes and episode covers)
+                # This ensures worker servers can download intermediate files for processing
+                from infrastructure import gcs
+                # Determine storage key based on category
+                if category == MediaCategory.main_content:
+                    # Main content goes to media_uploads for worker access
+                    storage_key = f"{current_user.id.hex}/media_uploads/{safe_filename}"
+                else:
+                    # Other categories go to media/{category}
+                    storage_key = f"{current_user.id.hex}/media/{category.value}/{safe_filename}"
+                
+                log.info("[upload.storage] Uploading %s to GCS bucket %s, key: %s", 
+                        category.value, gcs_bucket, storage_key)
+                
+                # Upload directly to GCS from memory - NO local file write, NO R2
+                # CRITICAL: allow_fallback=False to ensure files are ALWAYS uploaded to GCS
+                storage_url = gcs.upload_fileobj(
+                    gcs_bucket,
+                    storage_key,
+                    file_stream,
+                    content_type=final_content_type,
+                    allow_fallback=False,  # Require GCS - no local fallback
+                    force_gcs=True  # Force GCS even if STORAGE_BACKEND=r2 (intermediate files must go to GCS)
                 )
+                
+                # Store GCS URL - intermediate files always go to GCS (not R2)
+                # URL format: gs://bucket/key
+                if not storage_url:
+                    log.error("[upload.storage] CRITICAL: GCS upload returned None for %s - this should never happen with allow_fallback=False", category.value)
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Failed to upload {category.value} to GCS - upload returned None"
+                    )
+                elif storage_url.startswith("gs://"):
+                    final_filename = storage_url
+                    log.info("[upload.storage] SUCCESS: %s uploaded to GCS: %s", category.value, storage_url)
+                    log.info("[upload.storage] MediaItem will be saved with filename='%s'", final_filename)
+                else:
+                    # Upload returned a local path or invalid URL (should not happen with allow_fallback=False)
+                    log.error("[upload.storage] CRITICAL: GCS upload returned invalid URL: %s", storage_url)
+                    log.error("[upload.storage] Expected gs:// URL, but got: %s", storage_url)
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Failed to upload {category.value} to GCS - upload returned invalid URL: {storage_url}"
+                    )
         except HTTPException:
             raise
         except Exception as e:
@@ -248,14 +274,24 @@ async def upload_media_files(
 
         friendly_name = names[i] if i < len(names) and names[i].strip() else default_friendly_name
         
-        # Verify final_filename is a GCS URL before saving (intermediate files always go to GCS)
-        if not final_filename.startswith("gs://"):
-            log.error("[upload.storage] CRITICAL: final_filename is not a GCS URL: '%s'", final_filename)
-            log.error("[upload.storage] Expected gs:// URL for intermediate file upload")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Internal error: filename is not a GCS URL. This indicates a bug in the upload process."
-            )
+        # Verify final_filename is valid (GCS URL for intermediate files, R2 URL for episode covers)
+        if category == MediaCategory.episode_cover:
+            # Episode covers go to R2 - verify it's an R2 URL
+            if not (final_filename.startswith("https://") and ".r2.cloudflarestorage.com" in final_filename):
+                log.error("[upload.storage] CRITICAL: final_filename is not an R2 URL: '%s'", final_filename)
+                raise HTTPException(
+                    status_code=500,
+                    detail="Internal error: episode cover filename is not an R2 URL. This indicates a bug in the upload process."
+                )
+        else:
+            # Intermediate files go to GCS - verify it's a GCS URL
+            if not final_filename.startswith("gs://"):
+                log.error("[upload.storage] CRITICAL: final_filename is not a GCS URL: '%s'", final_filename)
+                log.error("[upload.storage] Expected gs:// URL for intermediate file upload")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Internal error: filename is not a GCS URL. This indicates a bug in the upload process."
+                )
 
         # For main_content uploads, validate storage limits and set tier-based expiration
         expires_at = None
@@ -321,7 +357,8 @@ async def upload_media_files(
                 log.warning("[storage] Storage validation error (non-fatal): %s", e, exc_info=True)
                 # Don't fail upload if validation fails - we'll enforce limits in cleanup
         
-        log.info("[upload.storage] Creating MediaItem with filename='%s' (GCS URL)", final_filename)
+        storage_type = "R2 URL" if category == MediaCategory.episode_cover else "GCS URL"
+        log.info("[upload.storage] Creating MediaItem with filename='%s' (%s)", final_filename, storage_type)
         media_item = MediaItem(
             filename=final_filename,
             friendly_name=friendly_name,
@@ -329,7 +366,8 @@ async def upload_media_files(
             filesize=bytes_written,
             user_id=current_user.id,
             category=category,
-            expires_at=expires_at
+            expires_at=expires_at,
+            use_auphonic=bool(use_auphonic or False)  # CRITICAL: Sole source of truth for transcription routing
         )
         session.add(media_item)
         created_items.append(media_item)
@@ -358,13 +396,21 @@ async def upload_media_files(
         # Verify the filenames were saved correctly
         for item in created_items:
             session.refresh(item)
-            log.info("[upload.db] MediaItem saved: id=%s, filename='%s' (starts with gs://: %s)", 
-                    item.id, item.filename, 
-                    item.filename.startswith("gs://") if item.filename else False)
-            if item.filename and not item.filename.startswith("gs://"):
-                log.error("[upload.db] CRITICAL: MediaItem filename is not a GCS URL: '%s'", item.filename)
-                log.error("[upload.db] Expected gs:// URL for intermediate file")
-                log.error("[upload.db] This indicates the database save failed or was rolled back")
+            is_gcs = item.filename.startswith("gs://") if item.filename else False
+            is_r2 = item.filename.startswith("https://") and ".r2.cloudflarestorage.com" in item.filename if item.filename else False
+            log.info("[upload.db] MediaItem saved: id=%s, filename='%s' (starts with gs://: %s, is R2: %s)", 
+                    item.id, item.filename, is_gcs, is_r2)
+            # Episode covers go to R2, other files go to GCS
+            if item.category == MediaCategory.episode_cover:
+                if item.filename and not is_r2:
+                    log.error("[upload.db] CRITICAL: Episode cover MediaItem filename is not an R2 URL: '%s'", item.filename)
+                    log.error("[upload.db] Expected R2 URL (https://...r2.cloudflarestorage.com/...) for episode cover")
+                    log.error("[upload.db] This indicates the database save failed or was rolled back")
+            else:
+                if item.filename and not is_gcs:
+                    log.error("[upload.db] CRITICAL: MediaItem filename is not a GCS URL: '%s'", item.filename)
+                    log.error("[upload.db] Expected gs:// URL for intermediate file")
+                    log.error("[upload.db] This indicates the database save failed or was rolled back")
     except Exception as e:
         log.error("[upload.db] commit failed for %d items in category=%s: %s", len(created_items), category.value, e, exc_info=True)
         # Note: Files are already in GCS, so we can't easily clean them up here
@@ -502,10 +548,15 @@ async def delete_media_item(
                 # Use GCS client directly (like orchestrator cleanup) to ensure we can delete
                 # even if STORAGE_BACKEND=r2, since media files are always in GCS
                 from google.cloud import storage
+                from infrastructure.gcs import _get_gcs_client
+                
                 path_part = filename[5:]  # Remove "gs://" prefix
                 bucket_name, _, key = path_part.partition('/')
                 if bucket_name and key:
-                    client = storage.Client()
+                    # Use cached client if available, otherwise create one
+                    client = _get_gcs_client(force=True)
+                    if not client:
+                        client = storage.Client()
                     bucket = client.bucket(bucket_name)
                     blob = bucket.blob(key)
                     
@@ -593,7 +644,7 @@ async def preview_media(
     if not path:
         raise HTTPException(status_code=400, detail="Missing id or path")
     
-    # Handle GCS URLs (build components, raw uploads, media library)
+    # Handle GCS URLs (gs://bucket/key)
     if path.startswith("gs://"):
         p = path[5:]
         bucket, _, key = p.partition("/")
@@ -610,22 +661,43 @@ async def preview_media(
             raise HTTPException(status_code=500, detail=f"Failed to sign URL: {ex}")
         
         if resolve:
-            return JSONResponse({"url": url})
+            return JSONResponse({"url": url, "path": url})
         return RedirectResponse(url=url)
     
-    # Handle R2 URLs (finished episode audio, images, transcripts)
-    # R2 URLs are already public/signed, return directly
-    elif path.startswith("https://") or path.startswith("http://"):
-        log.info(f"[media/preview] R2 URL detected (finished product), returning directly: {path[:80]}...")
+    # Handle R2 paths (r2://bucket/key) - convert to signed URL
+    elif path.startswith("r2://"):
+        p = path[5:]
+        bucket, _, key = p.partition("/")
+        if not bucket or not key:
+            log.error(f"Invalid r2:// path format: {path}")
+            raise HTTPException(status_code=400, detail="Invalid r2 path")
+        try:
+            from infrastructure import r2
+            log.info(f"Generating signed URL for r2://{bucket}/{key}")
+            url = r2.generate_signed_url(bucket, key, expiration=600)  # 10 minutes
+            if not url:
+                raise RuntimeError("R2 signed URL generation returned None")
+            log.info(f"Successfully generated R2 signed URL: {url[:100]}...")
+        except Exception as ex:
+            log.error(f"Failed to generate R2 signed URL: {ex}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Failed to sign R2 URL: {ex}")
+        
         if resolve:
-            return JSONResponse({"url": path})
+            return JSONResponse({"url": url, "path": url})
+        return RedirectResponse(url=url)
+    
+    # Handle HTTP/HTTPS URLs (already public/signed, return directly)
+    elif path.startswith("https://") or path.startswith("http://"):
+        log.info(f"[media/preview] HTTP(S) URL detected, returning directly: {path[:80]}...")
+        if resolve:
+            return JSONResponse({"url": path, "path": path})
         return RedirectResponse(url=path)
     
     # Invalid path format - must be cloud storage
     log.error(f"Invalid media path (not cloud storage): {path}")
     raise HTTPException(
         status_code=400, 
-        detail=f"Media file must be in cloud storage (gs:// or https://). Local files not supported. Path: {path[:50]}"
+        detail=f"Media file must be in cloud storage (gs://, r2://, or https://). Local files not supported. Path: {path[:50]}"
     )
 
 # Schemas for main content endpoints
@@ -656,6 +728,7 @@ class RegisterUploadItem(BaseModel):
     original_filename: Optional[str] = None
     content_type: Optional[str] = None
     size: Optional[int] = None
+    use_auphonic: Optional[bool] = Field(default=False, description="True if Auphonic transcription was requested (checkbox on upload)")
 
 class RegisterRequest(BaseModel):
     uploads: List[RegisterUploadItem]
@@ -972,17 +1045,25 @@ async def register_upload(
     gcs_bucket = os.getenv("MEDIA_BUCKET") or os.getenv("GCS_BUCKET") or "ppp-media-us-west1"
     created_items = []
     
+    # Create GCS client once and reuse for all upload items (performance optimization)
+    import time
+    from google.cloud import storage
+    from infrastructure.gcs import _get_gcs_client
+    
+    # Use cached client if available, otherwise create one
+    client = _get_gcs_client(force=True)
+    if not client:
+        # Fallback: create client directly if cache is empty
+        client = storage.Client()
+    
+    bucket = client.bucket(gcs_bucket)
+    
     for upload_item in request.uploads:
         try:
             # CRITICAL: Verify object exists in GCS directly (not through storage abstraction)
             # Direct uploads always go to GCS, even when STORAGE_BACKEND=r2
             # We need to check GCS directly, not through the storage backend abstraction
             # Also handle eventual consistency with retries
-            import time
-            from google.cloud import storage
-            
-            client = storage.Client()
-            bucket = client.bucket(gcs_bucket)
             blob = bucket.blob(upload_item.object_path)
             
             # Retry up to 3 times with delays for eventual consistency
@@ -1041,7 +1122,8 @@ async def register_upload(
                 friendly_name=friendly_name,
                 content_type=upload_item.content_type,
                 filesize=file_size,  # MediaItem uses 'filesize' not 'size'
-                user_id=current_user.id
+                user_id=current_user.id,
+                use_auphonic=bool(upload_item.use_auphonic or False)  # CRITICAL: Sole source of truth for transcription routing
             )
             session.add(media_item)
             session.commit()
@@ -1075,3 +1157,193 @@ async def register_upload(
             )
     
     return created_items
+
+# Interview/Multi-track endpoints
+class MergeTracksRequest(BaseModel):
+    track_paths: List[str]
+    gains_db: Optional[List[float]] = None
+    sync_offsets_ms: Optional[List[int]] = None
+    friendly_name: Optional[str] = None
+
+class MergeTracksResponse(BaseModel):
+    merged_filename: str
+    duration_ms: int
+    tracks_merged: int
+
+@router.post("/merge-interview-tracks", response_model=MergeTracksResponse, status_code=status.HTTP_201_CREATED)
+async def merge_interview_tracks_endpoint(
+    request: MergeTracksRequest,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Merge multiple audio tracks (e.g., from Zoom separate recordings) into a single file.
+    
+    Downloads tracks from GCS if needed, merges them, uploads result, and creates MediaItem.
+    """
+    import tempfile
+    import uuid
+    from pathlib import Path
+    from api.services.audio.interview_merger import InterviewMerger
+    from infrastructure import gcs
+    
+    log = logging.getLogger("api.media.merge")
+    
+    if not request.track_paths or len(request.track_paths) < 2:
+        raise HTTPException(status_code=400, detail="At least 2 tracks are required for merging")
+    
+    log.info(f"[merge] Merging {len(request.track_paths)} tracks for user {current_user.id}")
+    
+    # Create temp directory for processing
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        downloaded_tracks = []
+        
+        try:
+            # Download tracks from GCS if needed
+            for i, track_path in enumerate(request.track_paths):
+                local_path = temp_path / f"track_{i}.mp3"
+                
+                if track_path.startswith("gs://"):
+                    # Download from GCS
+                    bucket_key = track_path[5:]  # Remove "gs://"
+                    bucket, _, key = bucket_key.partition("/")
+                    
+                    gcs_bucket = os.getenv("MEDIA_BUCKET") or os.getenv("GCS_BUCKET") or "ppp-media-us-west1"
+                    if bucket != gcs_bucket:
+                        # Track is in different bucket, download it
+                        from google.cloud import storage
+                        client = storage.Client()
+                        source_bucket = client.bucket(bucket)
+                        blob = source_bucket.blob(key)
+                        blob.download_to_filename(str(local_path))
+                    else:
+                        # Same bucket, use GCS helper
+                        from infrastructure.gcs import download_bytes
+                        audio_bytes = download_bytes(bucket, key)
+                        if audio_bytes:
+                            with open(local_path, "wb") as f:
+                                f.write(audio_bytes)
+                        else:
+                            raise HTTPException(status_code=404, detail=f"Failed to download track from GCS: {track_path}")
+                elif Path(track_path).exists():
+                    # Local file (for development/testing)
+                    import shutil
+                    shutil.copy2(track_path, local_path)
+                else:
+                    raise HTTPException(status_code=400, detail=f"Track not found: {track_path}")
+                
+                downloaded_tracks.append(str(local_path))
+            
+            # Merge tracks
+            merger = InterviewMerger()
+            output_filename = request.friendly_name or f"merged_interview_{uuid.uuid4().hex[:8]}.mp3"
+            merged_path = temp_path / output_filename
+            
+            tracks_info = [
+                {"path": path, "gain_db": request.gains_db[i] if request.gains_db and i < len(request.gains_db) else 0.0}
+                for i, path in enumerate(downloaded_tracks)
+            ]
+            
+            merge_result = merger.merge_tracks(
+                tracks=tracks_info,
+                output_path=merged_path,
+                sync_offsets_ms=request.sync_offsets_ms,
+            )
+            
+            # Upload merged file to GCS
+            gcs_bucket = os.getenv("MEDIA_BUCKET") or os.getenv("GCS_BUCKET") or "ppp-media-us-west1"
+            user_id = current_user.id.hex
+            storage_key = f"{user_id}/media_uploads/{uuid.uuid4().hex}_{output_filename}"
+            
+            with open(merged_path, "rb") as f:
+                storage_url = gcs.upload_fileobj(
+                    gcs_bucket,
+                    storage_key,
+                    f,
+                    content_type="audio/mpeg",
+                    allow_fallback=False,
+                    force_gcs=True,
+                )
+            
+            if not storage_url or not storage_url.startswith("gs://"):
+                raise HTTPException(status_code=500, detail="Failed to upload merged file to GCS")
+            
+            # Create MediaItem
+            media_item = MediaItem(
+                filename=storage_url,
+                friendly_name=request.friendly_name or "Merged Interview",
+                content_type="audio/mpeg",
+                filesize=merged_path.stat().st_size,
+                user_id=current_user.id,
+                category=MediaCategory.main_content,
+                use_auphonic=False  # Merged files default to AssemblyAI (no checkbox on merge)
+            )
+            session.add(media_item)
+            session.commit()
+            session.refresh(media_item)
+            
+            # Trigger transcription with multichannel support if multiple tracks
+            try:
+                from infrastructure.tasks_client import enqueue_http_task
+                enqueue_http_task("/api/tasks/transcribe", {
+                    "filename": storage_url,
+                    "user_id": str(current_user.id),
+                    "multichannel": len(request.track_paths) > 1,  # Enable multichannel for merged tracks
+                })
+            except Exception as e:
+                log.warning(f"[merge] Failed to enqueue transcription: {e}", exc_info=True)
+            
+            return MergeTracksResponse(
+                merged_filename=storage_url,
+                duration_ms=merge_result["duration_ms"],
+                tracks_merged=len(request.track_paths),
+            )
+        
+        except HTTPException:
+            raise
+        except Exception as e:
+            log.error(f"[merge] Failed to merge tracks: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Failed to merge tracks: {str(e)}")
+
+@router.get("/zoom-recordings", response_model=List[Dict])
+async def list_zoom_recordings(
+    current_user: User = Depends(get_current_user),
+    max_sessions: int = 10,
+):
+    """
+    Detect and list Zoom recordings in default save locations.
+    
+    Note: This endpoint can only access files on the server's filesystem.
+    For client-side file access, use the frontend file picker.
+    """
+    from api.services.zoom.recording_detector import detect_zoom_recordings
+    
+    try:
+        recordings = detect_zoom_recordings(max_sessions=max_sessions)
+        
+        result = []
+        for rec in recordings:
+            result.append({
+                "session_name": rec.session_name,
+                "session_path": str(rec.session_path),
+                "audio_tracks": [
+                    {
+                        "path": str(audio_path),
+                        "participant_name": participant_name,
+                        "size_bytes": audio_path.stat().st_size if audio_path.exists() else 0,
+                    }
+                    for audio_path, participant_name in rec.audio_files
+                ],
+                "video_file": str(rec.video_file) if rec.video_file else None,
+                "timestamp": rec.timestamp,
+            })
+        
+        return result
+    
+    except Exception as e:
+        import logging
+        log = logging.getLogger("api.media.zoom")
+        log.error(f"[zoom] Failed to detect recordings: {e}", exc_info=True)
+        # Return empty list rather than failing - user can still upload manually
+        return []

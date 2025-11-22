@@ -20,10 +20,13 @@ export default function FinishStep({ wizard }) {
         </div>
       ) : (
         <>
-          <p className="text-sm text-muted-foreground">
-            Nice work. You can publish now or explore your dashboard.
+          <p className="text-sm text-muted-foreground mb-2">
+            All set! We've created your podcast <strong>"{formData.podcastName || 'your show'}"</strong> and a default template.
           </p>
-          {saving && <div className="text-xs text-muted-foreground">Working...</div>}
+          <p className="text-sm text-muted-foreground">
+            Click Finish to go to your dashboard where you can create your first episode.
+          </p>
+          {saving && <div className="text-xs text-muted-foreground mt-2">Working...</div>}
         </>
       )}
     </div>

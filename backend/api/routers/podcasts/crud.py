@@ -27,6 +27,7 @@ from ...services.image_utils import ensure_cover_image_constraints
 from ...services.podcasts.utils import save_cover_upload
 from ...services.publisher import SpreakerClient
 from ...services import podcast_websites
+from ...services.trial_service import can_create_content, start_trial, can_modify_rss_settings
 
 log = logging.getLogger(__name__)
 
@@ -57,11 +58,19 @@ async def create_podcast(
     name: str = Form(...),
     description: str = Form(...),
     cover_image: Optional[UploadFile] = File(None),
+    format: Optional[str] = Form(None),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
     log.info("--- Starting a new podcast creation process ---")
     log.info("Received request to create podcast with name: '%s'", name)
+
+    # Check if user can create content (trial expired check)
+    if not can_create_content(current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Your free trial has expired. Please subscribe to a plan to continue creating podcasts."
+        )
 
     try:
         name_clean = (name or "").strip()
@@ -106,6 +115,7 @@ async def create_podcast(
         description=desc_clean,
         spreaker_show_id=spreaker_show_id,
         user_id=current_user.id,
+        format=format if format else None,
     )
 
     if spreaker_show_id and client is not None:
@@ -165,9 +175,85 @@ async def create_podcast(
         log.info("No cover image was provided.")
 
     session.add(db_podcast)
-    session.commit()
-    session.refresh(db_podcast)
+    try:
+        session.commit()
+        session.refresh(db_podcast)
+    except ProgrammingError as pe:
+        # Handle missing columns (like 'format') gracefully
+        message = str(pe).lower()
+        if "format" in message or "column" in message:
+            log.warning(f"[podcast.create] Format column missing, retrying without format field: {pe}")
+            session.rollback()
+            # Remove format field and retry
+            if hasattr(db_podcast, 'format'):
+                delattr(db_podcast, 'format')
+            session.add(db_podcast)
+            session.commit()
+            session.refresh(db_podcast)
+        else:
+            raise
     log.info("Successfully saved podcast to local database with ID: %s", db_podcast.id)
+    
+    # Start free trial if this is user's first podcast (wizard completion)
+    if not current_user.trial_started_at:
+        try:
+            start_trial(current_user, session)
+            log.info("✅ Started free trial for user %s", current_user.id)
+        except Exception as trial_err:
+            log.warning("Failed to start trial (non-fatal): %s", trial_err)
+    
+    # Generate friendly slug for RSS feed URL BEFORE creating website (prevents race conditions)
+    # This must happen early to avoid duplicate slug conflicts
+    if not db_podcast.slug:
+        from ...services.podcast_websites import _slugify_base, _ensure_unique_podcast_slug
+        from sqlalchemy.exc import IntegrityError
+        base_slug = _slugify_base(db_podcast.name)
+        db_podcast.slug = _ensure_unique_podcast_slug(session, base_slug, db_podcast.id)
+        session.add(db_podcast)
+        max_retries = 5
+        retry_count = 0
+        while retry_count < max_retries:
+            try:
+                session.commit()
+                session.refresh(db_podcast)
+                break  # Success, exit retry loop
+            except IntegrityError as ie:
+                # Handle race condition where slug was taken between check and commit
+                if ("slug" in str(ie).lower() or "unique" in str(ie).lower()) and retry_count < max_retries - 1:
+                    log.warning(f"[podcast.create] Slug conflict detected (attempt {retry_count + 1}/{max_retries}), retrying with unique slug: {ie}")
+                    session.rollback()
+                    # Generate a new unique slug (increment counter)
+                    retry_count += 1
+                    # Force a new check with incremented counter
+                    db_podcast.slug = _ensure_unique_podcast_slug(session, base_slug, db_podcast.id)
+                    session.add(db_podcast)
+                else:
+                    # Max retries reached or different error
+                    raise
+        log.info(f"✅ Generated unique slug: {db_podcast.slug}")
+    
+    # 🎉 AUTO-CREATE COMING SOON EPISODE - Allows immediate RSS feed submission
+    try:
+        # Import with error handling to prevent module load failures
+        try:
+            from ...services.episodes.coming_soon import create_coming_soon_episode
+        except ImportError as import_err:
+            log.warning(f"⚠️ Could not import coming_soon module (non-fatal): {import_err}")
+            create_coming_soon_episode = None
+        
+        if create_coming_soon_episode:
+            coming_soon_episode = create_coming_soon_episode(
+                session=session,
+                podcast=db_podcast,
+                user_id=current_user.id,
+            )
+            if coming_soon_episode:
+                log.info(f"✅ Created coming soon episode {coming_soon_episode.id} for immediate RSS feed submission")
+            else:
+                log.info("ℹ️ Coming soon episode not created (may already exist or have real episodes)")
+    except Exception as exc:
+        # Non-fatal - don't block podcast creation if coming soon episode fails
+        log.warning(f"⚠️ Failed to create coming soon episode (non-fatal): {exc}", exc_info=True)
     
     # 🎉 AUTO-CREATE WEBSITE & RSS FEED - New users get working URLs immediately!
     try:
@@ -179,15 +265,12 @@ async def create_podcast(
         website_url = f"https://{website.subdomain}.{base_domain}"
         log.info(f"✅ Website auto-created: {website_url}")
         
-        # Generate friendly slug for RSS feed URL
+        # Slug should already be set above (before website creation)
         if not db_podcast.slug:
-            from ...services.podcast_websites import _slugify_base
-            db_podcast.slug = _slugify_base(db_podcast.name)
-            session.add(db_podcast)
-            session.commit()
-            session.refresh(db_podcast)
-        
-        rss_url = f"https://app.{base_domain}/rss/{db_podcast.slug}/feed.xml"
+            log.warning(f"[podcast.create] Slug missing after website creation, using podcast ID for RSS URL")
+            rss_url = f"https://app.{base_domain}/rss/{db_podcast.id}/feed.xml"
+        else:
+            rss_url = f"https://app.{base_domain}/rss/{db_podcast.slug}/feed.xml"
         log.info(f"✅ RSS feed available: {rss_url}")
         log.info(f"🎊 User can share immediately: {website_url} and {rss_url}")
     except Exception as exc:
@@ -251,17 +334,24 @@ def _load_user_podcasts(session: Session, user_id: UUID) -> List[Podcast]:
         return podcasts
 
 
-@router.get("/")
+@router.get("/", response_model=List[dict])
 async def get_user_podcasts(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
+    """Get all podcasts for the current user.
+    
+    Returns empty list [] for new users who haven't created any podcasts yet.
+    This is expected and should not be treated as an error.
+    """
     try:
         # Get user ID safely
         user_id = getattr(current_user, "id", None)
         if not user_id:
             log.error("[podcasts.list] No user ID found in current_user")
             raise HTTPException(status_code=401, detail="User authentication failed")
+        
+        log.debug("[podcasts.list] Loading podcasts for user_id=%s", user_id)
         
         podcasts = _load_user_podcasts(session, user_id)
         podcast_ids = [p.id for p in podcasts]
@@ -424,6 +514,7 @@ async def update_podcast(
     if not podcast_to_update:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Podcast not found or you don't have permission to edit it.")
 
+    # Check if user can modify RSS settings (trial users cannot transfer RSS feeds)
     original_spreaker_id = podcast_to_update.spreaker_show_id
     if podcast_update:
         payload = podcast_update.model_dump(exclude_unset=True)
@@ -431,6 +522,12 @@ async def update_podcast(
         for key, value in payload.items():
             if key == "rss_url_locked":
                 continue
+            # Block RSS redirect/transfer settings during trial
+            if key in ("spreaker_show_id", "rss_url") and not can_modify_rss_settings(current_user):
+                raise HTTPException(
+                    status_code=403,
+                    detail="RSS feed redirect/transfer settings cannot be modified during your free trial. Subscribe to a plan to change these settings."
+                )
             if key == "spreaker_show_id" and value and value != original_spreaker_id:
                 if not allow_spreaker_id_change:
                     raise HTTPException(
@@ -460,6 +557,12 @@ async def update_podcast(
             for key in candidate_keys:
                 if key in form and form.get(key) not in (None, ""):
                     value = form.get(key)
+                    # Block RSS redirect/transfer settings during trial
+                    if key in ("spreaker_show_id", "rss_url") and not can_modify_rss_settings(current_user):
+                        raise HTTPException(
+                            status_code=403,
+                            detail="RSS feed redirect/transfer settings cannot be modified during your free trial. Subscribe to a plan to change these settings."
+                        )
                     if key == "spreaker_show_id" and value != original_spreaker_id and not allow_spreaker_id_change:
                         raise HTTPException(
                             status_code=400,
@@ -478,6 +581,12 @@ async def update_podcast(
                     for key in candidate_keys:
                         if key in raw_json and raw_json[key] not in (None, ""):
                             value = raw_json[key]
+                            # Block RSS redirect/transfer settings during trial
+                            if key in ("spreaker_show_id", "rss_url") and not can_modify_rss_settings(current_user):
+                                raise HTTPException(
+                                    status_code=403,
+                                    detail="RSS feed redirect/transfer settings cannot be modified during your free trial. Subscribe to a plan to change these settings."
+                                )
                             if key == "spreaker_show_id" and value != original_spreaker_id and not allow_spreaker_id_change:
                                 raise HTTPException(
                                     status_code=400,
@@ -686,30 +795,200 @@ async def delete_podcast(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    statement = select(Podcast).where(Podcast.id == podcast_id, Podcast.user_id == current_user.id)
-    podcast_to_delete = session.exec(statement).first()
+    try:
+        # Try to load podcast - handle missing columns gracefully
+        try:
+            statement = select(Podcast).where(Podcast.id == podcast_id, Podcast.user_id == current_user.id)
+            podcast_to_delete = session.exec(statement).first()
+        except ProgrammingError as pe:
+            # Handle missing columns (like 'format') gracefully
+            message = str(pe).lower()
+            if "format" in message or "column" in message:
+                log.warning(f"[podcast.delete] Column missing, using legacy query: {pe}")
+                session.rollback()
+                # Use raw SQL query that excludes missing columns
+                legacy_query = text(
+                    """
+                    SELECT
+                        id,
+                        user_id,
+                        name,
+                        description,
+                        cover_path,
+                        rss_url,
+                        rss_url_locked,
+                        remote_cover_url,
+                        podcast_type,
+                        language,
+                        copyright_line,
+                        owner_name,
+                        author_name,
+                        spreaker_show_id,
+                        contact_email,
+                        is_explicit,
+                        itunes_category,
+                        category_id,
+                        category_2_id,
+                        category_3_id,
+                        podcast_guid,
+                        feed_url_canonical,
+                        verification_method,
+                        verified_at,
+                        slug,
+                        has_guests,
+                        speaker_intros
+                    FROM podcast
+                    WHERE id = CAST(:podcast_id AS UUID) AND user_id = CAST(:user_id AS UUID)
+                    """
+                )
+                row = session.execute(legacy_query, {
+                    "podcast_id": str(podcast_id),
+                    "user_id": str(current_user.id)
+                }).first()
+                
+                if not row:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Podcast not found.")
+                
+                # Create Podcast object from row data
+                data = dict(getattr(row, "_mapping", row))
+                data.setdefault("format", None)  # Add format as None if missing
+                data.setdefault("remote_cover_url", None)
+                # Create a minimal Podcast object for deletion
+                podcast_to_delete = Podcast(**data)
+            else:
+                raise
 
-    if not podcast_to_delete:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Podcast not found.")
+        if not podcast_to_delete:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Podcast not found.")
 
-    # Clean up dependent records referencing this podcast.
-    # Templates retain their data but should no longer be scoped to a deleted show.
-    templates = session.exec(
-        select(PodcastTemplate).where(PodcastTemplate.podcast_id == podcast_id)
-    ).all()
-    for template in templates:
-        template.podcast_id = None
-        session.add(template)
+        log.info(f"[podcast.delete] Starting deletion of podcast {podcast_id} (name: {podcast_to_delete.name})")
 
-    session.exec(
-        delete(PodcastDistributionStatus).where(
-            PodcastDistributionStatus.podcast_id == podcast_id
+        # Clean up dependent records referencing this podcast.
+        # Templates retain their data but should no longer be scoped to a deleted show.
+        try:
+            templates = session.exec(
+                select(PodcastTemplate).where(PodcastTemplate.podcast_id == podcast_id)
+            ).all()
+            for template in templates:
+                template.podcast_id = None
+                session.add(template)
+            log.debug(f"[podcast.delete] Updated {len(templates)} templates")
+        except Exception as template_err:
+            log.warning(f"[podcast.delete] Failed to update templates (non-fatal): {template_err}")
+
+        # Delete distribution status records
+        try:
+            dist_count = session.exec(
+                delete(PodcastDistributionStatus).where(
+                    PodcastDistributionStatus.podcast_id == podcast_id
+                )
+            )
+            log.debug(f"[podcast.delete] Deleted distribution status records")
+        except Exception as dist_err:
+            log.warning(f"[podcast.delete] Failed to delete distribution status (non-fatal): {dist_err}")
+
+        # Delete episode sections
+        try:
+            section_count = session.exec(
+                delete(EpisodeSection).where(EpisodeSection.podcast_id == podcast_id)
+            )
+            log.debug(f"[podcast.delete] Deleted episode sections")
+        except Exception as section_err:
+            log.warning(f"[podcast.delete] Failed to delete episode sections (non-fatal): {section_err}")
+
+        # Delete import state if it exists
+        try:
+            from ...models.podcast import PodcastImportState
+            import_stmt = delete(PodcastImportState).where(PodcastImportState.podcast_id == podcast_id)
+            session.exec(import_stmt)
+            log.debug(f"[podcast.delete] Deleted import state records")
+        except Exception as import_err:
+            log.debug(f"[podcast.delete] No import state to delete or error (non-fatal): {import_err}")
+
+        # Delete website records (must be deleted before podcast due to foreign key constraint)
+        # Use savepoint to isolate this operation - if it fails, we can rollback just this part
+        website_sp = None
+        try:
+            from ...models.website import PodcastWebsite
+            # Create savepoint for website deletion
+            website_sp = session.begin_nested()
+            websites = session.exec(
+                select(PodcastWebsite).where(PodcastWebsite.podcast_id == podcast_id)
+            ).all()
+            if websites:
+                for website in websites:
+                    session.delete(website)
+                session.flush()  # Flush website deletions before proceeding
+            website_sp.commit()  # Commit savepoint
+            log.debug(f"[podcast.delete] Deleted {len(websites)} website records")
+        except Exception as website_err:
+            log.error(f"[podcast.delete] Failed to delete website records: {website_err}", exc_info=True)
+            if website_sp:
+                website_sp.rollback()  # Rollback savepoint only
+            # Continue anyway - website deletion failure shouldn't block podcast deletion
+
+        # Delete episodes explicitly (cascade may not work if there are foreign key constraints)
+        # Use no_autoflush to prevent premature flushes during cascade operations
+        # Use savepoint to isolate this operation
+        episode_sp = None
+        try:
+            from ...models.episode import Episode
+            
+            # Create savepoint for episode deletion
+            episode_sp = session.begin_nested()
+            
+            episodes = session.exec(
+                select(Episode).where(Episode.podcast_id == podcast_id)
+            ).all()
+            
+            # Use no_autoflush context to prevent autoflush during cascade operations
+            # In SQLAlchemy 2.0+, no_autoflush is accessed directly on the session
+            with session.no_autoflush:
+                for episode in episodes:
+                    # Clear any foreign key references first
+                    # Use nested transaction to prevent main transaction abort if this fails
+                    media_sp = session.begin_nested()
+                    try:
+                        from ...models.podcast import MediaItem
+                        media_items = session.exec(
+                            select(MediaItem).where(MediaItem.used_in_episode_id == episode.id)
+                        ).all()
+                        for item in media_items:
+                            item.used_in_episode_id = None
+                            session.add(item)
+                        session.flush()  # Ensure DB errors happen inside this savepoint
+                        media_sp.commit()
+                    except Exception as media_err:
+                        media_sp.rollback()
+                        log.debug(f"[podcast.delete] Failed to clear media references for episode {episode.id}: {media_err}")
+                        # Don't fail on this - continue with deletion
+                    
+                    session.delete(episode)
+            
+            # Flush episode deletions explicitly after no_autoflush block
+            session.flush()
+            episode_sp.commit()  # Commit savepoint
+            log.debug(f"[podcast.delete] Deleted {len(episodes)} episodes")
+        except Exception as episode_err:
+            log.error(f"[podcast.delete] Failed to delete episodes: {episode_err}", exc_info=True)
+            if episode_sp:
+                episode_sp.rollback()  # Rollback savepoint only
+            # Re-raise - episode deletion failure should block podcast deletion
+            raise
+
+        # Delete the podcast itself
+        session.delete(podcast_to_delete)
+        session.commit()
+        
+        log.info(f"[podcast.delete] ✅ Successfully deleted podcast {podcast_id}")
+        return None
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"[podcast.delete] ❌ Failed to delete podcast {podcast_id}: {e}", exc_info=True)
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete podcast: {str(e)}"
         )
-    )
-    session.exec(
-        delete(EpisodeSection).where(EpisodeSection.podcast_id == podcast_id)
-    )
-
-    session.delete(podcast_to_delete)
-    session.commit()
-    return None

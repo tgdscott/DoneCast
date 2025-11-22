@@ -38,6 +38,7 @@ function getTierBadge(tier) {
   if (normalized === "pro") return <Badge className="bg-purple-100 text-purple-800">Pro</Badge>;
   if (normalized === "creator") return <Badge className="bg-blue-100 text-blue-800">Creator</Badge>;
   if (normalized === "free" || normalized === "starter") return <Badge className="bg-gray-100 text-gray-800">Starter</Badge>;
+  if (normalized === "trial") return <Badge className="bg-green-100 text-green-800">Trial</Badge>;
   if (normalized === "unlimited") return <Badge className="bg-yellow-100 text-yellow-800">Unlimited</Badge>;
   if (normalized === "executive") return <Badge className="bg-teal-100 text-teal-800">Executive</Badge>;
   if (normalized === "admin") return <Badge className="bg-orange-100 text-orange-800">Admin</Badge>;
@@ -126,7 +127,8 @@ export default function UsersTab({
       const iso = usToISO(pending);
       if (iso) return iso;
     }
-    return user.subscription_expires_at || new Date().toISOString().slice(0, 10);
+    // Use subscription_expires_at if available, otherwise default to 12/31/2099 for users who haven't started trial
+    return user.subscription_expires_at || "2099-12-31";
   }, [editingDates]);
 
   const handleDateBlur = (userId) => {
@@ -228,10 +230,10 @@ export default function UsersTab({
               <TableHeader>
                 <TableRow className="border-b border-gray-200">
                   <TableHead className="font-semibold text-gray-700">User</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Email</TableHead>
                   <TableHead className="font-semibold text-gray-700">Verified</TableHead>
                   <TableHead className="font-semibold text-gray-700">Tier</TableHead>
                   <TableHead className="font-semibold text-gray-700">Status</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Trial End</TableHead>
                   <TableHead className="font-semibold text-gray-700">Episodes</TableHead>
                   <TableHead className="font-semibold text-gray-700">Last Login</TableHead>
                   <TableHead className="font-semibold text-gray-700">Actions</TableHead>
@@ -259,7 +261,6 @@ export default function UsersTab({
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="text-gray-600">{user.email}</TableCell>
                       <TableCell>
                         {user.email_verified ? (
                           <div className="flex items-center text-green-600" title="Email verified">
@@ -282,6 +283,11 @@ export default function UsersTab({
                       </TableCell>
                       <TableCell>{getTierBadge(user.tier || "starter")}</TableCell>
                       <TableCell>{getStatusBadge(user.is_active ? "Active" : "Inactive")}</TableCell>
+                      <TableCell className="text-gray-600">
+                        {user.subscription_expires_at 
+                          ? user.subscription_expires_at.slice(0, 10) 
+                          : "12/31/2099"}
+                      </TableCell>
                       <TableCell className="text-gray-600">{user.episode_count}</TableCell>
                       <TableCell className="text-gray-600">{user.last_activity ? user.last_activity.slice(0, 10) : "—"}</TableCell>
                       <TableCell>
@@ -296,6 +302,7 @@ export default function UsersTab({
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="starter">Starter</SelectItem>
+                              <SelectItem value="trial">Trial</SelectItem>
                               <SelectItem value="creator">Creator</SelectItem>
                               <SelectItem value="pro">Pro</SelectItem>
                               <SelectItem value="executive">Executive</SelectItem>
@@ -315,7 +322,7 @@ export default function UsersTab({
                             onCheckedChange={(value) => onUpdateUser(user.id, { is_active: value })}
                           />
                           <input
-                            aria-label="Subscription expiry date"
+                            aria-label="Trial end date"
                             type="text"
                             inputMode="numeric"
                             className={`border rounded px-2 py-1 text-xs w-28 ${
@@ -325,7 +332,7 @@ export default function UsersTab({
                                 ? "border-red-400"
                                 : ""
                             }`}
-                            value={editingDates[user.id] ?? isoToUS(user.subscription_expires_at)}
+                            value={editingDates[user.id] ?? (user.subscription_expires_at ? isoToUS(user.subscription_expires_at) : "12/31/2099")}
                             onChange={(event) => {
                               const nextValue = formatDateInput(event.target.value);
                               setEditingDates((prev) => ({ ...prev, [user.id]: nextValue }));
@@ -333,7 +340,7 @@ export default function UsersTab({
                             onBlur={() => handleDateBlur(user.id)}
                             disabled={savingIds.has(user.id)}
                             placeholder="MM/DD/YYYY"
-                            title="Subscription expiry (MM/DD/YYYY)"
+                            title="Trial end date (MM/DD/YYYY) - uses subscription_expires_at field"
                           />
                           <div className="flex space-x-1">
                             <button
@@ -388,18 +395,6 @@ export default function UsersTab({
                               Clear
                             </button>
                           </div>
-                          {(user.is_active || (user.tier && user.tier.toLowerCase() !== "free" && user.tier.toLowerCase() !== "starter")) && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 px-2 text-[10px] text-orange-600 hover:text-orange-700 hover:bg-orange-50"
-                              disabled={savingIds.has(user.id)}
-                              onClick={() => onPrepareUserForDeletion(user.id, user.email, user.is_active, user.tier)}
-                              title="Set user to INACTIVE + FREE tier (required before deletion)"
-                            >
-                              Prep
-                            </Button>
-                          )}
                           <Button
                             variant="ghost"
                             size="sm"
