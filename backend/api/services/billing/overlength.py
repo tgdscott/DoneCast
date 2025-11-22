@@ -54,7 +54,7 @@ def check_overlength(
     
     # Episode exceeds limit - check plan rules
     if not allows_overlength(plan_key):
-        # Starter: hard block
+        # Hobby: hard block
         error_msg = (
             f"Episode length ({episode_duration_minutes:.1f} min) exceeds your plan limit "
             f"({max_minutes} min). Please upgrade to Creator or higher to process longer episodes."

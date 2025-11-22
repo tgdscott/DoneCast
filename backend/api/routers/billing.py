@@ -30,9 +30,9 @@ internal_router = APIRouter(prefix="/internal/billing", tags=["internal:billing"
 _TASKS_AUTH = os.getenv("TASKS_AUTH", "")
 
 PRICE_MAP = {
-    "starter": {
+    "hobby": {
         "monthly": os.getenv("PRICE_STARTER_MONTHLY", "price_starter_monthly_placeholder"),
-        # Starter does not have an annual plan
+        # Hobby does not have an annual plan
     },
     "creator": {
         "monthly": (

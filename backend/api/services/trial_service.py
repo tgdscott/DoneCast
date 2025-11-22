@@ -33,12 +33,12 @@ def get_effective_tier(user: User) -> str:
     """
     Get the effective tier for a user.
     
-    During trial: returns "starter" (trial users get Starter package benefits)
+    During trial: returns "hobby" (trial users get Hobby package benefits)
     After trial: returns user's actual tier
     If trial expired and no subscription: returns "free"
     """
     if is_on_trial(user):
-        return "starter"
+        return "hobby"
     
     # If trial expired and user has no active subscription, they're effectively "free"
     if is_trial_expired(user) and not has_active_subscription(user):
@@ -55,7 +55,7 @@ def has_active_subscription(user: User) -> bool:
         return now < user.subscription_expires_at
     
     # Check if user has a paid tier (not free)
-    paid_tiers = {"starter", "creator", "pro", "executive", "enterprise"}
+    paid_tiers = {"hobby", "creator", "pro", "executive", "enterprise"}
     return user.tier in paid_tiers
 
 

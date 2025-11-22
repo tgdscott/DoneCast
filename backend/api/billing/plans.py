@@ -8,8 +8,8 @@ from typing import Optional, Dict, Any
 
 # Storage limits (configurable via environment variables)
 # Format: hours of raw audio storage, retention days
-_STORAGE_HOURS_STARTER = int(os.getenv("STORAGE_HOURS_STARTER", "2"))
-_STORAGE_DAYS_STARTER = int(os.getenv("STORAGE_DAYS_STARTER", "7"))
+_STORAGE_HOURS_HOBBY = int(os.getenv("STORAGE_HOURS_STARTER", "2"))
+_STORAGE_DAYS_HOBBY = int(os.getenv("STORAGE_DAYS_STARTER", "7"))
 _STORAGE_HOURS_CREATOR = int(os.getenv("STORAGE_HOURS_CREATOR", "10"))
 _STORAGE_DAYS_CREATOR = int(os.getenv("STORAGE_DAYS_CREATOR", "14"))
 _STORAGE_HOURS_PRO = int(os.getenv("STORAGE_HOURS_PRO", "25"))
@@ -25,14 +25,14 @@ _STORAGE_DAYS_UNLIMITED = os.getenv("STORAGE_DAYS_UNLIMITED")
 
 # Plan definitions
 PLANS: Dict[str, Dict[str, Any]] = {
-    "starter": {
+    "hobby": {
         "price": 19,
         "monthly_credits": 28_800,  # 480 hours = 28,800 minutes
         "max_minutes": 40,
         "analytics": "basic",
         "priority": 1,
-        "storage_hours": _STORAGE_HOURS_STARTER,  # Maximum hours of raw audio storage
-        "storage_days": _STORAGE_DAYS_STARTER,  # Retention period in days
+        "storage_hours": _STORAGE_HOURS_HOBBY,  # Maximum hours of raw audio storage
+        "storage_days": _STORAGE_DAYS_HOBBY,  # Retention period in days
     },
     "creator": {
         "price": 39,
@@ -93,7 +93,7 @@ RATES: Dict[str, int] = {
 
 # ElevenLabs TTS rates per plan (credits per second)
 RATES_ELEVENLABS: Dict[str, int] = {
-    "starter": 15,
+    "hobby": 15,
     "creator": 14,
     "pro": 13,
     "executive": 12,
@@ -121,13 +121,13 @@ def get_plan(plan_key: str) -> Optional[Dict[str, Any]]:
     """
     Get plan configuration by key.
     
-    Normalizes "free" to "starter" for backward compatibility.
-    Backend uses "free" internally, but plans use "starter".
+    Normalizes "free" to "hobby" for backward compatibility.
+    Backend uses "free" internally, but plans use "hobby".
     """
     normalized = plan_key.lower()
-    # Map "free" to "starter" (backend uses "free", plans use "starter")
+    # Map "free" to "hobby" (backend uses "free", plans use "hobby")
     if normalized == "free":
-        normalized = "starter"
+        normalized = "hobby"
     return PLANS.get(normalized)
 
 
@@ -181,7 +181,7 @@ def is_enterprise_plan(plan_key: str) -> bool:
 
 def get_elevenlabs_rate(plan_key: str) -> int:
     """Get ElevenLabs TTS rate (credits per second) for a plan."""
-    return RATES_ELEVENLABS.get(plan_key.lower(), 15)  # Default to starter rate
+    return RATES_ELEVENLABS.get(plan_key.lower(), 15)  # Default to hobby rate
 
 
 def get_ai_metadata_rate(metadata_type: str) -> int:
@@ -210,7 +210,7 @@ def allows_overlength(plan_key: str) -> bool:
     if plan_key.lower() in ("creator", "pro"):
         return True
     
-    # Starter blocks at hard cap
+    # Hobby blocks at hard cap
     return False
 
 
