@@ -97,11 +97,11 @@ gcloud projects add-iam-policy-binding podcast612 \
   --role="roles/storage.objectViewer"
 
 # Create and download key
-gcloud iam service-accounts keys create gcs-signer-key.json \
+gcloud iam service-accounts keys create secrets/gcs-signer-key.json \
   --iam-account=gcs-media-signer@podcast612.iam.gserviceaccount.com
 
 # Set environment variable
-$env:GOOGLE_APPLICATION_CREDENTIALS = "D:/PodWebDeploy/gcs-signer-key.json"
+$env:GOOGLE_APPLICATION_CREDENTIALS = "D:/PodWebDeploy/secrets/gcs-signer-key.json"
 ```
 
 ### Test the Fix
@@ -149,7 +149,7 @@ Ensure the `gcs-signer-key` secret exists in Secret Manager:
 # Upload the service account key to Secret Manager
 gcloud secrets create gcs-signer-key \
   --project=podcast612 \
-  --data-file=gcs-signer-key.json
+  --data-file=secrets/gcs-signer-key.json
 
 # Grant Cloud Run service account access to the secret
 gcloud secrets add-iam-policy-binding gcs-signer-key \

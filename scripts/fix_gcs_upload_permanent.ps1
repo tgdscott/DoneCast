@@ -8,6 +8,16 @@ param(
     [string]$BucketName = "ppp-media-us-west1"
 )
 
+# WORKAROUND: Fix for "Test-Path : Access is denied" error on Windows/gcloud
+# If CLOUDSDK_PYTHON is not set, try to use the current python executable
+if (-not $env:CLOUDSDK_PYTHON) {
+    $pythonPath = (Get-Command python -ErrorAction SilentlyContinue).Source
+    if ($pythonPath) {
+        $env:CLOUDSDK_PYTHON = $pythonPath
+        Write-Host "Using Python at $pythonPath for gcloud to avoid permission errors" -ForegroundColor Gray
+    }
+}
+
 Write-Host "=== GCS Upload Permanent Fix ===" -ForegroundColor Cyan
 Write-Host ""
 
@@ -93,7 +103,11 @@ if (-not $secretExists -or $versions.Count -eq 0) {
         --condition=None 2>&1 | Out-Null
     
     # Create key file
-    $keyFile = "gcs-signer-key.json"
+    # Check if secrets directory exists
+    if (-not (Test-Path "secrets")) {
+        New-Item -ItemType Directory -Force -Path "secrets" | Out-Null
+    }
+    $keyFile = "secrets/gcs-signer-key.json"
     Write-Host "  Creating service account key..." -ForegroundColor Gray
     gcloud iam service-accounts keys create $keyFile `
         --iam-account=$signerAccount `

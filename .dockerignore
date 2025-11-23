@@ -15,8 +15,10 @@ __pycache__/
 *.log
 logs.txt
 recent_logs*.txt
+# Local environment variables / secrets
 .env
 .env.*
+secrets/
 *.coverage
 .pytest_cache/
 htmlcov/

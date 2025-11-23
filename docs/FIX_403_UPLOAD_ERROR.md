@@ -93,11 +93,11 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
   --role="roles/storage.objectAdmin"
 
 # Create key
-gcloud iam service-accounts keys create gcs-signer-key.json \
+gcloud iam service-accounts keys create secrets/gcs-signer-key.json \
   --iam-account=gcs-signer@$PROJECT_ID.iam.gserviceaccount.com
 
 # Store in Secret Manager
-gcloud secrets create gcs-signer-key --data-file=gcs-signer-key.json
+gcloud secrets create gcs-signer-key --data-file=secrets/gcs-signer-key.json
 
 # Grant Cloud Run access to secret
 gcloud secrets add-iam-policy-binding gcs-signer-key \
@@ -105,7 +105,7 @@ gcloud secrets add-iam-policy-binding gcs-signer-key \
   --role="roles/secretmanager.secretAccessor"
 
 # Delete local key file
-rm gcs-signer-key.json
+rm secrets/gcs-signer-key.json
 ```
 
 The code already checks Secret Manager for `gcs-signer-key` (see `backend/infrastructure/gcs.py` lines 40-77).

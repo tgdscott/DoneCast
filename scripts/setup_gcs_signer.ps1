@@ -1,12 +1,22 @@
 # Setup GCS Signing Service Account
 # This script creates a service account with permissions to sign GCS URLs
 
+# WORKAROUND: Fix for "Test-Path : Access is denied" error on Windows/gcloud
+# If CLOUDSDK_PYTHON is not set, try to use the current python executable
+if (-not $env:CLOUDSDK_PYTHON) {
+    $pythonPath = (Get-Command python -ErrorAction SilentlyContinue).Source
+    if ($pythonPath) {
+        $env:CLOUDSDK_PYTHON = $pythonPath
+        Write-Host "Using Python at $pythonPath for gcloud to avoid permission errors" -ForegroundColor Gray
+    }
+}
+
 $ErrorActionPreference = "Stop"
 
 $PROJECT_ID = "podcast612"
 $SA_NAME = "gcs-media-signer"
 $SA_EMAIL = "$SA_NAME@$PROJECT_ID.iam.gserviceaccount.com"
-$KEY_FILE = "gcs-signer-key.json"
+$KEY_FILE = "secrets/gcs-signer-key.json"
 
 Write-Host "=== GCS Signing Service Account Setup ===" -ForegroundColor Cyan
 Write-Host ""
@@ -65,6 +75,11 @@ if ($iamCode -eq 0) {
 }
 
 Write-Host ""
+
+# Check if secrets directory exists
+if (-not (Test-Path "secrets")) {
+    New-Item -ItemType Directory -Force -Path "secrets" | Out-Null
+}
 
 # Check if key file already exists
 if (Test-Path $KEY_FILE) {

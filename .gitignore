@@ -54,7 +54,7 @@ pnpm-debug.log*
 # Local environment variables / secrets
 .env
 .env.*
-secrets/*.key
+secrets/
 *.pem
 *.crt
 gcs-signer-key.json
