@@ -118,6 +118,7 @@ export default function UsersTab({
   onPrepareUserForDeletion,
   onViewUserCredits,
   onVerifyUserEmail,
+  onTriggerPasswordReset,
   isSuperAdmin,
   isAdmin,
 }) {
@@ -284,8 +285,8 @@ export default function UsersTab({
                       <TableCell>{getTierBadge(user.tier || "starter")}</TableCell>
                       <TableCell>{getStatusBadge(user.is_active ? "Active" : "Inactive")}</TableCell>
                       <TableCell className="text-gray-600">
-                        {user.subscription_expires_at 
-                          ? user.subscription_expires_at.slice(0, 10) 
+                        {user.subscription_expires_at
+                          ? user.subscription_expires_at.slice(0, 10)
                           : "12/31/2099"}
                       </TableCell>
                       <TableCell className="text-gray-600">{user.episode_count}</TableCell>
@@ -325,13 +326,12 @@ export default function UsersTab({
                             aria-label="Trial end date"
                             type="text"
                             inputMode="numeric"
-                            className={`border rounded px-2 py-1 text-xs w-28 ${
-                              editingDates[user.id] &&
+                            className={`border rounded px-2 py-1 text-xs w-28 ${editingDates[user.id] &&
                               editingDates[user.id].length > 0 &&
                               usToISO(editingDates[user.id]) === null
-                                ? "border-red-400"
-                                : ""
-                            }`}
+                              ? "border-red-400"
+                              : ""
+                              }`}
                             value={editingDates[user.id] ?? (user.subscription_expires_at ? isoToUS(user.subscription_expires_at) : "12/31/2099")}
                             onChange={(event) => {
                               const nextValue = formatDateInput(event.target.value);
@@ -404,6 +404,17 @@ export default function UsersTab({
                           >
                             <Coins className="h-3 w-3 mr-1" />
                             Credits
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 px-2 text-[10px] text-purple-600 hover:text-purple-700 hover:bg-purple-50"
+                            disabled={savingIds.has(user.id)}
+                            onClick={() => onTriggerPasswordReset(user.id, user.email)}
+                            title="Send password reset email to this user"
+                          >
+                            <Mail className="h-3 w-3 mr-1" />
+                            Reset PW
                           </Button>
                           {isSuperAdmin && (
                             <Button

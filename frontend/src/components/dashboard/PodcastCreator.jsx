@@ -430,6 +430,8 @@ export default function PodcastCreator({
         }
         return (
           <StepUploadAudio
+            token={token}
+            podcastId={podcasts?.[0]?.id}
             mainSegments={mainSegments}
             uploadedFilename={uploadedFilename}
             isUploading={isUploading}
@@ -521,6 +523,8 @@ export default function PodcastCreator({
       case 5:
         return (
           <StepEpisodeDetails
+            token={token}
+            podcastId={podcasts?.[0]?.id}
             episodeDetails={episodeDetails}
             transcriptReady={transcriptReady}
             isAssembling={isAssembling}

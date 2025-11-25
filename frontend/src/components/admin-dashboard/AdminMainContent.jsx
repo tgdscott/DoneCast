@@ -128,6 +128,7 @@ export default function AdminMainContent({
   prepareUserForDeletion,
   viewUserCredits,
   verifyUserEmail,
+  triggerPasswordReset,
   setAdminSettings,
 }) {
   return (
@@ -212,6 +213,7 @@ export default function AdminMainContent({
           onPrepareUserForDeletion={prepareUserForDeletion}
           onViewUserCredits={viewUserCredits}
           onVerifyUserEmail={verifyUserEmail}
+          onTriggerPasswordReset={triggerPasswordReset}
           isSuperAdmin={isSuperAdmin}
           isAdmin={isAdmin}
         />
@@ -269,15 +271,15 @@ export default function AdminMainContent({
 
       {/* Enhanced Analytics Tab */}
       {activeTab === "analytics" && (
-        <AnalyticsTab 
-          analytics={analytics} 
-          metrics={metrics} 
+        <AnalyticsTab
+          analytics={analytics}
+          metrics={metrics}
           growthMetrics={growthMetrics}
           systemHealth={systemHealth}
-          analyticsLoading={analyticsLoading} 
+          analyticsLoading={analyticsLoading}
         />
       )}
-      
+
       {/* Enhanced Dashboard Overview Tab */}
       {activeTab === "dashboard" && (
         <AdminDashboardTab
@@ -310,7 +312,7 @@ export default function AdminMainContent({
           isSuperAdmin={isSuperAdmin}
         />
       )}
-      
+
       {/* Other tabs placeholder */}
       {!["users", "analytics", "settings", "dashboard", "music", "tiers", "landing", "db", "podcasts", "bugs", "billing", "help", "promo-codes"].includes(activeTab) && (
         <div className="text-center py-12">
@@ -374,5 +376,6 @@ AdminMainContent.propTypes = {
   prepareUserForDeletion: PropTypes.func.isRequired,
   viewUserCredits: PropTypes.func.isRequired,
   verifyUserEmail: PropTypes.func.isRequired,
+  triggerPasswordReset: PropTypes.func.isRequired,
   setAdminSettings: PropTypes.func.isRequired,
 };

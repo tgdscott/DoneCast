@@ -14,10 +14,11 @@ from uuid import UUID
 
 from sqlmodel import select
 
-from api.models.podcast import MediaCategory, MediaItem
+from api.models.podcast import MediaCategory, MediaItem, Podcast
 from api.services import ai_enhancer, clean_engine, transcription as trans
 from api.services.audio.common import sanitize_filename
 from api.services.clean_engine.features import apply_flubber_cuts
+from api.services.transcription.speaker_identification import prepend_speaker_intros, map_speaker_labels
 from api.core.paths import MEDIA_DIR, WS_ROOT as PROJECT_ROOT
 from api.core.paths import TRANSCRIPTS_DIR as _TRANSCRIPTS_DIR
 
@@ -531,10 +532,57 @@ def _maybe_generate_transcript(
     )
 
     words_list = None
+    intro_duration_s = 0.0
+    
     try:
+        transcription_basename = basename
+
+        # Attempt to prepend speaker intros for better diarization
+        try:
+            if episode and episode.podcast_id and local_candidate.exists():
+                podcast = session.exec(
+                    select(Podcast).where(Podcast.id == episode.podcast_id)
+                ).first()
+                
+                if podcast:
+                    # Prepend intros
+                    output_with_intros, duration = prepend_speaker_intros(
+                        main_audio_path=local_candidate,
+                        podcast_speaker_intros=podcast.speaker_intros,
+                        episode_guest_intros=episode.guest_intros
+                    )
+                    
+                    if duration > 0:
+                        intro_duration_s = duration
+                        transcription_basename = output_with_intros.name
+                        logging.info(
+                            "[assemble] 🎙️ Prepended speaker intros for transcription: %s (intro duration: %.2fs)",
+                            transcription_basename,
+                            intro_duration_s
+                        )
+        except Exception as intro_err:
+            logging.warning("[assemble] Failed to prepend speaker intros (continuing with original): %s", intro_err)
+            transcription_basename = basename
+
         # Prefer the helper that reuses any existing JSON before contacting providers
-        logging.info("[assemble] Attempting transcription via transcribe_media_file with basename: %s", basename)
-        words_list = trans.transcribe_media_file(basename, user_id=user_id)
+        logging.info("[assemble] Attempting transcription via transcribe_media_file with basename: %s", transcription_basename)
+        words_list = trans.transcribe_media_file(transcription_basename, user_id=user_id)
+        
+        # If we used intros, map speakers and strip timestamps immediately
+        if words_list and intro_duration_s > 0:
+            try:
+                logging.info("[assemble] Post-processing transcript with intros (duration: %.2fs)", intro_duration_s)
+                words_list = map_speaker_labels(
+                    words=words_list,
+                    podcast_id=episode.podcast_id,
+                    episode_id=episode.id,
+                    speaker_intros=podcast.speaker_intros,
+                    guest_intros=episode.guest_intros,
+                    intro_duration_s=intro_duration_s
+                )
+            except Exception as map_err:
+                logging.error("[assemble] Failed to map speakers/strip intros after transcription: %s", map_err)
+
     except Exception as transcribe_err:
         logging.warning("[assemble] Transcription with basename failed: %s, trying GCS URI", transcribe_err)
         try:

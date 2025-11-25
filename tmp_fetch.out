@@ -1,0 +1,4 @@
+root_status 500
+{"error":{"code":"internal_error","message":"We're experiencing technical difficulties. Please try again in a moment.","technical_message":"Something went wrong","details":null,"retryable":true,"request_id":"c4cdee4c-9789-4858-951c-5a600c92a0ae","error_id":"72a43f18-e715-485c-a1ca-d673119e2a20"}}
+health_status 200
+{"status":"ok","router":"podcasts","included_routers":["categories","distribution","spreaker"],"failed_routers":["crud","websites"],"total_routes":10}

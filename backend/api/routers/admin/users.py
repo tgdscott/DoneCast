@@ -405,6 +405,109 @@ def admin_verify_user_email(
     }
 
 
+@router.post("/users/{user_id}/password-reset", status_code=status.HTTP_200_OK)
+def admin_trigger_password_reset(
+    user_id: UUID,
+    session: Session = Depends(get_session),
+    admin_user: User = Depends(get_current_admin_user),
+) -> Dict[str, Any]:
+    """
+    Trigger a password reset email for a user (Admin only).
+    
+    This generates a valid password reset token and sends the standard
+    "Reset your password" email to the user, just as if they had
+    requested it themselves via the forgot password page.
+    """
+    log.info(f"[ADMIN] Password reset trigger requested by {admin_user.email} for user_id: {user_id}")
+    
+    # Find the user
+    user = crud.get_user_by_id(session, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if not user.is_active:
+        raise HTTPException(status_code=400, detail="Cannot reset password for inactive user")
+
+    # Check if verification/reset system is available
+    if not VERIFICATION_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Verification system not available")
+
+    # Invalidate existing reset tokens
+    try:
+        resets = session.exec(
+            select(PasswordReset).where(
+                PasswordReset.user_id == user.id,
+                PasswordReset.used_at == None,  # noqa: E711
+            )
+        ).all()
+        for reset in resets:
+            reset.used_at = datetime.utcnow()
+            session.add(reset)
+        session.commit()
+    except Exception:
+        session.rollback()
+
+    # Generate new token
+    import secrets
+    import string
+    alphabet = string.ascii_letters + string.digits
+    token = "".join(secrets.choice(alphabet) for _ in range(40))
+    expires = datetime.utcnow() + timedelta(minutes=30)
+    
+    # Record the reset request (attributed to admin action implicitly via logs)
+    pr = PasswordReset(
+        user_id=user.id, 
+        token=token, 
+        expires_at=expires, 
+        ip="0.0.0.0",  # Placeholder for admin action
+        user_agent=f"Admin Action by {admin_user.email}"
+    )
+    session.add(pr)
+    session.commit()
+
+    # Send the email
+    from api.services.mailer import mailer
+    
+    app_base = (settings.APP_BASE_URL or "https://app.podcastplusplus.com").rstrip("/")
+    reset_url = f"{app_base}/reset-password?token={token}"
+    subj = "Podcast Plus Plus: Password reset request"
+    text_body = (
+        "We received a request to reset your password (initiated by support).\n\n"
+        f"Reset link (valid 30 minutes): {reset_url}\n\n"
+        "If you did not request this, you can ignore this email."
+    )
+    html_body = f"""
+    <div style='font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:8px 4px;'>
+      <h2 style='font-size:20px;margin:0 0 12px;'>Reset your password</h2>
+      <p style='font-size:15px;line-height:1.5;margin:0 0 16px;'>An administrator has initiated a password reset for your account. Click the button below to choose a new password. This link expires in 30 minutes.</p>
+      <p style='text-align:center;margin:0 0 24px;'>
+        <a href='{reset_url}' style='display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 20px;border-radius:6px;font-weight:600;'>Choose New Password</a>
+      </p>
+      <p style='font-size:13px;color:#555;margin:0 0 12px;'>If you didn't request this, you can safely ignore this email.</p>
+    <p style='font-size:12px;color:#777;margin:24px 0 0;'>&copy; {datetime.utcnow().year} Podcast Plus Plus</p>
+    </div>
+    """.strip()
+    
+    try:
+        mailer.send(to=user.email, subject=subj, text=text_body, html=html_body)
+        log.info(f"[ADMIN] Password reset email sent to {user.email}")
+    except Exception as e:
+        log.error(f"[ADMIN] Failed to send password reset email to {user.email}: {e}")
+        # We still return success because the token was generated, but warn about email
+        return {
+            "success": True, 
+            "message": "Token generated but email failed to send", 
+            "token": token, # Return token to admin as fallback if email fails
+            "error": str(e)
+        }
+
+    return {
+        "success": True,
+        "message": f"Password reset email sent to {user.email}",
+        "user_id": str(user.id)
+    }
+
+
 @router.delete(
     "/users/{user_id}",
     status_code=status.HTTP_200_OK,

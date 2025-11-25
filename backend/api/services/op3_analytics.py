@@ -11,7 +11,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 from pydantic import BaseModel
@@ -26,6 +26,62 @@ CACHE_TTL_HOURS = 3  # Cache OP3 stats for 3 hours
 # Lock to prevent concurrent fetches for the same URL
 _fetch_locks: Dict[str, asyncio.Lock] = {}
 _locks_lock = asyncio.Lock()  # Lock for the locks dict itself
+
+
+def wrap_url_with_op3(url: str) -> str:
+    """
+    Wrap a URL with OP3 prefix for analytics tracking.
+    
+    OP3 expects the target URL in a specific format:
+    - For full HTTPS URLs: Strip the protocol and use hostname + path
+    - Example: https://example.com/episode.mp3?param=value
+    - Output: https://analytics.podcastplusplus.com/e/example.com/episode.mp3?param=value
+    
+    This format preserves query parameters in signed URLs because they're part of the path
+    segment, not query parameters for the OP3 URL itself.
+    """
+    if not url:
+        return url
+    normalized = url.strip()
+    if not normalized:
+        return normalized
+    # If already wrapped, return as-is
+    if normalized.startswith("https://analytics.podcastplusplus.com/e/"):
+        return normalized
+    
+    # Parse the URL to extract hostname and path
+    # OP3 format: https://analytics.podcastplusplus.com/e/hostname/path?query
+    # This preserves query parameters from signed URLs (they're part of the path, not OP3 query params)
+    try:
+        parsed = urlparse(normalized)
+        if parsed.scheme and parsed.netloc:
+            # Full URL: extract hostname and path
+            hostname = parsed.netloc
+            # Build path with query parameters (OP3 expects: /e/hostname/path?query)
+            # The path should start with / after hostname
+            target_path = parsed.path
+            if not target_path:
+                target_path = "/"  # Ensure there's at least a /
+            
+            # Build the full target path including query and fragment
+            full_target_path = target_path
+            if parsed.query:
+                full_target_path = f"{target_path}?{parsed.query}"
+            if parsed.fragment:
+                full_target_path = f"{full_target_path}#{parsed.fragment}"
+            
+            # OP3 format: /e/hostname/path?query
+            # Note: path starts with /, so result is /e/hostname/path?query
+            op3_url = f"https://analytics.podcastplusplus.com/e/{hostname}{full_target_path}"
+            return op3_url
+        else:
+            # Not a full URL (no scheme or netloc), might be relative or invalid
+            # Try to use as-is (OP3 might handle it)
+            return f"https://analytics.podcastplusplus.com/e/{normalized}"
+    except Exception as e:
+        # If parsing fails, fall back to simple prefix
+        logger.warning(f"Failed to parse URL for OP3 wrapping: {e}, using simple prefix")
+        return f"https://analytics.podcastplusplus.com/e/{normalized}"
 
 
 class OP3DownloadStats(BaseModel):

@@ -6,8 +6,11 @@ import { Label } from '../../ui/label';
 import { Textarea } from '../../ui/textarea';
 import { ArrowLeft, Loader2, Wand2, Lightbulb, ListChecks, AlertTriangle, RefreshCw } from 'lucide-react';
 import { TagInput } from '../AudioCleanupSettings';
+import GuestSelector from './GuestSelector';
 
 export default function StepEpisodeDetails({
+  token,
+  podcastId,
   episodeDetails,
   transcriptReady,
   isAssembling,
@@ -305,6 +308,16 @@ export default function StepEpisodeDetails({
               <p className="text-xs text-slate-500 mt-1">AI-suggested — click to edit or replace.</p>
             )}
             <p className="text-xs text-gray-500 mt-1">Each tag ≤30 chars. Enforced on publish.</p>
+          </div>
+
+          {/* Guest Selector */}
+          <div className="pt-2">
+            <GuestSelector
+              token={token}
+              podcastId={podcastId}
+              initialGuests={episodeDetails.guests || []}
+              onGuestsChange={(guests) => onDetailsChange('guests', guests)}
+            />
           </div>
 
           <div className="space-y-3 pt-4 border-t">

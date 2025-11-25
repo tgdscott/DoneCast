@@ -19,7 +19,7 @@ import json
 import logging
 from pathlib import Path
 from typing import List, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Form
 from pydantic import BaseModel
@@ -290,6 +290,184 @@ async def delete_speaker(
     
     return {"ok": True, "removed": speaker_name}
 
+
+# ========== GUEST LIBRARY ENDPOINTS ==========
+
+class GuestLibraryItem(BaseModel):
+    """Reusable guest configuration."""
+    id: str
+    name: str
+    gcs_path: Optional[str] = None
+    last_used: Optional[str] = None
+
+
+@router.get("/podcasts/{podcast_id}/guest-library")
+async def get_guest_library(
+    podcast_id: UUID,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> List[GuestLibraryItem]:
+    """Get reusable guest library for a podcast."""
+    
+    podcast = session.exec(
+        select(Podcast).where(Podcast.id == podcast_id)
+    ).first()
+    
+    if not podcast:
+        raise HTTPException(status_code=404, detail="Podcast not found")
+    
+    if podcast.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your podcast")
+    
+    library = podcast.guest_library or []
+    
+    return [
+        GuestLibraryItem(
+            id=item.get("id") or str(uuid4()),
+            name=item.get("name", ""),
+            gcs_path=item.get("gcs_path"),
+            last_used=item.get("last_used")
+        )
+        for item in library
+    ]
+
+
+@router.post("/podcasts/{podcast_id}/guest-library")
+async def update_guest_library(
+    podcast_id: UUID,
+    guests: List[GuestLibraryItem],
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Update podcast guest library."""
+    
+    podcast = session.exec(
+        select(Podcast).where(Podcast.id == podcast_id)
+    ).first()
+    
+    if not podcast:
+        raise HTTPException(status_code=404, detail="Podcast not found")
+    
+    if podcast.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your podcast")
+    
+    # Build library JSON
+    library_data = [
+        {
+            "id": guest.id,
+            "name": guest.name,
+            "gcs_path": guest.gcs_path,
+            "last_used": guest.last_used
+        }
+        for guest in guests
+    ]
+    
+    podcast.guest_library = library_data
+    
+    session.add(podcast)
+    session.commit()
+    
+    logger.info("[speakers] Updated guest library for podcast %s: %d guests", podcast_id, len(library_data))
+    
+    return {"ok": True, "count": len(library_data)}
+
+@router.post("/podcasts/{podcast_id}/guest-library/intro")
+async def upload_library_guest_intro(
+    podcast_id: UUID,
+    guest_id: str,
+    intro_audio: UploadFile = File(...),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Upload voice intro for a library guest."""
+    
+    podcast = session.exec(
+        select(Podcast).where(Podcast.id == podcast_id)
+    ).first()
+    
+    if not podcast:
+        raise HTTPException(status_code=404, detail="Podcast not found")
+    
+    if podcast.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your podcast")
+    
+    # Validate file type
+    content_type = intro_audio.content_type or ""
+    if not content_type.startswith("audio/"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type: {content_type}. Expected audio file."
+        )
+    
+    # Read file content
+    audio_bytes = await intro_audio.read()
+    
+    if len(audio_bytes) > 5 * 1024 * 1024:  # 5MB limit
+        raise HTTPException(
+            status_code=400,
+            detail="Voice intro too large (max 5MB, ~30 seconds recommended)"
+        )
+    
+    # Upload to GCS
+    from api.core.config import settings
+    
+    # Find guest name for filename
+    library = podcast.guest_library or []
+    guest_name = "unknown"
+    for item in library:
+        if item.get("id") == guest_id:
+            guest_name = item.get("name", "unknown")
+            break
+            
+    safe_name = "".join(c if c.isalnum() else "_" for c in guest_name.lower())
+    filename = f"guest_library/{podcast_id}/{guest_id}_{safe_name}_intro.wav"
+    
+    try:
+        gcs_uri = gcs.upload_bytes(
+            settings.GCS_BUCKET,
+            filename,
+            audio_bytes,
+            content_type=content_type
+        )
+        
+        logger.info(
+            "[speakers] Uploaded library guest intro for %s (podcast %s): %s",
+            guest_name,
+            podcast_id,
+            gcs_uri
+        )
+        
+    except Exception as e:
+        logger.error("[speakers] Failed to upload library guest intro to GCS: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to upload voice intro to cloud storage"
+        )
+    
+    # Update library JSON
+    updated = False
+    for item in library:
+        if item.get("id") == guest_id:
+            item["gcs_path"] = gcs_uri
+            updated = True
+            break
+    
+    if not updated:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Guest ID '{guest_id}' not found in library"
+        )
+    
+    podcast.guest_library = library
+    session.add(podcast)
+    session.commit()
+    
+    return {
+        "ok": True,
+        "guest_id": guest_id,
+        "gcs_uri": gcs_uri,
+        "size_bytes": len(audio_bytes)
+    }
 
 # ========== EPISODE GUEST ENDPOINTS ==========
 

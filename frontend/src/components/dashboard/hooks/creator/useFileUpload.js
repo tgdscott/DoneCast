@@ -133,6 +133,7 @@ export default function useFileUpload({
           file,
           friendlyName: file.name,
           token,
+          guest_ids: options.guest_ids || [], // Pass guest IDs if provided
           onProgress: ({ percent, loaded, total, bytesPerSecond, etaSeconds }) => {
             if (typeof percent === 'number') setUploadProgress(percent);
             setUploadStats({ loaded, total, bytesPerSecond, etaSeconds });

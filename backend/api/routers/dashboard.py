@@ -4,7 +4,7 @@ import logging
 import re
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlmodel import Session, select, desc
 
 from api.routers.auth import get_current_user
@@ -68,13 +68,13 @@ def _compute_local_episode_stats(session: Session, user_id) -> tuple[dict, int]:
     total_episodes = session.exec(
         select(func.count(Episode.id))
         .where(Episode.user_id == user_id)
-        .where(Episode.episode_number != 0)  # Exclude placeholder episodes
+        .where(or_(Episode.episode_number != 0, Episode.episode_number == None))  # Exclude placeholder episodes (0), allow NULL
     ).one()
 
     upcoming_scheduled = session.exec(
         select(func.count(Episode.id)).where(
             Episode.user_id == user_id,
-            Episode.episode_number != 0,  # Exclude placeholder episodes
+            or_(Episode.episode_number != 0, Episode.episode_number == None),  # Exclude placeholder episodes (0), allow NULL
             Episode.publish_at != None,  # noqa: E711
             Episode.publish_at > now,
         )
@@ -86,7 +86,7 @@ def _compute_local_episode_stats(session: Session, user_id) -> tuple[dict, int]:
     last_published_episode = session.exec(
         select(Episode)
         .where(Episode.user_id == user_id)
-        .where(Episode.episode_number != 0)  # Exclude placeholder episodes
+        .where(or_(Episode.episode_number != 0, Episode.episode_number == None))  # Exclude placeholder episodes (0), allow NULL
         .where(Episode.publish_at != None)  # noqa: E711
         .where(Episode.publish_at <= now)  # Only published episodes (not scheduled)
         .order_by(desc(Episode.publish_at))
@@ -112,7 +112,7 @@ def _compute_local_episode_stats(session: Session, user_id) -> tuple[dict, int]:
     last_processed_episode = session.exec(
         select(Episode)
         .where(Episode.user_id == user_id)
-        .where(Episode.episode_number != 0)  # Exclude placeholder episodes
+        .where(or_(Episode.episode_number != 0, Episode.episode_number == None))  # Exclude placeholder episodes (0), allow NULL
         .where(Episode.processed_at != None)  # noqa: E711
         .order_by(desc(Episode.processed_at))
         .limit(1)
@@ -147,7 +147,7 @@ def _compute_local_episode_stats(session: Session, user_id) -> tuple[dict, int]:
     recent_episodes = session.exec(
         select(Episode)
         .where(Episode.user_id == user_id)
-        .where(Episode.episode_number != 0)  # Exclude placeholder episodes
+        .where(or_(Episode.episode_number != 0, Episode.episode_number == None))  # Exclude placeholder episodes (0), allow NULL
         .where(Episode.publish_at != None)  # noqa: E711
         .where(Episode.publish_at <= now)  # Only published episodes (not scheduled)
         .order_by(sa_text("publish_at DESC"))

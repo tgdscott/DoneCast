@@ -26,12 +26,12 @@ export default function AdminDashboard() {
   const { token, logout, user: authUser } = useAuth();
   const { toast } = useToast();
   const resolvedTimezone = useResolvedTimezone();
-  
+
   // Determine admin role (superadmin has full access, admin has restrictions)
   const userRole = authUser?.role?.toLowerCase() || (authUser?.is_admin ? 'admin' : 'user');
   const isSuperAdmin = userRole === 'superadmin';
   const isAdmin = userRole === 'admin' || isSuperAdmin;
-  
+
   const {
     users,
     usersLoading,
@@ -63,6 +63,7 @@ export default function AdminDashboard() {
     denyRefundRequest,
     prepareUserForDeletion,
     verifyUserEmail,
+    triggerPasswordReset,
   } = useAdminDashboardData({ token, toast });
 
   const {
@@ -133,7 +134,7 @@ export default function AdminDashboard() {
     if (creditViewerDialog.open && creditViewerDialog.refundRequest && creditViewerDialog.refundRequestDetail) {
       const refundRequest = creditViewerDialog.refundRequest;
       const detail = creditViewerDialog.refundRequestDetail;
-      
+
       // Pre-select all refundable entries from episodes and non-episode charges
       const allRefundableIds = [];
       if (detail.episodes) {
@@ -152,7 +153,7 @@ export default function AdminDashboard() {
           }
         });
       }
-      
+
       if (allRefundableIds.length > 0) {
         setSelectedCharges(new Set(allRefundableIds));
       } else if (refundRequest.ledger_entry_ids && refundRequest.ledger_entry_ids.length > 0) {
@@ -168,7 +169,7 @@ export default function AdminDashboard() {
           setSelectedCharges(new Set(toSelect));
         }
       }
-      
+
       // Pre-fill refund notes with the request reason
       if (refundRequest.reason) {
         setRefundNotes(`Refund request: ${refundRequest.reason}${refundRequest.notes ? `\n\nUser notes: ${refundRequest.notes}` : ''}`);
@@ -222,7 +223,7 @@ export default function AdminDashboard() {
       }, 0);
     }
   };
-  
+
   const totalRefundCredits = calculateTotalFromSelectedCharges();
   const effectiveRefundAmount = useManualAmount && manualRefundAmount ? parseFloat(manualRefundAmount) : totalRefundCredits;
 
@@ -239,10 +240,10 @@ export default function AdminDashboard() {
         return;
       }
       if (manualAmount > totalRefundCredits) {
-        toast({ 
-          title: "Error", 
-          description: `Manual amount (${manualAmount.toFixed(1)}) cannot exceed selected charges total (${totalRefundCredits.toFixed(1)})`, 
-          variant: "destructive" 
+        toast({
+          title: "Error",
+          description: `Manual amount (${manualAmount.toFixed(1)}) cannot exceed selected charges total (${totalRefundCredits.toFixed(1)})`,
+          variant: "destructive"
         });
         return;
       }
@@ -253,8 +254,8 @@ export default function AdminDashboard() {
     setRefundSubmitting(true);
     try {
       await refundUserCredits(
-        creditViewerDialog.userId, 
-        Array.from(selectedCharges), 
+        creditViewerDialog.userId,
+        Array.from(selectedCharges),
         refundNotes,
         useManualAmount ? parseFloat(manualRefundAmount) : undefined
       );
@@ -365,7 +366,7 @@ export default function AdminDashboard() {
         setActiveTab={setActiveTab}
         logout={logout}
       />
-      
+
       {/* Main Content */}
       <div className="flex-1 flex flex-col" role="main" aria-label="Admin main content" tabIndex={-1}>
         {/* Top Header */}
@@ -374,7 +375,7 @@ export default function AdminDashboard() {
           navigationItems={navigationItems}
           resolvedTimezone={resolvedTimezone}
         />
-        
+
         {/* Content Area */}
         <AdminMainContent
           activeTab={activeTab}
@@ -430,10 +431,11 @@ export default function AdminDashboard() {
           prepareUserForDeletion={prepareUserForDeletion}
           viewUserCredits={viewUserCredits}
           verifyUserEmail={verifyUserEmail}
+          triggerPasswordReset={triggerPasswordReset}
           setAdminSettings={setAdminSettings}
         />
       </div>
-      
+
       {/* Admin Tier Confirmation Dialog */}
       <Dialog open={adminTierDialog.open} onOpenChange={(open) => !open && closeAdminTierDialog()}>
         <DialogContent>
@@ -476,7 +478,7 @@ export default function AdminDashboard() {
             <Button variant="outline" onClick={closeAdminTierDialog}>
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={confirmAdminTier}
               disabled={adminTierDialog.confirmText.toLowerCase() !== 'yes'}
               className="bg-orange-600 hover:bg-orange-700"
@@ -486,7 +488,7 @@ export default function AdminDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      
+
       {/* Credit Viewer Dialog */}
       <Dialog open={creditViewerDialog.open} onOpenChange={(open) => !open && closeCreditViewer()}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
@@ -501,7 +503,7 @@ export default function AdminDashboard() {
               )}
             </DialogDescription>
           </DialogHeader>
-          
+
           {creditViewerDialog.loading ? (
             <div className="py-8 text-center text-gray-500">Loading credit data...</div>
           ) : creditViewerDialog.userData ? (
@@ -515,7 +517,7 @@ export default function AdminDashboard() {
                       <AlertCircle className="h-5 w-5 text-orange-600 mt-0.5" />
                       <div className="flex-1">
                         <div className="font-semibold text-orange-900 mb-2">Refund Request Details</div>
-                        
+
                         {/* User's Request */}
                         <div className="bg-white rounded p-3 mb-3 border border-orange-200">
                           <div className="text-sm font-medium text-gray-700 mb-1">User's Reason</div>
@@ -584,7 +586,7 @@ export default function AdminDashboard() {
                                   const episodeSelectedEntries = episode.ledger_entries.filter(e => selectedCharges.has(e.id) && e.can_refund);
                                   const episodeTotalSelected = episodeSelectedEntries.reduce((sum, e) => sum + e.credits, 0);
                                   const allEpisodeEntriesSelected = episode.ledger_entries.filter(e => e.can_refund).every(e => selectedCharges.has(e.id));
-                                  
+
                                   return (
                                     <Card key={episode.id} className="border-l-4 border-l-blue-500">
                                       <CardContent className="p-4 space-y-3">
@@ -601,31 +603,31 @@ export default function AdminDashboard() {
                                                   S{episode.season_number || '?'}E{episode.episode_number || '?'}
                                                 </div>
                                               )}
-                                              <Badge 
-                                                variant={episode.status === 'published' ? 'default' : episode.status === 'error' ? 'destructive' : 'secondary'} 
+                                              <Badge
+                                                variant={episode.status === 'published' ? 'default' : episode.status === 'error' ? 'destructive' : 'secondary'}
                                                 className="text-xs"
                                               >
                                                 {episode.status}
                                               </Badge>
-                                              <Badge 
-                                                variant={episode.service_delivered ? 'default' : 'destructive'} 
+                                              <Badge
+                                                variant={episode.service_delivered ? 'default' : 'destructive'}
                                                 className="text-xs"
                                               >
                                                 {episode.service_delivered ? 'Service Delivered' : 'Service Failed'}
                                               </Badge>
                                               {episode.refund_recommendation && (
-                                                <Badge 
+                                                <Badge
                                                   variant={
                                                     episode.refund_recommendation === 'full_refund' ? 'default' :
-                                                    episode.refund_recommendation === 'no_refund' ? 'secondary' :
-                                                    'outline'
-                                                  } 
+                                                      episode.refund_recommendation === 'no_refund' ? 'secondary' :
+                                                        'outline'
+                                                  }
                                                   className="text-xs"
                                                 >
                                                   {episode.refund_recommendation === 'full_refund' ? '✓ Recommend Full Refund' :
-                                                   episode.refund_recommendation === 'no_refund' ? '✗ Do Not Refund' :
-                                                   episode.refund_recommendation === 'conditional_refund' ? '? Conditional Refund' :
-                                                   '~ Partial Refund'}
+                                                    episode.refund_recommendation === 'no_refund' ? '✗ Do Not Refund' :
+                                                      episode.refund_recommendation === 'conditional_refund' ? '? Conditional Refund' :
+                                                        '~ Partial Refund'}
                                                 </Badge>
                                               )}
                                             </div>
@@ -732,17 +734,16 @@ export default function AdminDashboard() {
                                             {episode.ledger_entries.map((entry) => {
                                               const isSelected = selectedCharges.has(entry.id);
                                               const canSelect = entry.can_refund && !entry.already_refunded;
-                                              
+
                                               return (
-                                                <div 
+                                                <div
                                                   key={entry.id}
-                                                  className={`flex items-start gap-2 p-2 rounded border ${
-                                                    entry.already_refunded 
-                                                      ? 'bg-green-50 border-green-200' 
-                                                      : canSelect && isSelected
+                                                  className={`flex items-start gap-2 p-2 rounded border ${entry.already_refunded
+                                                    ? 'bg-green-50 border-green-200'
+                                                    : canSelect && isSelected
                                                       ? 'bg-blue-50 border-blue-300'
                                                       : 'bg-white border-gray-200'
-                                                  }`}
+                                                    }`}
                                                 >
                                                   {canSelect ? (
                                                     <Checkbox
@@ -775,7 +776,7 @@ export default function AdminDashboard() {
                                                     )}
                                                     {entry.cost_breakdown && (
                                                       <div className="text-xs text-gray-600 mt-1">
-                                                        Base: {entry.cost_breakdown.base_credits?.toFixed(1) || 'N/A'} | 
+                                                        Base: {entry.cost_breakdown.base_credits?.toFixed(1) || 'N/A'} |
                                                         Total: {entry.cost_breakdown.total?.toFixed(1) || entry.credits.toFixed(1)}
                                                       </div>
                                                     )}
@@ -810,17 +811,16 @@ export default function AdminDashboard() {
                                   {creditViewerDialog.refundRequestDetail.non_episode_charges.map((entry) => {
                                     const isSelected = selectedCharges.has(entry.id);
                                     const canSelect = entry.can_refund && !entry.already_refunded;
-                                    
+
                                     return (
-                                      <div 
+                                      <div
                                         key={entry.id}
-                                        className={`flex items-start gap-2 p-2 rounded border ${
-                                          entry.already_refunded 
-                                            ? 'bg-green-50 border-green-200' 
-                                            : canSelect && isSelected
+                                        className={`flex items-start gap-2 p-2 rounded border ${entry.already_refunded
+                                          ? 'bg-green-50 border-green-200'
+                                          : canSelect && isSelected
                                             ? 'bg-blue-50 border-blue-300'
                                             : 'bg-white border-gray-200'
-                                        }`}
+                                          }`}
                                       >
                                         {canSelect ? (
                                           <Checkbox
@@ -933,7 +933,7 @@ export default function AdminDashboard() {
                   </CardContent>
                 </Card>
               )}
-              
+
               {/* Only show regular credit viewer if NOT viewing a refund request with detail */}
               {!creditViewerDialog.refundRequestDetail && (
                 <>
@@ -950,12 +950,12 @@ export default function AdminDashboard() {
                         </div>
                       </CardContent>
                     </Card>
-                    
+
                     <Card>
                       <CardContent className="p-4">
                         <div className="text-xs text-gray-500 mb-1">Allocated</div>
                         <div className="text-2xl font-bold text-gray-700">
-                          {creditViewerDialog.userData.credits_allocated !== null 
+                          {creditViewerDialog.userData.credits_allocated !== null
                             ? creditViewerDialog.userData.credits_allocated.toFixed(0)
                             : '∞'}
                         </div>
@@ -964,7 +964,7 @@ export default function AdminDashboard() {
                         </div>
                       </CardContent>
                     </Card>
-                    
+
                     <Card>
                       <CardContent className="p-4">
                         <div className="text-xs text-gray-500 mb-1">Used This Month</div>
@@ -972,14 +972,14 @@ export default function AdminDashboard() {
                           {creditViewerDialog.userData.credits_used_this_month.toFixed(1)}
                         </div>
                         <div className="text-xs text-gray-500 mt-1">
-                          {creditViewerDialog.userData.credits_allocated !== null 
+                          {creditViewerDialog.userData.credits_allocated !== null
                             ? `${((creditViewerDialog.userData.credits_used_this_month / creditViewerDialog.userData.credits_allocated) * 100).toFixed(0)}% of limit`
                             : 'Unlimited tier'}
                         </div>
                       </CardContent>
                     </Card>
                   </div>
-                  
+
                   {/* Usage Breakdown */}
                   {creditViewerDialog.userData.credits_breakdown && (
                     <div>
@@ -1026,7 +1026,7 @@ export default function AdminDashboard() {
                   )}
                 </>
               )}
-              
+
               {/* Refund Credits Section */}
               <div className="border rounded-lg p-4 bg-blue-50">
                 <div className="flex items-center gap-2 mb-3">
@@ -1036,7 +1036,7 @@ export default function AdminDashboard() {
                 <div className="text-xs text-gray-600 mb-3">
                   {creditViewerDialog.refundRequestDetail ? (
                     <>
-                      Select which charges to refund from the episodes above. 
+                      Select which charges to refund from the episodes above.
                       {(() => {
                         const allEntries = [
                           ...(creditViewerDialog.refundRequestDetail.episodes?.flatMap(ep => ep.ledger_entries) || []),
@@ -1113,7 +1113,7 @@ export default function AdminDashboard() {
                       </label>
                     </div>
                   )}
-                  
+
                   {/* Manual Amount Input */}
                   {useManualAmount && selectedCharges.size > 0 && (
                     <div className="space-y-1">
@@ -1133,7 +1133,7 @@ export default function AdminDashboard() {
                       </div>
                     </div>
                   )}
-                  
+
                   <Textarea
                     placeholder="Optional notes for refund..."
                     value={refundNotes}
@@ -1253,7 +1253,7 @@ export default function AdminDashboard() {
                   {creditViewerDialog.userData.pagination && creditViewerDialog.userData.pagination.total_pages > 1 && (
                     <div className="flex items-center justify-between mt-3">
                       <div className="text-xs text-gray-500">
-                        Page {creditViewerDialog.userData.pagination.page} of {creditViewerDialog.userData.pagination.total_pages} 
+                        Page {creditViewerDialog.userData.pagination.page} of {creditViewerDialog.userData.pagination.total_pages}
                         ({creditViewerDialog.userData.pagination.total} total)
                       </div>
                       <div className="flex gap-2">
@@ -1282,7 +1282,7 @@ export default function AdminDashboard() {
           ) : (
             <div className="py-8 text-center text-gray-500">No data available</div>
           )}
-          
+
           <DialogFooter>
             <Button variant="outline" onClick={closeCreditViewer}>
               Close
@@ -1338,7 +1338,7 @@ export default function AdminDashboard() {
                   });
                   return;
                 }
-                
+
                 if (!creditViewerDialog.refundRequest?.notification_id) {
                   toast({
                     title: "Error",
@@ -1347,7 +1347,7 @@ export default function AdminDashboard() {
                   });
                   return;
                 }
-                
+
                 setDenySubmitting(true);
                 try {
                   await denyRefundRequest(

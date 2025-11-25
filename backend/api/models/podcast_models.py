@@ -62,6 +62,7 @@ class PodcastBase(SQLModel):
     # Speaker identification settings
     has_guests: bool = Field(default=False, description="This podcast regularly features guests")
     speaker_intros: Optional[dict] = Field(default=None, sa_column=Column(JSON), description="Voice intro files for speaker identification - format: {'hosts': [{'name': 'Scott', 'gcs_path': 'gs://...', 'duration_ms': 2000}]}")
+    guest_library: Optional[list] = Field(default=None, sa_column=Column(JSON), description="Reusable guest library - format: [{'id': 'uuid', 'name': 'Guest Name', 'gcs_path': 'gs://...', 'duration_ms': 2000, 'last_used': 'iso-date'}]")
     # Format selection from onboarding (for demographic purposes)
     format: Optional[str] = Field(default=None, description="Podcast format selected during onboarding: solo, interview, cohost, panel, narrative")
 

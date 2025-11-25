@@ -28,7 +28,11 @@ _media_root_str = os.getenv("MEDIA_ROOT")
 if _media_root_str:
     MEDIA_DIR = Path(_media_root_str).resolve()
 else:
-    MEDIA_DIR = PROJECT_ROOT / "local_media"
+    if IS_DEV_ENV or IS_TEST_ENV:
+        MEDIA_DIR = PROJECT_ROOT / "local_media"
+    else:
+        # In production (containers), default to /tmp/media to avoid read-only filesystem errors
+        MEDIA_DIR = LOCAL_TMP_DIR / "media"
 
 # Define other necessary directories, using environment variables with local defaults
 FINAL_DIR = Path(os.getenv("FINAL_DIR", str(LOCAL_TMP_DIR / "final_episodes")))

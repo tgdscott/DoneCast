@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Body, status, Query, Requ
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlmodel import select
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from api.core.database import get_session
 from api.routers.auth import get_current_user
@@ -472,7 +472,7 @@ def list_episodes(
                         select(func.count())
                         .select_from(Episode)
                         .where(Episode.user_id == current_user.id)
-                        .where(Episode.episode_number != 0)  # Exclude placeholder episodes
+                        .where(or_(Episode.episode_number != 0, Episode.episode_number == None))  # Exclude placeholder episodes (0), allow NULL
                 ).scalar_one()
         except Exception:
                 total = 0
@@ -481,7 +481,7 @@ def list_episodes(
                 eps = session.execute(
                         select(Episode)
                         .where(Episode.user_id == current_user.id)
-                        .where(Episode.episode_number != 0)  # CRITICAL: Exclude placeholder episodes (episode_number=0)
+                        .where(or_(Episode.episode_number != 0, Episode.episode_number == None))  # CRITICAL: Exclude placeholder episodes (0), allow NULL
                         .order_by(_sa_text("publish_at DESC"), _sa_text("processed_at DESC"), _sa_text("created_at DESC"), _sa_text("id DESC"))
                         .offset(offset)
                         .limit(limit)
@@ -491,7 +491,7 @@ def list_episodes(
                 eps = session.execute(
                         select(Episode)
                         .where(Episode.user_id == current_user.id)
-                        .where(Episode.episode_number != 0)  # CRITICAL: Exclude placeholder episodes (episode_number=0)
+                        .where(or_(Episode.episode_number != 0, Episode.episode_number == None))  # CRITICAL: Exclude placeholder episodes (0), allow NULL
                         .order_by(_sa_text("processed_at DESC"))
                         .offset(offset)
                         .limit(limit)
@@ -653,7 +653,7 @@ def episodes_summary(
         from uuid import UUID as _UUID
         try:
                 q = select(Episode).where(Episode.user_id == current_user.id)
-                q = q.where(Episode.episode_number != 0)  # CRITICAL: Exclude placeholder episodes (episode_number=0)
+                q = q.where(or_(Episode.episode_number != 0, Episode.episode_number == None))  # CRITICAL: Exclude placeholder episodes (0), allow NULL
                 if podcast_id:
                         pid = _UUID(str(podcast_id))
                         q = q.where(Episode.podcast_id == pid)

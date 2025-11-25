@@ -104,6 +104,12 @@ def _fetch_published_episodes(session: Session, podcast: Podcast, max_count: int
         playback_info = compute_playback_info(ep, wrap_with_op3=True)
         audio_url = playback_info.get("playback_url")  # Fixed: use playback_url not url
         
+        # Debug logging for audio URL
+        if audio_url and "analytics.podcastplusplus.com" in audio_url:
+             log.debug(f"[sites] Generated OP3-tracked URL for episode {ep.id}: {audio_url}")
+        elif audio_url:
+             log.warning(f"[sites] Audio URL for episode {ep.id} is NOT OP3-tracked: {audio_url}")
+
         # Skip episodes without valid audio URLs
         if not audio_url:
             continue

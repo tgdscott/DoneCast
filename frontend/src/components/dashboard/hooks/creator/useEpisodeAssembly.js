@@ -244,7 +244,13 @@ export default function useEpisodeAssembly({
             main_content_filename: uploadedFilename,
             output_filename: episodeDetails.title.toLowerCase().replace(/\s+/g, '-'),
             tts_values: ttsValues,
-            episode_details: sanitizedDetails,
+            episode_details: {
+              ...sanitizedDetails,
+              guest_intros: episodeDetails.guests ? episodeDetails.guests.map(g => ({
+                name: g.name,
+                gcs_path: g.gcs_path
+              })) : []
+            },
             flubber_cuts_ms: Array.isArray(flubberCutsMs) && flubberCutsMs.length ? flubberCutsMs : null,
             intents: intents,
             use_auphonic: useAdvancedAudio,

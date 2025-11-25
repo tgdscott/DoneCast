@@ -254,6 +254,6 @@ def get_answer_for_topic(
 __all__ = [
     "AIEnhancerError",
     "generate_speech_from_text",
-#   "interpret_intern_command",
+    "interpret_intern_command",
     "get_answer_for_topic",
 ]

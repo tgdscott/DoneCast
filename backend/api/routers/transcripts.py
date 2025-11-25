@@ -162,7 +162,9 @@ def get_episode_transcript_json(episode_id: str, session: Session = Depends(get_
     try:
         content = Path(path).read_bytes()
         return Response(content=content, media_type="application/json")
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error("Failed to read transcript file %s: %s", path, e, exc_info=True)
         raise HTTPException(status_code=404, detail="TRANSCRIPT_NOT_FOUND")
 
 
@@ -189,11 +191,14 @@ def get_episode_transcript_text(episode_id: str, session: Session = Depends(get_
     # Generate diarized transcript with speaker labels and timestamps
     try:
         text = _format_diarized_transcript(words)
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Failed to format diarized transcript: %s", e, exc_info=True)
         # Fallback to simple concatenation if formatting fails
         try:
             text = " ".join([str(w.get("word", "")).strip() for w in words if w.get("word")])
-        except Exception:
+        except Exception as fallback_err:
+            logging.getLogger(__name__).error("Failed to fallback format transcript: %s", fallback_err, exc_info=True)
             text = ""
     return Response(content=text.encode("utf-8"), media_type="text/plain; charset=utf-8")
 

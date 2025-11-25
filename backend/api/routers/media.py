@@ -41,11 +41,13 @@ async def upload_media_files(
     current_user: User = Depends(get_current_user),
     files: List[UploadFile] = File(...),
     friendly_names: Optional[str] = Form(None),
-    use_auphonic: Optional[bool] = Form(False)  # CRITICAL: Sole source of truth for transcription routing
+    use_auphonic: Optional[bool] = Form(False),  # CRITICAL: Sole source of truth for transcription routing
+    guest_ids: Optional[str] = Form(None) # JSON string of guest IDs
 ):
     """Upload one or more media files with optional friendly names."""
     created_items = []
     names = json.loads(friendly_names) if friendly_names else []
+    guests_list = json.loads(guest_ids) if guest_ids else []
 
     # Simple constraints and validators (server-side defense-in-depth)
     # Size caps (bytes)
@@ -367,7 +369,8 @@ async def upload_media_files(
             user_id=current_user.id,
             category=category,
             expires_at=expires_at,
-            use_auphonic=bool(use_auphonic or False)  # CRITICAL: Sole source of truth for transcription routing
+            use_auphonic=bool(use_auphonic or False),  # CRITICAL: Sole source of truth for transcription routing
+            guest_ids=guests_list if category == MediaCategory.main_content else None
         )
         session.add(media_item)
         created_items.append(media_item)
@@ -381,7 +384,8 @@ async def upload_media_files(
                 from infrastructure.tasks_client import enqueue_http_task  # type: ignore
                 task_result = enqueue_http_task("/api/tasks/transcribe", {
                     "filename": final_filename,  # Use GCS URL instead of just filename
-                    "user_id": str(current_user.id)  # Pass user_id for tier-based routing
+                    "user_id": str(current_user.id),  # Pass user_id for tier-based routing
+                    "guest_ids": guests_list # Pass guest IDs for speaker identification
                 })
                 log.info("Transcription task enqueued for %s: %s", final_filename, task_result)
         except Exception as e:
@@ -729,11 +733,14 @@ class RegisterUploadItem(BaseModel):
     content_type: Optional[str] = None
     size: Optional[int] = None
     use_auphonic: Optional[bool] = Field(default=False, description="True if Auphonic transcription was requested (checkbox on upload)")
+    guest_ids: Optional[List[str]] = Field(default=None, description="List of guest IDs associated with this upload")
+    guest_ids: Optional[List[str]] = Field(default=None, description="List of guest IDs associated with this upload")
 
 class RegisterRequest(BaseModel):
     uploads: List[RegisterUploadItem]
     notify_when_ready: bool = False
     notify_email: Optional[str] = None
+    guest_ids: Optional[List[str]] = None # Backward compatibility if passed at top level
 
 def _resolve_transcript_path(filename: str) -> Path:
     stem = Path(filename).stem
@@ -1123,7 +1130,8 @@ async def register_upload(
                 content_type=upload_item.content_type,
                 filesize=file_size,  # MediaItem uses 'filesize' not 'size'
                 user_id=current_user.id,
-                use_auphonic=bool(upload_item.use_auphonic or False)  # CRITICAL: Sole source of truth for transcription routing
+                use_auphonic=bool(upload_item.use_auphonic or False),  # CRITICAL: Sole source of truth for transcription routing
+                guest_ids=upload_item.guest_ids or request.guest_ids  # Store guest IDs
             )
             session.add(media_item)
             session.commit()
@@ -1141,7 +1149,8 @@ async def register_upload(
                     from infrastructure.tasks_client import enqueue_http_task  # type: ignore
                     task_result = enqueue_http_task("/api/tasks/transcribe", {
                         "filename": gcs_url,
-                        "user_id": str(current_user.id)
+                        "user_id": str(current_user.id),
+                        "guest_ids": media_item.guest_ids # Pass guest IDs to transcription task
                     })
                     log.info(f"Transcription task enqueued for media_id={media_item.id}, user_id={current_user.id}, gcs_path={gcs_url}, task={task_result}")
                 except Exception as trans_err:

@@ -165,6 +165,7 @@ export async function uploadMediaDirect({
   apiClient,
   notifyWhenReady,
   notifyEmail,
+  guest_ids, // New: accept guest IDs
   onProgress,
   signal,
   onXhrCreate,
@@ -229,6 +230,7 @@ export async function uploadMediaDirect({
           original_filename: file.name || friendlyName || 'upload',
           content_type: contentType,
           size: typeof file.size === 'number' ? file.size : undefined,
+          guest_ids: guest_ids, // Pass guest_ids to registration
         },
       ],
     };
@@ -249,6 +251,10 @@ export async function uploadMediaDirect({
     
     const friendlyNamesArray = [friendlyName || file.name || 'upload'];
     formData.append('friendly_names', JSON.stringify(friendlyNamesArray));
+    
+    if (guest_ids && Array.isArray(guest_ids) && guest_ids.length > 0) {
+      formData.append('guest_ids', JSON.stringify(guest_ids)); // Pass as JSON string
+    }
     
     if (notifyWhenReady !== undefined) {
       formData.append('notify_when_ready', notifyWhenReady ? 'true' : 'false');

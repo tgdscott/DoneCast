@@ -230,88 +230,89 @@ def execute_intern_commands(
                 log.append(f"[INTERN_INTERPRET_FALLBACK] {e}")
             default_action = "add_to_shownotes" if (cmd.get("mode") == "shownote") else "generate_audio"
             action = (interpreted or {}).get("action") or default_action
-        # Get the clean topic from the interpretation, but fall back to the
-        # original prompt if the interpretation failed for some reason.
-        query_text = (interpreted or {}).get("topic") or prompt_text
-        try:
-            cmd["interpreted_topic"] = (interpreted or {}).get("topic")
-        except Exception:
-            pass
-        log.append(f"[INTERN_QUERY] action='{action}' topic='{query_text[:200]}'")
-        if action == "add_to_shownotes":
+            # Get the clean topic from the interpretation, but fall back to the
+            # original prompt if the interpretation failed for some reason.
+            query_text = (interpreted or {}).get("topic") or prompt_text
             try:
-                note = ai_enhancer.get_answer_for_topic(
-                    query_text,
-                    context=(cmd.get("local_context") or ""),
-                    mode="shownote",
-                )
-                if note:
-                    cmd["note"] = note.strip()
-                    log.append(f"[INTERN_NOTE] added len={len(cmd['note'])}")
-            except Exception as e:
-                cmd["shownote_error"] = str(e)
-                log.append(f"[INTERN_NOTE_ERROR] {e}")
-        else:
-            answer_text = ""
-            try:
-                # Check if user provided an override answer first
-                override_answer = (cmd.get("override_answer") or "").strip()
-                if override_answer:
-                    answer = override_answer
-                    log.append(f"[INTERN_OVERRIDE_ANSWER] using user-edited text len={len(answer)}")
-                elif fast_mode:
-                    answer = "The intern is out to lunch."
-                    try:
-                        log.append("[INTERN_FAST_MODE] using placeholder answer")
-                    except Exception:
-                        pass
-                else:
-                    answer = ai_enhancer.get_answer_for_topic(
+                cmd["interpreted_topic"] = (interpreted or {}).get("topic")
+            except Exception:
+                pass
+            log.append(f"[INTERN_QUERY] action='{action}' topic='{query_text[:200]}'")
+
+            if action == "add_to_shownotes":
+                try:
+                    note = ai_enhancer.get_answer_for_topic(
                         query_text,
                         context=(cmd.get("local_context") or ""),
-                        mode="audio",
+                        mode="shownote",
                     )
-
-                answer_text = (answer or "").strip()
-                if not answer_text:
-                    answer_text = "The intern is out to lunch."
-
+                    if note:
+                        cmd["note"] = note.strip()
+                        log.append(f"[INTERN_NOTE] added len={len(cmd['note'])}")
+                except Exception as e:
+                    cmd["shownote_error"] = str(e)
+                    log.append(f"[INTERN_NOTE_ERROR] {e}")
+            else:
+                answer_text = ""
                 try:
-                    spoken_prompt = (cmd.get("local_context") or "").strip()
-                    prompts = [spoken_prompt, (query_text or "").strip()]
-                    seen = set()
-                    prompts = [p for p in prompts if p and not (p in seen or seen.add(p))]
-                    
-                    # CRITICAL FIX: Ensure answer_text is not the same as the prompt/question
-                    # If answer_text matches the prompt exactly or is very similar, it means AI echoed the question
-                    prompt_normalized = _norm(spoken_prompt) if spoken_prompt else ""
-                    query_normalized = _norm(query_text) if query_text else ""
-                    answer_normalized = _norm(answer_text)
-                    
-                    # Check if answer is essentially the same as the prompt (AI echoed question back)
-                    if answer_normalized and prompt_normalized:
-                        if answer_normalized == prompt_normalized or answer_normalized.startswith(prompt_normalized[:min(20, len(prompt_normalized))]):
-                            log.append(f"[INTERN_ANSWER_ECHO_DETECTED] Answer matches prompt - AI echoed question back")
-                            # Don't use the echoed prompt, use a fallback
+                    # Check if user provided an override answer first
+                    override_answer = (cmd.get("override_answer") or "").strip()
+                    if override_answer:
+                        answer = override_answer
+                        log.append(f"[INTERN_OVERRIDE_ANSWER] using user-edited text len={len(answer)}")
+                    elif fast_mode:
+                        answer = "The intern is out to lunch."
+                        try:
+                            log.append("[INTERN_FAST_MODE] using placeholder answer")
+                        except Exception:
+                            pass
+                    else:
+                        answer = ai_enhancer.get_answer_for_topic(
+                            query_text,
+                            context=(cmd.get("local_context") or ""),
+                            mode="audio",
+                        )
+
+                    answer_text = (answer or "").strip()
+                    if not answer_text:
+                        answer_text = "The intern is out to lunch."
+
+                    try:
+                        spoken_prompt = (cmd.get("local_context") or "").strip()
+                        prompts = [spoken_prompt, (query_text or "").strip()]
+                        seen = set()
+                        prompts = [p for p in prompts if p and not (p in seen or seen.add(p))]
+                        
+                        # CRITICAL FIX: Ensure answer_text is not the same as the prompt/question
+                        # If answer_text matches the prompt exactly or is very similar, it means AI echoed the question
+                        prompt_normalized = _norm(spoken_prompt) if spoken_prompt else ""
+                        query_normalized = _norm(query_text) if query_text else ""
+                        answer_normalized = _norm(answer_text)
+                        
+                        # Check if answer is essentially the same as the prompt (AI echoed question back)
+                        if answer_normalized and prompt_normalized:
+                            if answer_normalized == prompt_normalized or answer_normalized.startswith(prompt_normalized[:min(20, len(prompt_normalized))]):
+                                log.append(f"[INTERN_ANSWER_ECHO_DETECTED] Answer matches prompt - AI echoed question back")
+                                # Don't use the echoed prompt, use a fallback
+                                answer_text = "The intern is processing that request."
+                                answer_normalized = _norm(answer_text)
+                        
+                        if answer_normalized and query_normalized:
+                            if answer_normalized == query_normalized or answer_normalized.startswith(query_normalized[:min(20, len(query_normalized))]):
+                                log.append(f"[INTERN_ANSWER_ECHO_DETECTED] Answer matches query_text - AI echoed question back")
+                                answer_text = "The intern is processing that request."
+                                answer_normalized = _norm(answer_text)
+                        
+                        # Now strip any remaining prompt-like content from the answer
+                        answer_text = _strip_prompt_prefix_suffix(answer_text, prompts, log)
+                        # Also remove duplicated or prompt-like tail phrases to avoid end-echo in TTS
+                        answer_text = _dedupe_tail(answer_text, log)
+                        answer_text = _strip_promptish_tail(answer_text, prompts, log)
+                        
+                        # Final safety check: ensure answer is not empty after stripping
+                        if not answer_text or not answer_text.strip():
+                            log.append(f"[INTERN_ANSWER_EMPTY_AFTER_STRIP] Using fallback answer")
                             answer_text = "The intern is processing that request."
-                            answer_normalized = _norm(answer_text)
-                    
-                    if answer_normalized and query_normalized:
-                        if answer_normalized == query_normalized or answer_normalized.startswith(query_normalized[:min(20, len(query_normalized))]):
-                            log.append(f"[INTERN_ANSWER_ECHO_DETECTED] Answer matches query_text - AI echoed question back")
-                            answer_text = "The intern is processing that request."
-                            answer_normalized = _norm(answer_text)
-                    
-                    # Now strip any remaining prompt-like content from the answer
-                    answer_text = _strip_prompt_prefix_suffix(answer_text, prompts, log)
-                    # Also remove duplicated or prompt-like tail phrases to avoid end-echo in TTS
-                    answer_text = _dedupe_tail(answer_text, log)
-                    answer_text = _strip_promptish_tail(answer_text, prompts, log)
-                    
-                    # Final safety check: ensure answer is not empty after stripping
-                    if not answer_text or not answer_text.strip():
-                        log.append(f"[INTERN_ANSWER_EMPTY_AFTER_STRIP] Using fallback answer")
-                        answer_text = "The intern is processing that request."
                 except Exception as e:
                     log.append(f"[INTERN_ANSWER_PROCESSING_ERROR] {e}; using answer as-is")
                     # If processing fails, use answer as-is but ensure it's not empty
@@ -446,38 +447,34 @@ def execute_intern_commands(
                 if insertion_s is None:
                     # Fallback to insertion_s if end_marker_end not available
                     insertion_s = _safe_float(cmd.get("insertion_s"))
-                if insertion_s is None or insertion_s <= 0:
-                    # Last resort: use context_end_s (end of command context)
-                    insertion_s = context_end_s
-                    if insertion_s <= 0:
-                        # Absolute last resort: use start_s + a small offset to insert after the command starts
-                        insertion_s = start_s + 0.5
-                        log.append(f"[INTERN_INSERT_WARNING] Using fallback insertion_s={insertion_s:.3f} (start_s + 0.5s)")
-
+                
+                # Calculate prompt start/end in ms first, as we need them for robust insertion check
                 prompt_start_ms = int(start_s * 1000 * ratio)
                 prompt_end_ms = int(context_end_s * 1000 * ratio)
                 prompt_start_ms = max(0, min(prompt_start_ms, len(out)))
                 prompt_end_ms = max(prompt_start_ms, min(prompt_end_ms, len(out)))
+
+                if insertion_s is None or insertion_s <= 0:
+                    # Last resort: use context_end_s (end of command context)
+                    insertion_s = context_end_s
+                    # If context_end_s also effectively zero or same as start, push it forward
+                    if insertion_s <= start_s:
+                        insertion_s = start_s + 0.5
+                        log.append(f"[INTERN_INSERT_WARNING] Using fallback insertion_s={insertion_s:.3f} (start_s + 0.5s)")
 
                 insertion_ms = int(insertion_s * 1000 * ratio)
                 insertion_ms = max(0, min(insertion_ms, len(out)))
                 
                 # CRITICAL FIX: Ensure insertion is AFTER the command ends (not before or at start)
                 # NEVER insert at the very beginning (0ms) - always ensure it's after the command
-                if insertion_ms <= prompt_start_ms:
-                    log.append(
-                        f"[INTERN_INSERT_CRITICAL] insertion_ms={insertion_ms} is at/before prompt_start_ms={prompt_start_ms} - FORCING to prompt_end_ms={prompt_end_ms}"
+                if insertion_ms < prompt_end_ms:
+                     log.append(
+                        f"[INTERN_INSERT_CRITICAL] insertion_ms={insertion_ms} is before prompt_end_ms={prompt_end_ms} - FORCING to prompt_end_ms"
                     )
-                    insertion_ms = max(prompt_end_ms, prompt_start_ms + 100)  # At least 100ms after start
-                    insertion_s = (insertion_ms / 1000.0) / ratio if ratio else (insertion_ms / 1000.0)
-                elif insertion_ms < prompt_end_ms:
-                    log.append(
-                        f"[INTERN_INSERT_ADJUST] insertion_ms={insertion_ms} is before prompt_end_ms={prompt_end_ms}; adjusting to prompt_end_ms"
-                    )
-                    insertion_ms = prompt_end_ms
-                    insertion_s = (prompt_end_ms / 1000.0) / ratio if ratio else (prompt_end_ms / 1000.0)
-                else:
-                    log.append(f"[INTERN_INSERT_ONLY] insert_at={insertion_ms}ms (s={insertion_s:.3f}) AFTER command end at {prompt_end_ms}ms")
+                     insertion_ms = prompt_end_ms
+                     insertion_s = (insertion_ms / 1000.0) / ratio if ratio else (insertion_ms / 1000.0)
+                
+                log.append(f"[INTERN_INSERT_ONLY] insert_at={insertion_ms}ms (s={insertion_s:.3f}) AFTER command end at {prompt_end_ms}ms")
                 cmd["resolved_insertion_ms"] = insertion_ms
                 cmd["resolved_insertion_s"] = insertion_s
                 log.append(

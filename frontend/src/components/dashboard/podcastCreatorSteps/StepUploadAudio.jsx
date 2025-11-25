@@ -5,10 +5,13 @@ import { Switch } from '../../ui/switch';
 import { Loader2, Mic, Upload, ArrowLeft, AlertTriangle, Trash2 } from 'lucide-react';
 import { formatDisplayName } from '@/lib/displayNames';
 import { formatProgressDetail } from '@/lib/uploadProgress';
+import GuestSelector from './GuestSelector';
 
 const SEGMENT_PLACEHOLDER = 'Audio segment';
 
 export default function StepUploadAudio({
+  token,
+  podcastId,
   mainSegments = [],
   uploadedFilename,
   isUploading,
@@ -43,6 +46,7 @@ export default function StepUploadAudio({
   onAdvancedAudioToggle = () => {},
   isAdvancedAudioSaving = false,
 }) {
+  const [uploadGuests, setUploadGuests] = React.useState([]);
   const audioDurationSec = audioDurationSecProp;
   const hasSegments = Array.isArray(mainSegments) && mainSegments.length > 0;
   const hasMergedAudio = Boolean(uploadedFilename);
@@ -109,7 +113,7 @@ export default function StepUploadAudio({
     const files = Array.from(fileList || []);
     for (const file of files) {
       // eslint-disable-next-line no-await-in-loop
-      await onFileChange(file);
+      await onFileChange(file, { guest_ids: uploadGuests.map(g => g.id) });
     }
   };
 
@@ -157,6 +161,20 @@ export default function StepUploadAudio({
         </CardTitle>
         <p className="text-sm text-slate-500 mt-2">Upload each segment separately so we can stitch and process them in the right order.</p>
       </CardHeader>
+
+      {/* Guest Selector for Transcription */}
+      {podcastId && (
+        <div className="max-w-2xl mx-auto">
+          <GuestSelector
+            token={token}
+            podcastId={podcastId}
+            onGuestsChange={setUploadGuests}
+          />
+          <p className="text-xs text-slate-500 mt-2 text-center">
+            Select guests <strong>before</strong> uploading to ensure correct speaker labeling in the transcript.
+          </p>
+        </div>
+      )}
 
       {(isUploading || (typeof uploadProgress === 'number' && uploadProgress < 100)) && (
         <div className="rounded-md border border-slate-200 bg-white p-3" aria-live="polite">

@@ -342,9 +342,9 @@ def compute_playback_info(episode: Any, *, now: Optional[datetime] = None, wrap_
     # Wrap with OP3 prefix if requested (for public website tracking)
     if wrap_with_op3 and playback_url:
         try:
-            # Import OP3 wrapper function from RSS feed module
-            from api.routers.rss_feed import _wrap_with_op3
-            playback_url = _wrap_with_op3(str(playback_url))
+            # Import OP3 wrapper function from services module
+            from api.services.op3_analytics import wrap_url_with_op3
+            playback_url = wrap_url_with_op3(str(playback_url))
         except Exception as err:
             from api.core.logging import get_logger
             logger = get_logger("api.episodes.common")

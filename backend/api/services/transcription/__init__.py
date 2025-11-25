@@ -21,6 +21,8 @@ import uuid
 from ...core.paths import MEDIA_DIR, TRANSCRIPTS_DIR
 from .watchers import notify_watchers_processed, mark_watchers_failed, _candidate_filenames
 from ..audio.common import sanitize_filename
+from .speaker_identification import prepend_speaker_intros, map_speaker_labels
+
 
 
 class TranscriptionError(Exception):
@@ -360,7 +362,7 @@ def _read_existing_transcript_for(filename: str) -> List[Dict[str, Any]] | None:
     return None
 
 
-def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def transcribe_media_file(filename: str, user_id: Optional[str] = None, guest_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """Synchronously transcribe a media file and persist transcript artifacts.
     
     Routes to appropriate transcription service based on MediaItem.use_auphonic flag:
@@ -372,6 +374,7 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
     Args:
         filename: GCS URL or local path to audio file
         user_id: UUID string of user (required for MediaItem lookup)
+        guest_ids: Optional list of guest library IDs for speaker identification (AssemblyAI only)
         
     Returns:
         List of word dicts with start/end/word/speaker keys
@@ -381,7 +384,7 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
     """
 
     # DEBUG: Log what we received
-    logging.info(f"[transcription] 🎬 CALLED with filename={filename}, user_id={user_id!r} (type={type(user_id).__name__})")
+    logging.info(f"[transcription] 🎬 CALLED with filename={filename}, user_id={user_id!r}, guest_ids={guest_ids}")
     
     # ========== IDEMPOTENCY CHECK: Prevent duplicate transcriptions ==========
     # Critical for container restarts: if this file is already transcribed, return cached result
@@ -678,6 +681,13 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
 
     local_name = filename
     delete_after = False
+    
+    # Speaker identification vars
+    intro_duration_s = 0.0
+    podcast_context_id = None
+    episode_guest_intros = []
+    podcast_speaker_intros = None
+    
     try:
         if _is_gcs_url(filename):
             try:
@@ -692,8 +702,92 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None) -> List[
         if raw_toggle and str(raw_toggle).strip().lower() in {"0", "false", "no", "off"}:
             raise TranscriptionError("Transcription disabled by environment")
 
+        # =====================================================================
+        # SPEAKER IDENTIFICATION: Prepend intros if guest_ids provided
+        # =====================================================================
+        if guest_ids and user_id:
+            try:
+                from api.core.database import get_session
+                from api.models.podcast import Podcast
+                from sqlmodel import select
+                
+                # Use existing session if possible, else create new
+                # (Assuming one session per task execution is fine)
+                session = next(get_session())
+                
+                # Find user's podcasts to locate guests
+                user_podcasts = session.exec(select(Podcast).where(Podcast.user_id == user_id)).all()
+                
+                found_guests = []
+                target_podcast = None
+                
+                for pod in user_podcasts:
+                    lib = pod.guest_library or []
+                    # lib is list of dicts: {id, name, gcs_path, ...}
+                    matches = [g for g in lib if g.get("id") in guest_ids]
+                    if matches:
+                        found_guests.extend(matches)
+                        if not target_podcast:
+                            target_podcast = pod
+                
+                if found_guests:
+                    episode_guest_intros = found_guests
+                    logging.info("[transcription] Found %d guests in library for speaker ID", len(found_guests))
+                    
+                    if target_podcast:
+                        podcast_context_id = target_podcast.id
+                        podcast_speaker_intros = target_podcast.speaker_intros
+                        logging.info("[transcription] Using host intros from podcast %s", target_podcast.title)
+                    
+                    # Prepend intros to local audio file
+                    # Note: local_name is just a filename in MEDIA_DIR, we need full path
+                    local_path = MEDIA_DIR / local_name
+                    if local_path.exists():
+                        prepended_path, duration = prepend_speaker_intros(
+                            main_audio_path=local_path,
+                            podcast_speaker_intros=podcast_speaker_intros,
+                            episode_guest_intros=episode_guest_intros
+                        )
+                        
+                        if duration > 0:
+                            intro_duration_s = duration
+                            # Use the prepended file for transcription
+                            # It returns a Path object, get name relative to MEDIA_DIR if needed
+                            # But get_word_timestamps expects filename in MEDIA_DIR
+                            # prepend_speaker_intros saves to MEDIA_DIR, so just get name
+                            local_name = prepended_path.name
+                            # Don't delete this temp file immediately, wait for cleanup
+                            delete_after = True # It's a temp file
+                            logging.info(
+                                "[transcription] 🎙️ Prepended speaker intros (duration: %.2fs) -> %s",
+                                intro_duration_s,
+                                local_name
+                            )
+            except Exception as speaker_err:
+                logging.error("[transcription] Failed to setup speaker identification: %s", speaker_err, exc_info=True)
+                # Continue without speaker ID
+        # =====================================================================
+
         words = get_word_timestamps(local_name)
         
+        # =====================================================================
+        # SPEAKER IDENTIFICATION: Map labels and shift timestamps
+        # =====================================================================
+        if intro_duration_s > 0:
+            try:
+                logging.info("[transcription] Post-processing transcript with intros (duration: %.2fs)", intro_duration_s)
+                words = map_speaker_labels(
+                    words=words,
+                    podcast_id=podcast_context_id,
+                    episode_id=None, # No episode yet
+                    speaker_intros=podcast_speaker_intros,
+                    guest_intros=episode_guest_intros,
+                    intro_duration_s=intro_duration_s
+                )
+            except Exception as map_err:
+                logging.error("[transcription] Failed to map speakers/strip intros: %s", map_err, exc_info=True)
+        # =====================================================================
+
         # DIAGNOSTIC: Confirm AssemblyAI returned data
         logging.info("🟢 [STEP_2_COMPLETE] Got %d words from AssemblyAI for filename='%s'", len(words), filename)
         

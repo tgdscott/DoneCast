@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 import logging
 
 log = logging.getLogger(__name__)
@@ -30,7 +31,34 @@ except Exception as e:
     # CRUD router is critical - this will break podcast creation/listing
     # Log full traceback for debugging
     import traceback
-    log.error("Full traceback for CRUD router import failure:\n%s", traceback.format_exc())
+    tb = traceback.format_exc()
+    log.error("Full traceback for CRUD router import failure:\n%s", tb)
+    
+    # Register fallback route to surface error to client
+    @router.get("/")
+    def crud_load_error():
+        return JSONResponse(
+            status_code=500, 
+            content={
+                "error": "Podcast CRUD router failed to load", 
+                "detail": str(e),
+                "hint": "Check server logs for import errors. The POST /api/podcasts/ endpoint is not available.",
+                "traceback": tb.splitlines()[:15]  # Limit traceback size
+            }
+        )
+    
+    # Also register a POST fallback to return a more specific error
+    @router.post("/")
+    def crud_post_error():
+        return JSONResponse(
+            status_code=503,  # Service Unavailable
+            content={
+                "error": "Podcast creation endpoint unavailable",
+                "detail": "The CRUD router failed to load during server startup",
+                "reason": str(e),
+                "hint": "Contact support or check server logs for details"
+            }
+        )
 
 # Import sub-routers with error handling (after CRUD router)
 try:

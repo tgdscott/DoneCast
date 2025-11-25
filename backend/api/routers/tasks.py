@@ -42,6 +42,7 @@ _IS_DEV = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") o
 class TranscribeIn(BaseModel):
     filename: str
     user_id: str | None = None  # Optional: determines which transcription service to use
+    guest_ids: list[str] | None = None  # Optional: list of guest IDs for speaker ID
 
 
 def _validate_payload(data: Dict[str, Any]) -> TranscribeIn:
@@ -57,16 +58,17 @@ async def _dispatch_transcription(
     user_id: str | None,
     request_id: str | None, 
     *, 
-    suppress_errors: bool
+    suppress_errors: bool,
+    guest_ids: list[str] | None = None
 ) -> None:
     """Execute transcription in a worker thread, optionally suppressing exceptions."""
     import asyncio
     from api.services.transcription import transcribe_media_file  # type: ignore
     
     loop = asyncio.get_running_loop()
-    log.info("event=tasks.transcribe.start filename=%s user_id=%s request_id=%s", filename, user_id, request_id)
+    log.info("event=tasks.transcribe.start filename=%s user_id=%s request_id=%s guest_ids=%s", filename, user_id, request_id, guest_ids)
     try:
-        await loop.run_in_executor(None, transcribe_media_file, filename, user_id)
+        await loop.run_in_executor(None, transcribe_media_file, filename, user_id, guest_ids)
         log.info("event=tasks.transcribe.done filename=%s request_id=%s", filename, request_id)
     except FileNotFoundError as err:
         log.warning("event=tasks.transcribe.not_found filename=%s request_id=%s", filename, request_id)
@@ -141,6 +143,7 @@ async def transcribe_endpoint(request: Request, x_tasks_auth: str | None = Heade
 
     filename = (payload.filename or "").strip()
     user_id = (payload.user_id or "").strip() or None  # Extract user_id from payload
+    guest_ids = payload.guest_ids or None
     
     if not filename:
         raise HTTPException(status_code=400, detail="filename required")
@@ -150,11 +153,11 @@ async def transcribe_endpoint(request: Request, x_tasks_auth: str | None = Heade
     if _IS_DEV:
         _ensure_local_media_present(filename)
         import asyncio
-        asyncio.create_task(_dispatch_transcription(filename, user_id, request_id, suppress_errors=True))
+        asyncio.create_task(_dispatch_transcription(filename, user_id, request_id, suppress_errors=True, guest_ids=guest_ids))
         return {"started": True, "async": True}
 
     try:
-        await _dispatch_transcription(filename, user_id, request_id, suppress_errors=False)
+        await _dispatch_transcription(filename, user_id, request_id, suppress_errors=False, guest_ids=guest_ids)
         return {"started": True}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="file not found")

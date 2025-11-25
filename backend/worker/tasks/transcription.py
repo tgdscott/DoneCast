@@ -14,7 +14,7 @@ from api.services.transcription.watchers import notify_watchers_processed
 
 
 @celery_app.task(name="transcribe_media_file")
-def transcribe_media_file(filename: str, user_id: str | None = None) -> dict:
+def transcribe_media_file(filename: str, user_id: str | None = None, guest_ids: list[str] | None = None) -> dict:
     """Generate transcript artifacts for the uploaded media file."""
 
     try:
@@ -30,7 +30,7 @@ def transcribe_media_file(filename: str, user_id: str | None = None) -> dict:
             in {"1", "true", "yes", "on"}
         )
 
-        words = run_transcription(filename, user_id)
+        words = run_transcription(filename, user_id, guest_ids=guest_ids)
         stem = Path(filename).stem
         import json as _json
 

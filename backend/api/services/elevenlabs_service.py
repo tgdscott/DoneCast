@@ -27,6 +27,13 @@ class ElevenLabsService:
     BASE_URL = "https://api.elevenlabs.io/v1"
     _CACHE_TTL_SEC = 10 * 60
     
+    # Blacklisted voice IDs to exclude from the voice list
+    # These are custom voices from the account that should not be shown to users
+    _BLACKLISTED_VOICE_IDS = {
+        "bg9u7pac20JnCVZBdWyC",
+        "EoKJz7bDkYqgRsEMSZZ7",
+    }
+    
     # Supplemental female voices from ElevenLabs pre-made library
     # These are always available to ensure gender balance (16 male + 11 female → 16 male + 16 female)
     _SUPPLEMENTAL_FEMALE_VOICES = [
@@ -166,6 +173,9 @@ class ElevenLabsService:
         if not isinstance(voices, list):
             voices = []
         
+        # Filter out blacklisted voice IDs
+        voices = [v for v in voices if v.get("voice_id") not in self._BLACKLISTED_VOICE_IDS]
+        
         # Merge supplemental female voices (avoid duplicates by voice_id)
         existing_ids = {v.get("voice_id") for v in voices if v.get("voice_id")}
         for supp_voice in self._SUPPLEMENTAL_FEMALE_VOICES:
@@ -271,6 +281,10 @@ class ElevenLabsService:
 
     def get_voice(self, voice_id: str) -> Optional[Dict[str, Any]]:
         """Return a normalized VoiceItem-like dict for a single id, or None if not found."""
+        # Check if voice is blacklisted
+        if voice_id in self._BLACKLISTED_VOICE_IDS:
+            return None
+        
         # Check supplemental voices first
         for supp_voice in self._SUPPLEMENTAL_FEMALE_VOICES:
             if supp_voice["voice_id"] == voice_id:

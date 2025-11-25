@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Plus, Edit, Trash2, Loader2, ArrowLeft, Bot, FileText } from "lucide-react";
+import { Plus, Edit, Trash2, Loader2, ArrowLeft, Bot, FileText, Copy } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useState, useEffect } from "react";
 import TemplateEditor from "./TemplateEditor"; // We will use the editor as a sub-component
@@ -64,6 +64,17 @@ export default function TemplateManager({ onBack, token, setCurrentView }) {
     }
   };
 
+  const handleDuplicate = async (templateId) => {
+    try {
+      const api = makeApi(token);
+      await api.post(`/api/templates/${templateId}/duplicate`);
+      fetchTemplates();
+    } catch (err) {
+      const msg = (err && err.message) || 'Duplicate failed';
+      setError(msg);
+    }
+  };
+
   // If we are editing or creating, show the editor component
   if (editingTemplateId) {
     return (
@@ -119,6 +130,7 @@ export default function TemplateManager({ onBack, token, setCurrentView }) {
                     </div>
                     <div className="space-x-2">
                        <Button variant="outline" size="sm" onClick={() => toggleActive(template)}>{template?.is_active !== false ? 'Disable' : 'Enable'}</Button>
+                       <Button variant="outline" size="sm" onClick={() => handleDuplicate(template.id)}><Copy className="w-4 h-4 mr-2"/>Duplicate</Button>
                        <Button variant="outline" size="sm" onClick={() => setEditingTemplateId(template.id)}><Edit className="w-4 h-4 mr-2"/>Edit</Button>
                        <Button variant="destructive" size="sm" onClick={() => handleDelete(template.id)}><Trash2 className="w-4 h-4 mr-2"/>Delete</Button>
                     </div>

@@ -638,13 +638,15 @@ def generate_podcast_cover_image(
     """
     Generate a podcast cover image using Gemini 2.5 Flash Image model.
     
+    Supports both public Gemini API and Vertex AI providers based on AI_PROVIDER setting.
+    
     Args:
         prompt: Description of the image to generate
         aspect_ratio: Image aspect ratio (default "1:1" for square podcast covers)
         negative_prompt: Things to avoid in the image (appended to prompt as guidance)
     
     Returns:
-        Base64-encoded PNG image data, or None if generation fails
+        Base64-encoded PNG image data (as data URL), or None if generation fails
     """
     if _stub_mode():
         _log.info("STUB: Would generate image with prompt: %s", prompt)
@@ -652,197 +654,186 @@ def generate_podcast_cover_image(
     
     try:
         import base64
-        
-        if genai is None or _GenerativeModel is None or _configure is None:
-            _log.error("Gemini SDK not available for image generation")
-            return None
-        
-        # Configure Gemini API (same pattern as text generation)
         from api.core.config import settings  # type: ignore
-        api_key_env = os.getenv("GEMINI_API_KEY")
-        api_key_settings = getattr(settings, 'GEMINI_API_KEY', None)
-        api_key = api_key_env or api_key_settings
         
-        # Debug logging to help identify where API key is coming from
-        if api_key:
-            source = "os.getenv" if api_key_env else "settings"
-            key_preview = f"{api_key[:10]}...{api_key[-4:]}" if len(api_key) > 14 else "***"
-            _log.debug(f"GEMINI_API_KEY loaded from {source} (preview: {key_preview})")
-        
+        # Determine provider
         provider = (os.getenv("AI_PROVIDER") or getattr(settings, 'AI_PROVIDER', 'gemini')).lower()
-        
         if provider not in ("gemini", "vertex"):
             provider = "gemini"
         
-        if provider == "gemini":
-            if not api_key:
-                if _stub_mode():
-                    return None
-                _log.error("GEMINI_API_KEY not set for image generation")
-                return None
-            _configure(api_key=api_key)
-        else:
-            # Vertex path - use ADC
-            try:
-                from google.cloud import aiplatform  # type: ignore
-                project = os.getenv("VERTEX_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
-                location = os.getenv("VERTEX_LOCATION", "us-central1")
-                if project:
-                    aiplatform.init(project=project, location=location)
-            except ImportError:
-                _log.error("Vertex AI SDK not available")
-                return None
-        
-        # Use Gemini 2.5 Flash Image model
+        # Model name (same for both providers)
         model_name = "gemini-2.5-flash-image"
-        model = _GenerativeModel(model_name=model_name)  # type: ignore[misc]
         
-        # Build full prompt (include negative prompt guidance if provided)
-        # Note: Per Gemini docs, aspect ratio should ideally be set via generationConfig.imageConfig.aspectRatio
-        # However, the older google.generativeai SDK may not support this parameter, so we include it in prompt as fallback
+        # Build full prompt
         full_prompt = prompt
         if negative_prompt:
             full_prompt = f"{full_prompt}\n\nAvoid: {negative_prompt}"
         
-        # Add aspect ratio instruction clearly (as fallback if SDK doesn't support imageConfig parameter)
-        # Format: "1:1" means square, which is standard for podcast covers
+        # Add aspect ratio instruction
         if aspect_ratio != "1:1":
             full_prompt = f"{full_prompt}\n\nImage aspect ratio: {aspect_ratio}"
         else:
-            # For square images, make it explicit since it's important for podcast covers
             full_prompt = f"{full_prompt}\n\nCreate a square image (1:1 aspect ratio)."
         
         # Build generation config
-        # TODO: If upgrading to newer google.genai SDK, use generationConfig.imageConfig.aspectRatio instead
         generation_config = {
             "temperature": 0.7,
         }
         
-        # Log FULL prompt and parameters being sent to Gemini
+        # Log request details
         _log.info("=" * 80)
-        _log.info("GEMINI IMAGE GENERATION REQUEST - FULL DETAILS:")
-        _log.info(f"MODEL: {model_name}")
-        _log.info(f"PROMPT (full, {len(full_prompt)} chars): {full_prompt}")
-        _log.info(f"ASPECT RATIO: {aspect_ratio} (requested)")
+        _log.info("IMAGE GENERATION REQUEST - provider=%s model=%s", provider, model_name)
+        _log.info(f"PROMPT ({len(full_prompt)} chars): {full_prompt}")
+        _log.info(f"ASPECT RATIO: {aspect_ratio}")
         _log.info("=" * 80)
         
-        # Generate image using Gemini
-        # For image generation models, generate_content returns image data
-        # According to docs: response.parts contains part.inline_data with base64 image
-        response = model.generate_content(
-            full_prompt,
-            generation_config=generation_config
-        )
+        # === PUBLIC GEMINI API PATH ===
+        if provider == "gemini":
+            if genai is None or _GenerativeModel is None or _configure is None:
+                _log.error("Gemini SDK not available for image generation")
+                return None
+            
+            # Get API key
+            api_key = os.getenv("GEMINI_API_KEY") or getattr(settings, 'GEMINI_API_KEY', None)
+            if not api_key:
+                _log.error("GEMINI_API_KEY not set for image generation (provider=gemini)")
+                return None
+            
+            # Configure public API
+            _configure(api_key=api_key)
+            _log.debug("Using public Gemini API with API key")
+            
+            # Create model using public SDK
+            model = _GenerativeModel(model_name=model_name)  # type: ignore[misc]
+            
+            # Generate image
+            response = model.generate_content(
+                full_prompt,
+                generation_config=generation_config
+            )
         
-        # Extract image data from response
-        # Per Gemini docs: https://ai.google.dev/gemini-api/docs/image-generation
-        # Response structure: response.candidates[0].content.parts contains part.inline_data
-        # The inline_data.data is already base64-encoded
+        # === VERTEX AI PATH ===
+        else:  # provider == "vertex"
+            # Import Vertex AI SDK
+            try:
+                from google.cloud import aiplatform  # type: ignore
+                # Import GenerativeModel from Vertex AI (NOT public SDK!)
+                try:
+                    from vertexai.generative_models import GenerativeModel as VertexModel  # type: ignore
+                except ImportError:
+                    from vertexai.preview.generative_models import GenerativeModel as VertexModel  # type: ignore
+            except ImportError as e:
+                _log.error("Vertex AI SDK not available: %s", e)
+                return None
+            
+            # Initialize Vertex AI
+            project = os.getenv("VERTEX_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
+            location = os.getenv("VERTEX_LOCATION", "us-central1")
+            
+            if not project:
+                _log.error("VERTEX_PROJECT not set for image generation (provider=vertex)")
+                return None
+            
+            try:
+                aiplatform.init(project=project, location=location)
+                _log.debug("Using Vertex AI: project=%s location=%s", project, location)
+            except Exception as e:
+                _log.error("Failed to initialize Vertex AI: %s", e)
+                return None
+            
+            # Create model using Vertex SDK
+            model = VertexModel(model_name)
+            
+            # Convert dict config to Vertex GenerationConfig if needed
+            vertex_config = None
+            if generation_config:
+                try:
+                    try:
+                        from vertexai.generative_models import GenerationConfig  # type: ignore
+                    except ImportError:
+                        from vertexai.preview.generative_models import GenerationConfig  # type: ignore
+                    vertex_config = GenerationConfig(**generation_config)
+                except Exception as config_err:
+                    _log.warning("Failed to create Vertex GenerationConfig: %s, using None", config_err)
+            
+            # Generate image
+            response = model.generate_content(
+                full_prompt,
+                generation_config=vertex_config
+            )
+        
+        # === EXTRACT IMAGE DATA (same for both providers) ===
         if response and hasattr(response, 'candidates') and response.candidates:
             candidate = response.candidates[0]
             if hasattr(candidate, 'content') and candidate.content:
                 if hasattr(candidate.content, 'parts'):
                     parts = candidate.content.parts
                     for part in parts:
-                        # Check for inline_data (base64 image) - this is the standard format per docs
+                        # Check for inline_data (base64 image)
                         if hasattr(part, 'inline_data') and part.inline_data:
                             image_data = part.inline_data.data
                             mime_type = getattr(part.inline_data, 'mime_type', 'image/png')
+                            
                             if not image_data:
                                 _log.error("inline_data exists but data is empty")
                                 continue
                             
-                            # Debug: log the type we received
-                            _log.debug("image_data type: %s, first 50 chars: %s", type(image_data).__name__, str(image_data)[:50])
-                            
                             # Convert bytes to base64 string if necessary
-                            # According to Gemini API docs, inline_data.data should be base64-encoded string
-                            # But it might come as bytes that need to be base64-encoded
                             if isinstance(image_data, bytes):
-                                # If it's bytes, encode it to base64 string
-                                import base64
                                 image_data = base64.b64encode(image_data).decode('utf-8')
-                                _log.debug("Converted bytes to base64 string (length: %d)", len(image_data))
+                                _log.debug("Converted bytes to base64 (length: %d)", len(image_data))
                             elif not isinstance(image_data, str):
-                                # If it's not a string or bytes, convert to string
+                                # Handle edge cases with string representation
                                 image_data_str = str(image_data)
-                                # Check if it's a Python byte string literal representation (b'...')
                                 if image_data_str.startswith("b'") or image_data_str.startswith('b"'):
-                                    _log.warning("Received byte string literal representation, attempting to extract bytes")
                                     try:
                                         import ast
-                                        # Safely evaluate the byte string literal to get actual bytes
                                         image_data_bytes = ast.literal_eval(image_data_str)
                                         if isinstance(image_data_bytes, bytes):
-                                            import base64
                                             image_data = base64.b64encode(image_data_bytes).decode('utf-8')
-                                            _log.debug("Extracted bytes from literal and encoded to base64 (length: %d)", len(image_data))
                                         else:
-                                            _log.warning("literal_eval did not return bytes, using string as-is")
                                             image_data = image_data_str
-                                    except Exception as e:
-                                        _log.error(f"Failed to parse byte string literal: {e}, using as-is")
+                                    except Exception:
                                         image_data = image_data_str
                                 else:
                                     image_data = image_data_str
                             
-                            # Ensure we have a clean base64 string (no data URL prefix yet)
+                            # Return as data URL
                             if isinstance(image_data, str) and image_data.startswith('data:'):
-                                # Already has data URL prefix, use as-is
-                                _log.debug("Image data already has data URL prefix")
+                                _log.info("✓ Image generated successfully (data URL format)")
                                 return image_data
                             
-                            _log.info("Successfully generated podcast cover image (data length: %d chars, mime: %s)", 
+                            _log.info("✓ Image generated successfully (data length: %d chars, mime: %s)", 
                                      len(image_data) if image_data else 0, mime_type)
                             return f"data:{mime_type};base64,{image_data}"
-                        # Also check for text that might contain image data
+                        
+                        # Fallback: check for text that might contain image data
                         elif hasattr(part, 'text') and part.text:
                             text = part.text.strip()
-                            # Check if it's a data URL
                             if text.startswith('data:image'):
-                                _log.info("Successfully generated podcast cover image (from text part)")
+                                _log.info("✓ Image generated successfully (from text part)")
                                 return text
-                            # Check if it's base64 data (long string, likely image)
-                            elif len(text) > 1000 and not text.startswith('http') and not ' ' in text[:100]:
-                                _log.info("Successfully generated podcast cover image (base64 from text part)")
+                            elif len(text) > 1000 and not text.startswith('http') and ' ' not in text[:100]:
+                                _log.info("✓ Image generated successfully (base64 from text)")
                                 return f"data:image/png;base64,{text}"
         
-        # Fallback: check response.text directly (some SDK versions may return differently)
-        if hasattr(response, 'text') and response.text:
-            text = response.text.strip()
-            if text.startswith('data:image'):
-                _log.info("Successfully generated podcast cover image (from response.text)")
-                return text
-        
-        _log.warning("No image data found in Gemini response")
-        if hasattr(response, 'candidates'):
-            _log.debug("Response candidates: %s", len(response.candidates) if response.candidates else 0)
-            if response.candidates:
-                candidate = response.candidates[0]
-                if hasattr(candidate, 'content') and candidate.content:
-                    if hasattr(candidate.content, 'parts'):
-                        parts = candidate.content.parts
-                        _log.debug("Candidate content parts: %d", len(parts))
-                        for i, part in enumerate(parts):
-                            _log.debug("Part %d: has inline_data=%s, has text=%s", 
-                                     i, hasattr(part, 'inline_data'), hasattr(part, 'text'))
-                            if hasattr(part, 'inline_data'):
-                                _log.debug("Part %d inline_data: %s", i, str(part.inline_data)[:200])
-                            if hasattr(part, 'text'):
-                                _log.debug("Part %d text preview: %s", i, str(part.text)[:200])
+        # No image data found
+        _log.warning("No image data found in response")
+        if hasattr(response, 'candidates') and response.candidates:
+            _log.debug("Response has %d candidate(s) but no image data", len(response.candidates))
         else:
-            _log.warning("Response has no 'candidates' attribute. Response type: %s", type(response))
-            _log.debug("Response attributes: %s", dir(response))
+            _log.debug("Response type: %s", type(response).__name__)
+        
         return None
             
     except ImportError as e:
-        _log.error(f"Required SDK not installed for image generation: {e}")
+        _log.error("Required SDK not installed for image generation: %s", e)
         return None
     except Exception as e:
         error_msg = str(e)
-        _log.error(f"Image generation failed: {e}", exc_info=True)
+        _log.error("Image generation failed: %s", e, exc_info=True)
         
-        # Check for specific API key errors
+        # Check for specific errors
         if "API key was reported as leaked" in error_msg or "leaked" in error_msg.lower():
             raise RuntimeError("Gemini API key has been reported as leaked. Please generate a new API key in Google AI Studio and update your GEMINI_API_KEY environment variable.")
         elif "API key" in error_msg and ("invalid" in error_msg.lower() or "not found" in error_msg.lower()):
@@ -850,5 +841,4 @@ def generate_podcast_cover_image(
         elif "PermissionDenied" in str(type(e).__name__) or "403" in error_msg:
             raise RuntimeError(f"Gemini API access denied: {error_msg}. Please check your API key permissions.")
         
-        # For other errors, return None to maintain backward compatibility
         return None

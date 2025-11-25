@@ -4,7 +4,14 @@ from uuid import UUID
 from sqlmodel import Session, select
 import json
 
-from ..models.podcast import PodcastTemplate, PodcastTemplateCreate, PodcastTemplatePublic
+from ..models.podcast import (
+    PodcastTemplate, 
+    PodcastTemplateCreate, 
+    PodcastTemplatePublic,
+    TemplateSegment,
+    BackgroundMusicRule,
+    SegmentTiming
+)
 from ..models.user import User
 from ..core.database import get_session
 from ..core import crud
@@ -171,3 +178,65 @@ async def update_template(
     session.refresh(db_template)
     print(f"🎤 [templates.py] After commit - DB has ElevenLabs: {db_template.default_elevenlabs_voice_id}, Intern: {db_template.default_intern_voice_id}")
     return convert_db_template_to_public(db_template)
+
+
+@router.post("/{template_id}/duplicate", response_model=PodcastTemplatePublic, status_code=status.HTTP_201_CREATED)
+async def duplicate_template(
+    template_id: UUID,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Duplicate an existing podcast template."""
+    db_template = crud.get_template_by_id(session=session, template_id=template_id)
+    if not db_template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if db_template.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this template")
+
+    # 1. Generate new name
+    base_name = db_template.name
+    new_name = f"{base_name} (Copy)"
+    
+    # Check for collisions and auto-increment if needed
+    counter = 1
+    while crud.get_template_by_name_for_user(session, user_id=current_user.id, name=new_name):
+        counter += 1
+        new_name = f"{base_name} (Copy {counter})"
+
+    # 2. Parse JSON fields back into objects for PodcastTemplateCreate
+    try:
+        segments_data = json.loads(db_template.segments_json)
+        segments = [TemplateSegment.model_validate(s) for s in segments_data]
+        
+        music_rules_data = json.loads(db_template.background_music_rules_json)
+        music_rules = [BackgroundMusicRule.model_validate(r) for r in music_rules_data]
+        
+        timing_data = json.loads(db_template.timing_json)
+        timing = SegmentTiming.model_validate(timing_data)
+        
+        ai_settings_data = json.loads(db_template.ai_settings_json)
+        ai_settings = PodcastTemplateCreate.AITemplateSettings.model_validate(ai_settings_data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to parse source template data: {e}")
+
+    # 3. Create input object
+    template_in = PodcastTemplateCreate(
+        name=new_name,
+        segments=segments,
+        background_music_rules=music_rules,
+        timing=timing,
+        podcast_id=db_template.podcast_id,
+        default_elevenlabs_voice_id=db_template.default_elevenlabs_voice_id,
+        default_intern_voice_id=db_template.default_intern_voice_id,
+        ai_settings=ai_settings,
+        is_active=db_template.is_active,
+        auto_generate_tags=True 
+    )
+
+    # 4. Save
+    try:
+        new_db_template = crud.create_user_template(session=session, template_in=template_in, user_id=current_user.id)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+        
+    return convert_db_template_to_public(new_db_template)

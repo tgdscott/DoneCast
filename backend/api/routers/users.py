@@ -158,7 +158,7 @@ def _to_user_public(u: User) -> UserPublic:
                     public.terms_version_required = None
             except Exception as terms_err:
                 # If terms check fails, don't require terms (safer default)
-                logger.warning("Failed to check terms acceptance: %s", terms_err)
+                logger.warning("Failed to check terms acceptance: %s", terms_err, exc_info=True)
                 public.terms_version_required = None
         else:
             # No terms version set

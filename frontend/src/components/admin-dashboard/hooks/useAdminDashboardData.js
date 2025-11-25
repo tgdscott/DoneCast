@@ -137,7 +137,7 @@ export function useAdminDashboardData({ token, toast }) {
     api.post("/api/admin/seed")
       .then((data) => {
         setSeedResult(data);
-        api.get("/api/admin/summary").then(setSummary).catch(() => {});
+        api.get("/api/admin/summary").then(setSummary).catch(() => { });
       })
       .catch(() => {
         // seed failures are surfaced via console
@@ -250,10 +250,10 @@ export function useAdminDashboardData({ token, toast }) {
 
     try {
       const api = makeApi(token);
-      
+
       // Fetch credit data
       const data = await api.get(`/api/admin/users/${userId}/credits?page=${page}&per_page=${perPage}`);
-      
+
       // If there's a refund request with notification_id, fetch detailed information
       let refundDetail = null;
       if (refundRequest?.notification_id) {
@@ -264,12 +264,12 @@ export function useAdminDashboardData({ token, toast }) {
           console.warn('Failed to load refund request detail:', detailError);
         }
       }
-      
-      setCreditViewerDialog({ 
-        open: true, 
-        userId, 
-        userData: data, 
-        loading: false, 
+
+      setCreditViewerDialog({
+        open: true,
+        userId,
+        userData: data,
+        loading: false,
         refundRequest,
         refundRequestDetail: refundDetail
       });
@@ -388,7 +388,7 @@ export function useAdminDashboardData({ token, toast }) {
 
       api.get("/api/admin/summary")
         .then((data) => setSummary(data))
-        .catch(() => {});
+        .catch(() => { });
 
       const gcsCommand = result?.gcs_cleanup_command;
       try {
@@ -527,6 +527,43 @@ export function useAdminDashboardData({ token, toast }) {
     }
   }, [toast, toastApiError, token]);
 
+  const triggerPasswordReset = useCallback(async (userId, userEmail) => {
+    const confirmed = window.confirm(
+      `Send password reset email to ${userEmail}?\n\n` +
+      "This will generate a secure reset token and send the standard 'Reset your password' email to the user.\n\n" +
+      "The user will be able to choose a new password via the link in the email."
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setSavingIds((prev) => new Set([...prev, userId]));
+    try {
+      const api = makeApi(token);
+      const result = await api.post(`/api/admin/users/${userId}/password-reset`);
+
+      try {
+        toast?.({
+          title: "Password reset sent",
+          description: result.message || `Password reset email sent to ${userEmail}`,
+        });
+      } catch (_) {
+        // ignore toast errors
+      }
+
+      console.log("[ADMIN] Password reset result:", result);
+    } catch (error) {
+      toastApiError(error, "Failed to send password reset");
+    } finally {
+      setSavingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(userId);
+        return next;
+      });
+    }
+  }, [toast, toastApiError, token]);
+
   return {
     users,
     usersLoading,
@@ -560,6 +597,7 @@ export function useAdminDashboardData({ token, toast }) {
     prepareUserForDeletion,
     deleteUser,
     verifyUserEmail,
+    triggerPasswordReset,
   };
 }
 

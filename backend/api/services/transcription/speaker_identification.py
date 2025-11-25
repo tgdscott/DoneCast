@@ -245,9 +245,13 @@ def map_speaker_labels(
     episode_id: UUID,
     speaker_intros: Optional[Dict[str, Any]] = None,
     guest_intros: Optional[List[Dict[str, Any]]] = None,
-    intro_duration_s: Optional[float] = None,  # DEPRECATED: No longer prepending intros
+    intro_duration_s: Optional[float] = None,
 ) -> List[Dict]:
     """Map generic speaker labels to real names based on speaker order.
+    
+    If intro_duration_s is provided, it will first strip that many seconds
+    from the beginning of the transcript (removing words within the intro)
+    and shift all subsequent timestamps back by that amount.
     
     SIMPLIFIED APPROACH (Phase 1):
     - Maps "Speaker A" to first speaker in speaker_intros (usually host)
@@ -258,9 +262,10 @@ def map_speaker_labels(
     - Host speaks first (reasonable assumption for most podcasts)
     - Speaker order in config matches speaking order
     
-    FUTURE ENHANCEMENT (Phase 2):
-    - Re-transcribe with prepended voice intros for voice-based identification
-    - Use intro_duration_s to strip intro section from timestamps
+    PHASE 2 (Prepended Intros):
+    - If intro_duration_s > 0, we assume intros were prepended to the audio
+    - We strip the intros from the transcript results
+    - We shift timestamps back to 0.0
     
     Args:
         words: List of word dicts with {word, start, end, speaker}
@@ -268,14 +273,50 @@ def map_speaker_labels(
         episode_id: UUID of episode (for logging)
         speaker_intros: Dict with podcast-level host configuration
         guest_intros: List of episode-level guest configuration
-        intro_duration_s: DEPRECATED - Duration of prepended intros (not used in Phase 1)
+        intro_duration_s: Duration of prepended intros in seconds (if any)
     
     Returns:
         Modified words list with speaker labels mapped to real names
     """
     if not words:
         return words
-    
+
+    # --- PHASE 2: Strip Intro Section (if applicable) ---
+    if intro_duration_s and intro_duration_s > 0:
+        logger.info(
+            "[speaker_id] Stripping intro section (duration: %.2fs) from transcript (podcast=%s, episode=%s)",
+            intro_duration_s,
+            podcast_id,
+            episode_id
+        )
+        
+        filtered_words = []
+        removed_count = 0
+        
+        for w in words:
+            start = float(w.get("start") or 0.0)
+            end = float(w.get("end") or 0.0)
+            
+            # Skip words in intro section
+            if start < intro_duration_s:
+                removed_count += 1
+                continue
+            
+            # Adjust timestamps (subtract intro duration)
+            w["start"] = max(0.0, start - intro_duration_s)
+            w["end"] = max(0.0, end - intro_duration_s)
+            
+            filtered_words.append(w)
+            
+        logger.info(
+            "[speaker_id] Removed %d intro words, kept %d content words",
+            removed_count,
+            len(filtered_words)
+        )
+        
+        # Replace words list with filtered version
+        words = filtered_words
+
     # Build ordered list of speaker names (hosts first, then guests)
     speaker_order = get_speaker_order(speaker_intros or {}, guest_intros or [])
     

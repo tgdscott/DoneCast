@@ -29,6 +29,15 @@ from ...services.publisher import SpreakerClient
 from ...services import podcast_websites
 from ...services.trial_service import can_create_content, start_trial, can_modify_rss_settings
 
+# Import coming_soon module with defensive error handling
+# Only catch ImportError (missing file) - let other exceptions propagate
+# so we can see them in logs if there's a deeper import issue
+try:
+    from ...services.episodes.coming_soon import create_coming_soon_episode
+except ImportError as import_err:
+    log.warning(f"⚠️ Could not import coming_soon module (non-fatal): {import_err}")
+    create_coming_soon_episode = None
+
 log = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -72,12 +81,8 @@ async def create_podcast(
             detail="Your free trial has expired. Please subscribe to a plan to continue creating podcasts."
         )
 
-    try:
-        name_clean = (name or "").strip()
-        desc_clean = (description or "").strip()
-    except Exception:
-        name_clean = name
-        desc_clean = description
+    name_clean = (name or "").strip()
+    desc_clean = (description or "").strip()
     if not name_clean or len(name_clean) < 4:
         raise HTTPException(status_code=400, detail="Name must be at least 4 characters.")
     if not desc_clean:
@@ -234,13 +239,6 @@ async def create_podcast(
     
     # 🎉 AUTO-CREATE COMING SOON EPISODE - Allows immediate RSS feed submission
     try:
-        # Import with error handling to prevent module load failures
-        try:
-            from ...services.episodes.coming_soon import create_coming_soon_episode
-        except ImportError as import_err:
-            log.warning(f"⚠️ Could not import coming_soon module (non-fatal): {import_err}")
-            create_coming_soon_episode = None
-        
         if create_coming_soon_episode:
             coming_soon_episode = create_coming_soon_episode(
                 session=session,
@@ -478,23 +476,35 @@ async def get_user_podcasts(
                 payload["cover_url"] = cover_url
                 enriched.append(payload)
             except Exception as pod_err:
-                # If serializing a single podcast fails, log and skip it
-                log.warning(f"[podcasts.list] Failed to serialize podcast {getattr(pod, 'id', 'unknown')}: {pod_err}", exc_info=True)
-                continue
+                # If serializing a single podcast fails, log it but try to include basic info
+                log.warning(f"[podcasts.list] Failed to enrich podcast {getattr(pod, 'id', 'unknown')}: {pod_err}", exc_info=True)
+                try:
+                    # Fallback: try to just dump the model without enrichment
+                    basic = pod.model_dump()
+                    # Ensure required fields exist
+                    basic.setdefault("import_status", None)
+                    basic.setdefault("cover_url", None)
+                    enriched.append(basic)
+                except Exception:
+                    # If even model_dump fails, skip it
+                    continue
 
+        return enriched
         return enriched
     except HTTPException:
         # Re-raise HTTP exceptions (like 401)
         raise
     except Exception as exc:
+        # Log full traceback for any unhandled exception
+        import traceback
         log.error(
-            "[podcasts.list] failed to load podcasts for user=%s: %s",
+            "[podcasts.list] CRITICAL UNHANDLED ERROR for user=%s: %s\nTraceback:\n%s",
             getattr(current_user, "id", None),
             exc,
-            exc_info=True
+            traceback.format_exc()
         )
         # Return empty list instead of raising - allows frontend to handle gracefully
-        # But log the error so we can diagnose the issue
+        # This is a safety mechanism to prevent the entire dashboard from crashing
         return []
 
 

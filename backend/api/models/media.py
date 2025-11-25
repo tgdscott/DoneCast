@@ -1,12 +1,13 @@
 """Media-related models: MediaItem, MusicAsset, and audio mixing configuration."""
 from __future__ import annotations
 
-from sqlmodel import SQLModel, Field, Relationship
+from sqlmodel import SQLModel, Field, Relationship, Column
 from sqlalchemy.orm import relationship
 from typing import List, Optional, Literal, TYPE_CHECKING
 from datetime import datetime
 from uuid import UUID, uuid4
 import json
+from sqlalchemy.dialects.postgresql import JSON
 
 from .enums import MediaCategory, MusicAssetSource
 from .user import User
@@ -67,6 +68,10 @@ class MediaItem(SQLModel, table=True):
     auphonic_original_audio_url: Optional[str] = Field(default=None, description="GCS URL of original audio (kept for failure diagnosis)")
     auphonic_output_file: Optional[str] = Field(default=None, description="GCS URL of single Auphonic output file")
     auphonic_metadata: Optional[str] = Field(default=None, description="JSON string with show_notes, chapters (if returned separately)")
+
+    # Speaker identification guests
+    guest_ids: Optional[list] = Field(default=None, sa_column=Column(JSON), description="List of guest_library IDs associated with this upload for transcription")
+
 
 
 class MusicAsset(SQLModel, table=True):
