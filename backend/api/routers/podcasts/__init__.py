@@ -34,6 +34,9 @@ except Exception as e:
     tb = traceback.format_exc()
     log.error("Full traceback for CRUD router import failure:\n%s", tb)
     
+    # Capture error message immediately because 'e' is deleted after except block in Python 3
+    error_msg = str(e)
+    
     # Register fallback route to surface error to client
     @router.get("/")
     def crud_load_error():
@@ -41,7 +44,7 @@ except Exception as e:
             status_code=500, 
             content={
                 "error": "Podcast CRUD router failed to load", 
-                "detail": str(e),
+                "detail": error_msg,
                 "hint": "Check server logs for import errors. The POST /api/podcasts/ endpoint is not available.",
                 "traceback": tb.splitlines()[:15]  # Limit traceback size
             }
@@ -55,7 +58,7 @@ except Exception as e:
             content={
                 "error": "Podcast creation endpoint unavailable",
                 "detail": "The CRUD router failed to load during server startup",
-                "reason": str(e),
+                "reason": error_msg,
                 "hint": "Contact support or check server logs for details"
             }
         )

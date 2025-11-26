@@ -34,6 +34,7 @@ import { BrandProvider } from './brand/BrandContext.jsx';
 import { ComfortProvider } from './ComfortContext.jsx';
 import { LayoutProvider } from './layout/LayoutContext.jsx';
 import { WarmupProvider } from './contexts/WarmupContext.jsx';
+import { PostHogProvider } from 'posthog-js/react';
 import './index.css' // <-- This line imports all the styles
 import { assetUrl } from './lib/apiClient';
 
@@ -185,17 +186,26 @@ const router = createBrowserRouter([
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <WarmupProvider>
-      <AuthProvider>
-        <BrandProvider>
-          <LayoutProvider>
-            <ComfortProvider>
-              <RouterProvider router={router} />
-            </ComfortProvider>
-          </LayoutProvider>
-        </BrandProvider>
-      </AuthProvider>
-    </WarmupProvider>
+    <PostHogProvider
+      apiKey={import.meta.env.VITE_PUBLIC_POSTHOG_KEY}
+      options={{
+        api_host: import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
+        defaults: '2025-05-24',
+        capture_exceptions: true,
+        debug: import.meta.env.DEV,
+      }}
+    >
+      <WarmupProvider>
+        <AuthProvider>
+          <BrandProvider>
+            <LayoutProvider>
+              <ComfortProvider>
+                <RouterProvider router={router} />
+              </ComfortProvider>
+            </LayoutProvider>
+          </BrandProvider>
+        </AuthProvider>
+      </WarmupProvider>
+    </PostHogProvider>
   </React.StrictMode>,
 )
-

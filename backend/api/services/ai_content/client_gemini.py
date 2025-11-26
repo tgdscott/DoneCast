@@ -16,6 +16,20 @@ except Exception:  # pragma: no cover
     _configure = None
     _GenerativeModel = None
 
+# PostHog initialization
+try:
+    import posthog
+    _posthog_key = os.getenv("POSTHOG_API_KEY")
+    if _posthog_key:
+        posthog.project_api_key = _posthog_key
+        posthog.host = os.getenv("POSTHOG_HOST", "https://us.i.posthog.com")
+        _log.info("PostHog initialized for LLM analytics")
+    else:
+        posthog = None
+except ImportError:
+    posthog = None
+    _log.warning("PostHog library not found, LLM analytics disabled")
+
 
 def _stub_mode() -> bool:
     """Return True if we should operate in stub mode.
@@ -119,6 +133,11 @@ def generate(content: str, **kwargs) -> str:
     Implements exponential backoff retry for 429 (rate limit) errors.
     Protected by circuit breaker to prevent cascading failures.
     """
+    start_time = time.time()
+    model_name_used = "unknown"
+    input_tokens = 0
+    output_tokens = 0
+    
     # Stub path short-circuit: if missing SDK/key and STUB_MODE set
     if _stub_mode() and (genai is None or _configure is None or _GenerativeModel is None or not getattr(__import__('api.core.config', fromlist=['settings']), 'settings', None).GEMINI_API_KEY):  # type: ignore
         return "Stub output (Gemini disabled)"
@@ -128,6 +147,7 @@ def generate(content: str, **kwargs) -> str:
     breaker = get_circuit_breaker("gemini")
     
     def _generate_internal():
+        nonlocal model_name_used
         # Configure with our API key from settings
         from api.core.config import settings  # local import
         if _configure and getattr(settings, "GEMINI_API_KEY", None):  # guard for stub mode
@@ -210,6 +230,7 @@ def generate(content: str, **kwargs) -> str:
                     if system_instruction
                     else _GenerativeModel(model_name=model_name)  # type: ignore[misc]
                 )
+                model_name_used = model_name
             except Exception as e:
                 if _stub_mode():
                     return f"Stub output (model init error: {type(e).__name__})"
@@ -325,6 +346,7 @@ def generate(content: str, **kwargs) -> str:
                 or getattr(settings, "GEMINI_MODEL", None) 
                 or default_model
             )
+            model_name_used = v_model
             
             # CRITICAL: Log where we're getting the model from for debugging
             _log.info(
@@ -606,7 +628,56 @@ def generate(content: str, **kwargs) -> str:
                 return "Stub output (unreachable state)"
             raise RuntimeError("AI_GENERATION_UNREACHABLE")
     
-    return breaker.call(_generate_internal)
+    try:
+        result = breaker.call(_generate_internal)
+        
+        # Track success in PostHog
+        if posthog:
+            try:
+                duration = time.time() - start_time
+                # Estimate tokens (rough approx: 4 chars per token)
+                input_est = len(content) // 4
+                output_est = len(result) // 4
+                
+                posthog.capture(
+                    distinct_id="system",  # Server-side event
+                    event="$ai_generation",
+                    properties={
+                        "$ai_provider": "gemini",
+                        "$ai_model": model_name_used,
+                        "$ai_input": content,
+                        "$ai_output": result,
+                        "$ai_latency": duration,
+                        "$ai_input_tokens": input_est,
+                        "$ai_output_tokens": output_est,
+                        "success": True
+                    }
+                )
+            except Exception as ph_err:
+                _log.warning("Failed to send PostHog event: %s", ph_err)
+                
+        return result
+        
+    except Exception as e:
+        # Track failure in PostHog
+        if posthog:
+            try:
+                duration = time.time() - start_time
+                posthog.capture(
+                    distinct_id="system",
+                    event="$ai_generation",
+                    properties={
+                        "$ai_provider": "gemini",
+                        "$ai_model": model_name_used,
+                        "$ai_input": content,
+                        "$ai_error": str(e),
+                        "$ai_latency": duration,
+                        "success": False
+                    }
+                )
+            except Exception:
+                pass
+        raise
 
 
 def generate_json(content: str) -> Dict[str, Any]:
