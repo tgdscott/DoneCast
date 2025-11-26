@@ -18,6 +18,7 @@ import {
   Trash,
   ChevronLeft,
   ChevronRight,
+  Play,
 } from "lucide-react";
 
 function getStatusBadge(status) {
@@ -416,6 +417,20 @@ export default function UsersTab({
                             <Mail className="h-3 w-3 mr-1" />
                             Reset PW
                           </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 px-2 text-[10px] text-teal-600 hover:text-teal-700 hover:bg-teal-50"
+                            onClick={() => {
+                              const projectId = import.meta.env.VITE_POSTHOG_PROJECT_ID || "254896";
+                              window.open(`https://us.posthog.com/project/${projectId}/person/${user.id}`, '_blank');
+                            }}
+                            title="View user sessions in PostHog"
+                          >
+                            <Play className="h-3 w-3 mr-1" />
+                            Session
+                          </Button>
+
                           {isSuperAdmin && (
                             <Button
                               variant="ghost"
@@ -489,6 +504,6 @@ export default function UsersTab({
           </div>
         </CardContent>
       </Card>
-    </div>
+    </div >
   );
 }

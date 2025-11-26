@@ -1,5 +1,6 @@
 import React, { createContext, useState, useContext, useEffect, useCallback, useRef } from 'react';
 import { makeApi } from './lib/apiClient';
+import posthog from 'posthog-js';
 
 const AuthContext = createContext(null);
 
@@ -40,20 +41,21 @@ export const AuthProvider = ({ children }) => {
         setUser(null);
         setMaintenanceInfo(null);
         setHydrated(true);
+        posthog.reset(); // Clear user session in PostHog
     };
 
-    const refreshUser = useCallback(async (opts={ force:false }) => {
+    const refreshUser = useCallback(async (opts = { force: false }) => {
         // If no token present, ensure user cleared and mark hydrated
-        if(!token) { setUser(null); setHydrated(true); return; }
+        if (!token) { setUser(null); setHydrated(true); return; }
         const now = Date.now();
         // Respect cooldown when backend offline unless force
-        if(!opts.force && !backendOnline) {
+        if (!opts.force && !backendOnline) {
             const since = now - lastAttemptRef.current;
-            if(since < backoffRef.current) {
+            if (since < backoffRef.current) {
                 return; // skip due to backoff
             }
         }
-        if(refreshInFlight.current && !opts.force) return;
+        if (refreshInFlight.current && !opts.force) return;
         refreshInFlight.current = true;
         lastAttemptRef.current = now;
         try {
@@ -61,21 +63,31 @@ export const AuthProvider = ({ children }) => {
             const data = await api.get('/api/users/me');
             // data should be JSON user object
             setUser(data);
+
+            // Identify user in PostHog
+            if (data && data.id) {
+                posthog.identify(data.id, {
+                    email: data.email,
+                    name: data.full_name || data.email,
+                    is_superuser: data.is_superuser
+                });
+            }
+
             setMaintenanceInfo(null);
             setBackendOnline(true);
             errorCountRef.current = 0;
             backoffRef.current = 2000; // reset backoff
             setHydrated(true);
-        } catch(err) {
+        } catch (err) {
             // Only clear token on explicit 401 Unauthorized
-            if(err && err.status === 401) {
+            if (err && err.status === 401) {
                 setUser(null);
                 setToken(null);
                 setHydrated(true);
                 return;
             }
             const maintenanceDetail = (err && typeof err.detail === 'object') ? err.detail : null;
-            if((maintenanceDetail && maintenanceDetail.maintenance) || (err && err.maintenance)) {
+            if ((maintenanceDetail && maintenanceDetail.maintenance) || (err && err.maintenance)) {
                 const message = maintenanceDetail?.message || maintenanceDetail?.detail || 'We are performing maintenance and will be back soon.';
                 setMaintenanceInfo({ message, detail: maintenanceDetail || {} });
                 setUser(null);
@@ -84,7 +96,7 @@ export const AuthProvider = ({ children }) => {
                 return;
             }
             // non-auth failures: mark backend offline and backoff
-            if(backendOnline) setBackendOnline(false);
+            if (backendOnline) setBackendOnline(false);
             errorCountRef.current += 1;
             backoffRef.current = Math.min(backoffRef.current * 2, maxBackoff);
             // keep hydrated true to allow UI to continue (we attempted)
@@ -94,13 +106,13 @@ export const AuthProvider = ({ children }) => {
         }
     }, [token, backendOnline]);
 
-    useEffect(()=>{ refreshUser(); }, [token, refreshUser]);
+    useEffect(() => { refreshUser(); }, [token, refreshUser]);
 
     // React to hash capture event (in case provider code fires after initial render)
     useEffect(() => {
         function onCaptured(e) {
             const t = e.detail && e.detail.token;
-            if(t && t !== token) {
+            if (t && t !== token) {
                 setToken(t);
             }
         }

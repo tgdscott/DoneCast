@@ -1,6 +1,7 @@
 import "./shims/react-global.js";
 import React from 'react'
 import './sentry.js'; // side-effect import for Sentry (no-op if DSN missing)
+import './posthog.js'; // side-effect import for PostHog (no-op if Key missing)
 import ReactDOM from 'react-dom/client'
 import App, { AppWithToasterWrapper } from './App.jsx'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
@@ -47,7 +48,7 @@ try {
   ) {
     document.documentElement.classList.add('env-dev');
   }
-} catch {}
+} catch { }
 
 // Runtime safeguard: some code (or older bundles) may call fetch('/api/...') expecting
 // the API to be on a separate origin. If VITE_API_BASE is configured we should ensure
@@ -83,7 +84,7 @@ try {
 // Expected format: #access_token=...&token_type=bearer
 try {
   // Stable tab id for cross-navigation (session only)
-  if(!sessionStorage.getItem('ppp_tab_id')) {
+  if (!sessionStorage.getItem('ppp_tab_id')) {
     sessionStorage.setItem('ppp_tab_id', Math.random().toString(36).slice(2));
   }
   if (window.location.hash && window.location.hash.includes('access_token=')) {
@@ -98,12 +99,12 @@ try {
       // Persist for subsequent tabs
       localStorage.setItem('authToken', accessToken);
       // Clean up visible hash (do not trigger a full reload)
-      try { window.history.replaceState(null, '', window.location.pathname + window.location.search); } catch(_) {}
+      try { window.history.replaceState(null, '', window.location.pathname + window.location.search); } catch (_) { }
       // Dispatch a custom event so AuthProvider (already reading from localStorage) can optionally react.
-      window.dispatchEvent(new CustomEvent('ppp-token-captured', { detail: { token: accessToken }}));
+      window.dispatchEvent(new CustomEvent('ppp-token-captured', { detail: { token: accessToken } }));
     }
   }
-} catch(err) {
+} catch (err) {
   // eslint-disable-next-line no-console
   console.warn('[auth] token capture failed', err);
 }
@@ -111,7 +112,7 @@ try {
 // Helper to detect if this is a subdomain request (for public websites)
 const isSubdomainRequest = () => {
   if (typeof window === 'undefined') return false;
-  
+
   // In dev mode, check for subdomain query parameter
   if (import.meta.env.DEV) {
     try {
@@ -124,16 +125,16 @@ const isSubdomainRequest = () => {
       // Ignore errors parsing URL
     }
   }
-  
+
   const hostname = window.location.hostname;
-  
+
   // Never treat localhost or IP addresses as subdomains (unless we have query param, handled above)
   if (hostname === 'localhost' || /^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
     return false;
   }
-  
+
   const parts = hostname.split('.');
-  
+
   // Check if subdomain exists (more than 2 parts) and not reserved
   if (parts.length < 3) return false;
   const subdomain = parts[0];

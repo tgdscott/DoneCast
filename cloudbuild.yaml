@@ -154,6 +154,7 @@ steps:
     secretEnv:
       - GOOGLE_CLIENT_ID
       - SENTRY_DSN
+      - VITE_POSTHOG_KEY
     args:
       - -c
       - |
@@ -184,6 +185,8 @@ steps:
           --build-arg VITE_GOOGLE_CLIENT_ID="$${VGCID}" \
           --build-arg VITE_API_BASE="${_VITE_API_BASE}" \
           --build-arg VITE_SENTRY_DSN="$${SENTRY}" \
+          --build-arg VITE_POSTHOG_KEY="$${VITE_POSTHOG_KEY}" \
+          --build-arg VITE_POSTHOG_HOST="https://us.i.posthog.com" \
           -t "$${IMG_LATEST}" \
           -t "$${IMG_ID}"
 
@@ -358,3 +361,5 @@ availableSecrets:
       env: GOOGLE_CLIENT_ID
     - versionName: projects/$PROJECT_ID/secrets/SENTRY_DSN/versions/latest
       env: SENTRY_DSN
+    - versionName: projects/$PROJECT_ID/secrets/VITE_POSTHOG_KEY/versions/latest
+      env: VITE_POSTHOG_KEY
