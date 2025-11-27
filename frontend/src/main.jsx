@@ -1,34 +1,35 @@
 import "./shims/react-global.js";
-import React from 'react'
+import React, { Suspense } from 'react'
+import { Loader2 } from 'lucide-react';
 import './sentry.js'; // side-effect import for Sentry (no-op if DSN missing)
-import './posthog.js'; // side-effect import for PostHog (no-op if Key missing)
 import ReactDOM from 'react-dom/client'
-import App, { AppWithToasterWrapper } from './App.jsx'
-import { createBrowserRouter, RouterProvider } from 'react-router-dom';
-import NotFound from '@/pages/NotFound.jsx';
-import ErrorPage from '@/pages/Error.jsx';
-import ABPreview from '@/pages/ABPreview.jsx';
-import OnboardingDemo from '@/pages/OnboardingDemo.jsx';
-import Onboarding from '@/pages/Onboarding.jsx';
-import PrivacyPolicy from '@/pages/PrivacyPolicy.jsx';
-import TermsOfUse from '@/pages/TermsOfUse.jsx';
-import Legal from '@/pages/Legal.jsx';
-import Verify from '@/pages/Verify.jsx';
-import EmailVerification from '@/pages/EmailVerification.jsx';
-import ResetPassword from '@/pages/ResetPassword.jsx';
-import Pricing from '@/pages/Pricing.jsx';
-import PublicPricing from '@/pages/PublicPricing.jsx';
-import PodcastWebsiteBuilder from '@/pages/PodcastWebsiteBuilder.jsx';
-import NewLanding from '@/pages/NewLanding.jsx';
-import Signup from '@/pages/Signup.jsx';
-import InDevelopment from '@/pages/InDevelopment.jsx';
-import Contact from '@/pages/Contact.jsx';
-import Guides from '@/pages/Guides.jsx';
-import FAQ from '@/pages/FAQ.jsx';
-import Features from '@/pages/Features.jsx';
-import About from '@/pages/About.jsx';
-import PublicWebsite from '@/pages/PublicWebsite.jsx';
-import AIAssistantPopup from '@/components/assistant/AIAssistantPopup.jsx';
+
+// Lazy load pages to improve initial bundle size
+const AppWithToasterWrapper = React.lazy(() => import('./App.jsx').then(module => ({ default: module.AppWithToasterWrapper })));
+const NotFound = React.lazy(() => import('@/pages/NotFound.jsx'));
+const ErrorPage = React.lazy(() => import('@/pages/Error.jsx'));
+const ABPreview = React.lazy(() => import('@/pages/ABPreview.jsx'));
+const OnboardingDemo = React.lazy(() => import('@/pages/OnboardingDemo.jsx'));
+const Onboarding = React.lazy(() => import('@/pages/Onboarding.jsx'));
+const PrivacyPolicy = React.lazy(() => import('@/pages/PrivacyPolicy.jsx'));
+const TermsOfUse = React.lazy(() => import('@/pages/TermsOfUse.jsx'));
+const Legal = React.lazy(() => import('@/pages/Legal.jsx'));
+const Verify = React.lazy(() => import('@/pages/Verify.jsx'));
+const EmailVerification = React.lazy(() => import('@/pages/EmailVerification.jsx'));
+const ResetPassword = React.lazy(() => import('@/pages/ResetPassword.jsx'));
+const Pricing = React.lazy(() => import('@/pages/Pricing.jsx'));
+const PublicPricing = React.lazy(() => import('@/pages/PublicPricing.jsx'));
+const PodcastWebsiteBuilder = React.lazy(() => import('@/pages/PodcastWebsiteBuilder.jsx'));
+const NewLanding = React.lazy(() => import('@/pages/NewLanding.jsx'));
+const Signup = React.lazy(() => import('@/pages/Signup.jsx'));
+const InDevelopment = React.lazy(() => import('@/pages/InDevelopment.jsx'));
+const Contact = React.lazy(() => import('@/pages/Contact.jsx'));
+const Guides = React.lazy(() => import('@/pages/Guides.jsx'));
+const FAQ = React.lazy(() => import('@/pages/FAQ.jsx'));
+const Features = React.lazy(() => import('@/pages/Features.jsx'));
+const About = React.lazy(() => import('@/pages/About.jsx'));
+const PublicWebsite = React.lazy(() => import('@/pages/PublicWebsite.jsx'));
+const AIAssistantPopup = React.lazy(() => import('@/components/assistant/AIAssistantPopup.jsx'));
 import { AuthProvider } from './AuthContext.jsx';
 import { BrandProvider } from './brand/BrandContext.jsx';
 import { ComfortProvider } from './ComfortContext.jsx';
@@ -37,6 +38,14 @@ import { WarmupProvider } from './contexts/WarmupContext.jsx';
 import { PostHogProvider } from 'posthog-js/react';
 import './index.css' // <-- This line imports all the styles
 import { assetUrl } from './lib/apiClient';
+import { createBrowserRouter, RouterProvider } from 'react-router-dom';
+
+// Simple loading spinner for Suspense fallback
+const PageLoader = () => (
+  <div className="flex items-center justify-center h-screen w-full bg-white dark:bg-slate-950">
+    <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+  </div>
+);
 
 // Always show DEV background when running on localhost:5173 or 127.0.0.1:5173
 try {
@@ -187,23 +196,28 @@ const router = createBrowserRouter([
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <PostHogProvider
-      apiKey={import.meta.env.VITE_PUBLIC_POSTHOG_KEY}
+      apiKey={import.meta.env.VITE_POSTHOG_KEY}
       options={{
-        api_host: import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
-        defaults: '2025-05-24',
-        capture_exceptions: true,
-        debug: import.meta.env.DEV,
+        api_host: import.meta.env.VITE_POSTHOG_HOST,
+        person_profiles: 'identified_only',
+        capture_pageview: true,
+        capture_pageleave: true,
+        loaded: (posthog) => {
+          if (import.meta.env.DEV) posthog.debug();
+        },
       }}
     >
       <WarmupProvider>
         <AuthProvider>
-          <BrandProvider>
-            <LayoutProvider>
-              <ComfortProvider>
-                <RouterProvider router={router} />
-              </ComfortProvider>
-            </LayoutProvider>
-          </BrandProvider>
+          <ComfortProvider>
+            <BrandProvider>
+              <LayoutProvider>
+                <Suspense fallback={<PageLoader />}>
+                  <RouterProvider router={router} />
+                </Suspense>
+              </LayoutProvider>
+            </BrandProvider>
+          </ComfortProvider>
         </AuthProvider>
       </WarmupProvider>
     </PostHogProvider>

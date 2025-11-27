@@ -73,6 +73,8 @@ steps:
           TWILIO_ACCOUNT_SID
           TWILIO_AUTH_TOKEN
           TWILIO_PHONE_NUMBER
+          SENTRY_DSN
+          VITE_POSTHOG_KEY
         )
         for s in "$${REQ_SECRETS[@]}"; do
           if ! gcloud secrets versions describe latest --secret="$$s" >/dev/null 2>&1; then

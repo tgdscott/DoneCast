@@ -773,10 +773,12 @@ def _build_context_prompt(ctx: WebsiteContext, include_layout: Optional[Dict[str
         lines.append("- Emphasize being part of a growing community")
         lines.append("")
     
+    secondary_keywords = ', '.join([f'"{topic}" podcast' for topic in content_analysis['key_topics'][:3]]) if content_analysis['key_topics'] else '"podcast"'
+    
     lines.extend([
         "**SEO Keywords:**",
         f"- Primary: '{ctx.podcast.name.lower()} podcast'",
-        f"- Secondary: {', '.join([f'\"{topic}\" podcast' for topic in content_analysis['key_topics'][:3]]) if content_analysis['key_topics'] else '\"podcast\"'}",
+        f"- Secondary: {secondary_keywords}",
         f"- Include these naturally in page titles and meta descriptions",
         "",
         "=" * 80,
