@@ -302,7 +302,7 @@ export default function BillingPage({ token, onBack }) {
   // Fallback data in case API fails
   const fallbackTiers = [
     {
-      key: 'starter', name: 'Starter', monthly: 19, annual: null,
+      key: 'hobby', name: 'Hobby', monthly: 19, annual: null,
       credits: '28,800', maxEpisodeLength: '40 min', queuePriority: 'Low',
       queue: '2 hrs, held 7 days',
       features: {
@@ -566,7 +566,7 @@ export default function BillingPage({ token, onBack }) {
                           >
                             {(() => {
                               const addonPrices = {
-                                'starter': 8,
+                                'hobby': 8,
                                 'creator': 7,
                                 'pro': 6,
                                 'executive': 5,
@@ -741,9 +741,9 @@ export default function BillingPage({ token, onBack }) {
                 <tr className="border-t">
                   <td className="p-2 text-[13px] font-medium">Addon Credits (10,000)</td>
                   {tiers.map(t => {
-                    // Prices: Starter=$8, Creator=$7, Pro=$6, Executive=$5, Enterprise=$5
+                    // Prices: Hobby=$8, Creator=$7, Pro=$6, Executive=$5, Enterprise=$5
                     const addonPrices = {
-                      'starter': 8,
+                      'hobby': 8,
                       'creator': 7,
                       'pro': 6,
                       'executive': 5,

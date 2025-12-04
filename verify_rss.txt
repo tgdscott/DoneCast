@@ -1,0 +1,19 @@
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0   187    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+HTTP/1.1 405 Method Not Allowed
+content-type: application/json
+x-request-id: 5b7d6152-17a7-4955-a227-944d6dec9915
+content-security-policy: default-src 'self'; base-uri 'self'; frame-ancestors 'none'; media-src 'self' blob:; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self'; connect-src 'self' https:; font-src 'self' data: https://fonts.gstatic.com; object-src 'none'
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: strict-origin-when-cross-origin
+permissions-policy: camera=(), microphone=()
+strict-transport-security: max-age=15552000; includeSubDomains
+x-response-time: 0.007
+x-cloud-trace-context: 96d6905d155a10001f54498874857a16;o=1
+alt-svc: h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+Content-Length: 187
+date: Tue, 02 Dec 2025 01:44:06 GMT
+server: Google Frontend
+

@@ -49,7 +49,7 @@ function FadeSlide({ children, keyProp }) {
   );
 }
 
-export default function OnboardingWrapper({ steps, index, setIndex, onComplete, prefs, greetingName, nextDisabled = false, hideNext = false, hideBack = false, showExitDiscard = false, onExitDiscard, hasExistingPodcast = false, onBack, path = "new", handleStartOver }) {
+export default function OnboardingWrapper({ steps, index, setIndex, onComplete, prefs, greetingName, nextDisabled = false, hideNext = false, hideBack = false, showExitDiscard = false, onExitDiscard, hasExistingPodcast = false, onBack, path = "new", handleStartOver, showConfirm }) {
   const { token, user, logout } = useAuth();
   const step = steps[index];
   const total = steps.length;
@@ -235,7 +235,7 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
       headline: "What to expect",
       summary: "You'll answer a few quick questions so we can pre-fill your show settings and connect the tools you already use.",
       steps: [
-        "Have your show name, a short description, and any cover art handy.",
+        "Have your show name, a short description, and any cover art handy if you already have it; otherwise we'll create it along the way.",
         "If you're importing, keep the RSS URL nearby.",
       ],
     },
@@ -333,7 +333,7 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
       headline: "Importing via RSS",
       summary: "Drop your RSS feed URL and we'll pull recent episodes to learn your style.",
       steps: [
-        "You can find the RSS link in Spotify for Podcasters, Apple Podcasts Connect, or your current host dashboard.",
+        "You can find the RSS link in Spotify for Creators, Apple Podcasts Connect, or your current host dashboard.",
         "We'll never publish to that feed—this is read-only for setup.",
       ],
     },
@@ -424,6 +424,58 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
       if (hideTimer.current) clearTimeout(hideTimer.current);
     };
   }, [step?.id]);
+
+  if (!step) {
+    return null;
+  }
+
+  if (step.id === "welcome") {
+    const HeroContent = step.render;
+    const heroColors = prefs.highContrast
+      ? "bg-white text-black"
+      : "bg-slate-950 text-white";
+    return (
+      <div className={`relative min-h-screen overflow-hidden ${heroColors}`}>
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 opacity-80"
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 20% 20%, rgba(99,102,241,0.25), transparent 45%), radial-gradient(circle at 80% 10%, rgba(248,250,252,0.18), transparent 35%), radial-gradient(circle at 50% 80%, rgba(56,189,248,0.15), transparent 40%)",
+          }}
+        />
+
+        <div className="absolute top-4 left-4 text-sm font-semibold uppercase tracking-[0.2em]">
+          New Podcast Setup
+        </div>
+
+        <div className="absolute top-4 right-4 flex flex-col items-end gap-3 text-sm">
+          <ComfortControls
+            largeText={prefs.largeText}
+            setLargeText={prefs.setLargeText ?? (() => {})}
+            highContrast={prefs.highContrast}
+            setHighContrast={prefs.setHighContrast ?? (() => {})}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={logout}
+            className="text-muted-foreground hover:text-foreground"
+            aria-label="Logout"
+          >
+            <LogOut className="mr-2 h-4 w-4" />
+            <span className="hidden sm:inline">Logout</span>
+          </Button>
+        </div>
+
+        <div className="relative z-10 flex min-h-screen items-center justify-center px-6 py-16">
+          <div className="w-full">
+            {HeroContent ? HeroContent({ onContinue: handleNext, prefs }) : null}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`min-h-screen bg-background ${baseText} ${hc}`}>
@@ -638,17 +690,27 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
                   <Button
                     variant="secondary"
                     className="rounded-[var(--radius)] h-11 min-h-[44px] px-5 w-full"
-                    onClick={() => {
-                      const ok = window.confirm(
-                        "You can skip this for now, but you will either have to complete this later or enter in everything manually to create podcast episodes."
-                      );
-                      if (ok) {
+                    onClick={async () => {
+                        let ok = true;
+                        if (typeof showConfirm === 'function') {
+                          ok = await showConfirm({
+                            title: 'Skip onboarding for now?',
+                            description: 'You can complete this later or enter details manually to create episodes.',
+                            confirmText: 'Skip for now',
+                            cancelText: 'Continue onboarding',
+                          });
+                        } else {
+                          ok = window.confirm(
+                            "You can skip this for now, but you will either have to complete this later or enter in everything manually to create podcast episodes."
+                          );
+                        }
+                        if (ok) {
                         try { localStorage.setItem('ppp.onboarding.completed', '1'); } catch {}
                         try { localStorage.removeItem('ppp.onboarding.step'); } catch {}
                         // Add onboarding=0 so App.jsx gating does not relaunch the wizard when user has 0 podcasts
                         try { window.location.assign('/dashboard?onboarding=0'); } catch {}
-                      }
-                    }}
+                        }
+                      }}
                   >
                     Skip for now
                   </Button>

@@ -88,7 +88,7 @@ const faqs = [
       },
       {
         q: 'How many credits do I get with each plan?',
-        a: 'Starter: 28,800 credits = about 2 hours of finished audio. Creator: 72,000 credits = about 5 hours. Pro: 172,800 credits = about 12 hours. Executive: 288,000 credits = about 20 hours.',
+        a: 'Hobby: 28,800 credits = about 2 hours of finished audio. Creator: 72,000 credits = about 5 hours. Pro: 172,800 credits = about 12 hours. Executive: 288,000 credits = about 20 hours.',
       },
       {
         q: 'What is premium processing and how much does it cost?',

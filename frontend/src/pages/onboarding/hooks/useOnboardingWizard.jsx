@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { makeApi, buildApiUrl } from "@/lib/apiClient";
 import { NO_MUSIC_OPTION } from "@/components/onboarding/OnboardingWizard.jsx";
 import { useResolvedTimezone } from "@/hooks/useResolvedTimezone";
@@ -18,6 +18,7 @@ import IntroOutroStep from "../steps/IntroOutroStep.jsx";
 import MusicStep from "../steps/MusicStep.jsx";
 import PublishCadenceStep from "../steps/PublishCadenceStep.jsx";
 import PublishScheduleStep from "../steps/PublishScheduleStep.jsx";
+import PublishPlanStep from "../steps/PublishPlanStep.jsx";
 import DesignStep from "../steps/DesignStep.jsx";
 import WebsiteStep from "../steps/WebsiteStep.jsx";
 import DistributionRequiredStep from "../steps/DistributionRequiredStep.jsx";
@@ -29,6 +30,17 @@ import ImportingStep from "../steps/ImportingStep.jsx";
 import ImportAnalyzeStep from "../steps/ImportAnalyzeStep.jsx";
 import ImportAssetsStep from "../steps/ImportAssetsStep.jsx";
 import ImportSuccessStep from "../steps/ImportSuccessStep.jsx";
+import WelcomeStep from "../steps/WelcomeStep.jsx";
+
+const DISTRIBUTION_BOOTSTRAP_STEPS = new Set([
+  "music",
+  "publishPlan",
+  "distributionRequired",
+  "distributionOptional",
+  "design",
+  "website",
+  "finish",
+]);
 
 export default function useOnboardingWizard({
   token,
@@ -36,11 +48,34 @@ export default function useOnboardingWizard({
   refreshUser,
   toast,
   comfort,
+  showConfirm,
 }) {
   const resolvedTimezone = useResolvedTimezone(user?.timezone);
   const { largeText, setLargeText, highContrast, setHighContrast } = comfort;
-  // Make step key user-specific to prevent cross-user contamination
-  const STEP_KEY = user?.email ? `ppp.onboarding.step.${user.email}` : "ppp.onboarding.step";
+
+  const getStoredStepIndex = useCallback((email) => {
+    if (!email) return 0;
+    try {
+      const key = `ppp.onboarding.step.${email}`;
+      const raw = localStorage.getItem(key);
+      const parsed = raw != null ? parseInt(raw, 10) : 0;
+      const idx = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+      if (idx > 0) {
+        console.log(`[Onboarding] Restored stepIndex ${idx} for user ${email} from localStorage`);
+      }
+      return idx;
+    } catch (error) {
+      console.warn("[Onboarding] Failed to restore stepIndex from localStorage:", error);
+      return 0;
+    }
+  }, []);
+
+  const initialStepData = (() => {
+    if (!user?.email) {
+      return { value: 0, restored: false };
+    }
+    return { value: getStoredStepIndex(user.email), restored: true };
+  })();
 
   const [fromManager] = useState(() => {
     try {
@@ -50,45 +85,39 @@ export default function useOnboardingWizard({
     }
   });
 
-  const [stepIndex, setStepIndex] = useState(() => {
-    // Only restore step if we have a user email (user-specific key)
-    if (!user?.email) {
-      return 0;
-    }
-    try {
-      const userStepKey = `ppp.onboarding.step.${user.email}`;
-      const raw = localStorage.getItem(userStepKey);
-      const n = raw != null ? parseInt(raw, 10) : 0;
-      return Number.isFinite(n) && n >= 0 ? n : 0;
-    } catch {
-      return 0;
-    }
-  });
+  const [stepIndex, setStepIndex] = useState(initialStepData.value);
+  const restoredStepRef = useRef(initialStepData.restored);
 
   // Clear step when user changes (prevents cross-user contamination)
   const lastUserEmailRef = useRef(user?.email);
   useEffect(() => {
-    if (user?.email && lastUserEmailRef.current && lastUserEmailRef.current !== user.email) {
+    const previousEmail = lastUserEmailRef.current;
+    if (user?.email && previousEmail && previousEmail !== user.email) {
       // User changed - clear old user's step
       try {
-        const oldKey = `ppp.onboarding.step.${lastUserEmailRef.current}`;
+        const oldKey = `ppp.onboarding.step.${previousEmail}`;
         localStorage.removeItem(oldKey);
-        console.log(`[Onboarding] Cleared step for previous user: ${lastUserEmailRef.current}`);
+        console.log(`[Onboarding] Cleared step for previous user: ${previousEmail}`);
       } catch (error) {
         console.warn("[Onboarding] Failed to clear previous user's step", error);
       }
       // Reset to step 0 for new user
       setStepIndex(0);
     }
+    if (user?.email !== previousEmail) {
+      restoredStepRef.current = false;
+    }
     lastUserEmailRef.current = user?.email;
   }, [user?.email, setStepIndex]);
 
   useEffect(() => {
-    if (!token && !user) {
-      console.warn("[Onboarding] No authentication token found, redirecting to login");
-      window.location.href = "/?login=1";
+    if (!user?.email || restoredStepRef.current) {
+      return;
     }
-  }, [token, user]);
+    const storedIndex = getStoredStepIndex(user.email);
+    restoredStepRef.current = true;
+    setStepIndex((current) => (storedIndex !== current ? storedIndex : current));
+  }, [user?.email, getStoredStepIndex]);
 
   const stepSaveTimer = useRef(null);
   const importResumeTimerRef = useRef(null);
@@ -140,14 +169,14 @@ export default function useOnboardingWizard({
   const [importLoading, setImportLoading] = useState(false);
   const [showSkipNotice, setShowSkipNotice] = useState(false);
   const [importJumpedToStep6, setImportJumpedToStep6] = useState(false);
-  
+
   const [targetPodcastId, setTargetPodcastId] = useState(() => {
     if (!user?.email) return null;
     try {
       return localStorage.getItem(`ppp.onboarding.pid.${user.email}`) || null;
     } catch { return null; }
   });
-  
+
   useEffect(() => {
     if (!user?.email) return;
     if (targetPodcastId) {
@@ -156,6 +185,9 @@ export default function useOnboardingWizard({
       localStorage.removeItem(`ppp.onboarding.pid.${user.email}`);
     }
   }, [targetPodcastId, user?.email]);
+
+  const lastPodcastInfoRef = useRef(null);
+  const ensurePodcastPromiseRef = useRef(null);
 
   const [rssFeedUrl, setRssFeedUrl] = useState("");
   const [websiteUrl, setWebsiteUrl] = useState(() => {
@@ -207,8 +239,8 @@ export default function useOnboardingWizard({
 
   const [introMode, setIntroMode] = useState("tts");
   const [outroMode, setOutroMode] = useState("tts");
-  const [introScript, setIntroScript] = useState("Welcome to my podcast!");
-  const [outroScript, setOutroScript] = useState("Thank you for listening and see you next time!");
+  const [introScript, setIntroScript] = useState("");
+  const [outroScript, setOutroScript] = useState("");
   const [introFile, setIntroFile] = useState(null);
   const [outroFile, setOutroFile] = useState(null);
   const [introAsset, setIntroAsset] = useState(null);
@@ -249,6 +281,11 @@ export default function useOnboardingWizard({
   );
 
   const newFlowSteps = useMemo(() => {
+    const welcomeStep = {
+      id: "welcome",
+      title: "Welcome to DoneCast",
+      description: "We make podcasting easy. This is a one-time setup to tailor DoneCast to your show.",
+    };
     const nameStep = {
       id: "yourName",
       title: "What can we call you?",
@@ -284,34 +321,33 @@ export default function useOnboardingWizard({
     };
 
     const baseSteps = [
+      welcomeStep,
       nameStep,
       choosePathStep,
       { id: "showDetails", title: "About your show" },
       { id: "format", title: "Format" },
-      { id: "coverArt", title: "Podcast Cover Art (optional)" },
+      { id: "coverArt", title: "Podcast Cover Art" },
       ...(showSkipNotice
         ? [
-            {
-              id: "skipNotice",
-              title: "Skipping ahead",
-              description: "We imported your show. We'll jump to Step 6 so you can finish setup.",
-            },
-          ]
+          {
+            id: "skipNotice",
+            title: "Skipping ahead",
+            description: "We imported your show. We'll jump to Step 6 so you can finish setup.",
+          },
+        ]
         : []),
       { id: "introOutro", title: "Intro & Outro" },
       { id: "music", title: "Music (optional)" },
-      { id: "publishCadence", title: "How often will you publish?" },
-      { id: "publishSchedule", title: "Publishing days" },
-      { id: "design", title: "Website Style" },
-      { id: "website", title: "Create your website" },
+      { id: "publishPlan", title: "Publishing plan" },
       { id: "distributionRequired", title: "Distribute to Apple & Spotify" },
       { id: "distributionOptional", title: "Other platforms" },
+      { id: "design", title: "Website Style" },
+      { id: "website", title: "Create your website" },
       { id: "finish", title: "All done!" },
     ];
 
     const filtered = fromManager ? baseSteps.filter((step) => step.id !== "yourName") : baseSteps;
-    const includeSchedule = freqUnit !== "day";
-    return includeSchedule ? filtered : filtered.filter((step) => step.id !== "publishSchedule");
+    return filtered;
   }, [
     firstName,
     lastName,
@@ -336,6 +372,7 @@ export default function useOnboardingWizard({
 
   const stepId = wizardSteps[stepIndex]?.id;
   stepIdRef.current = stepId;
+
 
   const [hasExistingPodcast, setHasExistingPodcast] = useState(false);
   useEffect(() => {
@@ -446,14 +483,15 @@ export default function useOnboardingWizard({
     if (stepId !== "music" && audioRef.current) {
       try {
         audioRef.current.pause();
-      } catch (_) {}
+      } catch (_) { }
       audioRef.current = null;
       setMusicPreviewing(null);
     }
   }, [stepId, musicAssets.length, musicLoading, token]);
 
   useEffect(() => {
-    if (stepId === "introOutro" && !voicesLoading && voices.length === 0) {
+    // Preload voices early to reduce delay at Intro/Outro
+    if (!voicesLoading && voices.length === 0) {
       setVoicesLoading(true);
       setVoicesError("");
       (async () => {
@@ -512,13 +550,13 @@ export default function useOnboardingWizard({
     if (stepId !== "introOutro" && voiceAudioRef.current) {
       try {
         voiceAudioRef.current.pause();
-      } catch (_) {}
+      } catch (_) { }
       setVoicePreviewing(false);
     }
     if (stepId !== "introOutro" && ioAudioRef.current) {
       try {
         ioAudioRef.current.pause();
-      } catch (_) {}
+      } catch (_) { }
       setIntroPreviewing(false);
       setOutroPreviewing(false);
     }
@@ -627,12 +665,25 @@ export default function useOnboardingWizard({
     setFormData((prev) => ({ ...prev, [id]: files ? files[0] : value }));
   }, []);
 
-  const handleExitDiscard = useCallback(() => {
+  const handleExitDiscard = useCallback(async () => {
+    // Use branded confirm dialog instead of window.confirm
+    const showConfirmSafe = showConfirm;
     if (!hasExistingPodcast) return;
     const idxIntro = newFlowSteps.findIndex((s) => s.id === "introOutro");
     const atOrBeyondIntro = idxIntro >= 0 && stepIndex >= idxIntro;
     if (atOrBeyondIntro) {
-      const ok = window.confirm("Exit and discard your onboarding changes?");
+      let ok = true;
+      if (showConfirmSafe) {
+        ok = await showConfirmSafe({
+          title: "Exit and discard changes?",
+          description: "Your onboarding progress will be cleared.",
+          confirmText: "Discard & Exit",
+          cancelText: "Stay",
+          variant: "destructive",
+        });
+      } else {
+        ok = typeof window !== "undefined" ? window.confirm("Exit and discard your onboarding changes?") : true;
+      }
       if (!ok) return;
     }
     try {
@@ -647,11 +698,13 @@ export default function useOnboardingWizard({
       console.warn("[Onboarding] Failed to clear stored step", error);
     }
     try {
-      window.location.replace("/?onboarding=0");
+      // Use href instead of replace to force full page reload and clear ALL state
+      // The discard=1 param helps us identify this was an intentional discard
+      window.location.href = "/?onboarding=0&discard=1";
     } catch (error) {
       console.warn("[Onboarding] Failed to redirect", error);
     }
-  }, [hasExistingPodcast, newFlowSteps, stepIndex]);
+  }, [hasExistingPodcast, newFlowSteps, stepIndex, user?.email]);
 
   const generateOrUploadTTS = useCallback(
     async (kind, mode, script, file, recordedAsset) => {
@@ -689,7 +742,7 @@ export default function useOnboardingWizard({
           category: kind,
         };
         // Use segment-specific voice if available, otherwise fall back to selectedVoiceId
-        const voiceToUse = kind === "intro" 
+        const voiceToUse = kind === "intro"
           ? (introVoiceId && introVoiceId !== "default" ? introVoiceId : selectedVoiceId)
           : (outroVoiceId && outroVoiceId !== "default" ? outroVoiceId : selectedVoiceId);
         if (voiceToUse && voiceToUse !== "default") body.voice_id = voiceToUse;
@@ -712,12 +765,153 @@ export default function useOnboardingWizard({
             description: errorMsg,
             variant: "destructive",
           });
-        } catch (_) {}
+        } catch (_) { }
         return null;
       }
     },
     [token, toast, selectedVoiceId, introVoiceId, outroVoiceId, firstTimeUser]
   );
+
+  const preparePodcastPayload = useCallback(async () => {
+    const nameClean = (formData.podcastName || "").trim();
+    const descClean = (formData.podcastDescription || "").trim();
+
+    if (!nameClean || nameClean.length < 4) {
+      throw new Error("Podcast name must be at least 4 characters.");
+    }
+    if (!descClean) {
+      throw new Error("Podcast description is required.");
+    }
+
+    const podcastPayload = new FormData();
+    podcastPayload.append("name", nameClean);
+    podcastPayload.append("description", descClean);
+    if (formatKey) {
+      podcastPayload.append("format", formatKey);
+    }
+    if (formData.coverArt) {
+      try {
+        const blob = await coverCropperRef.current?.getProcessedBlob?.();
+        if (blob) {
+          const file = new File([blob], "cover.jpg", { type: "image/jpeg" });
+          podcastPayload.append("cover_image", file);
+        } else {
+          podcastPayload.append("cover_image", formData.coverArt);
+        }
+      } catch (error) {
+        console.warn("[Onboarding] Failed to process cover crop", error);
+        podcastPayload.append("cover_image", formData.coverArt);
+      }
+    }
+
+    return podcastPayload;
+  }, [formData.podcastName, formData.podcastDescription, formData.coverArt, formatKey]);
+
+  const ensurePodcastExists = useCallback(async () => {
+    if (!token) {
+      return null;
+    }
+
+    if (ensurePodcastPromiseRef.current) {
+      return ensurePodcastPromiseRef.current;
+    }
+
+    const runner = (async () => {
+      if (targetPodcastId && lastPodcastInfoRef.current?.id === targetPodcastId) {
+        return lastPodcastInfoRef.current;
+      }
+      if (targetPodcastId && !lastPodcastInfoRef.current) {
+        const cached = { id: targetPodcastId };
+        lastPodcastInfoRef.current = cached;
+        return cached;
+      }
+
+      const api = makeApi(token);
+      let podcasts = [];
+      try {
+        const response = await api.get("/api/podcasts/");
+        podcasts = Array.isArray(response) ? response : response?.items || [];
+      } catch (err) {
+        if (err?.status !== 404) {
+          console.warn("[Onboarding] Failed to load podcasts while ensuring creation:", err);
+        }
+      }
+
+      let selected = null;
+      if (podcasts.length > 0) {
+        const nameClean = (formData.podcastName || "").trim().toLowerCase();
+        if (nameClean) {
+          selected = podcasts.find((p) => p.name && p.name.trim().toLowerCase() === nameClean) || null;
+        }
+        selected = selected || podcasts[podcasts.length - 1];
+      } else if (path === "new") {
+        try {
+          const payload = await preparePodcastPayload();
+          const created = await api.raw("/api/podcasts/", {
+            method: "POST",
+            body: payload,
+          });
+          selected = created;
+        } catch (creationErr) {
+          console.error("[Onboarding] Failed to auto-create podcast:", creationErr);
+          try {
+            toast?.({
+              variant: "destructive",
+              title: "Could not create your podcast",
+              description: creationErr?.message || "Please double-check your show details.",
+            });
+          } catch (toastErr) {
+            console.warn("[Onboarding] Failed to show toast for podcast creation error", toastErr);
+          }
+          return null;
+        }
+      }
+
+      if (selected?.id) {
+        lastPodcastInfoRef.current = selected;
+        setTargetPodcastId(selected.id);
+        const feed =
+          selected.rss_feed_url ||
+          selected.rss_url_locked ||
+          selected.rss_url ||
+          selected.feed_url ||
+          selected.rssFeedUrl;
+        if (feed) {
+          setRssFeedUrl(feed);
+        }
+        return selected;
+      }
+
+      return lastPodcastInfoRef.current;
+    })();
+
+    ensurePodcastPromiseRef.current = runner;
+    try {
+      return await runner;
+    } finally {
+      ensurePodcastPromiseRef.current = null;
+    }
+  }, [token, targetPodcastId, formData.podcastName, path, preparePodcastPayload, setTargetPodcastId, setRssFeedUrl, toast]);
+
+  useEffect(() => {
+    if (path !== "new") {
+      return;
+    }
+    if (!stepId || !DISTRIBUTION_BOOTSTRAP_STEPS.has(stepId)) {
+      return;
+    }
+
+    let cancelled = false;
+    ensurePodcastExists()?.catch((err) => {
+      if (!cancelled && err) {
+        console.warn("[Onboarding] ensurePodcastExists failed:", err);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [stepId, ensurePodcastExists, path]);
 
   const handleFinish = useCallback(async () => {
     try {
@@ -728,7 +922,7 @@ export default function useOnboardingWizard({
         const data = await makeApi(token).get("/api/podcasts/");
         existingShows = Array.isArray(data) ? data : data?.items || [];
         console.log(`[Onboarding.handleFinish] Found ${existingShows.length} existing podcast(s)`);
-        
+
         // If we have a targetPodcastId, find it in the list
         if (targetPodcastId && existingShows.length > 0) {
           targetPodcast = existingShows.find(p => p.id === targetPodcastId) || null;
@@ -738,11 +932,11 @@ export default function useOnboardingWizard({
             console.warn(`[Onboarding.handleFinish] targetPodcastId ${targetPodcastId} not found in existing shows`);
           }
         }
-        
+
         // Also try to match by name if we don't have a targetPodcast yet
         if (!targetPodcast && existingShows.length > 0 && formData.podcastName) {
           const nameClean = (formData.podcastName || "").trim().toLowerCase();
-          targetPodcast = existingShows.find(p => 
+          targetPodcast = existingShows.find(p =>
             p.name && p.name.trim().toLowerCase() === nameClean
           ) || null;
           if (targetPodcast) {
@@ -768,46 +962,19 @@ export default function useOnboardingWizard({
       // Use targetPodcast OR any existing shows OR targetPodcastId
       // Also check by name to catch cases where targetPodcastId wasn't set properly
       const nameClean = formData.podcastName ? (formData.podcastName || "").trim().toLowerCase() : "";
-      const hasMatchingPodcast = existingShows.length > 0 && nameClean 
+      const hasMatchingPodcast = existingShows.length > 0 && nameClean
         ? existingShows.some(p => p.name && p.name.trim().toLowerCase() === nameClean)
         : false;
       const podcastAlreadyCreated = targetPodcast || targetPodcastId || hasMatchingPodcast || existingShows.length > 0;
-      
+
       if (podcastAlreadyCreated) {
         const reason = targetPodcast ? 'targetPodcast' : targetPodcastId ? 'targetPodcastId' : hasMatchingPodcast ? 'name match' : 'any existing';
         console.log(`[Onboarding.handleFinish] Podcast already exists (${reason}) - skipping creation. Using: ${targetPodcast?.id || targetPodcastId || 'first available'}`);
       }
-      
+
       if (path === "new" && !podcastAlreadyCreated) {
         console.log("[Onboarding.handleFinish] No podcast found - creating new one...");
-        const nameClean = (formData.podcastName || "").trim();
-        const descClean = (formData.podcastDescription || "").trim();
-        if (!nameClean || nameClean.length < 4) {
-          throw new Error("Podcast name must be at least 4 characters.");
-        }
-        if (!descClean) {
-          throw new Error("Podcast description is required.");
-        }
-        const podcastPayload = new FormData();
-        podcastPayload.append("name", nameClean);
-        podcastPayload.append("description", descClean);
-        if (formatKey) {
-          podcastPayload.append("format", formatKey);
-        }
-        if (formData.coverArt) {
-          try {
-            const blob = await coverCropperRef.current?.getProcessedBlob?.();
-            if (blob) {
-              const file = new File([blob], "cover.jpg", { type: "image/jpeg" });
-              podcastPayload.append("cover_image", file);
-            } else {
-              podcastPayload.append("cover_image", formData.coverArt);
-            }
-          } catch (error) {
-            console.warn("[Onboarding] Failed to process cover crop", error);
-            podcastPayload.append("cover_image", formData.coverArt);
-          }
-        }
+        const podcastPayload = await preparePodcastPayload();
         const createdPodcast = await makeApi(token).raw("/api/podcasts/", {
           method: "POST",
           body: podcastPayload,
@@ -819,14 +986,14 @@ export default function useOnboardingWizard({
               createdPodcast && createdPodcast.detail
                 ? createdPodcast.detail
                 : JSON.stringify(createdPodcast || {});
-          } catch (_) {}
+          } catch (_) { }
           throw new Error(detail || "Failed to create the podcast show.");
         }
         targetPodcast = createdPodcast;
         setTargetPodcastId(createdPodcast.id);
         try {
           toast({ title: "Great!", description: "Your new podcast show has been created." });
-        } catch (_) {}
+        } catch (_) { }
         try {
           const segments = [];
           if (introAsset?.filename) {
@@ -888,7 +1055,7 @@ export default function useOnboardingWizard({
           }
           if (!chosen && existingShows.length > 0) {
             // Use most recently created (last in array, or match by name)
-            const nameMatch = formData.podcastName 
+            const nameMatch = formData.podcastName
               ? existingShows.find(p => p.name && p.name.trim().toLowerCase() === (formData.podcastName || "").trim().toLowerCase())
               : null;
             chosen = nameMatch || existingShows[existingShows.length - 1];
@@ -940,7 +1107,7 @@ export default function useOnboardingWizard({
         }
         if (!chosen && existingShows.length > 0) {
           // Match by name first, then use most recent
-          const nameMatch = formData.podcastName 
+          const nameMatch = formData.podcastName
             ? existingShows.find(p => p.name && p.name.trim().toLowerCase() === (formData.podcastName || "").trim().toLowerCase())
             : null;
           chosen = nameMatch || existingShows[existingShows.length - 1];
@@ -995,7 +1162,7 @@ export default function useOnboardingWizard({
         }
         try {
           toast({ title: "All done!", description: "Your show has been imported." });
-        } catch (_) {}
+        } catch (_) { }
       }
       try {
         localStorage.removeItem("ppp.onboarding.step");
@@ -1017,7 +1184,7 @@ export default function useOnboardingWizard({
     } catch (error) {
       try {
         toast({ title: "An Error Occurred", description: error.message, variant: "destructive" });
-      } catch (_) {}
+      } catch (_) { }
     } finally {
       setSaving(false);
     }
@@ -1032,6 +1199,7 @@ export default function useOnboardingWizard({
     musicAssets,
     musicChoice,
     path,
+    preparePodcastPayload,
   ]);
 
   useEffect(() => {
@@ -1121,18 +1289,12 @@ export default function useOnboardingWizard({
         break;
       }
       case "coverArt":
-        disabled = !(formData.coverArt || skipCoverNow);
+        disabled = !formData.coverArt; // Make cover art required
         break;
-      case "publishCadence":
+      case "publishPlan":
         disabled = !freqUnit || (freqUnit === "bi-weekly" && Number(freqCount) !== 1);
         break;
-      case "publishSchedule":
-        if (!notSureSchedule) {
-          if (freqUnit === "week") disabled = selectedWeekdays.length === 0;
-          else if (freqUnit === "bi-weekly" || freqUnit === "month")
-            disabled = selectedDates.length === 0;
-        }
-        break;
+      // schedule selection is part of publishPlan; no separate gating case
       case "introOutro": {
         const hasIntroAsset =
           introAsset ||
@@ -1207,6 +1369,7 @@ export default function useOnboardingWizard({
 
   const stepComponents = useMemo(
     () => ({
+      welcome: WelcomeStep,
       yourName: YourNameStep,
       choosePath: ChoosePathStep,
       showDetails: ShowDetailsStep,
@@ -1215,8 +1378,7 @@ export default function useOnboardingWizard({
       skipNotice: SkipNoticeStep,
       introOutro: IntroOutroStep,
       music: MusicStep,
-      publishCadence: PublishCadenceStep,
-      publishSchedule: PublishScheduleStep,
+      publishPlan: PublishPlanStep,
       website: WebsiteStep,
       distributionRequired: DistributionRequiredStep,
       distributionOptional: DistributionOptionalStep,
@@ -1267,7 +1429,7 @@ export default function useOnboardingWizard({
       // Handle both formats: "data:image/png;base64,{data}" or just "{data}"
       let base64Data = response.image;
       let mimeType = "image/png";
-      
+
       // Check if it's a data URL format
       if (base64Data.includes(",")) {
         const parts = base64Data.split(",");
@@ -1339,7 +1501,7 @@ export default function useOnboardingWizard({
       // Also remove legacy global key for cleanup
       localStorage.removeItem("ppp.onboarding.step");
       localStorage.removeItem("ppp.onboarding.completed");
-      
+
       // Clear any other onboarding-related localStorage keys
       const keysToRemove = [];
       for (let i = 0; i < localStorage.length; i++) {
@@ -1370,7 +1532,7 @@ export default function useOnboardingWizard({
 
       // Reset step index to 0 to restart from beginning
       setStepIndex(0);
-      
+
       // Reload the page with reset parameter AND force onboarding mode
       // This ensures user restarts onboarding even if they already have a podcast
       const url = new URL(window.location.href);
@@ -1524,6 +1686,7 @@ export default function useOnboardingWizard({
     setColorPreference,
     additionalNotes,
     setAdditionalNotes,
+    ensurePodcastExists,
   };
 
   const steps = wizardSteps.map((step, index) => {
@@ -1536,38 +1699,38 @@ export default function useOnboardingWizard({
         step.id === "yourName"
           ? "We'll use this to personalize your dashboard."
           : step.id === "choosePath"
-          ? "If you have an existing podcast, import it here."
-          : step.id === "showDetails"
-          ? "Short and clear works best."
-          : step.id === "format"
-          ? "This is for your reference."
-          : step.id === "coverArt"
-          ? "No artwork yet? You can skip this for now."
-          : step.id === "introOutro"
-          ? "Start with our default scripts or upload your own audio."
-          : step.id === "music"
-          ? 'Background music fades in during intros and fades out during outros. It does not play during your main content segments. All timing and volume can be adjusted later in the Template Editor.'
-          : step.id === "publishCadence"
-          ? "We ask to help keep you on track for publishing consistently"
-          : step.id === "publishSchedule"
-          ? "Consistency is more important than volume for a successful podcast"
-          : step.id === "rss"
-          ? "Paste your feed URL."
-          : step.id === "analyze"
-          ? "We'll bring over what we can, and you can tidy later."
-          : step.id === "assets"
-          ? "We'll bring over what we can, and you can tidy later."
-          : step.id === "finish"
-          ? "There's a short tour next if you'd like it."
-          : "",
+            ? "If you have an existing podcast, import it here."
+            : step.id === "showDetails"
+              ? "Short and clear works best."
+              : step.id === "format"
+                ? "This is for your reference."
+                : step.id === "coverArt"
+                  ? "No artwork yet? You can skip this for now."
+                  : step.id === "introOutro"
+                    ? "Start with our default scripts or upload your own audio."
+                    : step.id === "music"
+                      ? 'Background music fades in during intros and fades out during outros. It does not play during your main content segments. All timing and volume can be adjusted later in the Template Editor.'
+                      : step.id === "publishCadence"
+                        ? "We ask to help keep you on track for publishing consistently"
+                        : step.id === "publishSchedule"
+                          ? "Consistency is more important than volume for a successful podcast"
+                          : step.id === "rss"
+                            ? "Paste your feed URL."
+                            : step.id === "analyze"
+                              ? "We'll bring over what we can, and you can tidy later."
+                              : step.id === "assets"
+                                ? "We'll bring over what we can, and you can tidy later."
+                                : step.id === "finish"
+                                  ? "There's a short tour next if you'd like it."
+                                  : "",
       render: Component
-        ? () => <Component wizard={wizardContext} stepIndex={index} />
+        ? (extraProps = {}) => <Component wizard={wizardContext} stepIndex={index} {...extraProps} />
         : () => null,
       validate:
         step.validate && typeof step.validate === "function"
           ? step.validate
           : step.id === "publishCadence"
-          ? async () => {
+            ? async () => {
               if (!freqUnit) {
                 setCadenceError("Please choose a frequency.");
                 return false;
@@ -1579,54 +1742,54 @@ export default function useOnboardingWizard({
               setCadenceError("");
               return true;
             }
-          : step.id === "publishSchedule"
-          ? async () => {
-              if (notSureSchedule) return true;
-              if (freqUnit === "week" && selectedWeekdays.length === 0) return false;
-              if ((freqUnit === "bi-weekly" || freqUnit === "month") && selectedDates.length === 0)
-                return false;
-              return true;
-            }
-          : step.id === "confirm" && path === "import"
-          ? async () => {
-              const trimmed = (rssUrl || "").trim();
-              if (!trimmed) {
-                toast({
-                  variant: "destructive",
-                  title: "RSS feed required",
-                  description: "Please enter your feed URL before continuing.",
-                });
-                return false;
-              }
-              setImportLoading(true);
-              try {
-                const api = makeApi(token);
-                const data = await api.post("/api/import/rss", { rss_url: trimmed });
-                setImportResult(data);
-                setRssUrl(trimmed);
-                const importedName = data?.podcast_name || data?.title || data?.name || "";
-                const importedDescription = data?.description || data?.summary || "";
-                setFormData((prev) => ({
-                  ...prev,
-                  podcastName: importedName || prev.podcastName || "",
-                  podcastDescription: importedDescription || prev.podcastDescription || "",
-                }));
-                setSkipCoverNow(true);
-                setImportLoading(false);
-                setResumeAfterImport(true);
+            : step.id === "publishSchedule"
+              ? async () => {
+                if (notSureSchedule) return true;
+                if (freqUnit === "week" && selectedWeekdays.length === 0) return false;
+                if ((freqUnit === "bi-weekly" || freqUnit === "month") && selectedDates.length === 0)
+                  return false;
                 return true;
-              } catch (error) {
-                console.error("[Onboarding] Import failed", error);
-                toast({
-                  variant: "destructive",
-                  title: "Import failed",
-                  description: error?.message || "We couldn't import that feed.",
-                });
-                setImportLoading(false);
-                return false;
               }
-            }
-          : undefined,
+              : step.id === "confirm" && path === "import"
+                ? async () => {
+                  const trimmed = (rssUrl || "").trim();
+                  if (!trimmed) {
+                    toast({
+                      variant: "destructive",
+                      title: "RSS feed required",
+                      description: "Please enter your feed URL before continuing.",
+                    });
+                    return false;
+                  }
+                  setImportLoading(true);
+                  try {
+                    const api = makeApi(token);
+                    const data = await api.post("/api/import/rss", { rss_url: trimmed });
+                    setImportResult(data);
+                    setRssUrl(trimmed);
+                    const importedName = data?.podcast_name || data?.title || data?.name || "";
+                    const importedDescription = data?.description || data?.summary || "";
+                    setFormData((prev) => ({
+                      ...prev,
+                      podcastName: importedName || prev.podcastName || "",
+                      podcastDescription: importedDescription || prev.podcastDescription || "",
+                    }));
+                    setSkipCoverNow(true);
+                    setImportLoading(false);
+                    setResumeAfterImport(true);
+                    return true;
+                  } catch (error) {
+                    console.error("[Onboarding] Import failed", error);
+                    toast({
+                      variant: "destructive",
+                      title: "Import failed",
+                      description: error?.message || "We couldn't import that feed.",
+                    });
+                    setImportLoading(false);
+                    return false;
+                  }
+                }
+                : undefined,
     };
   });
 

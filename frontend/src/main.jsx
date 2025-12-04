@@ -38,7 +38,7 @@ import { WarmupProvider } from './contexts/WarmupContext.jsx';
 import { PostHogProvider } from 'posthog-js/react';
 import './index.css' // <-- This line imports all the styles
 import { assetUrl } from './lib/apiClient';
-import { createBrowserRouter, RouterProvider } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider, useSearchParams } from 'react-router-dom';
 
 // Simple loading spinner for Suspense fallback
 const PageLoader = () => (
@@ -123,17 +123,10 @@ try {
 const isSubdomainRequest = () => {
   if (typeof window === 'undefined') return false;
 
-  // In dev mode, check for subdomain query parameter
-  if (import.meta.env.DEV) {
-    try {
-      const searchParams = new URL(window.location.href).searchParams;
-      const subdomain = searchParams.get('subdomain');
-      if (subdomain) {
-        return true; // Treat as subdomain request in dev mode
-      }
-    } catch (e) {
-      // Ignore errors parsing URL
-    }
+  // Check for subdomain query parameter (allow in production for preview/debugging)
+  // Use simple string check to avoid any URL parsing issues
+  if (window.location.search && window.location.search.includes('subdomain=')) {
+    return true;
   }
 
   const hostname = window.location.hostname;
@@ -154,7 +147,14 @@ const isSubdomainRequest = () => {
 
 // Wrapper component that checks subdomain at render time (not just router creation time)
 const RootRouteElement = () => {
-  return isSubdomainRequest() ? <PublicWebsite /> : <NewLanding />;
+  const [searchParams] = useSearchParams();
+  const previewSubdomain = searchParams.get('subdomain');
+
+  // Check if we are on a subdomain OR if the user is requesting a preview via query param
+  if (previewSubdomain || isSubdomainRequest()) {
+    return <PublicWebsite />;
+  }
+  return <NewLanding />;
 };
 
 const router = createBrowserRouter([

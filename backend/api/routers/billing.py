@@ -31,28 +31,28 @@ _TASKS_AUTH = os.getenv("TASKS_AUTH", "")
 
 PRICE_MAP = {
     "hobby": {
-        "monthly": os.getenv("PRICE_STARTER_MONTHLY", "price_starter_monthly_placeholder"),
+        "monthly": os.getenv("PRICE_STARTER_MONTHLY") or "plan_hobby_monthly",
         # Hobby does not have an annual plan
     },
     "creator": {
         "monthly": (
             os.getenv("PRICE_CREATOR_MONTHLY")
             or os.getenv("PRICE_PREMIUM_MONTHLY")
-            or "price_creator_monthly_placeholder"
+            or "plan_creator_monthly"
         ),
         "annual": (
             os.getenv("PRICE_CREATOR_ANNUAL")
             or os.getenv("PRICE_PREMIUM_ANNUAL")
-            or "price_creator_annual_placeholder"
+            or "plan_creator_annual"
         ),
     },
     "pro": {
-        "monthly": os.getenv("PRICE_PRO_MONTHLY", "price_pro_monthly_placeholder"),
-        "annual": os.getenv("PRICE_PRO_ANNUAL", "price_pro_annual_placeholder"),
+        "monthly": os.getenv("PRICE_PRO_MONTHLY") or "plan_pro_monthly",
+        "annual": os.getenv("PRICE_PRO_ANNUAL") or "plan_pro_annual",
     },
     "executive": {
-        "monthly": os.getenv("PRICE_EXECUTIVE_MONTHLY", "price_executive_monthly_placeholder"),
-        "annual": os.getenv("PRICE_EXECUTIVE_ANNUAL", "price_executive_annual_placeholder"),
+        "monthly": os.getenv("PRICE_EXECUTIVE_MONTHLY") or "plan_executive_monthly",
+        "annual": os.getenv("PRICE_EXECUTIVE_ANNUAL") or "plan_executive_annual",
     },
 }
 
@@ -153,8 +153,8 @@ async def create_embedded_checkout_session(
         raise HTTPException(status_code=400, detail="Unknown plan")
     cycle_prices = PRICE_MAP[req.plan_key]
     if req.billing_cycle not in cycle_prices:
-        if req.plan_key == 'starter' and req.billing_cycle == 'annual':
-            raise HTTPException(status_code=400, detail="Starter plan does not have an annual option")
+        if req.plan_key in ('starter', 'hobby') and req.billing_cycle == 'annual':
+            raise HTTPException(status_code=400, detail=f"{req.plan_key.capitalize()} plan does not have an annual option")
         raise HTTPException(status_code=400, detail="Invalid billing cycle")
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Stripe not configured")
@@ -385,8 +385,8 @@ async def create_checkout_session(
         raise HTTPException(status_code=400, detail="Unknown plan")
     cycle_prices = PRICE_MAP[req.plan_key]
     if req.billing_cycle not in cycle_prices:
-        if req.plan_key == 'starter' and req.billing_cycle == 'annual':
-            raise HTTPException(status_code=400, detail="Starter plan does not have an annual option")
+        if req.plan_key in ('starter', 'hobby') and req.billing_cycle == 'annual':
+            raise HTTPException(status_code=400, detail=f"{req.plan_key.capitalize()} plan does not have an annual option")
         raise HTTPException(status_code=400, detail="Invalid billing cycle")
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Stripe not configured")
@@ -1022,6 +1022,25 @@ async def create_addon_credits_checkout(
     
     # Look up the addon credits price using lookup_key
     lookup_key = f"addon_credits_{req.plan_key.lower()}"
+
+    # Validate that the user is actually on the requested tier
+    # This prevents a lower-tier user from requesting a higher-tier (cheaper) addon price
+    user_tier = (getattr(current_user, 'tier', 'free') or 'free').lower()
+    
+    # Normalize legacy/alias tiers
+    if user_tier == 'starter':
+        user_tier = 'hobby'
+    
+    requested_tier = req.plan_key.lower()
+    
+    # Allow 'free' users to purchase at 'hobby' rates if they really want to (optional, but safe default is strict)
+    # For now, enforce strict tier matching to ensure they are paying for the tier that gives them the discount
+    if user_tier != requested_tier:
+        # Allow admin override or specific exceptions if needed, but generally:
+        raise HTTPException(
+            status_code=403, 
+            detail=f"You can only purchase add-on credits for your current tier ({user_tier}). Please upgrade to {requested_tier} to access this pricing."
+        )
     
     try:
         # Query Stripe for price with this lookup_key

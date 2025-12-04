@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger("security_headers")
 
-TRUSTED_CORS_SUFFIXES = ("podcastplusplus.com", "getpodcastplus.com")
+TRUSTED_CORS_SUFFIXES = ("donecast.com", "podcastplusplus.com", "getpodcastplus.com")
 
 def _normalize_origin(raw: str | None) -> str:
     """Return a canonical origin string (scheme://host[:port]) for comparisons."""

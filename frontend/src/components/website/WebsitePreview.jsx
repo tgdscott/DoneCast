@@ -5,6 +5,7 @@
 
 import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ensureReadablePair } from "@/components/website/theme/colorAccessibility";
 
 export default function WebsitePreview({ website }) {
   if (!website) {
@@ -20,6 +21,21 @@ export default function WebsitePreview({ website }) {
   const heroBg = theme.primary_color || "#0f172a";
   const heroFg = theme.secondary_color || "#ffffff";
   const accent = theme.accent_color || "#2563eb";
+  const heroColors = ensureReadablePair({
+    background: heroBg,
+    text: heroFg,
+    fallbackText: "#ffffff",
+  });
+  const accentButtonColors = ensureReadablePair({
+    background: accent,
+    text: "#ffffff",
+    fallbackText: "#0f172a",
+  });
+  const accentOnLight = ensureReadablePair({
+    background: "#ffffff",
+    text: accent,
+    fallbackText: "#2563eb",
+  }).text;
   const heroImage = layout.hero_image_url;
   const liveUrl = website.custom_domain
     ? `https://${website.custom_domain}`
@@ -31,7 +47,10 @@ export default function WebsitePreview({ website }) {
     <div className="space-y-8">
       <section
         className="rounded-2xl shadow-sm overflow-hidden"
-        style={{ backgroundColor: heroBg, color: heroFg }}
+        style={{ 
+          backgroundColor: heroColors.background || heroBg, 
+          color: heroColors.text || heroFg,
+        }}
       >
         <div className="grid gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,0.75fr)]">
           <div className="p-8 md:p-12 space-y-4">
@@ -44,7 +63,11 @@ export default function WebsitePreview({ website }) {
               <Button
                 asChild
                 size="sm"
-                className="mt-2 bg-white text-slate-900 hover:bg-slate-200"
+                className="mt-2"
+                style={{
+                  backgroundColor: accentButtonColors.background || accent,
+                  color: accentButtonColors.text,
+                }}
               >
                 <a href={liveUrl} target="_blank" rel="noopener noreferrer">
                   <ExternalLink className="mr-2 h-4 w-4" /> View live site
@@ -93,9 +116,15 @@ export default function WebsitePreview({ website }) {
                         href={episode.cta_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-xs font-medium text-white"
+                        className="text-xs font-medium"
                       >
-                        <Button size="sm" style={{ backgroundColor: accent }}>
+                        <Button
+                          size="sm"
+                          style={{
+                            backgroundColor: accentButtonColors.background || accent,
+                            color: accentButtonColors.text,
+                          }}
+                        >
                           {episode.cta_label || "Play"}
                         </Button>
                       </a>
@@ -141,7 +170,11 @@ export default function WebsitePreview({ website }) {
                 <Button
                   asChild
                   className="mt-4"
-                  style={{ backgroundColor: accent, borderColor: accent }}
+                  style={{
+                    backgroundColor: accentButtonColors.background || accent,
+                    borderColor: accentButtonColors.background || accent,
+                    color: accentButtonColors.text,
+                  }}
                 >
                   <a href={layout.call_to_action.button_url} target="_blank" rel="noopener noreferrer">
                     {layout.call_to_action.button_label || "Learn more"}
@@ -163,7 +196,7 @@ export default function WebsitePreview({ website }) {
                     <div className="flex items-center justify-between text-sm font-medium text-slate-900">
                       <span>{suggestion.label || suggestion.type || "Section"}</span>
                       {suggestion.include_by_default && (
-                        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: accent }}>
+                        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: accentOnLight }}>
                           Recommended
                         </span>
                       )}

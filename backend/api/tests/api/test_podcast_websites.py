@@ -26,7 +26,7 @@ _REQUIRED_KEYS = [
 for key in _REQUIRED_KEYS:
     os.environ.setdefault(key, "test")
 
-from api.main import app
+from api.app import app
 from api.core.database import engine
 from api.core import crud
 from api.models.user import UserCreate, User
@@ -163,7 +163,9 @@ def test_generate_website_creates_record(authed_client: TestClient, db: DBSessio
     def _fake_generate(prompt: str, **_kwargs: object) -> str:
         return json.dumps(layout)
 
-    monkeypatch.setattr(podcast_websites.client_gemini, "generate", _fake_generate)
+    monkeypatch.setattr(podcast_websites.ai_client, "generate", _fake_generate)
+    # Force production env to test domain generation
+    monkeypatch.setattr(settings, "APP_ENV", "production")
 
     missing = authed_client.get(f"/api/podcasts/{podcast.id}/website")
     assert missing.status_code == 404
@@ -174,7 +176,7 @@ def test_generate_website_creates_record(authed_client: TestClient, db: DBSessio
 
     assert body["status"] == "draft"
     assert body["subdomain"].startswith("ai-builder-podcast")
-    assert body["default_domain"].endswith("podcastplusplus.com")
+    assert body["default_domain"].endswith("donecast.com")
     assert body["layout"]["hero_title"] == "AI Builder Central"
     assert body["layout"]["episodes"][0]["episode_id"] == str(episode.id)
     assert body["layout"]["hero_image_url"] == "https://example.com/cover.jpg"
@@ -190,7 +192,7 @@ def test_chat_endpoint_updates_layout(authed_client: TestClient, db: DBSession, 
     def _initial_generate(prompt: str, **_kwargs: object) -> str:
         return json.dumps(_base_layout_for(episode))
 
-    monkeypatch.setattr(podcast_websites.client_gemini, "generate", _initial_generate)
+    monkeypatch.setattr(podcast_websites.ai_client, "generate", _initial_generate)
     create_resp = authed_client.post(f"/api/podcasts/{podcast.id}/website")
     assert create_resp.status_code == 200, create_resp.text
 
@@ -200,7 +202,7 @@ def test_chat_endpoint_updates_layout(authed_client: TestClient, db: DBSession, 
         updated["call_to_action"]["button_label"] = "Join the Hub"
         return json.dumps(updated)
 
-    monkeypatch.setattr(podcast_websites.client_gemini, "generate", _update_generate)
+    monkeypatch.setattr(podcast_websites.ai_client, "generate", _update_generate)
 
     resp = authed_client.post(
         f"/api/podcasts/{podcast.id}/website/chat",
@@ -219,7 +221,7 @@ def test_chat_endpoint_updates_layout(authed_client: TestClient, db: DBSession, 
 
 def test_update_domain_requires_plan(authed_client: TestClient, db: DBSession, user: User, podcast: Podcast, episode: Episode, monkeypatch):
     monkeypatch.setattr(
-        podcast_websites.client_gemini,
+        podcast_websites.ai_client,
         "generate",
         lambda prompt, **_: json.dumps(_base_layout_for(episode)),
     )

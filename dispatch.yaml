@@ -1,11 +1,29 @@
-# Google Cloud Run dispatch rules for app.podcastplusplus.com
+# Google Cloud Run dispatch rules for podcastplusplus.com domains
 # This routes requests to the appropriate service based on URL path
 
 dispatch:
-  # Route all /api/* requests to the backend API service
+  # Base domain: Route RSS feeds to API service (for podcast directory submission)
+  - url: "podcastplusplus.com/rss/*"
+    service: podcast-api
+  
+  # Base domain: Route all other requests to web service
+  - url: "podcastplusplus.com/*"
+    service: podcast-web
+  
+  # Wildcard subdomains: Route ALL podcast subdomains to web service
+  # This handles thousands of podcasts without individual domain mappings
+  # Example: cardiac-cowboys.podcastplusplus.com, cinema-irl.podcastplusplus.com
+  - url: "*.podcastplusplus.com/*"
+    service: podcast-web
+  
+  # App subdomain: Route /api/* requests to the backend API service
   - url: "app.podcastplusplus.com/api/*"
     service: podcast-api
   
-  # Route all other requests to the frontend
+  # App subdomain: Route all other requests to the frontend
   - url: "app.podcastplusplus.com/*"
     service: podcast-web
+  
+  # API subdomain: Route everything to API service (if needed)
+  - url: "api.podcastplusplus.com/*"
+    service: podcast-api

@@ -177,10 +177,10 @@ export default function NewLanding() {
   // Fetch landing page content from API (all sections)
   useEffect(() => {
     let cancelled = false;
-  const api = makeApi(null); // Public endpoint, no auth needed
-  // API routes are mounted under /api on the backend. Use the full /api prefix
-  // so buildApiUrl produces the correct production URL (e.g. https://api.podcastplusplus.com/api/public/landing).
-  api.get('/api/public/landing')
+    const api = makeApi(null); // Public endpoint, no auth needed
+    // API routes are mounted under /api on the backend. Use the full /api prefix
+    // so buildApiUrl produces the correct production URL (e.g. https://api.donecast.com/api/public/landing).
+    api.get('/api/public/landing')
       .then((data) => {
         if (!cancelled && data) {
           setLandingContent(mergeLandingContent(data));
@@ -196,6 +196,9 @@ export default function NewLanding() {
   // If a user is already authenticated (e.g., after OAuth redirect or returning visit),
   // move them into the application dashboard automatically instead of showing marketing.
   useEffect(() => {
+    // Don't redirect if we are trying to view a subdomain preview
+    if (window.location.search && window.location.search.includes('subdomain=')) return;
+
     if (hydrated && isAuthenticated) {
       // Avoid redirect loop if already on dashboard route (shouldn't happen here though)
       navigate('/dashboard', { replace: true });
@@ -253,12 +256,14 @@ export default function NewLanding() {
       <nav className="nl-nav">
         <div className="nl-container">
           <div className="nl-nav-inner">
-            <div className="nl-brand">
-              <span className="nl-brand-icon">
-                <Radio size={22} />
-              </span>
-              Podcast Plus Plus
-            </div>
+            <Link to="/" className="nl-brand" aria-label="DoneCast Home">
+              <img
+                src="/assets/branding/logo-horizontal.png"
+                alt="DoneCast"
+                className="h-8 w-auto"
+                loading="eager"
+              />
+            </Link>
             <div className="nl-nav-links">
               <Link to="/features">Features</Link>
               <Link to="/pricing-public">Pricing</Link>
@@ -520,9 +525,9 @@ export default function NewLanding() {
                 <div key={index} className="nl-card" style={{ padding: '2rem' }}>
                   <div className="flex items-center gap-3 mb-4">
                     {review.avatar_url ? (
-                      <img 
-                        src={review.avatar_url} 
-                        alt={review.author} 
+                      <img
+                        src={review.avatar_url}
+                        alt={review.author}
                         className="w-14 h-14 rounded-full object-cover"
                       />
                     ) : (
@@ -562,7 +567,7 @@ export default function NewLanding() {
             </div>
             <div className="space-y-3">
               {landingContent.faqs.map((faq, index) => (
-                <div 
+                <div
                   key={index}
                   className="border border-border rounded-lg overflow-hidden bg-card"
                 >
@@ -620,10 +625,12 @@ export default function NewLanding() {
           <div className="nl-footer-grid">
             <div>
               <div className="nl-brand" style={{ marginBottom: '1rem' }}>
-                <span className="nl-brand-icon">
-                  <Radio size={20} />
-                </span>
-                Podcast Plus Plus
+                <img
+                  src="/assets/branding/logo-horizontal.png"
+                  alt="DoneCast"
+                  className="h-6 w-auto"
+                  loading="lazy"
+                />
               </div>
               <p className="nl-lead" style={{ fontSize: '0.95rem' }}>
                 Professional podcast hosting for the modern creator.
@@ -633,7 +640,7 @@ export default function NewLanding() {
               <FooterColumn key={column.title} {...column} />
             ))}
           </div>
-          <div className="nl-footer-meta">&copy; {new Date().getFullYear()} Podcast Plus Plus. All rights reserved.</div>
+          <div className="nl-footer-meta">&copy; {new Date().getFullYear()} DoneCast. All rights reserved.</div>
         </div>
       </footer>
     </div>

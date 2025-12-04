@@ -51,7 +51,7 @@ def add_cors_headers_to_response(response: JSONResponse, request: Request) -> JS
                 parsed = urlparse(origin_clean)
                 host = (parsed.hostname or "").lower()
                 if host:
-                    for suffix in ("podcastplusplus.com", "getpodcastplus.com"):
+                    for suffix in ("donecast.com", "podcastplusplus.com", "getpodcastplus.com"):
                         if host == suffix or host.endswith(f".{suffix}"):
                             chosen_origin = f"{parsed.scheme}://{parsed.netloc}"
                             break

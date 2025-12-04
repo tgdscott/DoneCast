@@ -1,0 +1,137 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - heading "New Podcast Setup" [level=1] [ref=e8]
+        - button "Logout" [ref=e9] [cursor=pointer]:
+          - img
+          - generic [ref=e10] [cursor=pointer]: Logout
+      - generic [ref=e12]:
+        - generic [ref=e13] [cursor=pointer]:
+          - switch "Larger text" [ref=e14] [cursor=pointer]
+          - generic [ref=e15] [cursor=pointer]: Larger text
+        - generic [ref=e16] [cursor=pointer]:
+          - switch "High contrast" [ref=e17] [cursor=pointer]
+          - generic [ref=e18] [cursor=pointer]: High contrast
+  - main [ref=e19]:
+    - complementary [ref=e21]:
+      - generic [ref=e22]:
+        - heading "Setup Progress" [level=3] [ref=e24]
+        - generic [ref=e25]:
+          - generic [ref=e26]:
+            - generic [ref=e27]: Progress
+            - generic [ref=e28]: 5 of 14 steps
+          - progressbar [ref=e29]
+      - generic [ref=e31]:
+        - heading "Steps" [level=4] [ref=e32]
+        - generic [ref=e33]:
+          - button "What can we call you?" [ref=e34] [cursor=pointer]:
+            - img [ref=e35] [cursor=pointer]
+            - generic [ref=e37] [cursor=pointer]: What can we call you?
+          - button "Do you have an existing podcast?" [ref=e38] [cursor=pointer]:
+            - img [ref=e39] [cursor=pointer]
+            - generic [ref=e41] [cursor=pointer]: Do you have an existing podcast?
+          - button "About your show" [ref=e42] [cursor=pointer]:
+            - img [ref=e43] [cursor=pointer]
+            - generic [ref=e45] [cursor=pointer]: About your show
+          - button "Format" [ref=e46] [cursor=pointer]:
+            - img [ref=e47] [cursor=pointer]
+            - generic [ref=e49] [cursor=pointer]: Format
+          - button "Podcast Cover Art (optional)" [ref=e50] [cursor=pointer]:
+            - img [ref=e51] [cursor=pointer]
+            - generic [ref=e55] [cursor=pointer]: Podcast Cover Art (optional)
+          - button "Intro & Outro" [disabled]:
+            - img
+            - generic: Intro & Outro
+          - button "Music (optional)" [disabled]:
+            - img
+            - generic: Music (optional)
+          - button "How often will you publish?" [disabled]:
+            - img
+            - generic: How often will you publish?
+          - button "Publishing days" [disabled]:
+            - img
+            - generic: Publishing days
+          - button "Website Style" [disabled]:
+            - img
+            - generic: Website Style
+          - button "Create your website" [disabled]:
+            - img
+            - generic: Create your website
+          - button "Distribute to Apple & Spotify" [disabled]:
+            - img
+            - generic: Distribute to Apple & Spotify
+          - button "Other platforms" [disabled]:
+            - img
+            - generic: Other platforms
+          - button "All done!" [disabled]:
+            - img
+            - generic: All done!
+    - generic [ref=e56]:
+      - generic [ref=e57]:
+        - status [ref=e58]: "Step 5: Podcast Cover Art (optional)"
+        - navigation "Step Progress" [ref=e59]:
+          - list [ref=e60]:
+            - listitem [ref=e61]: "Step 1: What can we call you?"
+            - listitem [ref=e62]: "Step 2: Do you have an existing podcast?"
+            - listitem [ref=e63]: "Step 3: About your show"
+            - listitem [ref=e64]: "Step 4: Format"
+            - listitem [ref=e65]: "Step 5: Podcast Cover Art (optional)"
+            - listitem [ref=e66]: "Step 6: Intro & Outro"
+            - listitem [ref=e67]: "Step 7: Music (optional)"
+            - listitem [ref=e68]: "Step 8: How often will you publish?"
+            - listitem [ref=e69]: "Step 9: Publishing days"
+            - listitem [ref=e70]: "Step 10: Website Style"
+            - listitem [ref=e71]: "Step 11: Create your website"
+            - listitem [ref=e72]: "Step 12: Distribute to Apple & Spotify"
+            - listitem [ref=e73]: "Step 13: Other platforms"
+            - listitem [ref=e74]: "Step 14: All done!"
+        - generic [ref=e76]:
+          - img [ref=e77]
+          - 'heading "Step 5: Podcast Cover Art (optional)" [active] [level=2] [ref=e81]'
+      - generic [ref=e85]:
+        - generic [ref=e86]:
+          - generic [ref=e87]: Image
+          - generic [ref=e88]:
+            - checkbox "Skip this for now" [ref=e89]
+            - generic [ref=e90] [cursor=pointer]: Skip this for now
+        - generic [ref=e91]:
+          - generic [ref=e92]:
+            - button "Image" [ref=e93]
+            - paragraph [ref=e94]: You can resize and position your image below.
+          - generic [ref=e97]: or
+          - button "Generate with AI" [ref=e99] [cursor=pointer]:
+            - img
+            - text: Generate with AI
+      - generic [ref=e100]:
+        - button "Back" [ref=e101] [cursor=pointer]:
+          - img
+          - text: Back
+        - generic [ref=e102]:
+          - button "Continue" [disabled]:
+            - text: Continue
+            - img
+    - complementary [ref=e103]:
+      - generic [ref=e104]:
+        - generic [ref=e105]:
+          - img [ref=e106]
+          - generic [ref=e108]: Helpful tip
+        - paragraph [ref=e110]: No artwork yet? You can skip this for now.
+      - generic [ref=e111]:
+        - generic [ref=e112]:
+          - img [ref=e113]
+          - generic [ref=e116]: Need a hand?
+        - button "Contact Us" [ref=e119] [cursor=pointer]
+      - generic [ref=e120]:
+        - generic [ref=e121]:
+          - img [ref=e122]
+          - generic [ref=e125]: Start Over
+        - generic [ref=e126]:
+          - paragraph [ref=e127]: Clear all progress and start the wizard from the beginning.
+          - button "Start Over" [ref=e128] [cursor=pointer]:
+            - img
+            - text: Start Over
+```

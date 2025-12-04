@@ -186,8 +186,8 @@ def track_episode_play(episode_id: UUID, user_agent: str, ip: str):
    - Update RSS feed URL
    - Submit for review (usually approved in 24-48hrs)
 
-2. **Spotify for Podcasters**
-   - Login to podcasters.spotify.com  
+2. **Spotify for Creators**
+   - Login to creators.spotify.com  
    - Update RSS feed URL
    - Changes take effect within hours
 

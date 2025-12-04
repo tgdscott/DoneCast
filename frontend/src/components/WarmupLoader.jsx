@@ -51,7 +51,13 @@ export function WarmupLoader({ isVisible }) {
     >
       <div className="bg-white dark:bg-slate-900 rounded-lg shadow-2xl p-8 max-w-sm w-full mx-4 border border-slate-200 dark:border-slate-700">
         <div className="flex flex-col items-center justify-center space-y-4">
-          <Loader2 className="h-8 w-8 animate-spin text-blue-600 dark:text-blue-400" />
+          <img
+            src="/assets/branding/favicon.png"
+            alt="DoneCast icon"
+            className="h-10 w-10 animate-pulse"
+            aria-hidden="true"
+            loading="eager"
+          />
           <div className="text-center space-y-2">
             <p className="text-sm font-medium text-slate-900 dark:text-slate-100 animate-pulse">
               {currentMessage}

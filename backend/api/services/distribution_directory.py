@@ -59,15 +59,15 @@ _PLATFORMS: List[Dict[str, object]] = [
     },
     {
         "key": "spotify",
-        "name": "Spotify for Podcasters",
+        "name": "Spotify for Creators",
         "summary": "Submit to Spotify to reach Android, desktop, and smart speaker listeners.",
         "automation": "assisted",
         "automation_notes": "We provide a pre-filled submission link with your RSS feed.",
         "action_label": "Submit to Spotify",
-        "action_url_template": "https://podcasters.spotify.com/submit?feed={rss_feed_encoded}",
-        "docs_url": "https://podcasters.spotify.com/",
+        "action_url_template": "https://creators.spotify.com/pod/dashboard/submit?feed={rss_feed_encoded}",
+        "docs_url": "https://creators.spotify.com/",
         "instructions": [
-            "Sign in to Spotify for Podcasters (or create an account).",
+            "Sign in to Spotify for Creators (or create an account).",
             "Follow the claim flow; your RSS feed is pre-filled when you use our link.",
             "Verify ownership via the email sent to your podcast contact address, then complete the show setup.",
         ],
@@ -157,6 +157,7 @@ _PLATFORMS: List[Dict[str, object]] = [
         "automation": "assisted",
         "automation_notes": "We provide a pre-filled submission link with your RSS feed.",
         "action_label": "Submit to Castbox",
+        # Prefer pre-filled submit; fallback docs remains available
         "action_url_template": "https://castbox.fm/publisher/submit?feed={rss_feed_encoded}",
         "docs_url": "https://castbox.fm/publisher/",
         "instructions": [
@@ -174,6 +175,7 @@ _PLATFORMS: List[Dict[str, object]] = [
         "automation": "assisted",
         "automation_notes": "We provide a pre-filled submission link with your RSS feed.",
         "action_label": "Submit to Deezer",
+        # Prefer pre-filled submit; keep docs URL as backup
         "action_url_template": "https://podcasters.deezer.com/submit?feed={rss_feed_encoded}",
         "docs_url": "https://podcasters.deezer.com/",
         "instructions": [

@@ -18,7 +18,7 @@ export default function Guides() {
     {
       category: 'Getting Started',
       icon: PlayCircle,
-      description: 'New to Podcast Plus Plus? Start here to learn the basics',
+      description: 'New to DoneCast? Start here to learn the basics',
       items: [
         {
           title: 'Quick Start Guide',
@@ -27,7 +27,7 @@ export default function Guides() {
           content: `
 ## Quick Start Guide
 
-Welcome to Podcast Plus Plus! Here's how to create your first episode:
+Welcome to DoneCast! Here's how to create your first episode:
 
 ### 1. Complete Onboarding
 - Click through the onboarding wizard
@@ -379,7 +379,7 @@ The Manual Editor gives you complete control over your episode's final audio. Yo
 
 Every podcast gets a unique RSS feed URL:
 
-https://podcastplusplus.com/rss/your-show-name.xml
+https://donecast.com/rss/your-show-name.xml
 
 This feed updates automatically when you publish episodes.
 
@@ -401,7 +401,7 @@ This feed updates automatically when you publish episodes.
 
 ### Submitting to Spotify
 
-1. **Go to:** [Spotify for Podcasters](https://podcasters.spotify.com)
+1. **Go to:** [Spotify for Creators](https://creators.spotify.com)
 2. **Log in** or create account
 3. Click **"Get Started"**
 4. **Enter RSS feed URL**
@@ -496,7 +496,7 @@ Different platforms report differently:
 
 ### OP3 Analytics Integration
 
-Podcast Plus Plus uses OP3 (Open Podcast Prefix Project) for accurate tracking:
+DoneCast uses OP3 (Open Podcast Prefix Project) for accurate tracking:
 - Privacy-respecting analytics
 - Cross-platform aggregation
 - Industry-standard metrics
@@ -891,7 +891,7 @@ Create a professional podcast website with zero coding:
 1. **Go to Settings > Website**
 2. **Click "Build Website"**
 3. **Choose domain:**
-   - Free: yourshow.podcastplusplus.com
+   - Free: yourshow.donecast.com
    - Custom: yourshow.com (requires DNS setup)
 4. **Select theme/style**
 5. **Customize sections**
@@ -954,7 +954,7 @@ Create a professional podcast website with zero coding:
 2. **Add DNS records:**
    - Type: CNAME
    - Name: www (or @)
-   - Value: podcasts.podcastplusplus.com
+   - Value: podcasts.donecast.com
 3. **In Website Builder:** Enter your domain
 4. **Verify:** Takes 24-48 hours for DNS to propagate
 
@@ -1061,7 +1061,7 @@ Final audio assembly costs **3 credits per second** — covering your intros, ou
 
 Choose the plan that fits your production style:
 
-- **Starter:** 28,800 credits = about 2 hours of finished audio  
+- **Hobby:** 28,800 credits = about 2 hours of finished audio  
 
 - **Creator:** 72,000 credits = about 5 hours  
 
@@ -1234,17 +1234,17 @@ Simple, fair, and transparent — so you can focus on creating, not calculating.
 ### Contact Support
 
 **For Technical Issues:**
-- Email: support@podcastplusplus.com
+- Email: support@donecast.com
 - Include: Account email, episode ID (if applicable), screenshot
 - Response time: 24-48 hours
 
 **For Billing Questions:**
-- Email: billing@podcastplusplus.com
+- Email: billing@donecast.com
 - Include: Account email, invoice number (if applicable)
 - Response time: 24 hours
 
 **For Feature Requests:**
-- Email: feedback@podcastplusplus.com
+- Email: feedback@donecast.com
 - Or use the in-app feedback button
 - We review all suggestions!
 
@@ -1265,7 +1265,7 @@ Simple, fair, and transparent — so you can focus on creating, not calculating.
 ### Emergency Support
 
 For urgent production issues affecting live podcasts:
-- Email: urgent@podcastplusplus.com (Pro/Enterprise only)
+- Email: urgent@donecast.com (Pro/Enterprise only)
 - Expected response: 4 hours during business hours
 - Available: Monday-Friday, 9am-5pm PT
           `

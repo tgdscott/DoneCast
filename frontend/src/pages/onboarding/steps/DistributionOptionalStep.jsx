@@ -5,7 +5,10 @@ import { useToast } from "@/hooks/use-toast";
 import { makeApi } from "@/lib/apiClient";
 
 const OPTIONAL_PLATFORMS = [
+  // Keep Amazon first, then iHeart as requested
   "amazon_music",
+  "iheart",
+  // Remaining popular directories
   "castbox",
   "deezer",
   "podcast_addict",
@@ -13,7 +16,14 @@ const OPTIONAL_PLATFORMS = [
 ];
 
 export default function DistributionOptionalStep({ wizard }) {
-  const { token, targetPodcastId, rssFeedUrl, setRssFeedUrl } = wizard;
+  const {
+    token,
+    targetPodcastId,
+    setTargetPodcastId,
+    rssFeedUrl,
+    setRssFeedUrl,
+    ensurePodcastExists,
+  } = wizard;
   const [loading, setLoading] = useState(false);
   const [checklist, setChecklist] = useState(null);
   const [selectedPlatforms, setSelectedPlatforms] = useState(new Set());
@@ -21,10 +31,29 @@ export default function DistributionOptionalStep({ wizard }) {
   const { toast } = useToast();
 
   useEffect(() => {
-    if (targetPodcastId && token) {
-      loadChecklist();
-    }
-  }, [targetPodcastId, token]);
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      if (!token) return;
+      if (!targetPodcastId) {
+        if (typeof ensurePodcastExists === "function") {
+          const podcast = await ensurePodcastExists();
+          if (cancelled) return;
+          if (podcast?.id) {
+            setTargetPodcastId?.(podcast.id);
+            return;
+          }
+        }
+        return;
+      }
+      await loadChecklist();
+    };
+
+    bootstrap();
+    return () => {
+      cancelled = true;
+    };
+  }, [targetPodcastId, token, ensurePodcastExists, setTargetPodcastId]);
 
   const loadChecklist = async () => {
     if (!targetPodcastId || !token) return;

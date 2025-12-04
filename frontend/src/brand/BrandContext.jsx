@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useEffect, useMemo } from "react";
 import { BRANDS } from "./brands";
 
-const DEFAULT_KEY = "plusplus";
+const DEFAULT_KEY = "donecast";
 const BrandCtx = createContext({ brand: BRANDS[DEFAULT_KEY], setBrandKey: () => {} });
 
 export function BrandProvider({ children }) {

@@ -47,6 +47,7 @@ import Logo from "@/components/Logo.jsx";
 import Joyride, { STATUS } from "react-joyride";
 import { useResolvedTimezone } from "@/hooks/useResolvedTimezone";
 import { formatInTimezone } from "@/lib/timezone";
+import CustomTourTooltip from "@/components/dashboard/CustomTourTooltip";
 
 // Eager load components needed for dashboard view
 import EpisodeStartOptions from "@/components/dashboard/EpisodeStartOptions";
@@ -96,7 +97,7 @@ class LazyLoadErrorBoundary extends React.Component {
   componentDidCatch(error, errorInfo) {
     // Check if this is a chunk load error
     if (error?.message?.includes('Failed to fetch dynamically imported module') ||
-        error?.message?.includes('Loading chunk')) {
+      error?.message?.includes('Loading chunk')) {
       if (import.meta.env.DEV) console.warn('[LazyLoad] Chunk load error detected, will auto-reload');
       // The Vite plugin will handle reload, but this prevents error boundary crash
     }
@@ -105,8 +106,8 @@ class LazyLoadErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       const isChunkError = this.state.error?.message?.includes('Failed to fetch') ||
-                          this.state.error?.message?.includes('Loading chunk');
-      
+        this.state.error?.message?.includes('Loading chunk');
+
       return (
         <div className="flex flex-col items-center justify-center min-h-[400px] p-6">
           <AlertCircle className="w-12 h-12 text-orange-500 mb-4" />
@@ -114,7 +115,7 @@ class LazyLoadErrorBoundary extends React.Component {
             {isChunkError ? 'Loading Update...' : 'Something went wrong'}
           </h3>
           <p className="text-sm text-muted-foreground text-center max-w-md mb-4">
-            {isChunkError 
+            {isChunkError
               ? 'Podcast Plus Plus was recently updated. Refreshing to get the latest version...'
               : 'An error occurred loading this component.'}
           </p>
@@ -135,32 +136,32 @@ const isAdmin = (u) => !!(u && (u.is_admin || u.role === 'admin'));
 const DASHBOARD_TOUR_STORAGE_KEY = 'ppp_dashboard_tour_completed';
 
 function formatRelative(iso) {
-  if(!iso) return '—';
+  if (!iso) return '—';
   try {
     const d = new Date(iso);
     const diffMs = Date.now() - d.getTime();
-    const sec = Math.floor(diffMs/1000);
-    if(sec < 60) return 'just now';
-    const min = Math.floor(sec/60);
-    if(min < 60) return `${min}m ago`;
-    const hr = Math.floor(min/60);
-    if(hr < 24) return `${hr}h ago`;
-    const day = Math.floor(hr/24);
-    if(day < 30) return `${day}d ago`;
-    const mo = Math.floor(day/30);
-    if(mo < 12) return `${mo}mo ago`;
-    const yr = Math.floor(mo/12);
+    const sec = Math.floor(diffMs / 1000);
+    if (sec < 60) return 'just now';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr}h ago`;
+    const day = Math.floor(hr / 24);
+    if (day < 30) return `${day}d ago`;
+    const mo = Math.floor(day / 30);
+    if (mo < 12) return `${mo}mo ago`;
+    const yr = Math.floor(mo / 12);
     return `${yr}y ago`;
   } catch { return '—'; }
 }
 
 function formatAssemblyStatus(status) {
-  if(!status) return '—';
-  switch(status) {
+  if (!status) return '—';
+  switch (status) {
     case 'success': return 'Success';
     case 'error': return 'Error';
     case 'pending': return 'In Progress';
-    default: return status.charAt(0).toUpperCase()+status.slice(1);
+    default: return status.charAt(0).toUpperCase() + status.slice(1);
   }
 }
 
@@ -194,7 +195,7 @@ export default function PodcastPlusDashboard() {
   const [notifications, setNotifications] = useState([]);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [currentView, setCurrentView] = useState(() => {
-    try { if(localStorage.getItem('ppp_post_checkout')==='1') return 'billing'; } catch {}
+    try { if (localStorage.getItem('ppp_post_checkout') === '1') return 'billing'; } catch { }
     return 'dashboard';
   });
   const [selectedTemplateId, setSelectedTemplateId] = useState(null);
@@ -219,16 +220,16 @@ export default function PodcastPlusDashboard() {
   useEffect(() => {
     // Skip check if user data isn't hydrated yet (might be stale)
     if (!authUser) return;
-    
+
     const requiredVersion = authUser?.terms_version_required;
     const acceptedVersion = authUser?.terms_version_accepted;
-    
+
     // Only check if requiredVersion is set and differs from accepted
     // This prevents false positives when TERMS_VERSION isn't configured
     if (
-      requiredVersion && 
-      typeof requiredVersion === 'string' && 
-      requiredVersion.trim() !== '' && 
+      requiredVersion &&
+      typeof requiredVersion === 'string' &&
+      requiredVersion.trim() !== '' &&
       requiredVersion !== acceptedVersion
     ) {
       console.error('[Dashboard Safety Check] User bypassed TermsGate!', {
@@ -288,7 +289,7 @@ export default function PodcastPlusDashboard() {
         // Current state doesn't have dashboardView, fix it first
         window.history.replaceState({ dashboardView: previousView, inApp: true, ...currentState }, '', window.location.href);
       }
-      
+
       if (newView === 'dashboard') {
         // Going back to dashboard - ensure dashboard is at the end of history stack
         while (viewHistoryRef.current.length > 1 && viewHistoryRef.current[viewHistoryRef.current.length - 1] !== 'dashboard') {
@@ -318,7 +319,7 @@ export default function PodcastPlusDashboard() {
       }
     }
   }, [currentView]);
-  
+
   // Override setCurrentView to use history-aware version
   // We'll use this in the popstate handler, but for all other calls we need to replace setCurrentView
   // For now, let's update the popstate handler and key navigation points
@@ -327,23 +328,23 @@ export default function PodcastPlusDashboard() {
   useEffect(() => {
     const handlePopState = (event) => {
       const currentPath = window.location.pathname;
-      const isAppRoute = currentPath.startsWith('/app') || 
-                        currentPath.startsWith('/dashboard') || 
-                        currentPath.startsWith('/admin') ||
-                        (currentPath === '/' && authUser);
-      
+      const isAppRoute = currentPath.startsWith('/app') ||
+        currentPath.startsWith('/dashboard') ||
+        currentPath.startsWith('/admin') ||
+        (currentPath === '/' && authUser);
+
       // Always ensure we're still in an app route - if not, let App.jsx handle it
       if (!isAppRoute) {
         return; // Let App.jsx redirect back to app
       }
-      
+
       // Check if this is a dashboard view navigation
       if (event.state?.dashboardView) {
         // Restore the previous view
         isNavigatingFromPopStateRef.current = true;
         const targetView = event.state.dashboardView;
         setCurrentViewRef.current(targetView);
-        
+
         // Update history stack to match - find the view in our stack and trim to that point
         const idx = viewHistoryRef.current.indexOf(targetView);
         if (idx >= 0) {
@@ -507,7 +508,7 @@ export default function PodcastPlusDashboard() {
   const handleTourCallback = (data) => {
     const { status } = data;
     if ([STATUS.FINISHED, STATUS.SKIPPED].includes(status)) {
-      try { localStorage.setItem(DASHBOARD_TOUR_STORAGE_KEY, '1'); } catch {}
+      try { localStorage.setItem(DASHBOARD_TOUR_STORAGE_KEY, '1'); } catch { }
       setShouldRunTour(false);
     }
   };
@@ -525,19 +526,19 @@ export default function PodcastPlusDashboard() {
 
   // Track if we're currently fetching to prevent concurrent calls
   const fetchingRef = useRef(false);
-  
+
   const fetchData = useCallback(async () => {
     if (!token) return;
-    
+
     // Prevent concurrent fetches
     if (fetchingRef.current) {
       if (import.meta.env.DEV) console.log('[Dashboard] Skipping fetchData - already fetching');
       return;
     }
-    
+
     fetchingRef.current = true;
     if (import.meta.env.DEV) console.log('[Dashboard] Starting fetchData', { timestamp: Date.now() });
-    
+
     try {
       setStatsError(null);
       const api = makeApi(token);
@@ -631,11 +632,11 @@ export default function PodcastPlusDashboard() {
   useEffect(() => {
     fetchDataRef.current = fetchData;
   }, [fetchData]);
-  
-  useEffect(() => { 
-    if (token) { 
-      fetchDataRef.current(); 
-    } 
+
+  useEffect(() => {
+    if (token) {
+      fetchDataRef.current();
+    }
   }, [token]); // Only depend on token, not fetchData
   useEffect(() => {
     if (!token) return;
@@ -675,43 +676,43 @@ export default function PodcastPlusDashboard() {
       fetchData();
     }
   }, [token, currentView, fetchData]);
-  
+
   // Initial fetch of preuploaded items when dashboard loads
   useEffect(() => {
     if (token && currentView === 'dashboard' && !preuploadFetchedOnceRef.current) {
       refreshPreuploads();
     }
   }, [token, currentView, refreshPreuploads]);
-  
+
   // Poll for preupload updates when on dashboard with processing files
   useEffect(() => {
     if (!token || currentView !== 'dashboard') return;
-    
+
     // Check if we have any items that are still processing (not transcript_ready)
     const hasProcessingItems = preuploadItems.some((item) => !item?.transcript_ready);
-    
+
     if (!hasProcessingItems || preuploadItems.length === 0) return;
-    
+
     // Poll every 5 seconds while there are processing items
     const pollInterval = setInterval(() => {
       refreshPreuploads();
     }, 5000);
-    
+
     return () => clearInterval(pollInterval);
   }, [token, currentView, preuploadItems, refreshPreuploads]);
-  
+
   // Fetch notifications with adaptive polling to reduce DB load
   // - Default: 30 seconds (reduced from 10s to lower connection pressure)
   // - During upload/assembly: 60 seconds (reduce load during heavy operations)
   // - After upload: 60 seconds for 2 minutes, then back to 30s
   useEffect(() => {
-    if(!token) return;
+    if (!token) return;
     let cancelled = false;
     let intervalId = null;
     const UPLOAD_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutes after upload
     const DEFAULT_INTERVAL = 30000; // 30 seconds
     const SLOW_INTERVAL = 60000; // 60 seconds
-    
+
     // Check for recent upload activity in localStorage
     const checkRecentUpload = () => {
       try {
@@ -723,42 +724,42 @@ export default function PodcastPlusDashboard() {
           }
           localStorage.removeItem('ppp_last_upload_time');
         }
-      } catch {}
+      } catch { }
       return false;
     };
-    
+
     // Determine current polling interval based on state
     const getPollInterval = () => {
       const hasRecentUpload = checkRecentUpload();
-      const isInHeavyOperation = preuploadLoading || 
+      const isInHeavyOperation = preuploadLoading ||
         (currentView === 'createEpisode' && creatorMode !== 'preuploaded');
-      
+
       if (hasRecentUpload || isInHeavyOperation) {
         return SLOW_INTERVAL;
       }
       return DEFAULT_INTERVAL;
     };
-    
+
     const load = async () => {
       if (cancelled) return;
       try {
         const api = makeApi(token);
         const r = await api.get('/api/notifications/');
-        if(!cancelled && Array.isArray(r)) {
+        if (!cancelled && Array.isArray(r)) {
           setNotifications(curr => {
-            const map = new Map((curr||[]).map(n=>[n.id,n]));
+            const map = new Map((curr || []).map(n => [n.id, n]));
             const merged = r.map(n => {
               const existing = map.get(n.id);
-              if(existing && existing.read_at) return { ...n, read_at: existing.read_at };
+              if (existing && existing.read_at) return { ...n, read_at: existing.read_at };
               return n;
             });
-            for(const n of (curr||[])) if(!merged.find(m=>m.id===n.id)) merged.push(n);
-            return merged.sort((a,b)=> new Date(b.created_at||0) - new Date(a.created_at||0));
+            for (const n of (curr || [])) if (!merged.find(m => m.id === n.id)) merged.push(n);
+            return merged.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
           });
         }
-      } catch {}
+      } catch { }
     };
-    
+
     // Function to restart polling with correct interval
     const restartPolling = () => {
       if (intervalId) {
@@ -767,37 +768,37 @@ export default function PodcastPlusDashboard() {
       const interval = getPollInterval();
       intervalId = setInterval(load, interval);
     };
-    
+
     // Load immediately
     load();
-    
+
     // Start polling with initial interval
     restartPolling();
-    
+
     // Listen for upload events to adjust polling
     const handleUploadStart = () => {
       restartPolling(); // Will use SLOW_INTERVAL if in heavy operation
     };
-    
+
     const handleUploadComplete = () => {
       try {
         localStorage.setItem('ppp_last_upload_time', Date.now().toString());
-      } catch {}
+      } catch { }
       // Restart with slow interval (recent upload)
       restartPolling();
     };
-    
+
     // Listen for custom events from upload components
     window.addEventListener('ppp:upload:start', handleUploadStart);
     window.addEventListener('ppp:upload:complete', handleUploadComplete);
-    
+
     // Also restart polling when state changes
     const stateCheckInterval = setInterval(() => {
       if (!cancelled) {
         restartPolling();
       }
     }, 10000); // Check every 10s and adjust if needed
-    
+
     return () => {
       cancelled = true;
       if (intervalId) clearInterval(intervalId);
@@ -810,53 +811,53 @@ export default function PodcastPlusDashboard() {
   useEffect(() => {
     let bc;
     try {
-  bc = new BroadcastChannel('ppp_billing');
+      bc = new BroadcastChannel('ppp_billing');
       bc.onmessage = (e) => {
-        if(e?.data?.type === 'checkout_success') {
+        if (e?.data?.type === 'checkout_success') {
           // Refresh notifications & maybe toast
-          (async ()=>{
+          (async () => {
             try {
               const api = makeApi(token);
               const d = await api.get('/api/notifications/');
-              setNotifications(curr=>{
-            const map = new Map((curr||[]).map(n=>[n.id,n]));
-                const merged = (Array.isArray(d)? d: []).map(n=>{ const ex = map.get(n.id); if(ex && ex.read_at) return { ...n, read_at: ex.read_at }; return n; });
-                for(const n of (curr||[])) if(!merged.find(m=>m.id===n.id)) merged.push(n);
-                return merged.sort((a,b)=> new Date(b.created_at||0) - new Date(a.created_at||0));
+              setNotifications(curr => {
+                const map = new Map((curr || []).map(n => [n.id, n]));
+                const merged = (Array.isArray(d) ? d : []).map(n => { const ex = map.get(n.id); if (ex && ex.read_at) return { ...n, read_at: ex.read_at }; return n; });
+                for (const n of (curr || [])) if (!merged.find(m => m.id === n.id)) merged.push(n);
+                return merged.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
               });
-            } catch {}
+            } catch { }
           })();
-        } else if(e?.data?.type === 'subscription_updated') {
+        } else if (e?.data?.type === 'subscription_updated') {
           // Refetch subscription in case Billing page not mounted & show toast if not already billing view
-          if(currentView !== 'billing') {
-            toast({ title:'Subscription Updated', description:`Plan changed to ${e.data.payload?.plan_key}`, duration:5000 });
+          if (currentView !== 'billing') {
+            toast({ title: 'Subscription Updated', description: `Plan changed to ${e.data.payload?.plan_key}`, duration: 5000 });
           }
         }
       };
-    } catch {}
+    } catch { }
     const storageHandler = (ev) => {
-      if(ev.key === 'ppp_last_checkout') {
-        (async ()=>{
+      if (ev.key === 'ppp_last_checkout') {
+        (async () => {
           try {
             const api = makeApi(token);
             const d = await api.get('/api/notifications/');
-            setNotifications(curr=>{
-              const map = new Map((curr||[]).map(n=>[n.id,n]));
-              const merged = (Array.isArray(d)? d: []).map(n=>{ const ex = map.get(n.id); if(ex && ex.read_at) return { ...n, read_at: ex.read_at }; return n; });
-              for(const n of (curr||[])) if(!merged.find(m=>m.id===n.id)) merged.push(n);
-              return merged.sort((a,b)=> new Date(b.created_at||0) - new Date(a.created_at||0));
+            setNotifications(curr => {
+              const map = new Map((curr || []).map(n => [n.id, n]));
+              const merged = (Array.isArray(d) ? d : []).map(n => { const ex = map.get(n.id); if (ex && ex.read_at) return { ...n, read_at: ex.read_at }; return n; });
+              for (const n of (curr || [])) if (!merged.find(m => m.id === n.id)) merged.push(n);
+              return merged.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
             });
-          } catch {}
+          } catch { }
         })();
       }
     };
     window.addEventListener('storage', storageHandler);
-    return () => { try { bc && bc.close(); } catch{} window.removeEventListener('storage', storageHandler); };
+    return () => { try { bc && bc.close(); } catch { } window.removeEventListener('storage', storageHandler); };
   }, [token, currentView, toast]);
   // Sync local user with auth context
   useEffect(() => { setUser(authUser); }, [authUser]);
   // Clear post-checkout flag once we've mounted and possibly navigated
-  useEffect(() => { if(currentView==='billing') { try { localStorage.removeItem('ppp_post_checkout'); } catch {} } }, [currentView]);
+  useEffect(() => { if (currentView === 'billing') { try { localStorage.removeItem('ppp_post_checkout'); } catch { } } }, [currentView]);
 
   const handleEditTemplate = (templateId) => {
     setSelectedTemplateId(templateId);
@@ -869,27 +870,27 @@ export default function PodcastPlusDashboard() {
     setCurrentView('dashboard');
     // Don't call fetchData here - the useEffect will handle it when currentView changes to 'dashboard'
   }, []);
-  
+
   const handleBackToTemplateManager = () => {
-      setSelectedTemplateId(null);
-      setCurrentView('templateManager');
+    setSelectedTemplateId(null);
+    setCurrentView('templateManager');
   }
 
   const handleDeleteTemplate = async (templateId) => {
     if (!window.confirm("Are you sure you want to delete this template? This cannot be undone.")) return;
-  try {
-    const api = makeApi(token);
-    await api.del(`/api/templates/${templateId}`);
-    toast({ title: "All done!", description: "Template deleted." });
-    fetchData(); 
-  } catch (err) {
-    const msg = (err && err.message) || '';
-    if (msg.toLowerCase().includes('at least one template')){
-      toast({ title: "Action needed", description: "Create another template before deleting your last one.", variant: "destructive" });
-    } else {
-      toast({ title: "Error", description: msg || 'Delete failed', variant: "destructive" });
+    try {
+      const api = makeApi(token);
+      await api.del(`/api/templates/${templateId}`);
+      toast({ title: "All done!", description: "Template deleted." });
+      fetchData();
+    } catch (err) {
+      const msg = (err && err.message) || '';
+      if (msg.toLowerCase().includes('at least one template')) {
+        toast({ title: "Action needed", description: "Create another template before deleting your last one.", variant: "destructive" });
+      } else {
+        toast({ title: "Error", description: msg || 'Delete failed', variant: "destructive" });
+      }
     }
-  }
   };
 
   // Memoize targetPodcast for websiteBuilder to prevent re-renders
@@ -898,26 +899,26 @@ export default function PodcastPlusDashboard() {
     if (!podcasts || podcasts.length === 0) return '';
     return podcasts.map(p => p.id).sort().join(',');
   }, [podcasts]);
-  
+
   // Create a stable map that only updates when podcast IDs actually change
   const podcastsMapRef = useRef(new Map());
   const lastPodcastsIdsStringRef = useRef('');
-  
+
   if (podcastsIdsString !== lastPodcastsIdsStringRef.current) {
     // Podcasts actually changed, rebuild the map
     podcastsMapRef.current.clear();
     podcasts?.forEach(p => podcastsMapRef.current.set(p.id, p));
     lastPodcastsIdsStringRef.current = podcastsIdsString;
   }
-  
+
   const targetPodcastForBuilder = useMemo(() => {
     if (currentView !== 'websiteBuilder') return null;
     if (!podcastsIdsString || podcastsMapRef.current.size === 0) return null;
-    
+
     // Get first podcast ID from the map if no selection
     const firstPodcastId = selectedPodcastId || Array.from(podcastsMapRef.current.keys())[0];
     if (!firstPodcastId) return null;
-    
+
     return podcastsMapRef.current.get(firstPodcastId) || null;
   }, [currentView, selectedPodcastId, podcastsIdsString]); // Only depend on IDs string, not array
 
@@ -934,7 +935,7 @@ export default function PodcastPlusDashboard() {
                   setPreselectedMainFilename(filename || hint || null);
                   setPreselectedTranscriptReady(!!transcriptReady);
                   setWasRecorded(true);
-                } catch {}
+                } catch { }
                 // Return to main dashboard after recording (not the Episode Creator)
                 handleBackToDashboard();
               }}
@@ -951,7 +952,7 @@ export default function PodcastPlusDashboard() {
             onRetry={() => {
               try {
                 requestPreuploadRefresh();
-              } catch {}
+              } catch { }
             }}
             onBack={handleBackToDashboard}
             onChooseRecord={() => {
@@ -1033,7 +1034,7 @@ export default function PodcastPlusDashboard() {
       case 'websiteBuilder': {
         // Use memoized targetPodcast to prevent re-renders
         const targetPodcast = targetPodcastForBuilder;
-        
+
         // Debug: Log when targetPodcast changes (dev only)
         if (import.meta.env.DEV && targetPodcast) {
           console.log('[Dashboard] Rendering websiteBuilder', {
@@ -1044,7 +1045,7 @@ export default function PodcastPlusDashboard() {
             timestamp: Date.now()
           });
         }
-        
+
         if (!targetPodcast) {
           return (
             <div className="p-8 text-center">
@@ -1067,10 +1068,10 @@ export default function PodcastPlusDashboard() {
       case 'podcastManager':
         return (
           <Suspense fallback={<ComponentLoader />}>
-            <PodcastManager 
-              onBack={handleBackToDashboard} 
-              token={token} 
-              podcasts={podcasts} 
+            <PodcastManager
+              onBack={handleBackToDashboard}
+              token={token}
+              podcasts={podcasts}
               setPodcasts={setPodcasts}
               onViewAnalytics={(podcastId) => {
                 setSelectedPodcastId(podcastId);
@@ -1106,9 +1107,9 @@ export default function PodcastPlusDashboard() {
       case 'analytics':
         return (
           <Suspense fallback={<ComponentLoader />}>
-            <PodcastAnalytics 
-              podcastId={selectedPodcastId} 
-              token={token} 
+            <PodcastAnalytics
+              podcastId={selectedPodcastId}
+              token={token}
               onBack={handleBackToDashboard}
             />
           </Suspense>
@@ -1118,6 +1119,25 @@ export default function PodcastPlusDashboard() {
         const canCreateEpisode = podcasts.length > 0 && templates.length > 0;
         return (
           <div className="space-y-8">
+            {/* Onboarding nudge */}
+            {(() => {
+              let show = false;
+              try {
+                const completed = localStorage.getItem('ppp.onboarding.completed');
+                show = !completed;
+              } catch {}
+              return show ? (
+                <div className="rounded-lg border bg-amber-50 text-amber-900 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <div className="font-medium">Finish setting up your DoneCast onboarding</div>
+                      <div className="text-sm">Complete intro/outro, distribution, and website to streamline episode creation.</div>
+                    </div>
+                    <a href="/onboarding" className="px-3 py-2 rounded bg-primary text-white">Resume</a>
+                  </div>
+                </div>
+              ) : null;
+            })()}
             {/* Hero / Greeting */}
             <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
               <div>
@@ -1161,51 +1181,51 @@ export default function PodcastPlusDashboard() {
                         <div className="font-semibold text-gray-800">{stats?.total_episodes ?? '–'}</div>
                       </button>
                     </div>
-                      <div className="flex flex-col gap-2 w-full md:w-auto">
-                        {canCreateEpisode && (
-                          <>
+                    <div className="flex flex-col gap-2 w-full md:w-auto">
+                      {canCreateEpisode && (
+                        <>
+                          <Button
+                            className="flex-1 md:flex-none"
+                            variant="default"
+                            title="Record or upload new audio"
+                            data-tour-id="dashboard-record-upload"
+                            onClick={async () => {
+                              setCreatorMode('standard');
+                              setWasRecorded(false);
+                              // Refresh preuploaded items before showing options
+                              if (!preuploadLoading && preuploadItems.length === 0) {
+                                try { await requestPreuploadRefresh(); } catch { }
+                              }
+                              setCurrentView('episodeStart');
+                            }}
+                          >
+                            <Mic className="w-4 h-4 mr-2" />
+                            Record or Upload Audio
+                          </Button>
+                          {preuploadItems.some((item) => item?.transcript_ready) && (
                             <Button
+                              variant="green"
                               className="flex-1 md:flex-none"
-                              variant="default"
-                              title="Record or upload new audio"
-                              data-tour-id="dashboard-record-upload"
+                              title="Assemble episode from ready audio"
+                              data-tour-id="dashboard-assemble-episode"
                               onClick={async () => {
-                                setCreatorMode('standard');
+                                setCreatorMode('preuploaded');
                                 setWasRecorded(false);
-                                // Refresh preuploaded items before showing options
+                                setPreselectedMainFilename(null);
+                                setPreselectedTranscriptReady(false);
+                                resetPreuploadFetchedFlag();
                                 if (!preuploadLoading && preuploadItems.length === 0) {
-                                  try { await requestPreuploadRefresh(); } catch {}
+                                  try { await requestPreuploadRefresh(); } catch { }
                                 }
-                                setCurrentView('episodeStart');
+                                setCurrentView('createEpisode');
                               }}
                             >
-                              <Mic className="w-4 h-4 mr-2" />
-                              Record or Upload Audio
+                              <Library className="w-4 h-4 mr-2" />
+                              Assemble New Episode
                             </Button>
-                            {preuploadItems.some((item) => item?.transcript_ready) && (
-                              <Button
-                                variant="green"
-                                className="flex-1 md:flex-none"
-                                title="Assemble episode from ready audio"
-                                data-tour-id="dashboard-assemble-episode"
-                                onClick={async () => {
-                                  setCreatorMode('preuploaded');
-                                  setWasRecorded(false);
-                                  setPreselectedMainFilename(null);
-                                  setPreselectedTranscriptReady(false);
-                                  resetPreuploadFetchedFlag();
-                                  if (!preuploadLoading && preuploadItems.length === 0) {
-                                    try { await requestPreuploadRefresh(); } catch {}
-                                  }
-                                  setCurrentView('createEpisode');
-                                }}
-                              >
-                                <Library className="w-4 h-4 mr-2" />
-                                Assemble New Episode
-                              </Button>
-                            )}
-                          </>
-                        )}
+                          )}
+                        </>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -1231,41 +1251,41 @@ export default function PodcastPlusDashboard() {
                       </div>
                       <div className="p-3 rounded border bg-white flex flex-col gap-1">
                         <span className="text-[11px] tracking-wide text-gray-500">Last assembly result</span>
-                        <span className={`text-sm font-medium ${stats?.last_assembly_status==='error'?'text-red-600': stats?.last_assembly_status==='success'?'text-green-600': stats?.last_assembly_status==='pending'?'text-amber-600':'text-gray-600'}`}>{formatAssemblyStatus(stats?.last_assembly_status)}</span>
+                        <span className={`text-sm font-medium ${stats?.last_assembly_status === 'error' ? 'text-red-600' : stats?.last_assembly_status === 'success' ? 'text-green-600' : stats?.last_assembly_status === 'pending' ? 'text-amber-600' : 'text-gray-600'}`}>{formatAssemblyStatus(stats?.last_assembly_status)}</span>
                       </div>
                     </div>
-          {(typeof stats?.plays_last_30d === 'number' || typeof stats?.plays_7d === 'number' || typeof stats?.plays_365d === 'number' || typeof stats?.plays_all_time === 'number' || typeof stats?.show_total_plays === 'number' || (Array.isArray(stats?.top_episodes) && stats.top_episodes.length > 0)) && (
+                    {(typeof stats?.plays_last_30d === 'number' || typeof stats?.plays_7d === 'number' || typeof stats?.plays_365d === 'number' || typeof stats?.plays_all_time === 'number' || typeof stats?.show_total_plays === 'number' || (Array.isArray(stats?.top_episodes) && stats.top_episodes.length > 0)) && (
                       <div className="space-y-3">
                         <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Listening Stats</div>
-                        
+
                         {/* Time Period Cards */}
                         <div className="grid md:grid-cols-2 gap-3">
-              {typeof stats?.plays_7d === 'number' && (
+                          {typeof stats?.plays_7d === 'number' && (
                             <div className="p-3 rounded border bg-white flex flex-col gap-1">
-                <span className="text-[11px] tracking-wide text-gray-500">Downloads Last 7 Days</span>
-                <span className="text-lg font-semibold">{stats.plays_7d.toLocaleString()}</span>
+                              <span className="text-[11px] tracking-wide text-gray-500">Downloads Last 7 Days</span>
+                              <span className="text-lg font-semibold">{stats.plays_7d.toLocaleString()}</span>
                             </div>
                           )}
-              {typeof stats?.plays_30d === 'number' && (
+                          {typeof stats?.plays_30d === 'number' && (
                             <div className="p-3 rounded border bg-white flex flex-col gap-1">
-                <span className="text-[11px] tracking-wide text-gray-500">Downloads Last 30 Days</span>
-                <span className="text-lg font-semibold">{stats.plays_30d.toLocaleString()}</span>
+                              <span className="text-[11px] tracking-wide text-gray-500">Downloads Last 30 Days</span>
+                              <span className="text-lg font-semibold">{stats.plays_30d.toLocaleString()}</span>
                             </div>
                           )}
-              {typeof stats?.plays_365d === 'number' && (
+                          {typeof stats?.plays_365d === 'number' && (
                             <div className="p-3 rounded border bg-white flex flex-col gap-1">
-                <span className="text-[11px] tracking-wide text-gray-500">Downloads Last Year</span>
-                <span className="text-lg font-semibold">{stats.plays_365d.toLocaleString()}</span>
+                              <span className="text-[11px] tracking-wide text-gray-500">Downloads Last Year</span>
+                              <span className="text-lg font-semibold">{stats.plays_365d.toLocaleString()}</span>
                             </div>
                           )}
-              {typeof stats?.plays_all_time === 'number' && (
+                          {typeof stats?.plays_all_time === 'number' && (
                             <div className="p-3 rounded border bg-white flex flex-col gap-1">
-                <span className="text-[11px] tracking-wide text-gray-500">All-Time Downloads</span>
-                <span className="text-lg font-semibold">{stats.plays_all_time.toLocaleString()}</span>
+                              <span className="text-[11px] tracking-wide text-gray-500">All-Time Downloads</span>
+                              <span className="text-lg font-semibold">{stats.plays_all_time.toLocaleString()}</span>
                             </div>
                           )}
                         </div>
-                        
+
                         {/* Top Episodes Section */}
                         {Array.isArray(stats?.top_episodes) && stats.top_episodes.length > 0 && (
                           <div className="space-y-2">
@@ -1286,7 +1306,7 @@ export default function PodcastPlusDashboard() {
                         )}
                       </div>
                     )}
-                    
+
                     {/* Recent Episodes Section */}
                     {Array.isArray(stats?.recent_episodes) && stats.recent_episodes.length > 0 && (
                       <div className="space-y-2">
@@ -1304,7 +1324,7 @@ export default function PodcastPlusDashboard() {
                         ))}
                       </div>
                     )}
-                    
+
                     <p className="text-[11px] text-gray-400">Analytics powered by OP3 (Open Podcast Prefix Project). Updates every 3 hours.</p>
                     {stats?.op3_enabled && (stats?.plays_7d === 0 && stats?.plays_30d === 0 && stats?.plays_all_time === 0) && (
                       <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
@@ -1318,33 +1338,33 @@ export default function PodcastPlusDashboard() {
               </div>
               {/* Quick Tools */}
               <div className="space-y-6">
-        <Card className="shadow-sm border border-gray-200">
+                <Card className="shadow-sm border border-gray-200">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-lg">Quick Tools</CardTitle>
                     <CardDescription className="text-xs">Jump directly into a management area.</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <div className="grid grid-cols-2 gap-3">
-          <Button onClick={() => setCurrentViewWithHistory('podcastManager')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-podcasts"><Podcast className="w-4 h-4 mr-2" />Podcasts</Button>
+                      <Button onClick={() => setCurrentViewWithHistory('podcastManager')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-podcasts"><Podcast className="w-4 h-4 mr-2" />Podcasts</Button>
                       <Button onClick={() => setCurrentViewWithHistory('templateManager')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-templates"><FileText className="w-4 h-4 mr-2" />Templates</Button>
                       <Button onClick={() => setCurrentViewWithHistory('mediaLibrary')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-media"><Music className="w-4 h-4 mr-2" />Media</Button>
-          <Button onClick={() => setCurrentViewWithHistory('episodeHistory')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-episodes"><BarChart3 className="w-4 h-4 mr-2" />Episodes</Button>
-          <Button 
-            onClick={() => {
-              if (podcasts.length > 0) {
-                setSelectedPodcastId(podcasts[0].id);
-                setCurrentViewWithHistory('analytics');
-              }
-            }} 
-            variant="outline" 
-            className="justify-start text-sm h-10" 
-            data-tour-id="dashboard-quicktool-analytics"
-            disabled={podcasts.length === 0}
-          >
-            <BarChart3 className="w-4 h-4 mr-2" />Analytics
-          </Button>
-          {/* Import moved under Podcasts */}
-          <Button onClick={() => setCurrentViewWithHistory('billing')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-subscription"><DollarSign className="w-4 h-4 mr-2" />Subscription</Button>
+                      <Button onClick={() => setCurrentViewWithHistory('episodeHistory')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-episodes"><BarChart3 className="w-4 h-4 mr-2" />Episodes</Button>
+                      <Button
+                        onClick={() => {
+                          if (podcasts.length > 0) {
+                            setSelectedPodcastId(podcasts[0].id);
+                            setCurrentViewWithHistory('analytics');
+                          }
+                        }}
+                        variant="outline"
+                        className="justify-start text-sm h-10"
+                        data-tour-id="dashboard-quicktool-analytics"
+                        disabled={podcasts.length === 0}
+                      >
+                        <BarChart3 className="w-4 h-4 mr-2" />Analytics
+                      </Button>
+                      {/* Import moved under Podcasts */}
+                      <Button onClick={() => setCurrentViewWithHistory('billing')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-subscription"><DollarSign className="w-4 h-4 mr-2" />Subscription</Button>
                       <Button onClick={() => setCurrentViewWithHistory('settings')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-settings"><SettingsIcon className="w-4 h-4 mr-2" />Settings</Button>
                       <Button
                         onClick={() => window.location.href = '/guides'}
@@ -1365,9 +1385,9 @@ export default function PodcastPlusDashboard() {
                         Website Builder
                       </Button>
                       {(authUser?.role === 'admin' || authUser?.role === 'superadmin' || isAdmin(authUser)) && (
-                        <Button 
-                          onClick={() => window.location.href = '/dashboard?admin=1'} 
-                          variant="outline" 
+                        <Button
+                          onClick={() => window.location.href = '/dashboard?admin=1'}
+                          variant="outline"
                           className="justify-start text-sm h-10 border-orange-300 hover:bg-orange-50"
                           data-tour-id="dashboard-quicktool-admin-panel"
                           title="Access admin panel for user management and platform settings"
@@ -1377,9 +1397,9 @@ export default function PodcastPlusDashboard() {
                         </Button>
                       )}
                       {authUser?.email === 'wordsdonewrite@gmail.com' && (
-                        <Button 
-                          onClick={() => window.location.href = '/admin?tab=landing'} 
-                          variant="outline" 
+                        <Button
+                          onClick={() => window.location.href = '/admin?tab=landing'}
+                          variant="outline"
                           className="justify-start text-sm h-10 border-blue-300 hover:bg-blue-50"
                           data-tour-id="dashboard-quicktool-landing-editor"
                           title="Edit customer testimonials and FAQs on the front page"
@@ -1398,7 +1418,7 @@ export default function PodcastPlusDashboard() {
       }
     }
   };
-  
+
   useEffect(() => {
     const toBilling = () => setCurrentView('billing');
     window.addEventListener('ppp:navigate-billing', toBilling);
@@ -1406,7 +1426,7 @@ export default function PodcastPlusDashboard() {
       try {
         const v = e?.detail;
         if (typeof v === 'string') setCurrentView(v);
-      } catch {}
+      } catch { }
     };
     window.addEventListener('ppp:navigate-view', toView);
     return () => {
@@ -1433,7 +1453,7 @@ export default function PodcastPlusDashboard() {
         return;
       }
 
-      const firstTarget = document.querySelector('[data-tour-id="dashboard-new-episode"]');
+      const firstTarget = document.querySelector('[data-tour-id="dashboard-record-upload"]');
       if (firstTarget) {
         setShouldRunTour(true);
       }
@@ -1461,6 +1481,7 @@ export default function PodcastPlusDashboard() {
           last: "Let's Do This!",
           skip: "Skip Tour",
         }}
+        tooltipComponent={CustomTourTooltip}
       />
       <nav className="border-b border-gray-200 px-4 py-4 bg-white shadow-sm safe-top">
         <div className="container mx-auto max-w-7xl flex justify-between items-center">
@@ -1478,50 +1499,47 @@ export default function PodcastPlusDashboard() {
           </div>
           <div className="flex items-center space-x-2 sm:space-x-4">
             <div className="relative">
-              <Button variant="ghost" size="sm" className="relative" onClick={()=>setShowNotifPanel(v=>!v)}>
+              <Button variant="ghost" size="sm" className="relative" onClick={() => setShowNotifPanel(v => !v)}>
                 <Bell className="w-5 h-5" />
-                {notifications.filter(n=>!n.read_at).length > 0 && (
-                  <Badge className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 flex items-center justify-center bg-red-500 text-white text-xs">{notifications.filter(n=>!n.read_at).length}</Badge>
+                {notifications.filter(n => !n.read_at).length > 0 && (
+                  <Badge className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 flex items-center justify-center bg-red-500 text-white text-xs">{notifications.filter(n => !n.read_at).length}</Badge>
                 )}
               </Button>
               {showNotifPanel && (
                 <div className="absolute right-0 mt-2 w-80 bg-white border border-gray-200 rounded shadow-lg z-50 max-h-96 overflow-auto">
                   <div className="p-3 font-semibold border-b flex items-center justify-between">
                     <span>Notifications</span>
-                    {notifications.some(n=>!n.read_at) && (
+                    {notifications.some(n => !n.read_at) && (
                       <button
                         className="text-xs text-blue-600 hover:underline"
-                        onClick={async ()=>{
+                        onClick={async () => {
                           try {
                             const api = makeApi(token);
                             await api.post('/api/notifications/read-all');
-                            setNotifications(curr=>curr.map(n=> n.read_at ? n : { ...n, read_at: new Date().toISOString() }));
-                          } catch {}
+                            setNotifications(curr => curr.map(n => n.read_at ? n : { ...n, read_at: new Date().toISOString() }));
+                          } catch { }
                         }}
                       >Mark all read</button>
                     )}
                   </div>
                   {notifications.length === 0 && <div className="p-3 text-sm text-gray-500">No notifications</div>}
                   {notifications.map(n => (
-                    <div 
-                      key={n.id} 
-                      className={`p-3 text-sm border-b last:border-b-0 flex flex-col gap-1 ${
-                        n.type === 'error' ? 'bg-red-50 border-red-200' : ''
-                      }`}
+                    <div
+                      key={n.id}
+                      className={`p-3 text-sm border-b last:border-b-0 flex flex-col gap-1 ${n.type === 'error' ? 'bg-red-50 border-red-200' : ''
+                        }`}
                     >
                       <div className="flex items-center justify-between">
-                        <div className={`font-medium mr-2 truncate ${
-                          n.type === 'error' ? 'text-red-700' : ''
-                        }`}>{n.title}</div>
+                        <div className={`font-medium mr-2 truncate ${n.type === 'error' ? 'text-red-700' : ''
+                          }`}>{n.title}</div>
                         <div className="text-[11px] text-gray-500 whitespace-nowrap">{formatShort(n.created_at, resolvedTimezone)}</div>
                       </div>
-                      {n.body && <div className={`text-xs ${
-                        n.type === 'error' ? 'text-red-600' : 'text-gray-600'
-                      }`}>{n.body}</div>}
-                      {!n.read_at && <button className="text-xs text-blue-600 self-start" onClick={async ()=>{ try { const api = makeApi(token); await api.post(`/api/notifications/${n.id}/read`); setNotifications(curr=>curr.map(x=>x.id===n.id?{...x,read_at:new Date().toISOString()}:x)); } catch{} }}>Mark read</button>}
+                      {n.body && <div className={`text-xs ${n.type === 'error' ? 'text-red-600' : 'text-gray-600'
+                        }`}>{n.body}</div>}
+                      {!n.read_at && <button className="text-xs text-blue-600 self-start" onClick={async () => { try { const api = makeApi(token); await api.post(`/api/notifications/${n.id}/read`); setNotifications(curr => curr.map(x => x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x)); } catch { } }}>Mark read</button>}
                     </div>
                   ))}
-                </div>) }
+                </div>)}
             </div>
             <div className="flex items-center space-x-3">
               {user?.picture ? (
@@ -1541,36 +1559,36 @@ export default function PodcastPlusDashboard() {
           </div>
         </div>
       </nav>
-      
+
       {/* Mobile Menu Overlay and Drawer */}
       {mobileMenuOpen && (
         <>
-          <div 
+          <div
             className="fixed inset-0 bg-black/50 z-40 lg:hidden transition-opacity duration-300 animate-in fade-in"
             onClick={() => setMobileMenuOpen(false)}
           />
-          <div 
+          <div
             className="fixed top-0 left-0 bottom-0 w-[280px] bg-white shadow-xl z-50 overflow-y-auto lg:hidden safe-top safe-bottom transform transition-transform duration-300 ease-out animate-in slide-in-from-left"
             onTouchStart={(e) => {
               const touch = e.touches[0];
               const startX = touch.clientX;
               const drawer = e.currentTarget;
-              
+
               const handleTouchMove = (moveEvent) => {
                 const currentX = moveEvent.touches[0].clientX;
                 const deltaX = currentX - startX;
-                
+
                 // Only allow swiping left (closing)
                 if (deltaX < 0) {
                   const translateX = Math.max(deltaX, -280);
                   drawer.style.transform = `translateX(${translateX}px)`;
                 }
               };
-              
+
               const handleTouchEnd = (endEvent) => {
                 const endX = endEvent.changedTouches[0].clientX;
                 const deltaX = endX - startX;
-                
+
                 // If swiped more than 30% of drawer width, close it
                 if (deltaX < -84) {
                   setMobileMenuOpen(false);
@@ -1578,11 +1596,11 @@ export default function PodcastPlusDashboard() {
                   // Snap back
                   drawer.style.transform = '';
                 }
-                
+
                 drawer.removeEventListener('touchmove', handleTouchMove);
                 drawer.removeEventListener('touchend', handleTouchEnd);
               };
-              
+
               drawer.addEventListener('touchmove', handleTouchMove, { passive: true });
               drawer.addEventListener('touchend', handleTouchEnd);
             }}
@@ -1590,8 +1608,8 @@ export default function PodcastPlusDashboard() {
             <div className="p-4 border-b">
               <div className="flex items-center justify-between mb-4">
                 <Logo size={24} lockup />
-                <Button 
-                  variant="ghost" 
+                <Button
+                  variant="ghost"
                   size="sm"
                   onClick={() => setMobileMenuOpen(false)}
                   className="touch-target-icon"
@@ -1613,88 +1631,88 @@ export default function PodcastPlusDashboard() {
             </div>
             <div className="p-4 space-y-2">
               {currentView !== 'dashboard' && (
-                <Button 
-                  onClick={() => { setCurrentView('dashboard'); setMobileMenuOpen(false); }} 
-                  variant="outline" 
+                <Button
+                  onClick={() => { setCurrentView('dashboard'); setMobileMenuOpen(false); }}
+                  variant="outline"
                   className="w-full justify-start touch-target"
                 >
                   <ArrowLeft className="w-4 h-4 mr-2" />Dashboard
                 </Button>
               )}
-              <Button 
-                onClick={() => { setCurrentViewWithHistory('podcastManager'); setMobileMenuOpen(false); }} 
-                variant="outline" 
+              <Button
+                onClick={() => { setCurrentViewWithHistory('podcastManager'); setMobileMenuOpen(false); }}
+                variant="outline"
                 className="w-full justify-start touch-target"
               >
                 <Podcast className="w-4 h-4 mr-2" />Podcasts
               </Button>
-              <Button 
-                onClick={() => { setCurrentViewWithHistory('templateManager'); setMobileMenuOpen(false); }} 
-                variant="outline" 
+              <Button
+                onClick={() => { setCurrentViewWithHistory('templateManager'); setMobileMenuOpen(false); }}
+                variant="outline"
                 className="w-full justify-start touch-target"
               >
                 <FileText className="w-4 h-4 mr-2" />Templates
               </Button>
-              <Button 
-                onClick={() => { setCurrentViewWithHistory('mediaLibrary'); setMobileMenuOpen(false); }} 
-                variant="outline" 
+              <Button
+                onClick={() => { setCurrentViewWithHistory('mediaLibrary'); setMobileMenuOpen(false); }}
+                variant="outline"
                 className="w-full justify-start touch-target"
               >
                 <Music className="w-4 h-4 mr-2" />Media
               </Button>
-              <Button 
-                onClick={() => { setCurrentViewWithHistory('episodeHistory'); setMobileMenuOpen(false); }} 
-                variant="outline" 
+              <Button
+                onClick={() => { setCurrentViewWithHistory('episodeHistory'); setMobileMenuOpen(false); }}
+                variant="outline"
                 className="w-full justify-start touch-target"
               >
                 <BarChart3 className="w-4 h-4 mr-2" />Episodes
               </Button>
-              <Button 
-                onClick={() => { 
+              <Button
+                onClick={() => {
                   if (podcasts.length > 0) {
                     setSelectedPodcastId(podcasts[0].id);
                     setCurrentViewWithHistory('analytics');
                     setMobileMenuOpen(false);
                   }
-                }} 
-                variant="outline" 
+                }}
+                variant="outline"
                 className="w-full justify-start touch-target"
                 disabled={podcasts.length === 0}
               >
                 <BarChart3 className="w-4 h-4 mr-2" />Analytics
               </Button>
-              <Button 
-                onClick={() => { setCurrentViewWithHistory('billing'); setMobileMenuOpen(false); }} 
-                variant="outline" 
+              <Button
+                onClick={() => { setCurrentViewWithHistory('billing'); setMobileMenuOpen(false); }}
+                variant="outline"
                 className="w-full justify-start touch-target"
               >
                 <DollarSign className="w-4 h-4 mr-2" />Subscription
               </Button>
-              <Button 
-                onClick={() => { setCurrentViewWithHistory('settings'); setMobileMenuOpen(false); }} 
-                variant="outline" 
+              <Button
+                onClick={() => { setCurrentViewWithHistory('settings'); setMobileMenuOpen(false); }}
+                variant="outline"
                 className="w-full justify-start touch-target"
               >
                 <SettingsIcon className="w-4 h-4 mr-2" />Settings
               </Button>
-              <Button 
-                onClick={() => { window.location.href = '/guides'; }} 
-                variant="outline" 
+              <Button
+                onClick={() => { window.location.href = '/guides'; }}
+                variant="outline"
                 className="w-full justify-start touch-target"
               >
                 <BookOpen className="w-4 h-4 mr-2" />Guides & Help
               </Button>
-              <Button 
-                onClick={() => { setCurrentViewWithHistory('websiteBuilder'); setMobileMenuOpen(false); }} 
-                variant="outline" 
+              <Button
+                onClick={() => { setCurrentViewWithHistory('websiteBuilder'); setMobileMenuOpen(false); }}
+                variant="outline"
                 className="w-full justify-start touch-target"
               >
                 <Globe2 className="w-4 h-4 mr-2" />Website Builder
               </Button>
               {(authUser?.is_admin || authUser?.role === 'admin' || authUser?.role === 'superadmin') && (
-                <Button 
-                  onClick={() => { window.location.href = '/dashboard?admin=1'; setMobileMenuOpen(false); }} 
-                  variant="outline" 
+                <Button
+                  onClick={() => { window.location.href = '/dashboard?admin=1'; setMobileMenuOpen(false); }}
+                  variant="outline"
                   className="w-full justify-start touch-target bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100"
                 >
                   <SettingsIcon className="w-4 h-4 mr-2" />Admin Panel
@@ -1702,9 +1720,9 @@ export default function PodcastPlusDashboard() {
               )}
             </div>
             <div className="p-4 border-t mt-4">
-              <Button 
-                onClick={logout} 
-                variant="ghost" 
+              <Button
+                onClick={logout}
+                variant="ghost"
                 className="w-full justify-start touch-target text-red-600 hover:text-red-700 hover:bg-red-50"
               >
                 <LogOut className="w-4 h-4 mr-2" />Logout
@@ -1713,15 +1731,15 @@ export default function PodcastPlusDashboard() {
           </div>
         </>
       )}
-      
+
       <main className="container mx-auto max-w-7xl px-4 sm:px-6 py-6">
         {renderCurrentView()}
       </main>
-      
+
       {/* AI Assistant - Always available in bottom-right corner */}
-      <AIAssistant 
-        token={token} 
-        user={user} 
+      <AIAssistant
+        token={token}
+        user={user}
         currentPage={currentView}
         onRestartTooltips={currentView === 'dashboard' ? handleRestartTooltips : null}
       />

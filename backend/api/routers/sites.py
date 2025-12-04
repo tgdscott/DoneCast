@@ -9,7 +9,7 @@ import os
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from sqlmodel import Session, select
 from pydantic import BaseModel, Field
 
@@ -152,6 +152,60 @@ def _fetch_published_episodes(session: Session, podcast: Podcast, max_count: int
             break
     
     return episode_data
+
+
+@router.get("/", response_model=PublicWebsiteResponse)
+def get_website_by_host(
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """
+    Get public website data by extracting subdomain from Host header.
+    
+    This endpoint handles wildcard subdomain routing (*.podcastplusplus.com).
+    When someone visits cardiac-cowboys.podcastplusplus.com, this extracts
+    "cardiac-cowboys" from the Host header and serves the website.
+    
+    This enables scalable subdomain routing for thousands of podcasts
+    without requiring individual Cloud Run domain mappings.
+    """
+    # Extract subdomain from Host header
+    host = request.headers.get("host", "").lower()
+    log.info(f"[sites] Root endpoint called with host: {host}")
+    
+    # Remove port if present (e.g., "localhost:8080" -> "localhost")
+    if ":" in host:
+        host = host.split(":")[0]
+    
+    # Extract subdomain from host
+    # Examples:
+    #   - cardiac-cowboys.podcastplusplus.com -> cardiac-cowboys
+    #   - app.podcastplusplus.com -> app (skip this one)
+    #   - podcastplusplus.com -> None (no subdomain)
+    parts = host.split(".")
+    
+    # Check if this is a subdomain (has more than 2 parts)
+    if len(parts) < 3:
+        # No subdomain (e.g., podcastplusplus.com or localhost)
+        log.warning(f"[sites] No subdomain found in host: {host}")
+        raise HTTPException(
+            status_code=404,
+            detail="No podcast subdomain found. Please visit your podcast's subdomain (e.g., your-podcast.podcastplusplus.com)"
+        )
+    
+    subdomain = parts[0]
+    
+    # Skip special subdomains (app, api, www, etc.)
+    if subdomain in ("app", "api", "www", "admin"):
+        log.warning(f"[sites] Reserved subdomain accessed via root endpoint: {subdomain}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"'{subdomain}' is a reserved subdomain"
+        )
+    
+    # Log and delegate to existing get_public_website logic
+    log.info(f"[sites] Extracted subdomain from host: {subdomain}")
+    return get_public_website(subdomain, session)
 
 
 @router.get("/{subdomain}", response_model=PublicWebsiteResponse)

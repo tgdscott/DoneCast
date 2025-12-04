@@ -244,7 +244,7 @@ export default function Features() {
               <span className="nl-brand-icon">
                 <Radio size={22} />
               </span>
-              Podcast Plus Plus
+              DoneCast
             </Link>
             <div className="nl-nav-links">
               <Link to="/features">Features</Link>
@@ -273,7 +273,7 @@ export default function Features() {
               Professional Podcasting <span>Made Simple</span>
             </h1>
             <p className="nl-lead" style={{ maxWidth: '700px', margin: '0 auto' }}>
-              From AI-powered editing to global distribution, Podcast Plus Plus gives you everything professional podcasters need in one intuitive platform. No technical expertise required.
+              From AI-powered editing to global distribution, DoneCast gives you everything professional podcasters need in one intuitive platform. No technical expertise required.
             </p>
           </div>
         </div>
@@ -312,7 +312,7 @@ export default function Features() {
                 <span className="nl-brand-icon">
                   <Radio size={20} />
                 </span>
-                Podcast Plus Plus
+                DoneCast
               </Link>
               <p className="nl-lead" style={{ fontSize: '0.95rem' }}>
                 Professional podcast hosting for the modern creator.
@@ -341,7 +341,7 @@ export default function Features() {
             </div>
           </div>
           <div className="nl-footer-meta">
-            &copy; {new Date().getFullYear()} Podcast Plus Plus. All rights reserved.
+            &copy; {new Date().getFullYear()} DoneCast. All rights reserved.
           </div>
         </div>
       </footer>

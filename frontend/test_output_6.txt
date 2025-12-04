@@ -1,0 +1,80 @@
+
+Running 1 test using 1 worker
+
+[console:debug] [vite] connecting...
+[console:info] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold
+[console:log] [sentry] disabled (no DSN)
+[console:warning] [PostHog.js] No `apiKey` or `client` were provided to `PostHogProvider`. Using default global `window.posthog` instance. You must initialize it manually. This is not recommended behavior.
+[console:warning] [PostHog.js] No `apiKey` or `client` were provided to `PostHogProvider`. Using default global `window.posthog` instance. You must initialize it manually. This is not recommended behavior.
+[console:error] [PostHog.js] PostHog was initialized without a token. This likely indicates a misconfiguration. Please check the first argument passed to posthog.init()
+[console:debug] [vite] connected.
+[console:error] Warning: Can't perform a React state update on a component that hasn't mounted yet. This indicates that you have a side-effect in your render function that asynchronously later calls tries to update the component. Move this work to useEffect instead.%s 
+    at FadeSlide (http://127.0.0.1:5173/src/components/onboarding/OnboardingWrapper.jsx:45:22)
+    at section
+    at main
+    at div
+    at OnboardingWrapper (http://127.0.0.1:5173/src/components/onboarding/OnboardingWrapper.jsx:71:45)
+    at Onboarding (http://127.0.0.1:5173/src/pages/Onboarding.jsx:26:40)
+    at RenderedRoute (http://127.0.0.1:5173/node_modules/.vite/deps/react-router-dom.js?v=bc4be0b3:5575:26)
+    at RenderErrorBoundary (http://127.0.0.1:5173/node_modules/.vite/deps/react-router-dom.js?v=bc4be0b3:5531:5)
+    at DataRoutes (http://127.0.0.1:5173/node_modules/.vite/deps/react-router-dom.js?v=bc4be0b3:6193:3)
+    at Router (http://127.0.0.1:5173/node_modules/.vite/deps/react-router-dom.js?v=bc4be0b3:6279:13)
+    at RouterProvider (http://127.0.0.1:5173/node_modules/.vite/deps/react-router-dom.js?v=bc4be0b3:5999:11)
+    at RouterProvider2
+    at Suspense
+    at LayoutProvider (http://127.0.0.1:5173/src/layout/LayoutContext.jsx:84:34)
+    at BrandProvider (http://127.0.0.1:5173/src/brand/BrandContext.jsx:23:33)
+    at ComfortProvider (http://127.0.0.1:5173/src/ComfortContext.jsx:21:35)
+    at AuthProvider (http://127.0.0.1:5173/src/AuthContext.jsx:22:32)
+    at WarmupProvider (http://127.0.0.1:5173/src/contexts/WarmupContext.jsx:21:34)
+    at PostHogProvider (http://127.0.0.1:5173/node_modules/.vite/deps/posthog-js_react.js?v=bc4be0b3:49:21)
+[console:error] Failed to load resource: the server responded with a status of 401 (Unauthorized)
+[console:warning] [Onboarding] Failed to persist name {status: 401, error: Object}
+  ✘  1 [chromium] › e2e\signup-flow.spec.ts:13:5 › New User Signup & Onboarding Flow › complete onboarding wizard for new user (1.5s)
+
+
+  1) [chromium] › e2e\signup-flow.spec.ts:13:5 › New User Signup & Onboarding Flow › complete onboarding wizard for new user 
+
+    Error: expect.toBeVisible: Error: strict mode violation: getByText('Do you have an existing podcast?') resolved to 2 elements:
+        1) <span class="text-sm flex-1 text-left">Do you have an existing podcast?</span> aka getByRole('button', { name: 'Do you have an existing' })
+        2) <li>Step 2: Do you have an existing podcast?</li> aka getByText('Step 2: Do you have an')
+
+    Call log:
+    [2m  - Expect "toBeVisible" with timeout 5000ms[22m
+    [2m  - waiting for getByText('Do you have an existing podcast?')[22m
+
+
+      101 |
+      102 |         // Step 2: Choose Path (New vs Existing)
+    > 103 |         await expect(page.getByText('Do you have an existing podcast?')).toBeVisible();
+          |                                                                          ^
+      104 |         await page.getByText('No, I want to start a new one').click();
+      105 |         await page.getByRole('button', { name: 'Continue' }).click();
+      106 |
+        at C:\Users\windo\OneDrive\PodWebDeploy\frontend\e2e\signup-flow.spec.ts:103:74
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\e2e-signup-flow-New-User-S-62113-oarding-wizard-for-new-user-chromium\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results\e2e-signup-flow-New-User-S-62113-oarding-wizard-for-new-user-chromium\video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results\e2e-signup-flow-New-User-S-62113-oarding-wizard-for-new-user-chromium\error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\e2e-signup-flow-New-User-S-62113-oarding-wizard-for-new-user-chromium\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\e2e-signup-flow-New-User-S-62113-oarding-wizard-for-new-user-chromium\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [chromium] › e2e\signup-flow.spec.ts:13:5 › New User Signup & Onboarding Flow › complete onboarding wizard for new user 
+
+To open last HTML report run:
+[36m[39m
+[36m  npx playwright show-report[39m
+[36m[39m

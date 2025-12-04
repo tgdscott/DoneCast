@@ -1256,7 +1256,7 @@ https://podcastplusplus.com/v1/rss/my-awesome-podcast/feed.xml
 **Distribution to Podcast Platforms:**
 1. Copy RSS feed URL from **Settings → Distribution**
 2. Submit to Apple Podcasts Connect: https://podcastsconnect.apple.com
-3. Submit to Spotify for Podcasters: https://podcasters.spotify.com
+3. Submit to Spotify for Creators: https://creators.spotify.com
 4. Submit to Google Podcasts Manager: https://podcastsmanager.google.com
 5. Each platform reviews (Apple: 5-10 business days)
 6. Once approved, **all new episodes appear automatically** in that platform

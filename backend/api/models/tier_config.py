@@ -222,7 +222,7 @@ TIER_FEATURE_DEFINITIONS: list[TierFeatureDefinition] = [
         category="branding",
         type="boolean",
         default_value=False,
-        help_text="Remove 'Powered by Podcast Plus Plus' branding"
+        help_text="Remove 'Powered by DoneCast' branding"
     ),
     TierFeatureDefinition(
         key="custom_domain",

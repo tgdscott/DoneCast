@@ -266,9 +266,9 @@ async def create_podcast(
         # Slug should already be set above (before website creation)
         if not db_podcast.slug:
             log.warning(f"[podcast.create] Slug missing after website creation, using podcast ID for RSS URL")
-            rss_url = f"https://app.{base_domain}/rss/{db_podcast.id}/feed.xml"
+            rss_url = f"https://api.{base_domain}/rss/{db_podcast.id}/feed.xml"
         else:
-            rss_url = f"https://app.{base_domain}/rss/{db_podcast.slug}/feed.xml"
+            rss_url = f"https://api.{base_domain}/rss/{db_podcast.slug}/feed.xml"
         log.info(f"✅ RSS feed available: {rss_url}")
         log.info(f"🎊 User can share immediately: {website_url} and {rss_url}")
     except Exception as exc:

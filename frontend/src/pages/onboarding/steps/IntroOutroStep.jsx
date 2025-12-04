@@ -1,5 +1,5 @@
 import React from "react";
-import { Play, Pause, Mic, Upload, Square } from "lucide-react";
+import { Play, Mic, Square, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -56,6 +56,7 @@ export default function IntroOutroStep({ wizard }) {
     voicesLoading,
     voicesError,
     selectedVoiceId,
+    formData,
     setSelectedVoiceId,
     introVoiceId,
     setIntroVoiceId,
@@ -64,6 +65,7 @@ export default function IntroOutroStep({ wizard }) {
     previewSelectedVoice,
     canPreviewSelectedVoice,
     voicePreviewing,
+    generateOrUploadTTS,
   } = wizard;
 
   const [showIntroVoicePicker, setShowIntroVoicePicker] = React.useState(false);
@@ -74,6 +76,128 @@ export default function IntroOutroStep({ wizard }) {
   const [outroPlaying, setOutroPlaying] = React.useState(false);
   const introAudioRef = React.useRef(null);
   const outroAudioRef = React.useRef(null);
+  const [aiAssistBusy, setAiAssistBusy] = React.useState(false);
+
+  const showName = React.useMemo(() => {
+    const trimmed = (formData?.podcastName || "").trim();
+    return trimmed || "your show";
+  }, [formData?.podcastName]);
+
+  const hostNameDisplay = React.useMemo(() => (firstName || "").trim(), [firstName]);
+
+  const descriptionSnippet = React.useMemo(() => {
+    const raw = (formData?.podcastDescription || "").trim();
+    if (!raw) return "";
+    const match = raw.match(/[^.!?]+[.!?]?/);
+    const sentence = (match ? match[0] : raw).trim();
+    if (sentence.length > 180) {
+      return `${sentence.slice(0, 177)}...`;
+    }
+    return sentence;
+  }, [formData?.podcastDescription]);
+
+  const introSuggestion = React.useMemo(() => {
+    let copy;
+    if (descriptionSnippet) {
+      const withPeriod = descriptionSnippet.endsWith(".") ? descriptionSnippet : `${descriptionSnippet}.`;
+      const hostPart = hostNameDisplay ? `I'm ${hostNameDisplay}, ` : "";
+      copy = `Welcome to ${showName}. ${withPeriod} ${hostPart}and I'm glad you're here. Let's jump in.`;
+    } else {
+      const hostPart = hostNameDisplay ? `I'm ${hostNameDisplay}, ` : "";
+      copy = `Welcome to ${showName}. ${hostPart}let's jump in.`;
+    }
+    return copy.replace(/\s{2,}/g, " ").trim();
+  }, [descriptionSnippet, showName, hostNameDisplay]);
+
+  const outroSuggestion = React.useMemo(() => {
+    const hostPart = hostNameDisplay ? `I'm ${hostNameDisplay}, ` : "";
+    const copy = `Thanks for listening to ${showName}. ${hostPart}follow or share the show so more listeners can find it. I'll see you next time.`;
+    return copy.replace(/\s{2,}/g, " ").trim();
+  }, [showName, hostNameDisplay]);
+
+  const introVoiceLabel = introVoiceName || (introVoiceId && introVoiceId !== "default" ? "Custom ElevenLabs voice" : "Default AI voice");
+  const outroVoiceLabel = outroVoiceName || (outroVoiceId && outroVoiceId !== "default" ? "Custom ElevenLabs voice" : "Default AI voice");
+
+  const registerGeneratedAsset = React.useCallback(
+    (kind, asset) => {
+      if (!asset) return;
+      const key = String(asset.id || asset.filename || "");
+      if (!key) return;
+      if (kind === "intro") {
+        setIntroAsset(asset);
+        setIntroMode("existing");
+        setSelectedIntroId(key);
+        setIntroOptions((previous) => {
+          const exists = previous.some((item) => String(item.id || item.filename) === key);
+          return exists ? previous : [asset, ...previous];
+        });
+      } else {
+        setOutroAsset(asset);
+        setOutroMode("existing");
+        setSelectedOutroId(key);
+        setOutroOptions((previous) => {
+          const exists = previous.some((item) => String(item.id || item.filename) === key);
+          return exists ? previous : [asset, ...previous];
+        });
+      }
+    },
+    [
+      setIntroAsset,
+      setIntroMode,
+      setSelectedIntroId,
+      setIntroOptions,
+      setOutroAsset,
+      setOutroMode,
+      setSelectedOutroId,
+      setOutroOptions,
+    ]
+  );
+
+  const handleApplySuggestions = React.useCallback(() => {
+    setIntroScript(introSuggestion);
+    setOutroScript(outroSuggestion);
+    try {
+      toast?.({
+        title: "Scripts ready",
+        description: "Feel free to tweak the text before generating audio.",
+      });
+    } catch (_) { }
+  }, [introSuggestion, outroSuggestion, setIntroScript, setOutroScript, toast]);
+
+  const handleGenerateWithAI = React.useCallback(async () => {
+    setAiAssistBusy(true);
+    try {
+      setIntroScript(introSuggestion);
+      setOutroScript(outroSuggestion);
+      const introResult = await generateOrUploadTTS("intro", "tts", introSuggestion, null, null);
+      const outroResult = await generateOrUploadTTS("outro", "tts", outroSuggestion, null, null);
+      let createdAny = false;
+      if (introResult) {
+        registerGeneratedAsset("intro", introResult);
+        createdAny = true;
+      }
+      if (outroResult) {
+        registerGeneratedAsset("outro", outroResult);
+        createdAny = true;
+      }
+      if (createdAny) {
+        toast?.({
+          title: "Intro & outro ready",
+          description: "Preview the new AI voice lines below.",
+        });
+      }
+    } finally {
+      setAiAssistBusy(false);
+    }
+  }, [
+    generateOrUploadTTS,
+    introSuggestion,
+    outroSuggestion,
+    registerGeneratedAsset,
+    toast,
+    setIntroScript,
+    setOutroScript,
+  ]);
 
   // Resolve intro voice name when introVoiceId changes
   React.useEffect(() => {
@@ -153,9 +277,77 @@ export default function IntroOutroStep({ wizard }) {
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-muted-foreground">
-        We've pre-filled default scripts below. You can use these as-is or customize them.
-      </p>
+      <Card className="border-primary/20 bg-muted/40 shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Sparkles className="h-4 w-4 text-primary" />
+            Let DoneCast draft it for you
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            We use your show name, description, and selected voices to propose short intros and outros.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Suggested intro
+              </Label>
+              <Textarea
+                value={introSuggestion}
+                readOnly
+                className="mt-1 min-h-[90px] resize-none bg-background/70"
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Suggested outro
+              </Label>
+              <Textarea
+                value={outroSuggestion}
+                readOnly
+                className="mt-1 min-h-[90px] resize-none bg-background/70"
+              />
+            </div>
+          </div>
+          <div className="flex flex-col gap-4 pt-1 md:flex-row md:items-center md:gap-6">
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={handleApplySuggestions}>
+                Use these scripts
+              </Button>
+              <Button size="sm" onClick={handleGenerateWithAI} disabled={aiAssistBusy}>
+                {aiAssistBusy ? "Generating..." : "Generate intro & outro audio"}
+              </Button>
+            </div>
+            <div className="flex flex-col gap-2 text-xs text-muted-foreground md:flex-row md:items-center md:gap-4">
+              <div className="flex items-center gap-1">
+                <span className="font-semibold text-foreground">Intro voice:</span>
+                <span>{introVoiceLabel}</span>
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="h-auto px-1"
+                  onClick={() => setShowIntroVoicePicker(true)}
+                >
+                  Change
+                </Button>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="font-semibold text-foreground">Outro voice:</span>
+                <span>{outroVoiceLabel}</span>
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="h-auto px-1"
+                  onClick={() => setShowOutroVoicePicker(true)}
+                >
+                  Change
+                </Button>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Intro Card - Segmented like Template Editor */}
       <Card className="shadow-sm">
@@ -170,6 +362,7 @@ export default function IntroOutroStep({ wizard }) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="none">No Intro</SelectItem>
                 {introOptions.length > 0 && (
                   <SelectItem value="existing">Use Current Intro</SelectItem>
                 )}
@@ -192,8 +385,8 @@ export default function IntroOutroStep({ wizard }) {
             <div>
               <Label className="text-sm font-medium text-gray-600 mb-2 block">Audio File</Label>
               <div className="flex items-center gap-2">
-                <Select 
-                  value={selectedIntroId || ''} 
+                <Select
+                  value={selectedIntroId || ''}
                   onValueChange={(value) => {
                     setSelectedIntroId(value);
                     const found = introOptions.find((item) => String(item.id || item.filename) === value) || null;
@@ -275,9 +468,9 @@ export default function IntroOutroStep({ wizard }) {
                       {introVoiceName || introVoiceId || 'Not set'}
                     </div>
                   </div>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => setShowIntroVoicePicker(true)}
                   >
                     Choose voice
@@ -297,6 +490,12 @@ export default function IntroOutroStep({ wizard }) {
               />
             </div>
           )}
+
+          {introMode === "none" && (
+            <p className="text-sm text-muted-foreground">
+              No intro will be added to your episodes.
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -313,6 +512,7 @@ export default function IntroOutroStep({ wizard }) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="none">No Outro</SelectItem>
                 {outroOptions.length > 0 && (
                   <SelectItem value="existing">Use Current Outro</SelectItem>
                 )}
@@ -335,8 +535,8 @@ export default function IntroOutroStep({ wizard }) {
             <div>
               <Label className="text-sm font-medium text-gray-600 mb-2 block">Audio File</Label>
               <div className="flex items-center gap-2">
-                <Select 
-                  value={selectedOutroId || ''} 
+                <Select
+                  value={selectedOutroId || ''}
                   onValueChange={(value) => {
                     setSelectedOutroId(value);
                     const found = outroOptions.find((item) => String(item.id || item.filename) === value) || null;
@@ -418,9 +618,9 @@ export default function IntroOutroStep({ wizard }) {
                       {outroVoiceName || outroVoiceId || 'Not set'}
                     </div>
                   </div>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => setShowOutroVoicePicker(true)}
                   >
                     Choose voice
@@ -439,6 +639,12 @@ export default function IntroOutroStep({ wizard }) {
                 onChange={(event) => setOutroFile(event.target.files?.[0] || null)}
               />
             </div>
+          )}
+
+          {outroMode === "none" && (
+            <p className="text-sm text-muted-foreground">
+              No outro will be added to your episodes.
+            </p>
           )}
         </CardContent>
       </Card>
@@ -473,10 +679,6 @@ export default function IntroOutroStep({ wizard }) {
           token={token}
         />
       )}
-
-      <p className="text-xs text-muted-foreground">
-        We'll create simple defaults if you leave the scripts unchanged.
-      </p>
     </div>
   );
 }

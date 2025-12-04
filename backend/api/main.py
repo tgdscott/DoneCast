@@ -44,7 +44,7 @@ def create_app() -> FastAPI:
     log = get_logger("api.main")
     
     # Step 2: Create FastAPI app
-    app = FastAPI(title="Podcast Pro Plus API")
+    app = FastAPI(title="DoneCast API")
     
     # Step 3: Add proxy headers middleware early
     if ProxyHeadersMiddleware is not None:

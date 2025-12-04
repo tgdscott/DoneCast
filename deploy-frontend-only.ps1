@@ -47,6 +47,22 @@ try {
     Write-Host "    Using fallback: $GOOGLE_CLIENT_ID" -ForegroundColor Yellow
 }
 
+# Get VITE_POSTHOG_KEY from Secret Manager
+Write-Host "==> Fetching VITE_POSTHOG_KEY from Secret Manager..." -ForegroundColor Cyan
+try {
+    $VITE_POSTHOG_KEY = gcloud secrets versions access latest --secret="VITE_POSTHOG_KEY" --project=$PROJECT_ID 2>$null
+    if (-not $VITE_POSTHOG_KEY) {
+        Write-Host "WARNING: Could not fetch VITE_POSTHOG_KEY from Secret Manager" -ForegroundColor Yellow
+        Write-Host "    PostHog analytics will be disabled" -ForegroundColor Yellow
+        $VITE_POSTHOG_KEY = ""
+    } else {
+        Write-Host "    ✓ Retrieved from Secret Manager" -ForegroundColor Green
+    }
+} catch {
+    Write-Host "WARNING: Error fetching VITE_POSTHOG_KEY: $_" -ForegroundColor Yellow
+    $VITE_POSTHOG_KEY = ""
+}
+
 # Generate build ID (timestamp-based for local builds)
 $BUILD_ID = "manual-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 $IMG_LATEST = "$REGION-docker.pkg.dev/$PROJECT_ID/$AR_REPO/${WEB_SERVICE}:latest"
@@ -62,6 +78,8 @@ docker build $WEB_DIR `
     --file "$WEB_DIR\Dockerfile" `
     --build-arg VITE_GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" `
     --build-arg VITE_API_BASE="$VITE_API_BASE" `
+    --build-arg VITE_POSTHOG_KEY="$VITE_POSTHOG_KEY" `
+    --build-arg VITE_POSTHOG_HOST="https://us.i.posthog.com" `
     -t "$IMG_LATEST" `
     -t "$IMG_BUILD"
 

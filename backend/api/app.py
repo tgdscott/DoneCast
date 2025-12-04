@@ -36,7 +36,7 @@ except ImportError as e:
     )
     try:
         from fastapi import FastAPI
-        app = FastAPI(title="Podcast Pro Plus API (Import Error)")
+        app = FastAPI(title="DoneCast API (Import Error)")
         
         @app.get("/healthz")
         @app.get("/api/health")

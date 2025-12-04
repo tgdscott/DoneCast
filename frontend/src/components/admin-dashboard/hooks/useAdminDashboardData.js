@@ -441,7 +441,7 @@ export function useAdminDashboardData({ token, toast }) {
 
   const prepareUserForDeletion = useCallback(async (userId, userEmail, userIsActive, userTier) => {
     const normalizedTier = (userTier || "").toLowerCase();
-    const needsPrep = userIsActive || (userTier && normalizedTier !== "free" && normalizedTier !== "starter");
+    const needsPrep = userIsActive || (userTier && normalizedTier !== "free" && normalizedTier !== "starter" && normalizedTier !== "hobby");
 
     if (!needsPrep) {
       await deleteUser(userId, userEmail, false);
@@ -449,11 +449,11 @@ export function useAdminDashboardData({ token, toast }) {
     }
 
     const prepConfirm = window.confirm(
-      "\u26a0\ufe0f SAFETY CHECK: This user must be INACTIVE and on STARTER tier before deletion.\n\n" +
+      "\u26a0\ufe0f SAFETY CHECK: This user must be INACTIVE and on HOBBY tier before deletion.\n\n" +
       `User: ${userEmail}\n` +
       `Current Status: ${userIsActive ? "ACTIVE" : "INACTIVE"}\n` +
       `Current Tier: ${userTier || "unknown"}\n\n` +
-      "Click OK to automatically set this user to INACTIVE + STARTER tier, then you can delete them.\n" +
+      "Click OK to automatically set this user to INACTIVE + HOBBY tier, then you can delete them.\n" +
       "Click Cancel to abort."
     );
 
@@ -464,14 +464,14 @@ export function useAdminDashboardData({ token, toast }) {
     setSavingIds((prev) => new Set([...prev, userId]));
     try {
       const api = makeApi(token);
-      // Use "starter" as the tier value (backend should handle both "free" and "starter")
-      const payload = { is_active: false, tier: "starter" };
+      // Use "hobby" as the tier value (backend should handle both "free", "starter", and "hobby")
+      const payload = { is_active: false, tier: "hobby" };
       await api.patch(`/api/admin/users/${userId}`, payload);
-      setUsers((prev) => prev.map((user) => (user.id === userId ? { ...user, is_active: false, tier: "starter" } : user)));
+      setUsers((prev) => prev.map((user) => (user.id === userId ? { ...user, is_active: false, tier: "hobby" } : user)));
       try {
         toast?.({
           title: "User prepared for deletion",
-          description: `${userEmail} is now INACTIVE and on STARTER tier. You can now delete this user.`,
+          description: `${userEmail} is now INACTIVE and on HOBBY tier. You can now delete this user.`,
         });
       } catch (_) {
         // ignore toast errors

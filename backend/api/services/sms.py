@@ -141,7 +141,7 @@ class SMSService:
         """Send notification that episode is ready to assemble."""
         message = (
             f"🎙️ Your episode '{episode_name}' is ready to assemble! "
-            f"Visit https://app.podcastplusplus.com to continue. "
+            f"Visit https://app.donecast.com to continue. "
             f"Reply STOP to opt out."
         )
         return self.send_sms(phone_number, message, user_id)
@@ -161,7 +161,7 @@ class SMSService:
                 formatted_date = publish_date.strftime("%B %d, %Y at %I:%M %p %Z")
                 message = (
                     f"✅ Your episode '{episode_name}' is scheduled for {formatted_date}. "
-                    f"View it at https://app.podcastplusplus.com "
+                    f"View it at https://app.donecast.com "
                     f"Reply STOP to opt out."
                 )
             except Exception:

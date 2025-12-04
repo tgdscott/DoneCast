@@ -5,7 +5,14 @@ import { useToast } from "@/hooks/use-toast";
 import { makeApi } from "@/lib/apiClient";
 
 export default function DistributionRequiredStep({ wizard }) {
-  const { token, targetPodcastId, rssFeedUrl, setRssFeedUrl } = wizard;
+  const {
+    token,
+    targetPodcastId,
+    setTargetPodcastId,
+    rssFeedUrl,
+    setRssFeedUrl,
+    ensurePodcastExists,
+  } = wizard;
   const [loading, setLoading] = useState(false);
   const [checklist, setChecklist] = useState(null);
   const [appleStatus, setAppleStatus] = useState("not_started");
@@ -16,13 +23,35 @@ export default function DistributionRequiredStep({ wizard }) {
   const { toast } = useToast();
 
   useEffect(() => {
-    if (targetPodcastId && token) {
-      loadChecklist();
-    } else if (!targetPodcastId && token) {
-      // Try to find existing podcast (even without formData, in case podcast was created earlier)
-      findExistingPodcast();
-    }
-  }, [targetPodcastId, token]);
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      if (!token) {
+        return;
+      }
+
+      if (!targetPodcastId) {
+        if (typeof ensurePodcastExists === "function") {
+          const podcast = await ensurePodcastExists();
+          if (cancelled) return;
+          if (podcast?.id) {
+            setTargetPodcastId?.(podcast.id);
+            return;
+          }
+        }
+        await findExistingPodcast();
+        return;
+      }
+
+      await loadChecklist();
+    };
+
+    bootstrap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [targetPodcastId, token, ensurePodcastExists, setTargetPodcastId]);
 
   const findExistingPodcast = async () => {
     if (!token) return;
@@ -30,7 +59,7 @@ export default function DistributionRequiredStep({ wizard }) {
       const api = makeApi(token);
       const data = await api.get("/api/podcasts/");
       const podcasts = Array.isArray(data) ? data : data?.items || [];
-      if (podcasts.length > 0 && wizard?.setTargetPodcastId) {
+      if (podcasts.length > 0 && setTargetPodcastId) {
         // Try to match by name if we have formData
         const nameClean = wizard?.formData?.podcastName?.trim().toLowerCase();
         let selectedPodcast = podcasts[0];
@@ -44,7 +73,7 @@ export default function DistributionRequiredStep({ wizard }) {
           }
         }
         
-        wizard.setTargetPodcastId(selectedPodcast.id);
+        setTargetPodcastId(selectedPodcast.id);
         console.log("[Onboarding] Found existing podcast:", selectedPodcast.id);
       } else if (podcasts.length === 0) {
         console.warn("[Onboarding] No podcasts found - user may need to create one first");
@@ -145,12 +174,12 @@ export default function DistributionRequiredStep({ wizard }) {
     <div className="space-y-6">
       <div className="space-y-2">
         <p className="text-sm font-medium">
-          We want to set you up for success, and these are the two largest podcasting platforms that you need to be on.
+          Apple Podcasts and Spotify are the two largest podcast platforms.
         </p>
-        <p className="text-xs text-muted-foreground">
-          Submitting to these platforms helps listeners find your podcast. We strongly recommend submitting now, 
-          but you can skip and do it later if needed.
-        </p>
+        <div className="rounded-md border border-amber-300 bg-amber-50 text-amber-900 p-3 text-xs">
+          Skipping Apple or Spotify will dramatically reduce your potential audience.
+          We strongly recommend completing both. You can still publish without them.
+        </div>
       </div>
 
       {!hasPublishedEpisodes && (

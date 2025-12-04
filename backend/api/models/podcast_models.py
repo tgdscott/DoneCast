@@ -80,14 +80,14 @@ class Podcast(PodcastBase, table=True):
         """
         Deterministic RSS feed URL for this podcast.
         
-        ALWAYS uses production domain (podcastplusplus.com) for OP3 analytics compatibility.
+        ALWAYS uses production domain (donecast.com) for OP3 analytics compatibility.
         Uses slug if available, otherwise falls back to podcast ID.
         """
         # Get identifier (prefer slug over ID)
         identifier = getattr(self, 'slug', None) or str(self.id)
         
         # ALWAYS use production domain (hardcoded for OP3 analytics)
-        return f"https://podcastplusplus.com/rss/{identifier}/feed.xml"
+        return f"https://donecast.com/rss/{identifier}/feed.xml"
 
     @property
     def preferred_cover_url(self) -> Optional[str]:

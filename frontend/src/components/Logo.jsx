@@ -6,15 +6,15 @@ export default function Logo({ size = 28, lockup = true, src }) {
   const markSize = Math.max(24, size);
   const [imgFailed, setImgFailed] = React.useState(false);
   // Prefer SVG if present, then PNG. Served from Vite's public/ folder at runtime.
-  const imgSrc = src || "/logo-plusplus.svg";
-  const pngFallback = "/logo-plusplus.png";
+  const imgSrc = src || "/logo.png";
+  const pngFallback = "/logo.png";
 
   return (
     <div className="flex items-center gap-3" aria-label={brand.name}>
       {!imgFailed ? (
         <picture>
           {/* Try SVG first; if it 404s, the img will attempt PNG; onError -> fallback mark */}
-          <source srcSet={imgSrc} type="image/svg+xml" />
+          <source srcSet={imgSrc} type="image/png" />
           <img
             className="logo"
             src={pngFallback}
@@ -37,7 +37,7 @@ export default function Logo({ size = 28, lockup = true, src }) {
           }}
           aria-hidden="true"
         >
-          ++
+          DC
         </div>
       )}
       {lockup && (

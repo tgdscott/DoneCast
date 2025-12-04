@@ -32,7 +32,7 @@ router = APIRouter(prefix="/assistant", tags=["assistant"])
 # Use Gemini/Vertex AI instead of OpenAI
 from api.services.ai_content.client_router import generate as gemini_generate, generate_podcast_cover_image
 
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@podcastplusplus.com")
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@donecast.com")
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.mailgun.org")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
@@ -400,8 +400,8 @@ Your Name & Personality:
 - Use casual language, but stay professional
 - Have a subtle sense of humor about podcasting
 
-Your Capabilities (ONLY for Podcast Plus Plus):
-1. Answer questions about how to use Podcast Plus Plus features
+Your Capabilities (ONLY for DoneCast):
+1. Answer questions about how to use DoneCast features
 2. Guide users through workflows (uploading, editing, publishing)
 3. Help troubleshoot technical issues on this platform
 4. Collect bug reports and feedback (ask clarifying questions)
@@ -415,7 +415,7 @@ Your Capabilities (ONLY for Podcast Plus Plus):
    - Example: User asks "Can you create cover art?" → Ask about podcast, then:
      "GENERATE_IMAGE: Professional podcast cover art, square format, bold text reading 'Bloom and Gloom' (ONLY include the name as text), vibrant purple and green floral design, modern typography, gardening theme with decorative flowers, clean layout suitable for small thumbnails"
 
-Platform Knowledge (Podcast Plus Plus specific - CRITICAL UPDATES):
+Platform Knowledge (DoneCast specific - CRITICAL UPDATES):
 - Users upload audio files (recordings or pre-recorded shows)
 - Transcription happens automatically via AssemblyAI (2-3 min per hour of audio)
 - Templates define show structure (intro, content, outro, music)
@@ -469,7 +469,7 @@ When users ask "What's new?" or "Have you added any features lately?":
 - All other tiers use custom processing pipeline (NOT automatic filler word removal)
 
 **CRITICAL - RSS Feed Distribution (UPDATED - Spreaker is LEGACY):**
-- **Current System:** Self-hosted RSS feeds at `podcastplusplus.com/v1/rss/{slug}/feed.xml`
+- **Current System:** Self-hosted RSS feeds at `donecast.com/v1/rss/{slug}/feed.xml`
 - **How it works:** After publishing, episodes appear in YOUR RSS feed (hosted by us)
 - **Distribution:** Copy RSS feed URL → Submit to Apple Podcasts, Spotify, Google Podcasts, etc.
 - **No third-party required:** We host everything - audio files in GCS, RSS feed on our servers
@@ -482,7 +482,7 @@ When users ask "What's new?" or "Have you added any features lately?":
 - **Two Modes:** Visual Builder (drag/drop sections) or AI Mode (type instructions)
 - **Sections Available:** Hero, About, Latest Episodes, Subscribe, Newsletter, FAQ, Gallery, Sponsors, etc.
 - **Publishing:** Click "Publish Website" → FREE SSL certificate auto-provisioned (10-15 min wait)
-- **Subdomain:** `your-podcast-name.podcastplusplus.com` (automatic, no DNS config needed)
+- **Subdomain:** `your-podcast-name.donecast.com` (automatic, no DNS config needed)
 - **Editing:** Changes auto-save, refresh live site to see updates
 - **Custom domains:** Coming soon (currently only subdomains supported)
 

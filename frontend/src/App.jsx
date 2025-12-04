@@ -1,6 +1,6 @@
 import ProtectedRoute from "./components/common/ProtectedRoute.jsx";
 import React, { useEffect, useState } from 'react';
-import { useAuth } from './AuthContext.jsx'; 
+import { useAuth } from './AuthContext.jsx';
 import { makeApi } from '@/lib/apiClient';
 import PodcastPlusDashboard from '@/components/dashboard.jsx'; // The regular user dashboard
 import Onboarding from '@/pages/Onboarding.jsx';
@@ -51,7 +51,7 @@ export default function App() {
         // Store this in sessionStorage so it persists across page reloads
         const APP_ENTRY_KEY = 'ppp_app_entry_url';
         let appEntryUrl = sessionStorage.getItem(APP_ENTRY_KEY);
-        
+
         if (!appEntryUrl) {
             // First time entering the app - mark this as the entry point
             appEntryUrl = window.location.href;
@@ -68,13 +68,13 @@ export default function App() {
         const handlePopState = (event) => {
             const currentPath = window.location.pathname;
             const currentUrl = window.location.href;
-            
+
             // Check if we're still in the app (internal routes)
-            const isAppRoute = currentPath.startsWith('/app') || 
-                              currentPath.startsWith('/dashboard') || 
-                              currentPath.startsWith('/admin') ||
-                              (currentPath === '/' && isAuthenticated);
-            
+            const isAppRoute = currentPath.startsWith('/app') ||
+                currentPath.startsWith('/dashboard') ||
+                currentPath.startsWith('/admin') ||
+                (currentPath === '/' && isAuthenticated);
+
             // If we're still in the app, allow the navigation (let React Router and dashboard handle it)
             if (isAppRoute) {
                 // Check if this is a dashboard internal navigation (has dashboardView state)
@@ -91,16 +91,16 @@ export default function App() {
                 }
                 return; // Allow normal navigation - dashboard handler will restore view if needed
             }
-            
+
             // If we're navigating outside the app, redirect back to entry point
             // This prevents going back to external sites (like Google, etc.)
             const entryUrl = new URL(appEntryUrl);
             const targetPath = entryUrl.pathname || '/app';
-            
+
             // Check if we're on the same domain - if so, use history API to avoid reload
             const currentHost = window.location.hostname;
             const entryHost = entryUrl.hostname;
-            
+
             if (currentHost === entryHost || currentHost === 'localhost' || currentHost === '127.0.0.1') {
                 // Same domain - use history API to navigate without reload
                 window.history.pushState({ inApp: true, dashboardView: 'dashboard' }, '', targetPath);
@@ -129,7 +129,7 @@ export default function App() {
         const handleMessage = (event) => {
             // Verify origin for security
             if (event.origin !== window.location.origin) return;
-            
+
             // Handle navigate message from AI Assistant popup
             if (event.data?.type === 'navigate' && event.data?.path) {
                 window.location.href = event.data.path;
@@ -151,7 +151,7 @@ export default function App() {
                     window.location.hash = '';
                 }
             }
-            
+
             // Handle magic link token from email (query parameter)
             const searchParams = new URLSearchParams(window.location.search);
             const magicToken = searchParams.get('token');
@@ -164,7 +164,7 @@ export default function App() {
                         body: JSON.stringify({ token: magicToken }),
                         credentials: 'include',
                     });
-                    
+
                     if (response.ok) {
                         const data = await response.json();
                         if (data.access_token) {
@@ -189,12 +189,12 @@ export default function App() {
                     window.history.replaceState({}, '', newUrl.toString());
                 }
             }
-            
+
             // Detect checkout=success early (may arrive before AuthContext refresh completes)
             if (searchParams.get('checkout') === 'success') {
                 setPostCheckout(true);
                 setPostCheckoutStartedAt(Date.now());
-                try { localStorage.setItem('ppp_post_checkout','1'); } catch {}
+                try { localStorage.setItem('ppp_post_checkout', '1'); } catch { }
                 // Clean query (keep path) after flag so reloads don't re-trigger
                 // Defer query param cleanup so BillingPage can detect checkout=success and show toasts.
                 // We'll let BillingPage clear it after processing.
@@ -205,12 +205,29 @@ export default function App() {
         processAuth();
     }, [token, login, isAuthenticated]);
 
+    // Resume onboarding prompt on login if progress exists
+    useEffect(() => {
+        if (!hydrated || !isAuthenticated || user?.is_active === false) return;
+        try {
+            const keys = Object.keys(localStorage);
+            const stepKey = user?.email ? `ppp.onboarding.step.${user.email}` : null;
+            const hasProgress = stepKey ? localStorage.getItem(stepKey) != null : false;
+            const completed = localStorage.getItem('ppp.onboarding.completed') === '1';
+            if (hasProgress && !completed && !window.location.pathname.startsWith('/onboarding')) {
+                const ok = window.confirm('You have onboarding in progress. Do you want to resume it now?');
+                if (ok) {
+                    window.location.assign('/onboarding');
+                }
+            }
+        } catch {}
+    }, [hydrated, isAuthenticated, user?.email]);
+
     // If we have postCheckout flag but not authenticated yet, poll user refresh a few times
     useEffect(() => {
         if (!postCheckout) return;
         if (isAuthenticated) return; // normal flow will proceed
-    // Immediately try a forced refresh once (in case timing missed)
-    refreshUser({ force: true });
+        // Immediately try a forced refresh once (in case timing missed)
+        refreshUser({ force: true });
         let attempts = 0;
         const id = setInterval(() => {
             attempts += 1;
@@ -221,22 +238,22 @@ export default function App() {
     }, [postCheckout, isAuthenticated, refreshUser]);
     // Fetch podcasts once after auth to decide onboarding vs dashboard (must be before any returns)
     useEffect(() => {
-        if(!isAuthenticated || podcastCheck.fetched || !hydrated) return;
+        if (!isAuthenticated || podcastCheck.fetched || !hydrated) return;
         let cancelled = false;
         (async () => {
             try {
                 const api = makeApi(token);
                 const data = await api.get('/api/podcasts/');
-                if(!cancelled) {
+                if (!cancelled) {
                     const items = Array.isArray(data) ? data : (data.items || []);
-                    setPodcastCheck({ loading:false, count: items.length, fetched: true, error: false });
+                    setPodcastCheck({ loading: false, count: items.length, fetched: true, error: false });
                 }
             } catch (err) {
                 // If API call fails, don't assume user has no podcasts - they might have existing podcasts
                 // Set error flag so we don't redirect to onboarding on API failures
-                if(!cancelled) {
+                if (!cancelled) {
                     console.error('[App] Failed to fetch podcasts for onboarding check:', err);
-                    setPodcastCheck({ loading:false, count: 0, fetched: true, error: true });
+                    setPodcastCheck({ loading: false, count: 0, fetched: true, error: true });
                 }
             }
         })();
@@ -245,23 +262,23 @@ export default function App() {
 
     // Check onboarding completion status - CRITICAL: Users MUST complete all 13 steps before dashboard access
     useEffect(() => {
-        if(!isAuthenticated || onboardingCheck.fetched || !hydrated || !user) return;
+        if (!isAuthenticated || onboardingCheck.fetched || !hydrated || !user) return;
         let cancelled = false;
         (async () => {
             try {
                 const api = makeApi(token);
                 const status = await api.get('/api/assistant/onboarding/status');
-                if(!cancelled) {
-                    setOnboardingCheck({ 
-                        loading: false, 
-                        completed: status.completed || false, 
-                        fetched: true, 
-                        error: false 
+                if (!cancelled) {
+                    setOnboardingCheck({
+                        loading: false,
+                        completed: status.completed || false,
+                        fetched: true,
+                        error: false
                     });
                 }
             } catch (err) {
                 // If API call fails, assume onboarding not complete (safer default)
-                if(!cancelled) {
+                if (!cancelled) {
                     console.error('[App] Failed to check onboarding status:', err);
                     setOnboardingCheck({ loading: false, completed: false, fetched: true, error: true });
                 }
@@ -274,7 +291,7 @@ export default function App() {
     useEffect(() => {
         let cancelled = false;
         (async () => {
-            setAdminCheck(prev => ({...prev, checked: false, allowed: false}));
+            setAdminCheck(prev => ({ ...prev, checked: false, allowed: false }));
             if (!isAuthenticated || !hydrated || !user || !isAdmin(user)) { setAdminCheck({ checked: true, allowed: false }); return; }
             try {
                 const api = makeApi(token);
@@ -364,34 +381,34 @@ export default function App() {
             <div className="text-gray-500 text-sm">This will update automatically.</div>
             {elapsed > 8000 && <>
                 <div className="text-xs text-red-500">Still working... you can manually sign back in if this persists.</div>
-                <button onClick={()=>{ try { window.location.href='/?login=1'; } catch{} }} className="text-xs text-blue-600 underline">Open sign-in modal</button>
+                <button onClick={() => { try { window.location.href = '/?login=1'; } catch { } }} className="text-xs text-blue-600 underline">Open sign-in modal</button>
             </>}
         </div>;
     }
     if (!isAuthenticated && !token) return <LandingPage />;
     if (isLoading) return <div className="flex items-center justify-center h-screen">Loading...</div>;
     if (!isAuthenticated) return <LandingPage />;
-    
+
     // CRITICAL: Wait for AuthContext to hydrate before making routing decisions
     // This prevents race conditions where we render based on stale/null user data
     // (e.g., after email verification when user is freshly logged in)
     if (isAuthenticated && !hydrated) {
         return <div className="flex items-center justify-center h-screen">Preparing your account...</div>;
     }
-    
+
     if (user) {
         // If the account is inactive, show the closed alpha gate page
         if (user.is_active === false) {
             return <ClosedAlphaGate />;
         }
         if (podcastCheck.loading) return <div className="flex items-center justify-center h-screen">Preparing your workspace...</div>;
-        
+
         // CRITICAL: Wait for podcast check AND onboarding check to complete before making routing decisions
         // This prevents false positives when API calls are still in progress or have failed
         if (!podcastCheck.fetched || !onboardingCheck.fetched) {
             return <div className="flex items-center justify-center h-screen">Preparing your workspace...</div>;
         }
-        
+
         // CRITICAL: Check onboarding FIRST before anything else (including ToS)
         // This ensures new users who just verified their email go through onboarding
         const params = new URLSearchParams(window.location.search);
@@ -399,30 +416,79 @@ export default function App() {
         const forceOnboarding = onboardingParam === '1';
         const skipOnboarding = onboardingParam === '0' || params.get('skip_onboarding') === '1';
         const justVerified = params.get('verified') === '1';
-        
+
         // Skip onboarding for admin users - they should have direct access to dashboard/admin panel
         const userIsAdmin = isAdmin(user);
-        
+
+        // Helper function to check if user has saved onboarding progress in localStorage
+        // This allows users to resume mid-onboarding instead of being forced back to step 1
+        const checkOnboardingProgress = () => {
+            if (!user?.email) return { hasProgress: false, stepIndex: 0, podcastId: null };
+
+            try {
+                const stepKey = `ppp.onboarding.step.${user.email}`;
+                const pidKey = `ppp.onboarding.pid.${user.email}`;
+
+                const savedStep = localStorage.getItem(stepKey);
+                const savedPodcastId = localStorage.getItem(pidKey);
+
+                const stepIndex = savedStep ? parseInt(savedStep, 10) : 0;
+
+                // Consider user to have meaningful progress if:
+                // 1. They're past step 3 (beyond initial setup)
+                // 2. They have a podcast ID saved (podcast was created)
+                const hasProgress = stepIndex > 3 && savedPodcastId;
+
+                if (import.meta.env.DEV && hasProgress) {
+                    console.log('[App] Found saved onboarding progress:', {
+                        stepIndex,
+                        podcastId: savedPodcastId,
+                        email: user.email
+                    });
+                }
+
+                return { hasProgress, stepIndex, podcastId: savedPodcastId };
+            } catch (error) {
+                console.warn('[App] Failed to check onboarding progress:', error);
+                return { hasProgress: false, stepIndex: 0, podcastId: null };
+            }
+        };
+
         // CRITICAL: Users MUST complete all 13 onboarding steps before accessing dashboard
         // This checks backend status: has podcast, has template, AND terms accepted
         // EXCEPTION: Admin users skip onboarding regardless of completion status
         // IMPORTANT: Only redirect if we've successfully fetched onboarding status
         // If API call failed (error: true), don't redirect - assume user might have completed onboarding
         // CRITICAL: If forceOnboarding is set (e.g., from reset), always show onboarding regardless of completion status
+        // NEW: Check localStorage for saved progress - if user is mid-onboarding, let them continue
+        const savedProgress = checkOnboardingProgress();
+        // Persisted completion flag set by onboarding flow's finish handler
+        let completedFlag = false;
+        try { completedFlag = localStorage.getItem('ppp.onboarding.completed') === '1'; } catch { }
+
         if (
-            (onboardingCheck.fetched && 
-            !onboardingCheck.error && 
-            !onboardingCheck.completed && 
-            !skipOnboarding && 
-            !userIsAdmin) ||
+            (onboardingCheck.fetched &&
+                !onboardingCheck.error &&
+                !onboardingCheck.completed &&
+                !skipOnboarding &&
+                !userIsAdmin &&
+                !completedFlag) ||
             (forceOnboarding && !skipOnboarding && !userIsAdmin)
         ) {
+            // Check if user has saved progress - if so, let them continue onboarding
+            if (savedProgress.hasProgress && !forceOnboarding) {
+                if (import.meta.env.DEV) {
+                    console.log('[App] User has incomplete onboarding but has saved progress - allowing continuation from step', savedProgress.stepIndex);
+                }
+                return <Onboarding />;
+            }
+
             if (import.meta.env.DEV) {
                 console.log('[App] Redirecting to onboarding - user has not completed all 13 steps or forced onboarding');
             }
             return <Onboarding />;
         }
-        
+
         // CRITICAL: Users with ZERO podcasts MUST complete onboarding - no escape routes
         // This ensures every user creates at least one podcast before accessing dashboard
         // EXCEPTION: Admin users skip onboarding regardless of podcast count
@@ -432,18 +498,17 @@ export default function App() {
         if (podcastCheck.fetched && !podcastCheck.error && podcastCheck.count === 0 && !skipOnboarding && !userIsAdmin) {
             return <Onboarding />;
         }
-        
+
         // Honor a persisted completion flag so users who chose to skip aren't forced back into onboarding
-        let completedFlag = false;
-        try { completedFlag = localStorage.getItem('ppp.onboarding.completed') === '1'; } catch {}
-        
+        // completedFlag already computed above
+
         // Users with podcasts OR just verified their email OR explicitly requested onboarding
         // should go through onboarding BEFORE seeing ToS or dashboard
         // EXCEPTION: Admin users skip onboarding regardless of verification status
         if (!skipOnboarding && !completedFlag && !userIsAdmin && (forceOnboarding || justVerified)) {
             return <Onboarding />;
         }
-        
+
         // CRITICAL: Terms acceptance check - MUST happen AFTER onboarding check
         // Terms are the LAST step (step 13) of onboarding, so users must complete onboarding first
         // If Terms require acceptance, gate here AFTER onboarding check
@@ -451,7 +516,7 @@ export default function App() {
         // This prevents showing gate with stale data after user accepts terms
         const requiredVersion = user?.terms_version_required;
         const acceptedVersion = user?.terms_version_accepted;
-        
+
         // Debug logging to track Terms bypass issues (dev only to avoid console spam)
         if (import.meta.env.DEV && requiredVersion) {
             console.log('[TermsGate Check]', {
@@ -463,7 +528,7 @@ export default function App() {
                 hydrated: hydrated
             });
         }
-        
+
         // CRITICAL: Block access if terms not accepted (strict comparison)
         // Only enforce if:
         // 1. User data is hydrated (fresh from backend)
@@ -475,9 +540,9 @@ export default function App() {
         // - Pestering users who already accepted terms
         if (
             hydrated && // Only check with fresh data
-            requiredVersion && 
-            typeof requiredVersion === 'string' && 
-            requiredVersion.trim() !== '' && 
+            requiredVersion &&
+            typeof requiredVersion === 'string' &&
+            requiredVersion.trim() !== '' &&
             requiredVersion !== acceptedVersion
         ) {
             if (import.meta.env.DEV) {
@@ -489,40 +554,40 @@ export default function App() {
             }
             return <TermsGate />;
         }
-        
+
         // Admin gating: SUPERADMINS start on admin dashboard, regular admins start on user dashboard
         // CRITICAL: Allow opt-in/opt-out via ?admin=1 (force admin view) or ?view=user (force user view)
         const urlParams = new URLSearchParams(window.location.search);
         const forceAdminView = urlParams.get('admin') === '1';
         const forceUserView = urlParams.get('admin') === '0' || urlParams.get('view') === 'user';
-        
+
         const isSuperAdmin = user?.role === 'superadmin';
         const isRegularAdmin = user?.role === 'admin' || (user?.is_admin && !isSuperAdmin);
-        
+
         // Superadmins: Default to admin dashboard (unless ?view=user)
         if (isSuperAdmin && !forceUserView) {
             if (!adminCheck.checked) return <div className="flex items-center justify-center h-screen">Checking admin access...</div>;
             if (adminCheck.allowed) return <AdminDashboard />;
             // If not allowed, fall through to regular dashboard
         }
-        
+
         // Regular admins: Default to user dashboard (unless ?admin=1)
         if (isRegularAdmin && forceAdminView) {
             if (!adminCheck.checked) return <div className="flex items-center justify-center h-screen">Checking admin access...</div>;
             if (adminCheck.allowed) return <AdminDashboard />;
             // If not allowed, fall through to regular dashboard
         }
-        
+
         return layoutKey === 'ab' ? <AppAB token={token} /> : <PodcastPlusDashboard />;
     }
-        return <div className="flex items-center justify-center h-screen">Loading...</div>;
+    return <div className="flex items-center justify-center h-screen">Loading...</div>;
 }
 
 // Wrap export to always include single Toaster instance
 export function AppWithToasterWrapper() {
     const { isWarmingUp } = useWarmup();
     return <>
-    <MetaHead />
+        <MetaHead />
         <App />
         <BuildInfo />
         <WarmupLoader isVisible={isWarmingUp} />

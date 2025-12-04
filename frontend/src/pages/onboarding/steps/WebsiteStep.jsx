@@ -5,15 +5,16 @@ import { useToast } from "@/hooks/use-toast";
 import { makeApi } from "@/lib/apiClient";
 
 export default function WebsiteStep({ wizard }) {
-    const { 
-    token, 
-    targetPodcastId, 
+  const {
+    token,
+    targetPodcastId,
     setTargetPodcastId,
-    formData, 
+    formData,
     coverCropperRef,
     formatKey,
     setWebsiteUrl,
     websiteUrl: wizardWebsiteUrl,
+    ensurePodcastExists,
     designVibe,
     colorPreference,
     additionalNotes,
@@ -22,7 +23,7 @@ export default function WebsiteStep({ wizard }) {
   const [websiteUrl, setWebsiteUrlLocal] = useState(wizardWebsiteUrl);
   const [error, setError] = useState(null);
   const { toast } = useToast();
-  
+
   // Track if we've already initiated creation/generation to prevent duplicates
   const hasInitiatedRef = useRef(false);
   const isProcessingRef = useRef(false);
@@ -46,32 +47,32 @@ export default function WebsiteStep({ wizard }) {
       error,
       hasFormData: !!(formData.podcastName && formData.podcastDescription),
     });
-    
+
     // Prevent duplicate calls
     if (hasInitiatedRef.current || isProcessingRef.current) {
       console.log("[WebsiteStep] Skipping - already initiated or processing");
       return;
     }
-    
+
     // If we already have a website URL, don't do anything
     if (websiteUrl || wizardWebsiteUrl) {
       console.log("[WebsiteStep] Website already exists, skipping");
       hasInitiatedRef.current = true;
       return;
     }
-    
+
     // If we're already generating, don't start again
     if (generating) {
       console.log("[WebsiteStep] Already generating, skipping");
       return;
     }
-    
+
     // If there's an error, don't auto-retry
     if (error) {
       console.log("[WebsiteStep] Error present, skipping auto-retry");
       return;
     }
-    
+
     // Case 1: We have a podcast ID but no website - generate website
     if (targetPodcastId && !websiteUrl && !wizardWebsiteUrl) {
       console.log("[WebsiteStep] Case 1: Has podcast ID, generating website");
@@ -82,7 +83,7 @@ export default function WebsiteStep({ wizard }) {
       });
       return;
     }
-    
+
     // Case 2: No podcast ID - try to find existing podcast first, then create if needed
     if (!targetPodcastId) {
       console.log("[WebsiteStep] Case 2: No podcast ID, finding or creating podcast");
@@ -94,67 +95,87 @@ export default function WebsiteStep({ wizard }) {
       return;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetPodcastId, formData.podcastName, formData.podcastDescription]); // Also depend on formData to trigger when it becomes available
+  }, [targetPodcastId, formData.podcastName, formData.podcastDescription, ensurePodcastExists]); // Also depend on formData to trigger when it becomes available
 
   const findOrCreatePodcast = async () => {
     if (!token) return;
-    
+
     // Prevent duplicate calls
     if (isProcessingRef.current) {
-      console.log("[Onboarding] Already processing podcast creation, skipping duplicate call");
+      console.log("[WebsiteStep] Already processing podcast creation, skipping duplicate call");
       return;
     }
-    
+
     isProcessingRef.current = true;
     setGenerating(true);
     setError(null);
-    
+
     try {
+      if (typeof ensurePodcastExists === "function") {
+        const ensured = await ensurePodcastExists();
+        if (!ensured || !ensured.id) {
+          throw new Error("We couldn't create your podcast yet. Please complete the earlier steps and try again.");
+        }
+        if (ensured.id && ensured.id !== targetPodcastId) {
+          setTargetPodcastId?.(ensured.id);
+        }
+        await handleGenerateWebsite(ensured.id);
+        return;
+      }
+
       const api = makeApi(token);
-      
-      // First, check if a podcast already exists (always check, even if formData is empty)
+
+      // FIRST: Always check if a podcast already exists
+      // This is critical for users resuming onboarding
       try {
+        console.log("[WebsiteStep] Checking for existing podcasts before creation...");
         const podcasts = await api.get("/api/podcasts/");
         const items = Array.isArray(podcasts) ? podcasts : podcasts?.items || [];
-        
+
         if (items.length > 0) {
           // Try to find podcast by name match first (if formData has name)
           let existingPodcast = null;
           if (formData.podcastName) {
             const nameClean = (formData.podcastName || "").trim().toLowerCase();
-            existingPodcast = items.find(p => 
+            existingPodcast = items.find(p =>
               p.name && p.name.trim().toLowerCase() === nameClean
             );
+
+            if (existingPodcast) {
+              console.log("[WebsiteStep] Found existing podcast by name match:", existingPodcast.id, existingPodcast.name);
+            }
           }
-          
+
           // Use matching podcast or first one
           existingPodcast = existingPodcast || items[0];
-          console.log("[Onboarding] Found existing podcast:", existingPodcast.id, existingPodcast.name);
+          console.log("[WebsiteStep] Using existing podcast:", existingPodcast.id, existingPodcast.name);
           setTargetPodcastId(existingPodcast.id);
           setGenerating(false);
           // Generate website for existing podcast
           await handleGenerateWebsite(existingPodcast.id);
           return;
+        } else {
+          console.log("[WebsiteStep] No existing podcasts found - will create new one");
         }
       } catch (err) {
-        console.warn("[Onboarding] Failed to check for existing podcasts:", err);
+        console.warn("[WebsiteStep] Failed to check for existing podcasts:", err);
         // If it's a 404, that's fine - no podcasts exist yet
         // If it's another error, log it but continue to create new podcast
         if (err?.status !== 404) {
-          console.error("[Onboarding] Unexpected error checking podcasts:", err);
+          console.error("[WebsiteStep] Unexpected error checking podcasts:", err);
         }
       }
-      
+
       // No existing podcast found - only create if we have form data
       if (!formData.podcastName) {
         setError("No podcast found. Please go back and complete the previous steps to create a podcast.");
         setGenerating(false);
         return;
       }
-      
+
       const nameClean = (formData.podcastName || "").trim();
       const descClean = (formData.podcastDescription || "").trim();
-      
+
       if (!nameClean || nameClean.length < 4) {
         throw new Error("Podcast name must be at least 4 characters.");
       }
@@ -207,7 +228,7 @@ export default function WebsiteStep({ wizard }) {
 
       setTargetPodcastId(createdPodcast.id);
       toast({ title: "Great!", description: "Your podcast show has been created." });
-      
+
       // Now generate website
       await handleGenerateWebsite(createdPodcast.id);
     } catch (err) {
@@ -224,14 +245,14 @@ export default function WebsiteStep({ wizard }) {
   const handleGenerateWebsite = async (podcastId = targetPodcastId) => {
     // Use the passed podcastId parameter, not targetPodcastId
     const effectivePodcastId = podcastId || targetPodcastId;
-    
+
     if (!effectivePodcastId || !token) {
       setError("Podcast not found. Please go back and complete previous steps.");
       setGenerating(false);
       isProcessingRef.current = false;
       return;
     }
-    
+
     // Prevent duplicate calls
     if (isProcessingRef.current && !podcastId) {
       console.log("[Onboarding] Already processing website generation, skipping duplicate call");
@@ -249,7 +270,7 @@ export default function WebsiteStep({ wizard }) {
         color_preference: colorPreference,
         additional_notes: additionalNotes,
       });
-      
+
       if (response?.default_domain) {
         const url = response.default_domain;
         setWebsiteUrlLocal(url);
@@ -281,7 +302,7 @@ export default function WebsiteStep({ wizard }) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        We're creating a simple website for your podcast so people can find and listen to your show. 
+        We're creating a simple website for your podcast so people can find and listen to your show.
         You can customize it later in Website Builder.
       </p>
 
@@ -290,7 +311,7 @@ export default function WebsiteStep({ wizard }) {
           <Loader2 className="h-5 w-5 animate-spin text-primary" />
           <div>
             <p className="text-sm font-medium">Generating your website...</p>
-            <p className="text-xs text-muted-foreground">This usually takes 10-15 seconds</p>
+            <p className="text-xs text-muted-foreground">This usually takes 1–2 minutes</p>
           </div>
         </div>
       )}
@@ -333,11 +354,20 @@ export default function WebsiteStep({ wizard }) {
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => window.open(websiteUrl, "_blank")}
+              onClick={() => {
+                const canonical = websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`;
+                const sub = (websiteUrl || '').replace(/^https?:\/\//, '').replace(/\.donecast\.com$/,'');
+                const subdomain = sub.includes('.donecast.com') ? sub.split('.donecast.com')[0] : (sub || '').split('.')[0];
+                const previewUrl = subdomain ? `https://donecast.com/?subdomain=${encodeURIComponent(subdomain)}` : canonical;
+                window.open(previewUrl, "_blank");
+              }}
             >
               <ExternalLink className="h-4 w-4 mr-2" />
               Open
             </Button>
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Final URL: <code className="font-mono">{websiteUrl}</code> (may take up to 24 hours to propagate). The Open button uses the immediate preview: <code className="font-mono">https://donecast.com/?subdomain=your-subdomain</code>.
           </div>
           <p className="text-xs text-muted-foreground">
             You can customize your website later in Website Builder. For now, you have a URL to share with listeners.

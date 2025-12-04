@@ -117,7 +117,7 @@ class Settings(BaseSettings):
     OAUTH_BACKEND_BASE: Optional[str] = None
     APP_BASE_URL: Optional[str] = None  # For frontend redirects
     CORS_ALLOWED_ORIGINS: str = "http://127.0.0.1:5173,http://localhost:5173"
-    PODCAST_WEBSITE_BASE_DOMAIN: str = "podcastplusplus.com"
+    PODCAST_WEBSITE_BASE_DOMAIN: str = "donecast.com"
     PODCAST_WEBSITE_GCS_BUCKET: str = "ppp-websites-us-west1"
     PODCAST_WEBSITE_CUSTOM_DOMAIN_MIN_TIER: str = "pro"
     
@@ -130,8 +130,8 @@ class Settings(BaseSettings):
     # Changing this forces ALL users to re-accept terms. See TERMS_VERSION_MANAGEMENT_CRITICAL.md
     # If you change this, run: python migrate_terms_version.py (if you don't need re-acceptance)
     TERMS_VERSION: str = "2025-10-22"
-    # Default legal / marketing URLs (rebranded from getpodcastplus.com -> podcastplusplus.com)
-    TERMS_URL: str = "https://app.podcastplusplus.com/terms"
+    # Default legal / marketing URLs (rebranded from getpodcastplus.com -> podcastplusplus.com -> donecast.com)
+    TERMS_URL: str = "https://app.donecast.com/terms"
 
     # --- JWT Settings ---
     ALGORITHM: str = "HS256"
@@ -180,11 +180,15 @@ class Settings(BaseSettings):
         # function. Old domain entries can be removed after DNS / marketing cut-over.
         defaults = [
             # New brand (preferred)
+            "https://donecast.com",
+            "https://www.donecast.com",
+            "https://app.donecast.com",
+            "https://api.donecast.com",
+            # Legacy (backward compatibility)
             "https://podcastplusplus.com",
             "https://www.podcastplusplus.com",
             "https://app.podcastplusplus.com",
             "https://api.podcastplusplus.com",
-            # Legacy (backward compatibility)
             "https://getpodcastplus.com",
             "https://www.getpodcastplus.com",
             "https://app.getpodcastplus.com",
@@ -204,7 +208,7 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _apply_spreaker_defaults(self):
         if not self.SPREAKER_REDIRECT_URI:
-            base = (self.OAUTH_BACKEND_BASE or "https://api.podcastplusplus.com").rstrip("/")
+            base = (self.OAUTH_BACKEND_BASE or "https://api.donecast.com").rstrip("/")
             # Unified Spreaker OAuth callback route (popup flow)
             self.SPREAKER_REDIRECT_URI = f"{base}/api/auth/spreaker/callback"
         return self

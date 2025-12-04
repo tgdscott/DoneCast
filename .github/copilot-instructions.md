@@ -1,9 +1,9 @@
-# Podcast Plus Plus - AI Agent Instructions
+# DoneCast - AI Agent Instructions
 
 ## Project Overview
 Self-hosted podcast creation platform with AI-powered features. Full-stack app: FastAPI backend + React frontend, deployed on Google Cloud Run.
 
-**Production Domain**: `podcastplusplus.com` (primary), `getpodcastplus.com` (legacy, maintained for backward compatibility)  
+**Production Domain**: `donecast.com` (primary), `podcastplusplus.com` (legacy, maintained for backward compatibility)  
 **Key Tech:** Python 3.11+, FastAPI, SQLAlchemy 2.0/SQLModel, PostgreSQL, React 18, Vite, TailwindCSS, GCS, Cloud Tasks
 
 ## ⚠️ Critical Constraints
@@ -199,18 +199,16 @@ if path.startswith("gs://"):
 
 **All fixes and features MUST prioritize production environment.** Local dev is production-like (GCS/R2 required) and production stability is non-negotiable. If a change helps both, great. If it's a choice, production wins every time.
 
-### Branding: NEVER Use "Podcast++"
-**CRITICAL: Brand name must ALWAYS be "Podcast Plus Plus" or "Plus Plus" - NEVER "Podcast++"**
-
-This is non-negotiable for URL clarity and brand consistency. The ++ notation creates confusion with URLs and looks unprofessional.
+### Branding: ALWAYS Use "DoneCast"
+**CRITICAL: Brand name must ALWAYS be "DoneCast"**
 
 **Correct usage:**
-- ✅ "Podcast Plus Plus" (full name)
-- ✅ "Plus Plus" (short form)
-- ✅ "Powered by Podcast Plus Plus"
-- ✅ "Your Podcast Plus Plus RSS feeds"
+- ✅ "DoneCast" (full name)
+- ✅ "Powered by DoneCast"
+- ✅ "Your DoneCast RSS feeds"
+- ❌ "Podcast Plus Plus" (Legacy only)
+- ❌ "Plus Plus" (Legacy only)
 - ❌ "Podcast++" (NEVER use this anywhere)
-- ❌ "podcast++" (NEVER use this anywhere)
 
 **This applies to:**
 - UI text, labels, tooltips

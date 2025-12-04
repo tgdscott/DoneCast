@@ -38,7 +38,7 @@ function getTierBadge(tier) {
   const normalized = (tier || "").toLowerCase();
   if (normalized === "pro") return <Badge className="bg-purple-100 text-purple-800">Pro</Badge>;
   if (normalized === "creator") return <Badge className="bg-blue-100 text-blue-800">Creator</Badge>;
-  if (normalized === "free" || normalized === "starter") return <Badge className="bg-gray-100 text-gray-800">Starter</Badge>;
+  if (normalized === "free" || normalized === "starter" || normalized === "hobby") return <Badge className="bg-gray-100 text-gray-800">Hobby</Badge>;
   if (normalized === "trial") return <Badge className="bg-green-100 text-green-800">Trial</Badge>;
   if (normalized === "unlimited") return <Badge className="bg-yellow-100 text-yellow-800">Unlimited</Badge>;
   if (normalized === "executive") return <Badge className="bg-teal-100 text-teal-800">Executive</Badge>;

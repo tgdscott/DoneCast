@@ -17,7 +17,17 @@ def is_on_trial(user: User) -> bool:
         return False
     
     now = datetime.now(timezone.utc)
-    return user.trial_started_at <= now <= user.trial_expires_at
+    
+    # Ensure datetimes are timezone-aware for comparison
+    trial_start = user.trial_started_at
+    if trial_start.tzinfo is None:
+        trial_start = trial_start.replace(tzinfo=timezone.utc)
+    
+    trial_end = user.trial_expires_at
+    if trial_end.tzinfo is None:
+        trial_end = trial_end.replace(tzinfo=timezone.utc)
+    
+    return trial_start <= now <= trial_end
 
 
 def is_trial_expired(user: User) -> bool:
@@ -26,7 +36,13 @@ def is_trial_expired(user: User) -> bool:
         return False
     
     now = datetime.now(timezone.utc)
-    return now > user.trial_expires_at
+    
+    # Ensure datetime is timezone-aware for comparison
+    trial_end = user.trial_expires_at
+    if trial_end.tzinfo is None:
+        trial_end = trial_end.replace(tzinfo=timezone.utc)
+    
+    return now > trial_end
 
 
 def get_effective_tier(user: User) -> str:
@@ -52,7 +68,13 @@ def has_active_subscription(user: User) -> bool:
     # Check if user has a subscription that hasn't expired
     if user.subscription_expires_at:
         now = datetime.now(timezone.utc)
-        return now < user.subscription_expires_at
+        
+        # Ensure datetime is timezone-aware for comparison
+        sub_expires = user.subscription_expires_at
+        if sub_expires.tzinfo is None:
+            sub_expires = sub_expires.replace(tzinfo=timezone.utc)
+        
+        return now < sub_expires
     
     # Check if user has a paid tier (not free)
     paid_tiers = {"hobby", "creator", "pro", "executive", "enterprise"}

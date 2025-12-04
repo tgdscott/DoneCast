@@ -15,31 +15,31 @@ export default function PublicWebsite() {
         // Get subdomain from query param (for dev mode) or hostname (for production)
         const searchParams = new URL(window.location.href).searchParams;
         const previewSubdomain = searchParams.get('subdomain'); // For dev preview mode
-        
+
         let subdomain = null;
-        
-        // In dev mode, allow subdomain via query param
-        if (import.meta.env.DEV && previewSubdomain) {
+
+        // Allow subdomain via query param (production or dev)
+        if (previewSubdomain) {
           subdomain = previewSubdomain;
-          if (import.meta.env.DEV) console.log('[PublicWebsite] Dev mode: using subdomain from query param:', subdomain);
+          if (import.meta.env.DEV) console.log('[PublicWebsite] Using subdomain from query param:', subdomain);
         } else {
           // Extract subdomain from hostname (production mode)
           const hostname = window.location.hostname;
           if (import.meta.env.DEV) console.log('[PublicWebsite] Current hostname:', hostname);
-          
-          // Parse subdomain (e.g., "cinema-irl" from "cinema-irl.podcastplusplus.com")
+
+          // Parse subdomain (e.g., "cinema-irl" from "cinema-irl.donecast.com")
           const parts = hostname.split('.');
-          
+
           // Check if this is a subdomain request (not the root domain)
           if (parts.length < 3) {
             if (import.meta.env.DEV) console.log('[PublicWebsite] Not a subdomain, redirecting to dashboard');
             navigate('/dashboard');
             return;
           }
-          
+
           subdomain = parts[0];
           if (import.meta.env.DEV) console.log('[PublicWebsite] Detected subdomain:', subdomain);
-          
+
           // Check for reserved subdomains that shouldn't serve websites
           const reserved = ['www', 'api', 'admin', 'app', 'dev', 'test', 'staging'];
           if (reserved.includes(subdomain)) {
@@ -48,17 +48,25 @@ export default function PublicWebsite() {
             return;
           }
         }
-        
+
         if (!subdomain) {
           if (import.meta.env.DEV) console.log('[PublicWebsite] No subdomain found');
           navigate('/dashboard');
           return;
         }
-        
+
         // Fetch website data from API
-        const apiBase = import.meta.env.VITE_API_BASE || 
-                       (window.location.hostname === 'localhost' ? 'http://127.0.0.1:8000' : '');
-        
+        let apiBase = import.meta.env.VITE_API_BASE ||
+          (window.location.hostname === 'localhost' ? 'http://127.0.0.1:8000' : '');
+
+        // Fix for double /api/api issue
+        if (apiBase && apiBase.endsWith('/api')) {
+          apiBase = apiBase.slice(0, -4);
+        }
+        if (apiBase && apiBase.endsWith('/')) {
+          apiBase = apiBase.slice(0, -1);
+        }
+
         // In dev mode with query param, always use preview endpoint
         // In production, try published first, then preview
         let response;
@@ -68,14 +76,14 @@ export default function PublicWebsite() {
         } else {
           // Try published endpoint first
           response = await fetch(`${apiBase}/api/sites/${subdomain}`);
-          
+
           // If not published, try preview endpoint (shows draft websites)
           if (!response.ok && response.status === 404) {
             if (import.meta.env.DEV) console.log('[PublicWebsite] Published website not found, trying preview...');
             response = await fetch(`${apiBase}/api/sites/${subdomain}/preview`);
           }
         }
-        
+
         if (!response.ok) {
           if (response.status === 404) {
             const errorData = await response.json();
@@ -83,9 +91,9 @@ export default function PublicWebsite() {
           }
           throw new Error(`Failed to load website: ${response.status}`);
         }
-        
+
         const data = await response.json();
-        
+
         // Debug logging (dev only)
         if (import.meta.env.DEV) {
           const episodeCount = data.episodes?.length || 0;
@@ -102,7 +110,7 @@ export default function PublicWebsite() {
           console.log('========================================');
         }
         setWebsiteData(data);
-        
+
       } catch (err) {
         // Always log errors, but keep them minimal in production
         if (import.meta.env.DEV) {
@@ -115,7 +123,7 @@ export default function PublicWebsite() {
         setLoading(false);
       }
     }
-    
+
     loadWebsite();
   }, [navigate]); // Only depend on navigate, URL changes will trigger reload
 
@@ -144,7 +152,7 @@ export default function PublicWebsite() {
       if (import.meta.env.DEV) {
         console.log('[PublicWebsite] Injected custom CSS, length:', websiteData.global_css.length);
         console.log('[PublicWebsite] CSS preview:', websiteData.global_css.substring(0, 500));
-        
+
         // Debug: Check if CSS variables are defined
         const rootStyles = window.getComputedStyle(document.documentElement);
         console.log('[PublicWebsite] CSS Variables:', {
@@ -185,10 +193,10 @@ export default function PublicWebsite() {
           <h1 className="text-2xl font-bold text-slate-900 mb-2">Website Not Found</h1>
           <p className="text-slate-600 mb-6">{error}</p>
           <button
-            onClick={() => window.location.href = 'https://podcastplusplus.com'}
+            onClick={() => window.location.href = 'https://donecast.com'}
             className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-purple-600 hover:bg-purple-700"
           >
-            Go to Podcast Plus Plus
+            Go to DoneCast
           </button>
         </div>
       </div>
@@ -211,9 +219,9 @@ export default function PublicWebsite() {
         <div className="sticky top-0 z-50">
           {(() => {
             const HeaderComponent = getSectionPreviewComponent('header');
-            return <HeaderComponent 
-              config={headerSection.config} 
-              enabled={headerSection.enabled} 
+            return <HeaderComponent
+              config={headerSection.config}
+              enabled={headerSection.enabled}
               podcast={{
                 id: websiteData.podcast_id,
                 title: websiteData.podcast_title,
@@ -231,12 +239,12 @@ export default function PublicWebsite() {
       <main className="flex-1 pb-20">
         {contentSections.map((section) => {
           const SectionComponent = getSectionPreviewComponent(section.id);
-          
+
           if (!SectionComponent) {
             if (import.meta.env.DEV) console.warn(`[PublicWebsite] No component found for section ID: ${section.id}`);
             return null;
           }
-          
+
           // Pass episode data to sections that need it
           const sectionProps = {
             key: section.id,
@@ -250,14 +258,14 @@ export default function PublicWebsite() {
               rss_url: websiteData.podcast_rss_feed_url,
             },
           };
-          
+
           // Debug logging for hero section (dev only)
           if (import.meta.env.DEV && section.id === 'hero') {
             console.log('[PublicWebsite] Hero section config:', section.config);
             console.log('[PublicWebsite] Podcast cover_url being passed:', websiteData.podcast_cover_url);
             console.log('[PublicWebsite] Podcast object:', sectionProps.podcast);
           }
-          
+
           // Add episodes for sections that display them
           if (section.id === 'latest-episodes' || section.id === 'episodes') {
             // Add podcast_title to each episode for the player
@@ -268,7 +276,7 @@ export default function PublicWebsite() {
             sectionProps.episodes = episodesWithPodcast;
             if (import.meta.env.DEV) console.log(`[PublicWebsite] ${section.id} section - episodes count:`, episodesWithPodcast.length);
           }
-          
+
           return (
             <div data-section-id={section.id} key={section.id}>
               <SectionComponent {...sectionProps} />
@@ -276,41 +284,41 @@ export default function PublicWebsite() {
           );
         })}
       </main>
-      
+
       {/* Persistent Audio Player - Always visible at bottom */}
       <div style={{ position: 'relative', zIndex: 1 }}>
         <PersistentPlayer />
       </div>
-      
+
       {/* Footer Section */}
       {footerSection ? (
         (() => {
           const FooterComponent = getSectionPreviewComponent('footer');
-          return <FooterComponent 
-            config={footerSection.config} 
-            enabled={footerSection.enabled} 
+          return <FooterComponent
+            config={footerSection.config}
+            enabled={footerSection.enabled}
             podcast={{
               id: websiteData.podcast_id,
               title: websiteData.podcast_title,
               description: websiteData.podcast_description,
               cover_url: websiteData.podcast_cover_url,
               rss_url: websiteData.podcast_rss_feed_url,
-            }} 
+            }}
           />;
         })()
       ) : (
-        /* Default Podcast Plus Plus branding footer */
+        /* Default DoneCast branding footer */
         <footer className="bg-slate-900 text-white py-8">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
             <p className="text-sm text-slate-400">
               Powered by{' '}
-              <a 
-                href="https://podcastplusplus.com" 
-                target="_blank" 
+              <a
+                href="https://donecast.com"
+                target="_blank"
                 rel="noopener noreferrer"
                 className="text-purple-400 hover:text-purple-300 transition-colors"
               >
-                Podcast Plus Plus
+                DoneCast
               </a>
             </p>
           </div>

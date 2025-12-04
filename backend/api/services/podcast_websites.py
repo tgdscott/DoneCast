@@ -35,7 +35,7 @@ import colorsys
 log = logging.getLogger(__name__)
 
 _SITE_SCHEMA_PROMPT = """
-You are Podcast Plus Plus SiteBuilder, an expert AI web designer specializing in podcast websites.
+You are DoneCast SiteBuilder, an expert AI web designer specializing in podcast websites.
 
 **Your Mission:**
 Build a clean, modern starter website that matches the podcast's unique brand and style. The site should feel tailored to the podcast, not like a generic template.
@@ -142,7 +142,7 @@ ALWAYS respond with a single JSON object matching this schema exactly:
 - Think about the target audience and write copy that speaks to them
 """.strip()
 
-_BASE_DOMAIN = settings.PODCAST_WEBSITE_BASE_DOMAIN.strip() or "podcastplusplus.com"
+_BASE_DOMAIN = settings.PODCAST_WEBSITE_BASE_DOMAIN.strip() or "donecast.com"
 _PROMPT_BUCKET = settings.PODCAST_WEBSITE_GCS_BUCKET.strip() if settings.PODCAST_WEBSITE_GCS_BUCKET else ""
 _CUSTOM_DOMAIN_MIN_TIER = settings.PODCAST_WEBSITE_CUSTOM_DOMAIN_MIN_TIER.strip().lower() or "pro"
 
@@ -1835,6 +1835,22 @@ def create_or_refresh_site(session: Session, podcast: Podcast, user: User, desig
         from api.services.ai_theme_generator import generate_complete_theme
         if generate_complete_theme is not None:
             log.info("Generating AI theme from cover image analysis")
+            
+            # Extract tagline from AI content or podcast description
+            tagline = None
+            if content and content.hero_subtitle:
+                tagline = content.hero_subtitle
+            elif podcast.description:
+                # Use first sentence or generic fallback
+                desc = podcast.description.strip()
+                first_sentence = desc.split('.')[0] if desc else ""
+                if first_sentence and len(first_sentence) < 100:
+                    tagline = first_sentence + "."
+                else:
+                    tagline = f"Listen to {podcast.name} on your favorite platform."
+            else:
+                tagline = f"Listen to {podcast.name} on your favorite platform."
+            
             theme_result = generate_complete_theme(podcast, cover_url, tagline, design_prefs)
             
             # Log the colors being generated for debugging
@@ -1971,7 +1987,7 @@ def get_default_domain(subdomain: str) -> str:
         base_url = base_url.rstrip("/")
         return f"{base_url}/?subdomain={subdomain}"
     
-    # Production mode: return subdomain.podcastplusplus.com
+    # Production mode: return subdomain.donecast.com
     return f"{subdomain}.{_BASE_DOMAIN}" if subdomain else _BASE_DOMAIN
 
 

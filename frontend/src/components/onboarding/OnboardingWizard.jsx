@@ -102,6 +102,7 @@ export default function OnboardingWizard() {
   const [importAssets, setImportAssets] = useState([]);
   // Step 9 style: allow skipping category selection explicitly
   const [notSureCategories, setNotSureCategories] = useState(false);
+  const [createdWebsiteSubdomain, setCreatedWebsiteSubdomain] = useState(null);
 
   function nextNew(stepName) {
     const idx = NEW_STEPS.indexOf(stepName ?? newStep);
@@ -490,11 +491,14 @@ export default function OnboardingWizard() {
     try {
       if (importResult && (importResult.podcast_id || importResult.id)) {
         const pid = importResult.podcast_id || importResult.id;
-        await makeApi(token).post(`/api/podcasts/${pid}/website`, {
+        const webRes = await makeApi(token).post(`/api/podcasts/${pid}/website`, {
           design_vibe: designVibe,
           color_preference: colorPreference,
           additional_notes: additionalNotes
         });
+        if (webRes && webRes.subdomain) {
+          setCreatedWebsiteSubdomain(webRes.subdomain);
+        }
       }
       setImportStep('importSuccess');
     } catch (e) {
@@ -528,15 +532,36 @@ export default function OnboardingWizard() {
 
   // --- NEW PODCAST PATH ---
   if (mode === 'new') {
-    if (newStep === 'success') return (
-      <div className="max-w-xl mx-auto py-12">
-        <h1 className="text-3xl font-bold mb-4 text-center">All set</h1>
-        <p className="mb-6 text-center">Your podcast, "{podcastName}" and first template are ready.</p>
-        <div className="text-center">
-          <a href="/" className="px-6 py-3 bg-blue-600 text-white rounded inline-block">Go to Dashboard</a>
+    if (newStep === 'success') {
+      const previewUrl = createdPodcast?.slug ? `/?subdomain=${createdPodcast.slug}` : '/';
+      const liveUrl = createdPodcast?.slug ? `https://${createdPodcast.slug}.podcastplusplus.com` : null;
+      return (
+        <div className="max-w-xl mx-auto py-12 text-center">
+          <h1 className="text-3xl font-bold mb-4">All set!</h1>
+          <p className="mb-6 text-gray-600">Your podcast "{podcastName}" is ready.</p>
+
+          <div className="bg-green-50 border border-green-200 rounded p-6 mb-8 max-w-md mx-auto shadow-sm">
+            <h3 className="font-semibold text-green-800 mb-2">Your Website is Live (Preview)</h3>
+            <p className="text-sm text-green-700 mb-4">You can view and share your website immediately using the preview link.</p>
+            <a href={previewUrl} target="_blank" rel="noopener noreferrer" className="block w-full py-3 bg-green-600 text-white rounded font-semibold hover:bg-green-700 transition-colors shadow-sm">
+              View Website (Preview)
+            </a>
+          </div>
+
+          {liveUrl && (
+            <div className="mb-8 text-sm text-gray-500">
+              <p>Your custom subdomain is being provisioned:</p>
+              <a href={liveUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{liveUrl}</a>
+              <p className="text-xs mt-1">(May take a few minutes to activate SSL)</p>
+            </div>
+          )}
+
+          <div>
+            <a href="/" className="text-gray-600 hover:text-gray-900 font-medium">Go to Dashboard</a>
+          </div>
         </div>
-      </div>
-    );
+      );
+    }
     return (
       <div className="max-w-2xl mx-auto py-10">
         <h1 className="text-2xl font-bold mb-4">Create your podcast</h1>
@@ -931,10 +956,23 @@ export default function OnboardingWizard() {
           </div>
         )}
         {importStep === 'importSuccess' && (
-          <div className="text-center">
+          <div className="text-center max-w-xl mx-auto">
             <h2 className="text-3xl font-bold mb-4">Import complete</h2>
-            <p className="mb-6">Success! {importResult?.podcast_name || 'Your show'} imported. Your website and first template are ready.</p>
-            <a href="/" className="px-6 py-3 bg-blue-600 text-white rounded">Go to Dashboard</a>
+            <p className="mb-6 text-gray-600">Success! {importResult?.podcast_name || 'Your show'} imported.</p>
+
+            {createdWebsiteSubdomain && (
+              <div className="bg-green-50 border border-green-200 rounded p-6 mb-8 max-w-md mx-auto shadow-sm">
+                <h3 className="font-semibold text-green-800 mb-2">Your Website is Live (Preview)</h3>
+                <p className="text-sm text-green-700 mb-4">You can view and share your website immediately using the preview link.</p>
+                <a href={`/?subdomain=${createdWebsiteSubdomain}`} target="_blank" rel="noopener noreferrer" className="block w-full py-3 bg-green-600 text-white rounded font-semibold hover:bg-green-700 transition-colors shadow-sm">
+                  View Website (Preview)
+                </a>
+              </div>
+            )}
+
+            <div className="mb-8 text-sm text-gray-500">
+              <a href="/" className="text-gray-600 hover:text-gray-900 font-medium">Go to Dashboard</a>
+            </div>
           </div>
         )}
       </div>

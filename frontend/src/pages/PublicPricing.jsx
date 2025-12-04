@@ -332,7 +332,7 @@ export default function PublicPricing() {
               <span className="nl-brand-icon">
                 <Radio size={22} />
               </span>
-              Podcast Plus Plus
+              DoneCast
             </Link>
             <div className="nl-nav-links">
               <Link to="/features">Features</Link>
@@ -559,7 +559,7 @@ export default function PublicPricing() {
                 <span className="nl-brand-icon">
                   <Radio size={20} />
                 </span>
-                Podcast Plus Plus
+                DoneCast
               </div>
               <p className="nl-lead" style={{ fontSize: "0.95rem" }}>
                 Professional podcast hosting for the modern creator.
@@ -602,7 +602,7 @@ export default function PublicPricing() {
               </ul>
             </div>
           </div>
-          <div className="nl-footer-meta">&copy; {new Date().getFullYear()} Podcast Plus Plus. All rights reserved.</div>
+          <div className="nl-footer-meta">&copy; {new Date().getFullYear()} DoneCast. All rights reserved.</div>
         </div>
       </footer>
     </div>

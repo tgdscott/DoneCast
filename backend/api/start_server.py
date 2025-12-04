@@ -86,7 +86,7 @@ def create_error_app(error_msg):
     """Create a minimal FastAPI app that shows the error."""
     try:
         from fastapi import FastAPI
-        error_app = FastAPI(title="Podcast Plus Plus API (Startup Error)")
+        error_app = FastAPI(title="DoneCast API (Startup Error)")
         
         @error_app.get("/healthz")
         @error_app.get("/api/health")

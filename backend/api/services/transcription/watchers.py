@@ -182,10 +182,10 @@ def notify_watchers_processed(filename: str) -> None:
                     subject = "Your recording is ready to edit"
                     # Include download link and 24-hour retention notice
                     body = (
-                        f"Good news! Your recording '{friendly_text}' has finished processing and is ready in Podcast Plus Plus.\n\n"
+                        f"Good news! Your recording '{friendly_text}' has finished processing and is ready in DoneCast.\n\n"
                         
                         f"💾 Download your raw recording (valid for 24 hours):\n"
-                        f"https://app.podcastplusplus.com/media-library\n\n"
+                        f"https://app.donecast.com/media-library\n\n"
                         
                         "💡 Tip: Download a backup copy now! The raw file will be automatically deleted after 24 hours.\n\n"
                         
@@ -195,14 +195,14 @@ def notify_watchers_processed(filename: str) -> None:
                     html_body = (
                         f"<html><body style=\"font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;\">"
                         f"<div style=\"text-align: center; margin-bottom: 30px;\">"
-                        f"<img src=\"https://app.podcastplusplus.com/MikeCzech.png\" alt=\"Podcast Plus Plus\" style=\"width: 80px; height: 80px; border-radius: 50%; object-fit: cover; margin-bottom: 20px;\" />"
+                        f"<img src=\"https://app.donecast.com/logo.png\" alt=\"DoneCast\" style=\"width: 80px; height: 80px; border-radius: 50%; object-fit: cover; margin-bottom: 20px;\" />"
                         f"</div>"
                         f"<h2 style=\"color: #2C3E50; text-align: center;\">Good news! Your recording '{friendly_text}' has finished processing!</h2>"
                         f"<p style=\"margin: 20px 0; text-align: center;\">"
-                        f"Your recording is ready in Podcast Plus Plus."
+                        f"Your recording is ready in DoneCast."
                         f"</p>"
                         f"<p style=\"margin: 20px 0; text-align: center;\">"
-                        f"<a href=\"https://app.podcastplusplus.com/media-library\" style=\"display: inline-block; background-color: #2C3E50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold;\">"
+                        f"<a href=\"https://app.donecast.com/media-library\" style=\"display: inline-block; background-color: #2C3E50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold;\">"
                         f"Download Your Recording</a></p>"
                         f"<p style=\"font-size: 13px; color: #555; text-align: center; margin-top: 20px;\">"
                         f"💡 Tip: Download a backup copy now! The raw file will be automatically deleted after 24 hours."

@@ -148,7 +148,7 @@ class HeroSection(BaseModel):
     title_highlight: str = "For Everyone"
     description: str = (
         "No experience needed. No technical skills required. No age limit. Just your voice and our patent-pending "
-        "technology. PodcastPlusPlus makes professional podcasting so easy, it's faster and cheaper than hiring someone else to do it."
+        "technology. DoneCast makes professional podcasting so easy, it's faster and cheaper than hiring someone else to do it."
     )
     cta_text: str = "Start Your Free Trial"
     meta_items: list[str] = PydanticField(default_factory=lambda: ["Anyone can do this", "Setup in 5 minutes"])
@@ -181,7 +181,7 @@ class DoneForYouSection(BaseModel):
     title_highlight: str = "By You"
     description: str = (
         "Why pay someone else when you can do it yourself—faster, cheaper, and with complete creative control? "
-        "Podcast Plus Plus is so intuitive that publishing your podcast takes less time and effort than explaining it to someone else."
+        "DoneCast is so intuitive that publishing your podcast takes less time and effort than explaining it to someone else."
     )
     pillars: list[PillarCard] = PydanticField(
         default_factory=lambda: [
@@ -294,7 +294,7 @@ class Differentiator(BaseModel):
 
 class WhySection(BaseModel):
     title: str = "Why"
-    title_highlight: str = "Podcast Plus Plus"
+    title_highlight: str = "DoneCast"
     title_suffix: str = "?"
     description: str = (
         "We've built something truly special here. Technology that doesn't exist anywhere else. A platform that makes the "
@@ -329,7 +329,7 @@ class WhySection(BaseModel):
 class FinalCTASection(BaseModel):
     pill_text: str = "Ready when you are"
     title: str = "Ready to Take Your Podcast to the Next Level?"
-    description: str = "Join the next generation of podcasters who are building their audience with Podcast Plus Plus."
+    description: str = "Join the next generation of podcasters who are building their audience with DoneCast."
     cta_text: str = "Start Your Free Trial"
     fine_print: str = "14-day free trial • No credit card required • Cancel anytime"
 
@@ -344,11 +344,11 @@ def _default_reviews() -> list[LandingReview]:
     return [
         LandingReview(
             quote=(
-                "I was terrified of the technical side of podcasting. Podcast Plus Plus made it so simple that I "
+                "I was terrified of the technical side of podcasting. DoneCast made it so simple that I "
                 "launched my first episode in under 30 minutes! Now I have 50+ episodes and growing."
             ),
             author="Sarah Johnson",
-            role="Wellness Coach • 12 months on Plus Plus",
+            role="Wellness Coach • 12 months on DoneCast",
             avatar_url="https://placehold.co/60x60/E2E8F0/A0AEC0?text=SJ",
             rating=5.0,
         ),
@@ -358,7 +358,7 @@ def _default_reviews() -> list[LandingReview]:
                 "game-changer for my reach!"
             ),
             author="Maria Rodriguez",
-            role="Community Leader • 8 months on Plus Plus",
+            role="Community Leader • 8 months on DoneCast",
             avatar_url="https://placehold.co/60x60/E2E8F0/A0AEC0?text=MR",
             rating=5.0,
         ),
@@ -367,7 +367,7 @@ def _default_reviews() -> list[LandingReview]:
                 "The AI editing tools are unbelievable. I cut my production time by 80% and the quality actually went up."
             ),
             author="Dev Patel",
-            role="Startup Founder • 6 months on Plus Plus",
+            role="Startup Founder • 6 months on DoneCast",
             avatar_url="https://placehold.co/60x60/E2E8F0/A0AEC0?text=DP",
             rating=5.0,
         ),
@@ -377,9 +377,9 @@ def _default_reviews() -> list[LandingReview]:
 def _default_faqs() -> list[LandingFAQ]:
     return [
         LandingFAQ(
-            question="Do I need any technical experience to use Podcast Plus Plus?",
+            question="Do I need any technical experience to use DoneCast?",
             answer=(
-                "Absolutely not! Plus Plus is designed for complete beginners. If you can use email, you can create "
+                "Absolutely not! DoneCast is designed for complete beginners. If you can use email, you can create "
                 "professional podcasts with our platform."
             ),
         ),
@@ -431,7 +431,7 @@ class LandingPageContent(BaseModel):
     
     # FAQ section
     faq_heading: str = "Frequently Asked Questions"
-    faq_subheading: str = "Everything you need to know about getting started with Podcast Plus Plus"
+    faq_subheading: str = "Everything you need to know about getting started with DoneCast"
     faqs: list[LandingFAQ] = PydanticField(default_factory=_default_faqs)
     
     updated_at: Optional[datetime] = None

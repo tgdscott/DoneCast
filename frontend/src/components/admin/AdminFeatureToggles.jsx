@@ -184,10 +184,11 @@ export default function AdminFeatureToggles({ token, initial = null, onSaved, re
             disabled={saving || readOnly}
             className="border rounded px-3 py-1.5 text-sm"
           >
-            <option value="starter">Starter</option>
+            <option value="hobby">Hobby</option>
             <option value="creator">Creator</option>
             <option value="pro">Pro</option>
             <option value="executive">Executive</option>
+            <option value="enterprise">Enterprise</option>
             <option value="unlimited">Unlimited</option>
           </select>
         </div>

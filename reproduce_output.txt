@@ -1,2 +1,21 @@
-Attempting to import api.routers.podcasts.crud...
-Successfully imported api.routers.podcasts.crud
+2025-11-29 00:42:57,817 - INFO - Loading env from: C:\Users\windo\OneDrive\PodWebDeploy\backend\.env.local
+2025-11-29 00:42:57,824 - INFO - Forced AI_PROVIDER=gemini for testing
+2025-11-29 00:42:57,824 - INFO - Current GEMINI_API_KEY suffix: ...cjUAI
+2025-11-29 00:42:57,824 - INFO - Starting reproduction script...
+2025-11-29 00:42:57,824 - INFO - Testing image generation...
+2025-11-29 00:42:58,501 - WARNING - PostHog library not found, LLM analytics disabled
+2025-11-29 00:42:58,501 - INFO - Local google-generativeai version: 0.8.5
+2025-11-29 00:42:58,501 - INFO - Prompt: A futuristic podcast about AI and coding, neon colors, cyberpunk style
+2025-11-29 00:42:58,604 - INFO - [config] Loaded .env.local from C:\Users\windo\OneDrive\PodWebDeploy\backend\.env.local
+2025-11-29 00:42:58,631 - WARNING - Missing/placeholder secrets (dev allowed): STRIPE_WEBHOOK_SECRET
+2025-11-29 00:42:58,632 - INFO - ================================================================================
+2025-11-29 00:42:58,632 - INFO - IMAGE GENERATION REQUEST - provider=gemini model=gemini-2.5-flash-image
+2025-11-29 00:42:58,632 - INFO - PROMPT (113 chars): A futuristic podcast about AI and coding, neon colors, cyberpunk style
+
+Create a square image (1:1 aspect ratio).
+2025-11-29 00:42:58,632 - INFO - ASPECT RATIO: 1:1
+2025-11-29 00:42:58,632 - INFO - ================================================================================
+2025-11-29 00:43:05,283 - INFO - \u2713 Image generated successfully (data length: 2797932 chars, mime: image/png)
+2025-11-29 00:43:05,285 - INFO - SUCCESS: Image generated!
+2025-11-29 00:43:05,285 - INFO - Result length: 2797954
+2025-11-29 00:43:05,285 - INFO - Result preview: data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABAAA...

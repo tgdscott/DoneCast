@@ -243,7 +243,7 @@ If anything goes wrong:
 
 ### Directory Submission
 - Apple Podcasts: https://podcastsconnect.apple.com
-- Spotify: https://podcasters.spotify.com
+- Spotify: https://creators.spotify.com
 - Google: https://podcastsmanager.google.com
 - PodcastIndex: https://podcastindex.org
 

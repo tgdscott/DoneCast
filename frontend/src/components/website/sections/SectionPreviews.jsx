@@ -6,6 +6,7 @@
 import { ExternalLink, Mail, Radio, Rss, Users, Quote, DollarSign, Calendar, Heart, Sparkles, ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
+import { ensureReadablePair, normalizeHexColor } from "@/components/website/theme/colorAccessibility";
 
 // Helper to get icon component by name
 export function getSectionIcon(iconName) {
@@ -76,6 +77,16 @@ export function HeroSectionPreview({ config, enabled, podcast }) {
   
   // Check if we should use CSS variables (when background_color is a CSS variable)
   const useCSSVars = background_color && background_color.startsWith('var(');
+  const heroColors = ensureReadablePair({
+    background: bgColor,
+    text: txtColor,
+    fallbackText: "#ffffff",
+  });
+  const buttonColors = ensureReadablePair({
+    background: heroColors.text,
+    text: heroColors.background,
+    fallbackText: heroColors.background,
+  });
 
   return (
     <div
@@ -84,8 +95,8 @@ export function HeroSectionPreview({ config, enabled, podcast }) {
         // Let CSS variables handle colors - don't set inline styles
         opacity: enabled ? 1 : 0.6,
       } : {
-        backgroundColor: bgColor,
-        color: txtColor,
+        backgroundColor: heroColors.background || bgColor,
+        color: heroColors.text || txtColor,
         opacity: enabled ? 1 : 0.6,
       }}
     >
@@ -165,8 +176,8 @@ export function HeroSectionPreview({ config, enabled, podcast }) {
                   size="lg" 
                   className={variant === "marquee-style" ? "btn ticket-style" : ""}
                   style={useCSSVars ? undefined : { 
-                    color: bgColor,
-                    backgroundColor: txtColor
+                    color: buttonColors.text || bgColor,
+                    backgroundColor: buttonColors.background || txtColor,
                   }}
                   asChild
                 >
@@ -744,6 +755,12 @@ export function HeaderSectionPreview({ config, enabled, podcast, pages = [] }) {
     height = "normal",
     show_shadow = true,
   } = config || {};
+
+  const headerColors = ensureReadablePair({
+    background: background_color,
+    text: text_color,
+    fallbackText: "#1e293b",
+  });
   
   // Use config logo_text or fall back to podcast title
   const displayLogoText = logo_text || podcast?.title || "Podcast Name";
@@ -771,8 +788,8 @@ export function HeaderSectionPreview({ config, enabled, podcast, pages = [] }) {
     <div
       className={`w-full ${show_shadow ? "shadow-sm" : ""}`}
       style={{ 
-        backgroundColor: background_color, 
-        color: text_color,
+        backgroundColor: headerColors.background || background_color, 
+        color: headerColors.text || text_color,
         opacity: enabled ? 1 : 0.6 
       }}
     >
@@ -886,6 +903,17 @@ export function FooterSectionPreview({ config, enabled, podcast }) {
     text_color = "#94a3b8",
     layout = "columns",
   } = config || {};
+
+  const footerColors = ensureReadablePair({
+    background: background_color,
+    text: text_color,
+    fallbackText: "#94a3b8",
+  });
+
+  const footerDividerColor = (() => {
+    const normalized = normalizeHexColor(footerColors.text || text_color);
+    return normalized ? `${normalized}40` : undefined;
+  })();
   
   // Use config copyright or generate from podcast title
   const displayCopyright = copyright_text || `© ${new Date().getFullYear()} ${podcast?.title || 'Your Podcast'}. All rights reserved.`;
@@ -894,8 +922,8 @@ export function FooterSectionPreview({ config, enabled, podcast }) {
     <div
       className="w-full"
       style={{ 
-        backgroundColor: background_color, 
-        color: text_color,
+        backgroundColor: footerColors.background || background_color, 
+        color: footerColors.text || text_color,
         opacity: enabled ? 1 : 0.6 
       }}
     >
@@ -905,11 +933,11 @@ export function FooterSectionPreview({ config, enabled, podcast }) {
             {/* Social Links */}
             {show_social_links && (
               <div>
-                <h4 className="font-semibold mb-3 text-white">Follow Us</h4>
-                <div className="space-y-2">
-                  <div className="hover:text-white transition-colors cursor-pointer">Twitter</div>
-                  <div className="hover:text-white transition-colors cursor-pointer">Instagram</div>
-                  <div className="hover:text-white transition-colors cursor-pointer">YouTube</div>
+                <h4 className="font-semibold mb-3">Follow Us</h4>
+                <div className="space-y-2 text-sm">
+                  <div className="opacity-80 hover:opacity-100 transition-opacity cursor-pointer">Twitter</div>
+                  <div className="opacity-80 hover:opacity-100 transition-opacity cursor-pointer">Instagram</div>
+                  <div className="opacity-80 hover:opacity-100 transition-opacity cursor-pointer">YouTube</div>
                 </div>
               </div>
             )}
@@ -917,12 +945,12 @@ export function FooterSectionPreview({ config, enabled, podcast }) {
             {/* Subscribe Links */}
             {show_subscribe_links && (
               <div>
-                <h4 className="font-semibold mb-3 text-white">Subscribe</h4>
+                <h4 className="font-semibold mb-3">Subscribe</h4>
                 <div className="space-y-2">
-                  <div className="hover:text-white transition-colors cursor-pointer">Apple Podcasts</div>
-                  <div className="hover:text-white transition-colors cursor-pointer">Spotify</div>
+                  <div className="opacity-80 hover:opacity-100 transition-opacity cursor-pointer">Apple Podcasts</div>
+                  <div className="opacity-80 hover:opacity-100 transition-opacity cursor-pointer">Spotify</div>
                   {podcast?.rss_url && (
-                    <a href={podcast.rss_url} target="_blank" rel="noopener noreferrer" className="block hover:text-white transition-colors">
+                    <a href={podcast.rss_url} target="_blank" rel="noopener noreferrer" className="block opacity-80 hover:opacity-100 transition-opacity">
                       RSS Feed
                     </a>
                   )}
@@ -932,10 +960,10 @@ export function FooterSectionPreview({ config, enabled, podcast }) {
 
             {/* Legal */}
             <div>
-              <h4 className="font-semibold mb-3 text-white">Legal</h4>
+              <h4 className="font-semibold mb-3">Legal</h4>
               <div className="space-y-2">
-                <div className="hover:text-white transition-colors cursor-pointer">Privacy Policy</div>
-                <div className="hover:text-white transition-colors cursor-pointer">Terms of Service</div>
+                <div className="opacity-80 hover:opacity-100 transition-opacity cursor-pointer">Privacy Policy</div>
+                <div className="opacity-80 hover:opacity-100 transition-opacity cursor-pointer">Terms of Service</div>
               </div>
             </div>
           </div>
@@ -944,17 +972,17 @@ export function FooterSectionPreview({ config, enabled, podcast }) {
             {show_social_links && (
               <div className="flex gap-6 justify-center">
                 {["Twitter", "Instagram", "YouTube"].map((platform) => (
-                  <span key={platform} className="hover:text-white transition-colors cursor-pointer">{platform}</span>
+                  <span key={platform} className="opacity-80 hover:opacity-100 transition-opacity cursor-pointer">{platform}</span>
                 ))}
               </div>
             )}
             {show_subscribe_links && (
               <div className="flex gap-6 justify-center flex-wrap">
                 {["Apple Podcasts", "Spotify"].map((platform) => (
-                  <span key={platform} className="hover:text-white transition-colors cursor-pointer">{platform}</span>
+                  <span key={platform} className="opacity-80 hover:opacity-100 transition-opacity cursor-pointer">{platform}</span>
                 ))}
                 {podcast?.rss_url && (
-                  <a href={podcast.rss_url} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">
+                  <a href={podcast.rss_url} target="_blank" rel="noopener noreferrer" className="opacity-80 hover:opacity-100 transition-opacity">
                     RSS
                   </a>
                 )}
@@ -964,20 +992,23 @@ export function FooterSectionPreview({ config, enabled, podcast }) {
         )}
 
         {/* Copyright */}
-        <div className="mt-8 pt-6 border-t border-slate-700 text-xs text-center" style={{ borderColor: text_color + '40' }}>
+        <div
+          className="mt-8 pt-6 border-t border-slate-700 text-xs text-center"
+          style={footerDividerColor ? { borderColor: footerDividerColor } : undefined}
+        >
           {displayCopyright}
         </div>
         
-        {/* Podcast Plus Plus Branding */}
-        <div className="mt-4 text-xs text-center opacity-60">
+        {/* DoneCast Branding */}
+        <div className="mt-4 text-xs text-center opacity-70">
           Powered by{' '}
           <a 
-            href="https://podcastplusplus.com" 
+            href="https://donecast.com" 
             target="_blank" 
             rel="noopener noreferrer"
-            className="hover:text-white transition-colors"
+            className="underline"
           >
-            Podcast Plus Plus
+            DoneCast
           </a>
         </div>
       </div>

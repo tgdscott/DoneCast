@@ -96,7 +96,7 @@ Now that your RSS feed is live and working, you can submit it to podcast directo
    - Submit: https://app.podcastplusplus.com/api/rss/cinema-irl/feed.xml
 
 ### 2. **Spotify**
-   - URL: https://podcasters.spotify.com
+   - URL: https://creators.spotify.com
    - Submit: https://app.podcastplusplus.com/api/rss/cinema-irl/feed.xml
 
 ### 3. **Google Podcasts**

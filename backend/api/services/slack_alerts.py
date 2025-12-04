@@ -66,7 +66,7 @@ def send_slack_alert(
                 "fields": [
                     {
                         "title": "Service",
-                        "value": "Podcast Plus Plus Processing",
+                        "value": "DoneCast Processing",
                         "short": True
                     },
                     {
@@ -225,7 +225,7 @@ def alert_memory_high(used_percent: float):
 def test_slack_integration():
     """Test Slack webhook - call this to verify setup"""
     success = send_slack_alert(
-        "🧪 Test alert from Podcast Plus Plus monitoring system. If you see this, Slack integration is working!",
+        "🧪 Test alert from DoneCast monitoring system. If you see this, Slack integration is working!",
         severity="info"
     )
     if success:

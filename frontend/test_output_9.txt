@@ -1,0 +1,90 @@
+
+Running 1 test using 1 worker
+
+[console:debug] [vite] connecting...
+[console:info] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold
+[console:log] [sentry] disabled (no DSN)
+[console:warning] [PostHog.js] No `apiKey` or `client` were provided to `PostHogProvider`. Using default global `window.posthog` instance. You must initialize it manually. This is not recommended behavior.
+[console:warning] [PostHog.js] No `apiKey` or `client` were provided to `PostHogProvider`. Using default global `window.posthog` instance. You must initialize it manually. This is not recommended behavior.
+[console:error] [PostHog.js] PostHog was initialized without a token. This likely indicates a misconfiguration. Please check the first argument passed to posthog.init()
+[console:debug] [vite] connected.
+[console:error] Warning: Can't perform a React state update on a component that hasn't mounted yet. This indicates that you have a side-effect in your render function that asynchronously later calls tries to update the component. Move this work to useEffect instead.%s 
+    at FadeSlide (http://127.0.0.1:5173/src/components/onboarding/OnboardingWrapper.jsx:45:22)
+    at section
+    at main
+    at div
+    at OnboardingWrapper (http://127.0.0.1:5173/src/components/onboarding/OnboardingWrapper.jsx:71:45)
+    at Onboarding (http://127.0.0.1:5173/src/pages/Onboarding.jsx:26:40)
+    at RenderedRoute (http://127.0.0.1:5173/node_modules/.vite/deps/react-router-dom.js?v=bc4be0b3:5575:26)
+    at RenderErrorBoundary (http://127.0.0.1:5173/node_modules/.vite/deps/react-router-dom.js?v=bc4be0b3:5531:5)
+    at DataRoutes (http://127.0.0.1:5173/node_modules/.vite/deps/react-router-dom.js?v=bc4be0b3:6193:3)
+    at Router (http://127.0.0.1:5173/node_modules/.vite/deps/react-router-dom.js?v=bc4be0b3:6279:13)
+    at RouterProvider (http://127.0.0.1:5173/node_modules/.vite/deps/react-router-dom.js?v=bc4be0b3:5999:11)
+    at RouterProvider2
+    at Suspense
+    at LayoutProvider (http://127.0.0.1:5173/src/layout/LayoutContext.jsx:84:34)
+    at BrandProvider (http://127.0.0.1:5173/src/brand/BrandContext.jsx:23:33)
+    at ComfortProvider (http://127.0.0.1:5173/src/ComfortContext.jsx:21:35)
+    at AuthProvider (http://127.0.0.1:5173/src/AuthContext.jsx:22:32)
+    at WarmupProvider (http://127.0.0.1:5173/src/contexts/WarmupContext.jsx:21:34)
+    at PostHogProvider (http://127.0.0.1:5173/node_modules/.vite/deps/posthog-js_react.js?v=bc4be0b3:49:21)
+  ✘  1 [chromium] › e2e\signup-flow.spec.ts:13:5 › New User Signup & Onboarding Flow › complete onboarding wizard for new user (31.1s)
+
+
+  1) [chromium] › e2e\signup-flow.spec.ts:13:5 › New User Signup & Onboarding Flow › complete onboarding wizard for new user 
+
+    [31mTest timeout of 30000ms exceeded.[39m
+
+    Error: locator.click: Test timeout of 30000ms exceeded.
+    Call log:
+    [2m  - waiting for getByRole('button', { name: 'Continue' })[22m
+    [2m    - locator resolved to <button disabled class="inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium transition-colors disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 bg-primary shadow hover:bg-primary/90 py-2 rounded-[var(--radius)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring h-11 min-h-[44px] px-5 btn text-white disabled:opacity-60">…</button>[22m
+    [2m  - attempting click action[22m
+    [2m    2 × waiting for element to be visible, enabled and stable[22m
+    [2m      - element is not enabled[22m
+    [2m    - retrying click action[22m
+    [2m    - waiting 20ms[22m
+    [2m    2 × waiting for element to be visible, enabled and stable[22m
+    [2m      - element is not enabled[22m
+    [2m    - retrying click action[22m
+    [2m      - waiting 100ms[22m
+    [2m    54 × waiting for element to be visible, enabled and stable[22m
+    [2m       - element is not enabled[22m
+    [2m     - retrying click action[22m
+    [2m       - waiting 500ms[22m
+
+
+      120 |         // Step 5: Cover Art (Skip)
+      121 |         await expect(page.getByRole('heading', { name: 'Podcast Cover Art' })).toBeVisible();
+    > 122 |         await page.getByRole('button', { name: 'Continue' }).click();
+          |                                                              ^
+      123 |
+      124 |         // Step 6: Website Style (Design)
+      125 |         await expect(page.getByRole('heading', { name: 'Website Style' })).toBeVisible();
+        at C:\Users\windo\OneDrive\PodWebDeploy\frontend\e2e\signup-flow.spec.ts:122:62
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\e2e-signup-flow-New-User-S-62113-oarding-wizard-for-new-user-chromium\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results\e2e-signup-flow-New-User-S-62113-oarding-wizard-for-new-user-chromium\video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results\e2e-signup-flow-New-User-S-62113-oarding-wizard-for-new-user-chromium\error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\e2e-signup-flow-New-User-S-62113-oarding-wizard-for-new-user-chromium\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\e2e-signup-flow-New-User-S-62113-oarding-wizard-for-new-user-chromium\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [chromium] › e2e\signup-flow.spec.ts:13:5 › New User Signup & Onboarding Flow › complete onboarding wizard for new user 
+
+To open last HTML report run:
+[36m[39m
+[36m  npx playwright show-report[39m
+[36m[39m
