@@ -73,7 +73,7 @@ def _normalize_frontend_base(value: str | None) -> str | None:
                 ip = _ip.ip_address(host_lower)
                 allowed = ip.is_loopback or ip.is_private
             except Exception:
-                if host_lower.endswith(('podcastplusplus.com', 'getpodcastplus.com')) or host_lower.endswith('.local'):
+                if host_lower.endswith(('donecast.com', 'podcastplusplus.com', 'getpodcastplus.com')) or host_lower.endswith('.local'):
                     allowed = True
         if not allowed:
             return None
@@ -383,7 +383,7 @@ async def auth_google_callback(request: Request, db_session: Session = Depends(g
             netloc = parsed.netloc or ""
             host = parsed.hostname or ""
             port = parsed.port
-            trusted_suffixes = ("podcastplusplus.com", "getpodcastplus.com")
+            trusted_suffixes = ("donecast.com", "podcastplusplus.com", "getpodcastplus.com")
             trimmed_host = host
             if host and host.lower().endswith(trusted_suffixes):
                 for pref in ("app.", "api.", "dashboard.", "backend."):

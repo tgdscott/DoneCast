@@ -1,8 +1,21 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { ExternalLink, AlertCircle, CheckCircle2, Loader2, Copy, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { makeApi } from "@/lib/apiClient";
+import { copyTextToClipboard } from "@/lib/clipboard";
+import { ConfettiBurst } from "../components/ConfettiBurst.jsx";
+
+const CONFETTI_COLORS = [
+  "#FF6B6B",
+  "#4ECDC4",
+  "#45B7D1",
+  "#FFA07A",
+  "#98D8C8",
+  "#F7DC6F",
+  "#BB8FCE",
+  "#85C1E2",
+];
 
 export default function DistributionRequiredStep({ wizard }) {
   const {
@@ -12,6 +25,11 @@ export default function DistributionRequiredStep({ wizard }) {
     rssFeedUrl,
     setRssFeedUrl,
     ensurePodcastExists,
+    rssStatus,
+    refreshRssMetadata,
+    showRssWaiting,
+    setShowRssWaiting,
+    setDistributionReady,
   } = wizard;
   const [loading, setLoading] = useState(false);
   const [checklist, setChecklist] = useState(null);
@@ -20,7 +38,42 @@ export default function DistributionRequiredStep({ wizard }) {
   const [skipped, setSkipped] = useState(false);
   const [hasPublishedEpisodes, setHasPublishedEpisodes] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [refreshingRss, setRefreshingRss] = useState(false);
+  const [appleCompleting, setAppleCompleting] = useState(false);
+  const [spotifyCompleting, setSpotifyCompleting] = useState(false);
+  const [confettiBursts, setConfettiBursts] = useState([]);
   const { toast } = useToast();
+  const checklistFeed = checklist?.rss_feed_url || "";
+  const resolvedFeedUrl = useMemo(() => rssFeedUrl || checklistFeed || "", [rssFeedUrl, checklistFeed]);
+
+  const copyRssFeed = useCallback(
+    async ({ successDescription } = {}) => {
+      if (!resolvedFeedUrl) {
+        toast({
+          variant: "destructive",
+          title: "RSS feed unavailable",
+          description: "We couldn't find your DoneCast RSS feed yet. Please refresh and try again.",
+        });
+        return false;
+      }
+
+      const copied = await copyTextToClipboard(resolvedFeedUrl);
+      if (copied) {
+        if (successDescription) {
+          toast({ title: "Copied!", description: successDescription });
+        }
+        return true;
+      }
+
+      toast({
+        variant: "destructive",
+        title: "Copy failed",
+        description: "Please copy the RSS feed manually.",
+      });
+      return false;
+    },
+    [resolvedFeedUrl, toast]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -52,6 +105,17 @@ export default function DistributionRequiredStep({ wizard }) {
       cancelled = true;
     };
   }, [targetPodcastId, token, ensurePodcastExists, setTargetPodcastId]);
+
+  useEffect(() => {
+    if (!token || !targetPodcastId || rssFeedUrl) {
+      return;
+    }
+    refreshRssMetadata?.().catch((err) => {
+      if (err) {
+        console.warn("[Onboarding] RSS refresh failed in distribution step:", err);
+      }
+    });
+  }, [token, targetPodcastId, rssFeedUrl, refreshRssMetadata]);
 
   const findExistingPodcast = async () => {
     if (!token) return;
@@ -155,11 +219,109 @@ export default function DistributionRequiredStep({ wizard }) {
         title: "Failed to update status",
         description: err?.message || "Please try again.",
       });
+      throw err;
+    }
+  };
+
+  const waitingForRss = !targetPodcastId || !resolvedFeedUrl;
+
+  useEffect(() => {
+    if (!setShowRssWaiting) {
+      return;
+    }
+    setShowRssWaiting(waitingForRss);
+  }, [waitingForRss, setShowRssWaiting]);
+
+  useEffect(() => {
+    if (!setDistributionReady) {
+      return;
+    }
+    const ready = skipped || (appleStatus === "completed" && spotifyStatus === "completed");
+    setDistributionReady(ready);
+  }, [skipped, appleStatus, spotifyStatus, setDistributionReady]);
+
+  useEffect(() => {
+    if (!resolvedFeedUrl || rssFeedUrl === resolvedFeedUrl || !setRssFeedUrl) {
+      return;
+    }
+    setRssFeedUrl(resolvedFeedUrl);
+  }, [resolvedFeedUrl, rssFeedUrl, setRssFeedUrl]);
+
+  const handleManualRefresh = async () => {
+    if (!refreshRssMetadata || refreshingRss) {
+      return;
+    }
+    setRefreshingRss(true);
+    try {
+      await refreshRssMetadata();
+    } catch (err) {
+      const description = err?.message || err?.detail || "Please try again.";
+      toast({
+        variant: "destructive",
+        title: "Still preparing your feed",
+        description,
+      });
+    } finally {
+      setRefreshingRss(false);
+    }
+  };
+
+  const triggerConfetti = () => {
+    setConfettiBursts((prev) => [...prev, Date.now()]);
+  };
+
+  const handleConfettiComplete = (burstId) => {
+    setConfettiBursts((prev) => prev.filter((id) => id !== burstId));
+  };
+
+  const handlePlatformCompleted = async (platformKey) => {
+    const setLoading = platformKey === "apple_podcasts" ? setAppleCompleting : setSpotifyCompleting;
+    setLoading(true);
+    try {
+      await updateStatus(platformKey, "completed");
+      triggerConfetti();
+    } catch (err) {
+      // Errors already surfaced via toast in updateStatus
+    } finally {
+      setLoading(false);
     }
   };
 
   const appleItem = checklist?.items?.find(item => item.key === "apple_podcasts");
   const spotifyItem = checklist?.items?.find(item => item.key === "spotify");
+
+  if (waitingForRss || showRssWaiting) {
+    const statusLabel = rssStatus?.state === "error"
+      ? "We hit a snag while generating your RSS feed."
+      : "We’re generating your DoneCast RSS feed so Apple and Spotify can see it.";
+
+    return (
+      <div className="flex flex-col items-center justify-center text-center py-12 space-y-4">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <div className="space-y-2">
+          <p className="text-sm font-medium">{statusLabel}</p>
+          <p className="text-xs text-muted-foreground max-w-md">
+            This usually takes under a minute. Stay on this step and we’ll unlock the submission checklist the moment your feed is ready.
+          </p>
+        </div>
+        <div className="flex flex-col items-center gap-2">
+          <Button type="button" size="sm" disabled={refreshingRss} onClick={handleManualRefresh}>
+            {refreshingRss ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                Refreshing
+              </>
+            ) : (
+              <>Refresh status</>
+            )}
+          </Button>
+          {rssStatus?.error && (
+            <p className="text-xs text-destructive max-w-xs">{rssStatus.error}</p>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -171,7 +333,15 @@ export default function DistributionRequiredStep({ wizard }) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="relative space-y-6">
+      {confettiBursts.map((burstId) => (
+        <ConfettiBurst
+          key={burstId}
+          burstId={burstId}
+          onComplete={handleConfettiComplete}
+          colors={CONFETTI_COLORS}
+        />
+      ))}
       <div className="space-y-2">
         <p className="text-sm font-medium">
           Apple Podcasts and Spotify are the two largest podcast platforms.
@@ -201,7 +371,7 @@ export default function DistributionRequiredStep({ wizard }) {
       )}
 
       {/* RSS Feed Display */}
-      {(rssFeedUrl || checklist?.rss_feed_url) && (
+      {resolvedFeedUrl && (
         <div className="p-4 border rounded-lg bg-muted/30 space-y-2">
           <div className="flex items-center justify-between gap-2">
             <div className="flex-1 min-w-0">
@@ -210,44 +380,19 @@ export default function DistributionRequiredStep({ wizard }) {
               </label>
               <div className="flex items-center gap-2">
                 <code className="flex-1 text-sm font-mono break-all bg-background px-2 py-1.5 rounded border">
-                  {rssFeedUrl || checklist?.rss_feed_url}
+                  {resolvedFeedUrl}
                 </code>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={async () => {
-                    const feedUrl = rssFeedUrl || checklist?.rss_feed_url || "";
-                    try {
-                      await navigator.clipboard.writeText(feedUrl);
+                    const success = await copyRssFeed({
+                      successDescription: "RSS feed URL copied to clipboard",
+                    });
+                    if (success) {
                       setCopied(true);
-                      toast({
-                        title: "Copied!",
-                        description: "RSS feed URL copied to clipboard",
-                      });
                       setTimeout(() => setCopied(false), 2000);
-                    } catch (err) {
-                      // Fallback for older browsers
-                      const textArea = document.createElement("textarea");
-                      textArea.value = feedUrl;
-                      document.body.appendChild(textArea);
-                      textArea.select();
-                      try {
-                        document.execCommand("copy");
-                        setCopied(true);
-                        toast({
-                          title: "Copied!",
-                          description: "RSS feed URL copied to clipboard",
-                        });
-                        setTimeout(() => setCopied(false), 2000);
-                      } catch (fallbackErr) {
-                        toast({
-                          variant: "destructive",
-                          title: "Failed to copy",
-                          description: "Please copy the URL manually",
-                        });
-                      }
-                      document.body.removeChild(textArea);
                     }
                   }}
                   className="shrink-0"
@@ -289,41 +434,54 @@ export default function DistributionRequiredStep({ wizard }) {
               </div>
             </div>
             
-            {(rssFeedUrl || checklist?.rss_feed_url) && appleItem.action_url && (
-              <div className="flex items-center gap-2">
+            {resolvedFeedUrl && appleItem.action_url && (
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => window.open(appleItem.action_url, "_blank")}
                   disabled={!hasPublishedEpisodes}
-                  asChild
+                  onClick={async () => {
+                    await copyRssFeed({
+                      successDescription: "Copied! Opening Podcasts Connect in a new tab.",
+                    });
+                    window.open(appleItem.action_url, "_blank", "noopener");
+                  }}
                 >
-                  <a href={appleItem.action_url} target="_blank" rel="noreferrer">
-                    <ExternalLink className="h-4 w-4 mr-2" />
-                    {appleItem.action_label || "Open Podcasts Connect"}
-                  </a>
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  {`Copy RSS & ${appleItem.action_label || "Open Podcasts Connect"}`}
                 </Button>
-                <div className="flex items-center gap-2">
-                  <select
-                    className="text-xs border rounded px-2 py-1"
-                    value={appleStatus}
-                    onChange={(e) => updateStatus("apple_podcasts", e.target.value)}
+                {appleStatus === "completed" ? (
+                  <span className="text-sm font-semibold text-emerald-600 flex items-center gap-2">
+                    🎉 Completed 🎉
+                  </span>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                    onClick={() => handlePlatformCompleted("apple_podcasts")}
+                    disabled={appleCompleting}
                   >
-                    <option value="not_started">Not started</option>
-                    <option value="in_progress">In progress</option>
-                    <option value="completed">Completed</option>
-                  </select>
-                </div>
+                    {appleCompleting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        Saving...
+                      </>
+                    ) : (
+                      "I added it!"
+                    )}
+                  </Button>
+                )}
               </div>
             )}
 
-            {hasPublishedEpisodes && (rssFeedUrl || checklist?.rss_feed_url) && appleItem.instructions && (
+            {hasPublishedEpisodes && resolvedFeedUrl && appleItem.instructions && (
               <details className="text-xs text-muted-foreground">
                 <summary className="cursor-pointer hover:text-foreground">Show instructions</summary>
                 <ol className="list-decimal list-inside mt-2 space-y-1 pl-2">
                   {appleItem.instructions.map((step, idx) => (
-                    <li key={idx}>{step.replace("{rss_feed_url}", rssFeedUrl || checklist?.rss_feed_url || "")}</li>
+                    <li key={idx}>{step.replace("{rss_feed_url}", resolvedFeedUrl)}</li>
                   ))}
                 </ol>
               </details>
@@ -349,43 +507,58 @@ export default function DistributionRequiredStep({ wizard }) {
               </div>
             </div>
             
-            {(rssFeedUrl || checklist?.rss_feed_url) && spotifyItem.action_url && (
-              <div className="flex items-center gap-2">
+            {resolvedFeedUrl && spotifyItem.action_url && (
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    const feed = rssFeedUrl || checklist?.rss_feed_url || "";
-                    const encodedFeed = encodeURIComponent(feed);
-                    const url = spotifyItem.action_url_template?.replace("{rss_feed_encoded}", encodedFeed) || spotifyItem.action_url;
-                    window.open(url, "_blank");
+                  onClick={async () => {
+                    const feed = resolvedFeedUrl;
+                    const url = spotifyItem.action_url_template
+                      ? spotifyItem.action_url_template.replace("{rss_feed_encoded}", encodeURIComponent(feed))
+                      : spotifyItem.action_url;
+                    await copyRssFeed({
+                      successDescription: "Copied! Opening Spotify for Creators in a new tab.",
+                    });
+                    window.open(url, "_blank", "noopener");
                   }}
                   disabled={!hasPublishedEpisodes}
                 >
                   <ExternalLink className="h-4 w-4 mr-2" />
-                  {spotifyItem.action_label || "Submit to Spotify"}
+                  {`Copy RSS & ${spotifyItem.action_label || "Submit to Spotify"}`}
                 </Button>
-                <div className="flex items-center gap-2">
-                  <select
-                    className="text-xs border rounded px-2 py-1"
-                    value={spotifyStatus}
-                    onChange={(e) => updateStatus("spotify", e.target.value)}
+                {spotifyStatus === "completed" ? (
+                  <span className="text-sm font-semibold text-emerald-600 flex items-center gap-2">
+                    🎉 Completed 🎉
+                  </span>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                    onClick={() => handlePlatformCompleted("spotify")}
+                    disabled={spotifyCompleting}
                   >
-                    <option value="not_started">Not started</option>
-                    <option value="in_progress">In progress</option>
-                    <option value="completed">Completed</option>
-                  </select>
-                </div>
+                    {spotifyCompleting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        Saving...
+                      </>
+                    ) : (
+                      "I added it!"
+                    )}
+                  </Button>
+                )}
               </div>
             )}
 
-            {hasPublishedEpisodes && (rssFeedUrl || checklist?.rss_feed_url) && spotifyItem.instructions && (
+            {hasPublishedEpisodes && resolvedFeedUrl && spotifyItem.instructions && (
               <details className="text-xs text-muted-foreground">
                 <summary className="cursor-pointer hover:text-foreground">Show instructions</summary>
                 <ol className="list-decimal list-inside mt-2 space-y-1 pl-2">
                   {spotifyItem.instructions.map((step, idx) => (
-                    <li key={idx}>{step.replace("{rss_feed_url}", rssFeedUrl || checklist?.rss_feed_url || "")}</li>
+                    <li key={idx}>{step.replace("{rss_feed_url}", resolvedFeedUrl)}</li>
                   ))}
                 </ol>
               </details>

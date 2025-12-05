@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
-  Headphones,
   Plus,
   Edit,
   Trash2,
@@ -23,7 +22,6 @@ import {
   BarChart3,
   Loader2,
   Podcast,
-  ArrowLeft,
   Rss,
   AlertTriangle,
   AlertCircle,
@@ -36,6 +34,7 @@ import {
   Mic,
   Library,
   Shield,
+  Home,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import React, { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
@@ -48,6 +47,7 @@ import Joyride, { STATUS } from "react-joyride";
 import { useResolvedTimezone } from "@/hooks/useResolvedTimezone";
 import { formatInTimezone } from "@/lib/timezone";
 import CustomTourTooltip from "@/components/dashboard/CustomTourTooltip";
+import DashboardSidebar from "@/components/dashboard/DashboardSidebar.jsx";
 
 // Eager load components needed for dashboard view
 import EpisodeStartOptions from "@/components/dashboard/EpisodeStartOptions";
@@ -214,6 +214,21 @@ export default function PodcastPlusDashboard() {
   const isNavigatingFromPopStateRef = useRef(false);
   const viewHistoryRef = useRef(['dashboard']); // Track view history for back button
 
+  const navItems = useMemo(() => [
+    { id: 'episodes', label: 'Episodes', view: 'episodeHistory', icon: Play, tourId: 'dashboard-nav-episodes' },
+    { id: 'podcasts', label: 'Podcasts', view: 'podcastManager', icon: Podcast, tourId: 'dashboard-nav-podcasts' },
+    { id: 'templates', label: 'Templates', view: 'templateManager', icon: FileText, tourId: 'dashboard-nav-templates' },
+    { id: 'media', label: 'Media', view: 'mediaLibrary', icon: Music, tourId: 'dashboard-nav-media' },
+    { id: 'analytics', label: 'Analytics', view: 'analytics', icon: BarChart3, tourId: 'dashboard-nav-analytics', disabled: podcasts.length === 0 },
+    { id: 'subscription', label: 'Subscription', view: 'billing', icon: DollarSign, tourId: 'dashboard-nav-subscription' },
+    { id: 'website', label: 'Website Builder', view: 'websiteBuilder', icon: Globe2, tourId: 'dashboard-nav-website' },
+    { id: 'settings', label: 'Settings', view: 'settings', icon: SettingsIcon, tourId: 'dashboard-nav-settings' },
+    { id: 'guides', label: 'Guides & Help', href: '/guides', icon: BookOpen, tourId: 'dashboard-nav-guides', section: 'support' },
+  ], [podcasts.length]);
+
+  const primaryNavItems = useMemo(() => navItems.filter((item) => item.section !== 'support'), [navItems]);
+  const supportNavItems = useMemo(() => navItems.filter((item) => item.section === 'support'), [navItems]);
+
   // SAFETY CHECK: Detect users who bypassed TermsGate (should never happen, but defensive)
   // CRITICAL: Only check if user data is hydrated to avoid false positives
   // This prevents "pestering" users who just accepted terms but data hasn't refreshed yet
@@ -320,6 +335,25 @@ export default function PodcastPlusDashboard() {
     }
   }, [currentView]);
 
+  const handleSidebarNavigate = useCallback((item) => {
+    if (!item || item.disabled) return;
+    if (item.href) {
+      window.location.href = item.href;
+      setMobileMenuOpen(false);
+      return;
+    }
+
+    if (item.id === 'analytics' && podcasts.length > 0) {
+      setSelectedPodcastId(podcasts[0].id);
+    }
+
+    if (item.view) {
+      setCurrentViewWithHistory(item.view);
+    }
+
+    setMobileMenuOpen(false);
+  }, [podcasts, setCurrentViewWithHistory, setSelectedPodcastId]);
+
   // Override setCurrentView to use history-aware version
   // We'll use this in the popstate handler, but for all other calls we need to replace setCurrentView
   // For now, let's update the popstate handler and key navigation points
@@ -408,62 +442,87 @@ export default function PodcastPlusDashboard() {
     },
     {
       target: '[data-tour-id="dashboard-record-upload"]',
-      title: 'Record or Upload Audio',
-      content: 'Start here to record new audio or upload files you\'ve already created. This is your first step in creating a new episode.',
+      title: 'Create Something New',
+      content: 'Start every episode by recording or uploading audio. This button kicks off the entire DoneCast workflow, so we\'ll keep it first in the tour.',
       disableBeacon: true,
     },
     {
-      target: '[data-tour-id="dashboard-assemble-episode"]',
-      title: 'Assemble New Episode',
-      content: 'Got audio that\'s ready to go? This button appears when you have transcribed audio waiting. Click here to turn it into a polished episode.',
+      target: '[data-tour-id="dashboard-back-button"]',
+      title: 'Dashboard Shortcut',
+      content: 'Whenever you wander into another section, use this Dashboard button to snap back to your main view.',
       disableBeacon: true,
     },
     {
-      target: '[data-tour-id="dashboard-quicktool-podcasts"]',
-      title: 'Podcasts',
-      content: 'If you want to change anything about the structure of your show, like the name, cover, or description, that\'s here.',
-    },
-    {
-      target: '[data-tour-id="dashboard-quicktool-templates"]',
-      title: 'Templates',
-      content: 'This is the blueprint for your show - the stuff that happens every episode. We made one for you already, but you can edit it or make others.',
-    },
-    {
-      target: '[data-tour-id="dashboard-quicktool-media"]',
-      title: 'Media',
-      content: 'Any other sound files except for raw episodes that you use for your show are uploaded and stored here.',
-    },
-    {
-      target: '[data-tour-id="dashboard-quicktool-episodes"]',
+      target: '[data-tour-id="dashboard-nav-episodes"]',
       title: 'Episodes',
-      content: 'All the details about your individual episodes here so you can edit them as you need to.',
+      content: 'Preview your published, scheduled, and draft episodes. During the tour we\'ll open this view so you can see it for a moment.',
     },
     {
-      target: '[data-tour-id="dashboard-quicktool-analytics"]',
+      target: '[data-tour-id="dashboard-nav-podcasts"]',
+      title: 'Podcasts',
+      content: 'Manage show-level details like titles, artwork, and descriptions. Each click on the left menu opens instantly in the main area.',
+    },
+    {
+      target: '[data-tour-id="dashboard-nav-templates"]',
+      title: 'Templates',
+      content: 'Your repeatable structure lives here. Adjust prompts, intro/outro settings, or create variants for special series.',
+    },
+    {
+      target: '[data-tour-id="dashboard-nav-media"]',
+      title: 'Media Library',
+      content: 'Store intros, music beds, sponsor reads, and any reusable clips. No more digging through filenames elsewhere.',
+    },
+    {
+      target: '[data-tour-id="dashboard-nav-analytics"]',
       title: 'Analytics',
-      content: 'Track your podcast\'s performance here. See download stats, listener trends, and get insights about your audience.',
+      content: 'See downloads, trends, and OP3 insights without leaving DoneCast. We\'ll jump into the view so you can preview the layout.',
     },
     {
-      target: '[data-tour-id="dashboard-quicktool-guides"]',
-      title: 'Guides & Help',
-      content: 'Need help or want to learn more? Access step-by-step guides, tutorials, and documentation to make the most of your podcasting experience.',
-    },
-    {
-      target: '[data-tour-id="dashboard-quicktool-website"]',
-      title: 'Website Builder',
-      content: 'Create a beautiful website for your podcast! Build custom pages, showcase your episodes, and give your listeners a home on the web.',
-    },
-    {
-      target: '[data-tour-id="dashboard-quicktool-subscription"]',
+      target: '[data-tour-id="dashboard-nav-subscription"]',
       title: 'Subscription',
-      content: 'This is where you can choose and edit your plan here so you get the perfect one for you.',
+      content: 'Upgrade, downgrade, or review billing activity. Everything billing-related lives here now.',
     },
     {
-      target: '[data-tour-id="dashboard-quicktool-settings"]',
+      target: '[data-tour-id="dashboard-nav-website"]',
+      title: 'Website Builder',
+      content: 'Launch or tweak your DoneCast site without touching code. This opens the full visual editor.',
+    },
+    {
+      target: '[data-tour-id="dashboard-nav-settings"]',
       title: 'Settings',
-      content: 'If it doesn\'t fit in one of the categories above, look for it here.',
+      content: 'Account-level preferences and integrations live here. If it isn\'t a podcast asset, it probably belongs in Settings.',
+    },
+    {
+      target: '[data-tour-id="dashboard-nav-guides"]',
+      title: 'Guides & Help',
+      content: 'Need a walkthrough later? This link jumps directly to the DoneCast guides. We keep it visually separated so it\'s easy to spot.',
     },
   ], []);
+
+  const jumpToView = useCallback((view) => {
+    if (!view) return;
+    setCurrentViewWithHistory(view, true);
+  }, [setCurrentViewWithHistory]);
+
+  const tourStepActions = useMemo(() => ({
+    0: () => jumpToView('dashboard'),
+    1: () => jumpToView('dashboard'),
+    2: () => jumpToView('dashboard'),
+    3: () => jumpToView('episodeHistory'),
+    4: () => jumpToView('podcastManager'),
+    5: () => jumpToView('templateManager'),
+    6: () => jumpToView('mediaLibrary'),
+    7: () => {
+      if (podcasts.length > 0) {
+        setSelectedPodcastId(podcasts[0].id);
+        jumpToView('analytics');
+      }
+    },
+    8: () => jumpToView('billing'),
+    9: () => jumpToView('websiteBuilder'),
+    10: () => jumpToView('settings'),
+    11: () => jumpToView('dashboard'),
+  }), [jumpToView, podcasts, setSelectedPodcastId]);
 
   const refreshPreuploads = useCallback(async () => {
     if (!token) return [];
@@ -506,10 +565,19 @@ export default function PodcastPlusDashboard() {
   }, [resetPreuploadFetchedFlag, refreshPreuploads]);
 
   const handleTourCallback = (data) => {
-    const { status } = data;
+    const { status, type, index } = data;
+
+    if (type === 'step:before' && typeof index === 'number') {
+      const action = tourStepActions[index];
+      if (action) {
+        action();
+      }
+    }
+
     if ([STATUS.FINISHED, STATUS.SKIPPED].includes(status)) {
       try { localStorage.setItem(DASHBOARD_TOUR_STORAGE_KEY, '1'); } catch { }
       setShouldRunTour(false);
+      jumpToView('dashboard');
     }
   };
 
@@ -1154,9 +1222,8 @@ export default function PodcastPlusDashboard() {
                 {statsError}
               </div>
             )}
-            <div className="grid lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2 space-y-6">
-                {/* Create Episode Card */}
+            <div className="space-y-6">
+              {/* Create Episode Card */}
                 <Card className="shadow-sm border border-gray-200">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-lg">Create Episode</CardTitle>
@@ -1229,8 +1296,8 @@ export default function PodcastPlusDashboard() {
                     </div>
                   </CardContent>
                 </Card>
-                {/* Recent Activity & Listening Metrics */}
-                <Card className="shadow-sm border border-gray-200">
+              {/* Recent Activity & Listening Metrics */}
+              <Card className="shadow-sm border border-gray-200">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-lg">Recent Activity</CardTitle>
                     <CardDescription>Production pace and listening at a glance.</CardDescription>
@@ -1334,84 +1401,7 @@ export default function PodcastPlusDashboard() {
                       </div>
                     )}
                   </CardContent>
-                </Card>
-              </div>
-              {/* Quick Tools */}
-              <div className="space-y-6">
-                <Card className="shadow-sm border border-gray-200">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-lg">Quick Tools</CardTitle>
-                    <CardDescription className="text-xs">Jump directly into a management area.</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-2 gap-3">
-                      <Button onClick={() => setCurrentViewWithHistory('podcastManager')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-podcasts"><Podcast className="w-4 h-4 mr-2" />Podcasts</Button>
-                      <Button onClick={() => setCurrentViewWithHistory('templateManager')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-templates"><FileText className="w-4 h-4 mr-2" />Templates</Button>
-                      <Button onClick={() => setCurrentViewWithHistory('mediaLibrary')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-media"><Music className="w-4 h-4 mr-2" />Media</Button>
-                      <Button onClick={() => setCurrentViewWithHistory('episodeHistory')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-episodes"><BarChart3 className="w-4 h-4 mr-2" />Episodes</Button>
-                      <Button
-                        onClick={() => {
-                          if (podcasts.length > 0) {
-                            setSelectedPodcastId(podcasts[0].id);
-                            setCurrentViewWithHistory('analytics');
-                          }
-                        }}
-                        variant="outline"
-                        className="justify-start text-sm h-10"
-                        data-tour-id="dashboard-quicktool-analytics"
-                        disabled={podcasts.length === 0}
-                      >
-                        <BarChart3 className="w-4 h-4 mr-2" />Analytics
-                      </Button>
-                      {/* Import moved under Podcasts */}
-                      <Button onClick={() => setCurrentViewWithHistory('billing')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-subscription"><DollarSign className="w-4 h-4 mr-2" />Subscription</Button>
-                      <Button onClick={() => setCurrentViewWithHistory('settings')} variant="outline" className="justify-start text-sm h-10" data-tour-id="dashboard-quicktool-settings"><SettingsIcon className="w-4 h-4 mr-2" />Settings</Button>
-                      <Button
-                        onClick={() => window.location.href = '/guides'}
-                        variant="outline"
-                        className="justify-start text-sm h-10"
-                        data-tour-id="dashboard-quicktool-guides"
-                      >
-                        <BookOpen className="w-4 h-4 mr-2" />
-                        Guides & Help
-                      </Button>
-                      <Button
-                        onClick={() => setCurrentViewWithHistory('websiteBuilder')}
-                        variant="outline"
-                        className="justify-start text-sm h-10"
-                        data-tour-id="dashboard-quicktool-website"
-                      >
-                        <Globe2 className="w-4 h-4 mr-2" />
-                        Website Builder
-                      </Button>
-                      {(authUser?.role === 'admin' || authUser?.role === 'superadmin' || isAdmin(authUser)) && (
-                        <Button
-                          onClick={() => window.location.href = '/dashboard?admin=1'}
-                          variant="outline"
-                          className="justify-start text-sm h-10 border-orange-300 hover:bg-orange-50"
-                          data-tour-id="dashboard-quicktool-admin-panel"
-                          title="Access admin panel for user management and platform settings"
-                        >
-                          <Shield className="w-4 h-4 mr-2 text-orange-600" />
-                          Admin Panel
-                        </Button>
-                      )}
-                      {authUser?.email === 'wordsdonewrite@gmail.com' && (
-                        <Button
-                          onClick={() => window.location.href = '/admin?tab=landing'}
-                          variant="outline"
-                          className="justify-start text-sm h-10 border-blue-300 hover:bg-blue-50"
-                          data-tour-id="dashboard-quicktool-landing-editor"
-                          title="Edit customer testimonials and FAQs on the front page"
-                        >
-                          <FileText className="w-4 h-4 mr-2 text-blue-600" />
-                          Edit Front Page
-                        </Button>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
+              </Card>
             </div>
           </div>
         );
@@ -1466,7 +1456,7 @@ export default function PodcastPlusDashboard() {
   }, [currentView, podcasts, templates, shouldRunTour]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <>
       <Joyride
         steps={tourSteps}
         run={shouldRunTour}
@@ -1483,267 +1473,219 @@ export default function PodcastPlusDashboard() {
         }}
         tooltipComponent={CustomTourTooltip}
       />
-      <nav className="border-b border-gray-200 px-4 py-4 bg-white shadow-sm safe-top">
-        <div className="container mx-auto max-w-7xl flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="lg:hidden touch-target-icon"
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              aria-label="Toggle menu"
-            >
-              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-            </Button>
-            <Logo size={28} lockup />
-          </div>
-          <div className="flex items-center space-x-2 sm:space-x-4">
-            <div className="relative">
-              <Button variant="ghost" size="sm" className="relative" onClick={() => setShowNotifPanel(v => !v)}>
-                <Bell className="w-5 h-5" />
-                {notifications.filter(n => !n.read_at).length > 0 && (
-                  <Badge className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 flex items-center justify-center bg-red-500 text-white text-xs">{notifications.filter(n => !n.read_at).length}</Badge>
-                )}
+      <div className="min-h-screen bg-gray-50 flex">
+        <DashboardSidebar
+          navItems={navItems}
+          activeView={currentView}
+          onNavigate={handleSidebarNavigate}
+          onLogout={logout}
+        />
+        <div className="flex-1 flex flex-col min-h-screen">
+          <header className="border-b border-gray-200 bg-white px-4 lg:px-8 py-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between shadow-sm">
+            <div className="flex items-center gap-3 flex-wrap">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="lg:hidden"
+                aria-label="Toggle navigation"
+                onClick={() => setMobileMenuOpen((open) => !open)}
+              >
+                {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
               </Button>
-              {showNotifPanel && (
-                <div className="absolute right-0 mt-2 w-80 bg-white border border-gray-200 rounded shadow-lg z-50 max-h-96 overflow-auto">
-                  <div className="p-3 font-semibold border-b flex items-center justify-between">
-                    <span>Notifications</span>
-                    {notifications.some(n => !n.read_at) && (
-                      <button
-                        className="text-xs text-blue-600 hover:underline"
-                        onClick={async () => {
-                          try {
-                            const api = makeApi(token);
-                            await api.post('/api/notifications/read-all');
-                            setNotifications(curr => curr.map(n => n.read_at ? n : { ...n, read_at: new Date().toISOString() }));
-                          } catch { }
-                        }}
-                      >Mark all read</button>
-                    )}
-                  </div>
-                  {notifications.length === 0 && <div className="p-3 text-sm text-gray-500">No notifications</div>}
-                  {notifications.map(n => (
-                    <div
-                      key={n.id}
-                      className={`p-3 text-sm border-b last:border-b-0 flex flex-col gap-1 ${n.type === 'error' ? 'bg-red-50 border-red-200' : ''
-                        }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className={`font-medium mr-2 truncate ${n.type === 'error' ? 'text-red-700' : ''
-                          }`}>{n.title}</div>
-                        <div className="text-[11px] text-gray-500 whitespace-nowrap">{formatShort(n.created_at, resolvedTimezone)}</div>
-                      </div>
-                      {n.body && <div className={`text-xs ${n.type === 'error' ? 'text-red-600' : 'text-gray-600'
-                        }`}>{n.body}</div>}
-                      {!n.read_at && <button className="text-xs text-blue-600 self-start" onClick={async () => { try { const api = makeApi(token); await api.post(`/api/notifications/${n.id}/read`); setNotifications(curr => curr.map(x => x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x)); } catch { } }}>Mark read</button>}
-                    </div>
-                  ))}
-                </div>)}
-            </div>
-            <div className="flex items-center space-x-3">
-              {user?.picture ? (
-                <Avatar className="h-8 w-8">
-                  <AvatarImage src={user.picture} />
-                  <AvatarFallback>{user?.email ? user.email.substring(0, 2).toUpperCase() : '…'}</AvatarFallback>
-                </Avatar>
-              ) : null}
-              <span className="hidden md:block text-sm font-medium" style={{ color: "#2C3E50" }}>{user ? user.email : 'Loading...'}</span>
-            </div>
-            {(authUser?.is_admin || authUser?.role === 'admin' || authUser?.role === 'superadmin') && (
-              <Button onClick={() => window.location.href = '/dashboard?admin=1'} variant="ghost" size="sm" className="text-gray-600 hover:text-gray-800">
-                <SettingsIcon className="w-4 h-4 mr-1" /><span className="hidden md:inline">Admin Panel</span>
+              <div className="flex items-center gap-2 lg:hidden">
+                <Logo size={28} lockup />
+                <div>
+                  <p className="text-xs text-gray-500">DoneCast</p>
+                  <p className="text-base font-semibold text-gray-800">Creator Desktop</p>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-sm"
+                onClick={() => {
+                  if (currentView !== 'dashboard') {
+                    setCurrentViewWithHistory('dashboard');
+                  }
+                }}
+                data-tour-id="dashboard-back-button"
+              >
+                <Home className="w-4 h-4 mr-2" />
+                Dashboard
               </Button>
-            )}
-            <Button onClick={logout} variant="ghost" size="sm" className="text-gray-600 hover:text-gray-800"><LogOut className="w-4 h-4 mr-1" /><span className="hidden md:inline">Logout</span></Button>
-          </div>
-        </div>
-      </nav>
-
-      {/* Mobile Menu Overlay and Drawer */}
-      {mobileMenuOpen && (
-        <>
-          <div
-            className="fixed inset-0 bg-black/50 z-40 lg:hidden transition-opacity duration-300 animate-in fade-in"
-            onClick={() => setMobileMenuOpen(false)}
-          />
-          <div
-            className="fixed top-0 left-0 bottom-0 w-[280px] bg-white shadow-xl z-50 overflow-y-auto lg:hidden safe-top safe-bottom transform transition-transform duration-300 ease-out animate-in slide-in-from-left"
-            onTouchStart={(e) => {
-              const touch = e.touches[0];
-              const startX = touch.clientX;
-              const drawer = e.currentTarget;
-
-              const handleTouchMove = (moveEvent) => {
-                const currentX = moveEvent.touches[0].clientX;
-                const deltaX = currentX - startX;
-
-                // Only allow swiping left (closing)
-                if (deltaX < 0) {
-                  const translateX = Math.max(deltaX, -280);
-                  drawer.style.transform = `translateX(${translateX}px)`;
-                }
-              };
-
-              const handleTouchEnd = (endEvent) => {
-                const endX = endEvent.changedTouches[0].clientX;
-                const deltaX = endX - startX;
-
-                // If swiped more than 30% of drawer width, close it
-                if (deltaX < -84) {
-                  setMobileMenuOpen(false);
-                } else {
-                  // Snap back
-                  drawer.style.transform = '';
-                }
-
-                drawer.removeEventListener('touchmove', handleTouchMove);
-                drawer.removeEventListener('touchend', handleTouchEnd);
-              };
-
-              drawer.addEventListener('touchmove', handleTouchMove, { passive: true });
-              drawer.addEventListener('touchend', handleTouchEnd);
-            }}
-          >
-            <div className="p-4 border-b">
-              <div className="flex items-center justify-between mb-4">
-                <Logo size={24} lockup />
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="relative">
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="touch-target-icon"
+                  className="relative"
+                  onClick={() => setShowNotifPanel((v) => !v)}
+                  aria-haspopup="true"
+                  aria-expanded={showNotifPanel}
                 >
-                  <X className="w-5 h-5" />
+                  <Bell className="w-5 h-5" />
+                  {notifications.filter(n => !n.read_at).length > 0 && (
+                    <Badge className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 flex items-center justify-center bg-red-500 text-white text-xs">
+                      {notifications.filter(n => !n.read_at).length}
+                    </Badge>
+                  )}
                 </Button>
+                {showNotifPanel && (
+                  <div className="absolute right-0 mt-2 w-80 bg-white border border-gray-200 rounded shadow-lg z-50 max-h-96 overflow-auto">
+                    <div className="p-3 font-semibold border-b flex items-center justify-between">
+                      <span>Notifications</span>
+                      {notifications.some(n => !n.read_at) && (
+                        <button
+                          className="text-xs text-blue-600 hover:underline"
+                          onClick={async () => {
+                            try {
+                              const api = makeApi(token);
+                              await api.post('/api/notifications/read-all');
+                              setNotifications(curr => curr.map(n => n.read_at ? n : { ...n, read_at: new Date().toISOString() }));
+                            } catch { }
+                          }}
+                        >Mark all read</button>
+                      )}
+                    </div>
+                    {notifications.length === 0 && <div className="p-3 text-sm text-gray-500">No notifications</div>}
+                    {notifications.map(n => (
+                      <div
+                        key={n.id}
+                        className={`p-3 text-sm border-b last:border-b-0 flex flex-col gap-1 ${n.type === 'error' ? 'bg-red-50 border-red-200' : ''}`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className={`font-medium mr-2 truncate ${n.type === 'error' ? 'text-red-700' : ''}`}>{n.title}</div>
+                          <div className="text-[11px] text-gray-500 whitespace-nowrap">{formatShort(n.created_at, resolvedTimezone)}</div>
+                        </div>
+                        {n.body && (
+                          <div className={`text-xs ${n.type === 'error' ? 'text-red-600' : 'text-gray-600'}`}>{n.body}</div>
+                        )}
+                        {!n.read_at && (
+                          <button
+                            className="text-xs text-blue-600 self-start"
+                            onClick={async () => {
+                              try {
+                                const api = makeApi(token);
+                                await api.post(`/api/notifications/${n.id}/read`);
+                                setNotifications(curr => curr.map(x => x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x));
+                              } catch { }
+                            }}
+                          >Mark read</button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              {user && (
-                <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
+                {user?.picture ? (
                   <Avatar className="h-8 w-8">
                     <AvatarImage src={user.picture} />
                     <AvatarFallback>{user?.email ? user.email.substring(0, 2).toUpperCase() : '…'}</AvatarFallback>
                   </Avatar>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{user.email}</p>
-                  </div>
-                </div>
+                ) : null}
+                <span className="hidden md:block text-sm font-medium" style={{ color: "#2C3E50" }}>
+                  {user ? user.email : 'Loading...'}
+                </span>
+              </div>
+              {(authUser?.is_admin || authUser?.role === 'admin' || authUser?.role === 'superadmin') && (
+                <Button onClick={() => window.location.href = '/dashboard?admin=1'} variant="ghost" size="sm" className="text-gray-600 hover:text-gray-800">
+                  <SettingsIcon className="w-4 h-4 mr-1" />
+                  <span className="hidden md:inline">Admin Panel</span>
+                </Button>
               )}
+              <Button onClick={logout} variant="ghost" size="sm" className="text-gray-600 hover:text-gray-800">
+                <LogOut className="w-4 h-4 mr-1" />
+                <span className="hidden md:inline">Logout</span>
+              </Button>
             </div>
-            <div className="p-4 space-y-2">
-              {currentView !== 'dashboard' && (
+          </header>
+          <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-6">
+            {renderCurrentView()}
+          </main>
+        </div>
+        {mobileMenuOpen && (
+          <>
+            <div
+              className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+              onClick={() => setMobileMenuOpen(false)}
+            />
+            <div className="fixed top-0 left-0 bottom-0 w-[280px] bg-white shadow-xl z-50 lg:hidden safe-top safe-bottom flex flex-col">
+              <div className="p-4 border-b flex items-center justify-between">
+                <Logo size={24} lockup />
+                <Button variant="ghost" size="icon" onClick={() => setMobileMenuOpen(false)}>
+                  <X className="w-5 h-5" />
+                </Button>
+              </div>
+              <div className="p-4 space-y-2 overflow-y-auto flex-1">
                 <Button
-                  onClick={() => { setCurrentView('dashboard'); setMobileMenuOpen(false); }}
                   variant="outline"
                   className="w-full justify-start touch-target"
+                  onClick={() => { jumpToView('dashboard'); setMobileMenuOpen(false); }}
+                  data-tour-id="dashboard-back-button"
                 >
-                  <ArrowLeft className="w-4 h-4 mr-2" />Dashboard
+                  <Home className="w-4 h-4 mr-2" />Dashboard
                 </Button>
-              )}
-              <Button
-                onClick={() => { setCurrentViewWithHistory('podcastManager'); setMobileMenuOpen(false); }}
-                variant="outline"
-                className="w-full justify-start touch-target"
-              >
-                <Podcast className="w-4 h-4 mr-2" />Podcasts
-              </Button>
-              <Button
-                onClick={() => { setCurrentViewWithHistory('templateManager'); setMobileMenuOpen(false); }}
-                variant="outline"
-                className="w-full justify-start touch-target"
-              >
-                <FileText className="w-4 h-4 mr-2" />Templates
-              </Button>
-              <Button
-                onClick={() => { setCurrentViewWithHistory('mediaLibrary'); setMobileMenuOpen(false); }}
-                variant="outline"
-                className="w-full justify-start touch-target"
-              >
-                <Music className="w-4 h-4 mr-2" />Media
-              </Button>
-              <Button
-                onClick={() => { setCurrentViewWithHistory('episodeHistory'); setMobileMenuOpen(false); }}
-                variant="outline"
-                className="w-full justify-start touch-target"
-              >
-                <BarChart3 className="w-4 h-4 mr-2" />Episodes
-              </Button>
-              <Button
-                onClick={() => {
-                  if (podcasts.length > 0) {
-                    setSelectedPodcastId(podcasts[0].id);
-                    setCurrentViewWithHistory('analytics');
-                    setMobileMenuOpen(false);
-                  }
-                }}
-                variant="outline"
-                className="w-full justify-start touch-target"
-                disabled={podcasts.length === 0}
-              >
-                <BarChart3 className="w-4 h-4 mr-2" />Analytics
-              </Button>
-              <Button
-                onClick={() => { setCurrentViewWithHistory('billing'); setMobileMenuOpen(false); }}
-                variant="outline"
-                className="w-full justify-start touch-target"
-              >
-                <DollarSign className="w-4 h-4 mr-2" />Subscription
-              </Button>
-              <Button
-                onClick={() => { setCurrentViewWithHistory('settings'); setMobileMenuOpen(false); }}
-                variant="outline"
-                className="w-full justify-start touch-target"
-              >
-                <SettingsIcon className="w-4 h-4 mr-2" />Settings
-              </Button>
-              <Button
-                onClick={() => { window.location.href = '/guides'; }}
-                variant="outline"
-                className="w-full justify-start touch-target"
-              >
-                <BookOpen className="w-4 h-4 mr-2" />Guides & Help
-              </Button>
-              <Button
-                onClick={() => { setCurrentViewWithHistory('websiteBuilder'); setMobileMenuOpen(false); }}
-                variant="outline"
-                className="w-full justify-start touch-target"
-              >
-                <Globe2 className="w-4 h-4 mr-2" />Website Builder
-              </Button>
-              {(authUser?.is_admin || authUser?.role === 'admin' || authUser?.role === 'superadmin') && (
+                {primaryNavItems.map((item) => (
+                  <Button
+                    key={item.id}
+                    variant="outline"
+                    className={`w-full justify-start touch-target ${item.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    onClick={() => handleSidebarNavigate(item)}
+                    disabled={item.disabled}
+                    data-tour-id={item.tourId}
+                  >
+                    {item.icon && <item.icon className="w-4 h-4 mr-2" />}
+                    {item.label}
+                  </Button>
+                ))}
+                {supportNavItems.length > 0 && (
+                  <div className="mt-8 pt-6 border-t border-dashed border-gray-200 space-y-2">
+                    {supportNavItems.map((item) => (
+                      <Button
+                        key={item.id}
+                        variant="outline"
+                        className="w-full justify-start touch-target"
+                        onClick={() => handleSidebarNavigate(item)}
+                        data-tour-id={item.tourId}
+                      >
+                        {item.icon && <item.icon className="w-4 h-4 mr-2" />}
+                        {item.label}
+                      </Button>
+                    ))}
+                  </div>
+                )}
+                {(authUser?.is_admin || authUser?.role === 'admin' || authUser?.role === 'superadmin') && (
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start touch-target bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100"
+                    onClick={() => { window.location.href = '/dashboard?admin=1'; setMobileMenuOpen(false); }}
+                  >
+                    <SettingsIcon className="w-4 h-4 mr-2" />Admin Panel
+                  </Button>
+                )}
+              </div>
+              <div className="p-4 border-t">
                 <Button
-                  onClick={() => { window.location.href = '/dashboard?admin=1'; setMobileMenuOpen(false); }}
-                  variant="outline"
-                  className="w-full justify-start touch-target bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100"
+                  onClick={logout}
+                  variant="ghost"
+                  className="w-full justify-start touch-target text-red-600 hover:text-red-700 hover:bg-red-50"
                 >
-                  <SettingsIcon className="w-4 h-4 mr-2" />Admin Panel
+                  <LogOut className="w-4 h-4 mr-2" />Logout
                 </Button>
-              )}
+              </div>
             </div>
-            <div className="p-4 border-t mt-4">
-              <Button
-                onClick={logout}
-                variant="ghost"
-                className="w-full justify-start touch-target text-red-600 hover:text-red-700 hover:bg-red-50"
-              >
-                <LogOut className="w-4 h-4 mr-2" />Logout
-              </Button>
-            </div>
-          </div>
-        </>
-      )}
-
-      <main className="container mx-auto max-w-7xl px-4 sm:px-6 py-6">
-        {renderCurrentView()}
-      </main>
-
-      {/* AI Assistant - Always available in bottom-right corner */}
+          </>
+        )}
+      </div>
       <AIAssistant
         token={token}
         user={user}
         currentPage={currentView}
         onRestartTooltips={currentView === 'dashboard' ? handleRestartTooltips : null}
       />
-    </div>
+    </>
   );
 }
 

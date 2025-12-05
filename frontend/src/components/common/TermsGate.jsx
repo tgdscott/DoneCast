@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import termsHtml from "@/legal/terms-of-use.html?raw";
 import { useAuth } from "@/AuthContext.jsx";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,35 @@ export default function TermsGate() {
   // CRITICAL: Only use terms_version_required, never fallback to accepted version
   // This ensures we only show gate when there's actually a required version that differs
   const versionRequired = user?.terms_version_required || '';
+
+  const formattedVersionLabel = useMemo(() => {
+    if (!versionRequired) {
+      return '';
+    }
+    const parsed = new Date(`${versionRequired}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime())) {
+      return versionRequired;
+    }
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(parsed);
+  }, [versionRequired]);
+
+  const displayVersion = formattedVersionLabel || versionRequired;
+
+  const syncedTermsHtml = useMemo(() => {
+    if (!displayVersion) {
+      return termsHtml;
+    }
+    try {
+      return termsHtml.replace(/(Last updated:\s*)([^<]+)/i, `$1${displayVersion}`);
+    } catch (err) {
+      console.warn('[TermsGate] Failed to sync Terms last updated label', err);
+      return termsHtml;
+    }
+  }, [displayVersion]);
 
   const handleAccept = async () => {
     if (!versionRequired) {
@@ -94,11 +123,7 @@ export default function TermsGate() {
             </p>
           </CardHeader>
           <CardContent>
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
-              <div>
-                <span className="font-medium text-slate-800">Required version:</span>{' '}
-                {versionRequired || 'Unspecified'}
-              </div>
+            <div className="mb-4 flex flex-wrap items-center justify-end gap-3 text-sm text-slate-600">
               <div>
                 Need a larger view?{' '}
                 <a href="/terms" target="_blank" rel="noreferrer" className="font-medium text-blue-600 hover:text-blue-700">
@@ -107,7 +132,7 @@ export default function TermsGate() {
               </div>
             </div>
             <div className="max-h-[60vh] overflow-y-auto rounded-lg border border-slate-200 bg-white p-6">
-              <article className="prose prose-slate max-w-none" dangerouslySetInnerHTML={{ __html: termsHtml }} />
+              <article className="prose prose-slate max-w-none" dangerouslySetInnerHTML={{ __html: syncedTermsHtml }} />
             </div>
             {error && (
               <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">

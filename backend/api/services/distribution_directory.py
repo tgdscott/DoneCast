@@ -61,18 +61,18 @@ _PLATFORMS: List[Dict[str, object]] = [
         "key": "spotify",
         "name": "Spotify for Creators",
         "summary": "Submit to Spotify to reach Android, desktop, and smart speaker listeners.",
-        "automation": "assisted",
-        "automation_notes": "We provide a pre-filled submission link with your RSS feed.",
+        "automation": "manual",
+        "automation_notes": "We send you straight to Spotify’s submission form so you can paste your DoneCast RSS feed immediately.",
         "action_label": "Submit to Spotify",
-        "action_url_template": "https://creators.spotify.com/pod/dashboard/submit?feed={rss_feed_encoded}",
+        "action_url": "https://creators.spotify.com/dash/submit",
         "docs_url": "https://creators.spotify.com/",
         "instructions": [
-            "Sign in to Spotify for Creators (or create an account).",
-            "Follow the claim flow; your RSS feed is pre-filled when you use our link.",
-            "Verify ownership via the email sent to your podcast contact address, then complete the show setup.",
+            "Sign in to Spotify for Creators (or create a free account) at creators.spotify.com/dash/submit.",
+            "Click ‘Submit a podcast’, paste your DoneCast RSS feed URL ({rss_feed_url}), and confirm the show details.",
+            "Spotify emails a verification code to the address listed in your feed—enter it and finish the setup to publish.",
         ],
         "requires_rss_feed": True,
-        "rss_missing_help": "We need your Plus Plus RSS feed before we can pre-fill the Spotify form.",
+        "rss_missing_help": "Generate your DoneCast RSS feed so you can paste it into Spotify’s submission form.",
     },
     {
         "key": "amazon_music",
@@ -96,7 +96,7 @@ _PLATFORMS: List[Dict[str, object]] = [
         "summary": "Reach listeners across the iHeartRadio app, smart speakers, and radio sites.",
         "automation": "manual",
         "action_label": "Apply on iHeartRadio",
-        "action_url": "https://www.iheart.com/podcast-submissions/",
+        "action_url": "https://podcasters.iheart.com/",
         "instructions": [
             "Open the submission form and sign in or create a free creator account.",
             "Paste your RSS feed URL ({rss_feed_url}) and complete the required metadata fields.",
@@ -157,8 +157,7 @@ _PLATFORMS: List[Dict[str, object]] = [
         "automation": "assisted",
         "automation_notes": "We provide a pre-filled submission link with your RSS feed.",
         "action_label": "Submit to Castbox",
-        # Prefer pre-filled submit; fallback docs remains available
-        "action_url_template": "https://castbox.fm/publisher/submit?feed={rss_feed_encoded}",
+        "action_url": "https://castbox.fm/login",
         "docs_url": "https://castbox.fm/publisher/",
         "instructions": [
             "Sign in to Castbox Publisher (or create an account).",
@@ -175,8 +174,7 @@ _PLATFORMS: List[Dict[str, object]] = [
         "automation": "assisted",
         "automation_notes": "We provide a pre-filled submission link with your RSS feed.",
         "action_label": "Submit to Deezer",
-        # Prefer pre-filled submit; keep docs URL as backup
-        "action_url_template": "https://podcasters.deezer.com/submit?feed={rss_feed_encoded}",
+        "action_url": "https://podcasters.deezer.com/",
         "docs_url": "https://podcasters.deezer.com/",
         "instructions": [
             "Sign in to Deezer Podcasters (or create an account).",

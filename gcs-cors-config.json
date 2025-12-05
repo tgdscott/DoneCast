@@ -1,6 +1,6 @@
 [
   {
-    "origin": ["http://127.0.0.1:5173", "http://localhost:5173", "https://app.podcastplusplus.com", "https://podcastplusplus.com", "https://www.podcastplusplus.com", "https://getpodcastplus.com", "https://www.getpodcastplus.com"],
+    "origin": ["http://127.0.0.1:5173", "http://localhost:5173", "https://donecast.com", "https://www.donecast.com", "https://app.donecast.com", "https://app.podcastplusplus.com", "https://podcastplusplus.com", "https://www.podcastplusplus.com", "https://getpodcastplus.com", "https://www.getpodcastplus.com"],
     "method": ["GET", "HEAD", "PUT", "POST", "DELETE", "OPTIONS"],
     "responseHeader": ["Content-Type", "Content-Length", "Content-Range", "x-goog-resumable"],
     "maxAgeSeconds": 3600

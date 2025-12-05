@@ -23,13 +23,29 @@ def generate(content: str, **kwargs) -> str:
     - groq: Uses Groq API (fast, free tier)
     - gemini: Uses Google Gemini API
     - vertex: Uses Google Vertex AI
+    
+    Automatically falls back to Gemini if the Groq client is misconfigured or
+    raises an exception (missing API key, network failure, etc.).
     """
     provider = get_provider()
     
     if provider == "groq":
-        from . import client_groq
-        return client_groq.generate(content, **kwargs)
-    elif provider in ("gemini", "vertex"):
+        groq_key = (os.getenv("GROQ_API_KEY") or "").strip()
+        if not groq_key:
+            _log.warning("[ai_router] GROQ_API_KEY missing; falling back to Gemini provider")
+        else:
+            from . import client_groq
+            try:
+                return client_groq.generate(content, **kwargs)
+            except Exception as exc:  # pragma: no cover - depends on live API failures
+                _log.error(
+                    "[ai_router] Groq provider failed: %s. Falling back to Gemini.",
+                    exc,
+                    exc_info=True,
+                )
+        provider = "gemini"
+    
+    if provider in ("gemini", "vertex"):
         from . import client_gemini
         return client_gemini.generate(content, **kwargs)
     else:

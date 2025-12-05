@@ -188,8 +188,12 @@ export default function useOnboardingWizard({
 
   const lastPodcastInfoRef = useRef(null);
   const ensurePodcastPromiseRef = useRef(null);
+  const rssBootstrapRequestedRef = useRef(false);
 
   const [rssFeedUrl, setRssFeedUrl] = useState("");
+  const [rssStatus, setRssStatus] = useState({ state: "idle", lastChecked: 0, error: null });
+  const [showRssWaiting, setShowRssWaiting] = useState(false);
+  const [distributionReady, setDistributionReady] = useState(false);
   const [websiteUrl, setWebsiteUrl] = useState(() => {
     if (!user?.email) return "";
     try {
@@ -367,6 +371,16 @@ export default function useOnboardingWizard({
 
   const introOutroIndex = useMemo(() => {
     const idx = newFlowSteps.findIndex((step) => step.id === "introOutro");
+    return idx >= 0 ? idx : 0;
+  }, [newFlowSteps]);
+
+  const publishPlanIndex = useMemo(() => {
+    const idx = newFlowSteps.findIndex((step) => step.id === "publishPlan");
+    return idx >= 0 ? idx : 0;
+  }, [newFlowSteps]);
+
+  const distributionRequiredIndex = useMemo(() => {
+    const idx = newFlowSteps.findIndex((step) => step.id === "distributionRequired");
     return idx >= 0 ? idx : 0;
   }, [newFlowSteps]);
 
@@ -878,6 +892,7 @@ export default function useOnboardingWizard({
           selected.rssFeedUrl;
         if (feed) {
           setRssFeedUrl(feed);
+          setRssStatus({ state: "ready", lastChecked: Date.now(), error: null });
         }
         return selected;
       }
@@ -892,6 +907,88 @@ export default function useOnboardingWizard({
       ensurePodcastPromiseRef.current = null;
     }
   }, [token, targetPodcastId, formData.podcastName, path, preparePodcastPayload, setTargetPodcastId, setRssFeedUrl, toast]);
+
+  const refreshRssMetadata = useCallback(async () => {
+    if (!token) {
+      return null;
+    }
+
+    setRssStatus((prev) => {
+      if (prev.state === "ready") {
+        return prev;
+      }
+      return { state: "checking", lastChecked: Date.now(), error: null };
+    });
+
+    try {
+      let podcastId = targetPodcastId;
+      if (!podcastId) {
+        const ensured = await ensurePodcastExists();
+        podcastId = ensured?.id || null;
+      }
+
+      if (!podcastId) {
+        throw new Error("Podcast not created yet");
+      }
+
+      const api = makeApi(token);
+      const data = await api.get(`/api/podcasts/${podcastId}/distribution/checklist`);
+
+      if (data?.rss_feed_url) {
+        setRssFeedUrl(data.rss_feed_url);
+        setRssStatus({ state: "ready", lastChecked: Date.now(), error: null });
+        setShowRssWaiting(false);
+      } else {
+        setRssStatus({ state: "pending", lastChecked: Date.now(), error: null });
+        setShowRssWaiting(true);
+      }
+
+      return data;
+    } catch (error) {
+      const message = error?.detail || error?.message || "Failed to refresh RSS status";
+      console.warn("[Onboarding] refreshRssMetadata failed:", error);
+      setRssStatus({ state: "error", lastChecked: Date.now(), error: message });
+      throw error;
+    }
+  }, [token, targetPodcastId, ensurePodcastExists, setRssFeedUrl, setShowRssWaiting]);
+
+  useEffect(() => {
+    if (rssStatus.state !== "pending") {
+      return undefined;
+    }
+
+    const timer = setTimeout(() => {
+      refreshRssMetadata().catch((err) => {
+        console.warn("[Onboarding] RSS auto-refresh failed:", err);
+      });
+    }, 4000);
+
+    return () => clearTimeout(timer);
+  }, [rssStatus.state, refreshRssMetadata]);
+
+  useEffect(() => {
+    if (path !== "new") {
+      return;
+    }
+    if (!token) {
+      return;
+    }
+    if (stepIndex < introOutroIndex) {
+      return;
+    }
+    if (rssStatus.state === "ready") {
+      return;
+    }
+    if (rssBootstrapRequestedRef.current) {
+      return;
+    }
+
+    rssBootstrapRequestedRef.current = true;
+    refreshRssMetadata().catch((err) => {
+      rssBootstrapRequestedRef.current = false;
+      console.warn("[Onboarding] RSS bootstrap failed:", err);
+    });
+  }, [path, token, stepIndex, introOutroIndex, rssStatus.state, refreshRssMetadata]);
 
   useEffect(() => {
     if (path !== "new") {
@@ -1327,6 +1424,9 @@ export default function useOnboardingWizard({
           disabled = !(nameOk && descOk);
         }
         break;
+      case "distributionRequired":
+        disabled = !distributionReady;
+        break;
       default:
         break;
     }
@@ -1334,6 +1434,7 @@ export default function useOnboardingWizard({
   }, [
     stepId,
     path,
+    distributionReady,
     importLoading,
     firstName,
     formData.podcastName,
@@ -1678,6 +1779,12 @@ export default function useOnboardingWizard({
     setTargetPodcastId,
     rssFeedUrl,
     setRssFeedUrl,
+    rssStatus,
+    refreshRssMetadata,
+    showRssWaiting,
+    setShowRssWaiting,
+    distributionReady,
+    setDistributionReady,
     websiteUrl,
     setWebsiteUrl,
     designVibe,

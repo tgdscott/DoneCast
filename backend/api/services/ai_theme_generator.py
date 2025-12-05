@@ -14,9 +14,10 @@ from pydantic import BaseModel, Field
 from api.models.podcast import Podcast
 from api.services.ai_content import client_router as ai_client
 from api.services.podcast_websites import (
-    _get_readable_text_color,
-    _get_contrast_ratio,
-    _hex_to_rgb_tuple,
+  _get_readable_text_color,
+  _get_contrast_ratio,
+  _hex_to_rgb_tuple,
+  _ensure_readable_text_color,
 )
 
 log = logging.getLogger(__name__)
@@ -302,6 +303,39 @@ def _get_default_theme_spec(podcast_name: str) -> ThemeSpec:
     )
 
 
+    def _enforce_palette_contrast(theme_spec: ThemeSpec) -> ThemeSpec:
+      """Normalize AI palette choices so text always clears WCAG contrast thresholds."""
+
+      colors = dict(theme_spec.color_palette or {})
+      bg = colors.get("bg") or "#0f172a"
+      bg_elev = colors.get("bg_elev") or colors.get("bg") or "#1e293b"
+
+      # Ensure main text is readable against the base background
+      desired_text = colors.get("text") or "#f8fafc"
+      safe_text = _get_readable_text_color(bg, min_contrast=4.5)
+      if desired_text.lower() != safe_text.lower():
+        log.warning(
+          "Theme text color %s failed contrast on bg %s. Auto-adjusting to %s.",
+          desired_text,
+          bg,
+          safe_text,
+        )
+        colors["text"] = safe_text
+
+      # Muted/secondary text still needs to be readable, but 3.0:1 is acceptable
+      muted_color = colors.get("muted")
+      if muted_color:
+        safe_muted = _ensure_readable_text_color(muted_color, bg, min_contrast=3.0)
+        colors["muted"] = safe_muted
+
+      # Elevated surface text should also be readable if bg_elev differs
+      safe_elev_text = _get_readable_text_color(bg_elev, min_contrast=4.5)
+      colors.setdefault("bg_elev_text", safe_elev_text)
+
+      theme_spec.color_palette = colors
+      return theme_spec
+
+
 def map_theme_to_sections(theme_spec: ThemeSpec, podcast: Podcast) -> Dict[str, Any]:
     """
     Map theme specification to section configurations.
@@ -438,6 +472,11 @@ def generate_theme_css(theme_spec: ThemeSpec, section_configs: Dict[str, Any]) -
             else:
                 muted = "#64748b"  # Medium gray
     
+        # Persist corrected palette values so future steps have the safe versions
+        colors["text"] = text
+        colors["muted"] = muted
+        colors["primary_text"] = primary_text
+
     # Log the colors being used for debugging
     log.info("Generating CSS with colors: primary=%s, bg=%s, text=%s (contrast: %.2f:1)", 
              primary, bg, text, _get_contrast_ratio(_hex_to_rgb_tuple(text), bg_rgb))
@@ -484,6 +523,29 @@ body {{
   color: var(--text, {text}) !important;
   font-family: var(--font-body, {body_font});
   line-height: 1.6;
+}}
+
+/* Force any inherited Tailwind text utility to respect readable colors */
+body,
+main,
+section,
+p,
+li,
+span,
+.prose p,
+.prose li,
+[data-section-id] p,
+[data-section-id] li,
+[data-section-id] span,
+[data-section-id] strong,
+[data-section-id] em,
+[data-section-id] [class*="text-slate"],
+[data-section-id] [class*="text-gray"],
+[data-section-id] [class*="text-zinc"],
+[data-section-id] [class*="text-neutral"],
+[data-section-id] [class*="text-stone"],
+[data-section-id] [class*="text-white"] {{
+  color: var(--text, {text}) !important;
 }}
 
 /* Apply theme colors to hero sections - use high specificity to override inline styles */
@@ -599,9 +661,14 @@ div.w-full.relative.overflow-hidden.hero h1.text-5xl {{
 /* Override Tailwind text colors for headings - BUT only on dark backgrounds */
 /* On white/light backgrounds, use dark text for readability */
 .bg-white h1, .bg-white h2, .bg-white h3,
+.bg-white p, .bg-white li, .bg-white span,
 .bg-white [class*="text-"],
 [class*="bg-white"] h1, [class*="bg-white"] h2, [class*="bg-white"] h3,
-[class*="bg-white"] [class*="text-slate"], [class*="bg-white"] [class*="text-gray"] {{
+[class*="bg-white"] p, [class*="bg-white"] li, [class*="bg-white"] span,
+[class*="bg-white"] [class*="text-slate"], [class*="bg-white"] [class*="text-gray"],
+[class*="bg-white"] [class*="text-stone"], [class*="bg-white"] [class*="text-neutral"],
+.bg-gray-50 h1, .bg-gray-50 p, .bg-slate-50 h1, .bg-slate-50 p,
+[class*="bg-gray-50"] *, [class*="bg-slate-50"] * {{
   color: #1e293b !important; /* Dark slate for readability on white */
 }}
 
@@ -994,6 +1061,7 @@ def generate_complete_theme(
     """
     # Step 1: Analyze podcast
     theme_spec = analyze_podcast_for_theme(podcast, cover_url, tagline, design_prefs)
+    theme_spec = _enforce_palette_contrast(theme_spec)
     
     # Step 2: Map to sections
     section_configs = map_theme_to_sections(theme_spec, podcast)

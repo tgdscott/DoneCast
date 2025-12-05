@@ -76,7 +76,6 @@ export default function IntroOutroStep({ wizard }) {
   const [outroPlaying, setOutroPlaying] = React.useState(false);
   const introAudioRef = React.useRef(null);
   const outroAudioRef = React.useRef(null);
-  const [aiAssistBusy, setAiAssistBusy] = React.useState(false);
 
   const showName = React.useMemo(() => {
     const trimmed = (formData?.podcastName || "").trim();
@@ -164,40 +163,11 @@ export default function IntroOutroStep({ wizard }) {
     } catch (_) { }
   }, [introSuggestion, outroSuggestion, setIntroScript, setOutroScript, toast]);
 
-  const handleGenerateWithAI = React.useCallback(async () => {
-    setAiAssistBusy(true);
-    try {
-      setIntroScript(introSuggestion);
-      setOutroScript(outroSuggestion);
-      const introResult = await generateOrUploadTTS("intro", "tts", introSuggestion, null, null);
-      const outroResult = await generateOrUploadTTS("outro", "tts", outroSuggestion, null, null);
-      let createdAny = false;
-      if (introResult) {
-        registerGeneratedAsset("intro", introResult);
-        createdAny = true;
-      }
-      if (outroResult) {
-        registerGeneratedAsset("outro", outroResult);
-        createdAny = true;
-      }
-      if (createdAny) {
-        toast?.({
-          title: "Intro & outro ready",
-          description: "Preview the new AI voice lines below.",
-        });
-      }
-    } finally {
-      setAiAssistBusy(false);
-    }
-  }, [
-    generateOrUploadTTS,
-    introSuggestion,
-    outroSuggestion,
-    registerGeneratedAsset,
-    toast,
-    setIntroScript,
-    setOutroScript,
-  ]);
+  const handleGenerateWithAI = React.useCallback(() => {
+    // Button removed; keep handler for compatibility if called elsewhere
+    setIntroScript(introSuggestion);
+    setOutroScript(outroSuggestion);
+  }, [introSuggestion, outroSuggestion, setIntroScript, setOutroScript]);
 
   // Resolve intro voice name when introVoiceId changes
   React.useEffect(() => {
@@ -314,9 +284,6 @@ export default function IntroOutroStep({ wizard }) {
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm" onClick={handleApplySuggestions}>
                 Use these scripts
-              </Button>
-              <Button size="sm" onClick={handleGenerateWithAI} disabled={aiAssistBusy}>
-                {aiAssistBusy ? "Generating..." : "Generate intro & outro audio"}
               </Button>
             </div>
             <div className="flex flex-col gap-2 text-xs text-muted-foreground md:flex-row md:items-center md:gap-4">

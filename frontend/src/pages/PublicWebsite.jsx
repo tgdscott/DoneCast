@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { getSectionPreviewComponent } from '../components/website/sections/SectionPreviews';
 import PersistentPlayer from '../components/website/PersistentPlayer';
 
+const DEFAULT_BRAND_FAVICON = '/assets/branding/favicon.png';
+
 export default function PublicWebsite() {
   const [websiteData, setWebsiteData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -172,6 +174,46 @@ export default function PublicWebsite() {
     } else {
       if (import.meta.env.DEV) console.warn('[PublicWebsite] No global_css found in website data');
     }
+  }, [websiteData]);
+
+  // Update document metadata (title + favicon) to match the active podcast website
+  useEffect(() => {
+    if (!websiteData) {
+      return undefined;
+    }
+
+    const previousTitle = document.title;
+    const podcastTitle = websiteData.podcast_title || 'DoneCast Podcast';
+    document.title = `${podcastTitle} | DoneCast`;
+
+    const ensureLink = (rel) => {
+      let link = document.head.querySelector(`link[rel='${rel}']`);
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = rel;
+        document.head.appendChild(link);
+      }
+      return link;
+    };
+
+    const setFavicon = (rel, href) => {
+      const link = ensureLink(rel);
+      const previousHref = link.getAttribute('href');
+      link.setAttribute('href', href || DEFAULT_BRAND_FAVICON);
+      return previousHref;
+    };
+
+    const coverIcon = websiteData.podcast_cover_url || DEFAULT_BRAND_FAVICON;
+    const previousIcons = {
+      icon: setFavicon('icon', coverIcon),
+      apple: setFavicon('apple-touch-icon', coverIcon),
+    };
+
+    return () => {
+      document.title = previousTitle || 'DoneCast';
+      setFavicon('icon', previousIcons.icon || DEFAULT_BRAND_FAVICON);
+      setFavicon('apple-touch-icon', previousIcons.apple || DEFAULT_BRAND_FAVICON);
+    };
   }, [websiteData]);
 
   if (loading) {
