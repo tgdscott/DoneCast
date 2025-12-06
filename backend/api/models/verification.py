@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 from typing import Optional
 from uuid import UUID, uuid4
 
+from pydantic import field_validator
 from sqlmodel import SQLModel, Field, Relationship
 from sqlalchemy import Column
 from sqlalchemy.schema import Table
@@ -54,7 +56,7 @@ class OwnershipVerification(SQLModel, table=True):
 
 
 class PasswordReset(SQLModel, table=True):
-    """Single-use password reset token. Token is stored directly (short-lived) for MVP; can be hashed later."""
+    """Single-use password reset token. Token is hashed using SHA256."""
     __tablename__: ClassVar[str] = "passwordreset"
     __table_args__ = {"extend_existing": True}
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
@@ -65,6 +67,11 @@ class PasswordReset(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     ip: Optional[str] = Field(default=None, max_length=64)
     user_agent: Optional[str] = Field(default=None, max_length=300)
+
+    @field_validator("token")
+    @classmethod
+    def hash_token(cls, v: str) -> str:
+        return hashlib.sha256(v.encode()).hexdigest()
 
 
 class PhoneVerification(SQLModel, table=True):
