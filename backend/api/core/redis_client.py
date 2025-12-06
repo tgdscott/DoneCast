@@ -69,3 +69,17 @@ def redis_setex(key: str, time: int, value: Any) -> bool:
     except Exception as e:
         log.warning(f"Redis SETEX failed for {key}: {e}")
         return False
+
+
+def redis_set(key: str, value: Any) -> bool:
+    """
+    Fail-open Redis SET wrapper.
+    """
+    try:
+        client = get_redis_client()
+        if not client:
+            return False
+        return client.set(key, value)
+    except Exception as e:
+        log.warning(f"Redis SET failed for {key}: {e}")
+        return False
