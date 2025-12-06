@@ -1,5 +1,6 @@
 import MetaHead from "@/components/MetaHead.jsx";
 import Logo from "@/components/Logo.jsx";
+import DOMPurify from 'dompurify';
 
 const currentYear = new Date().getFullYear();
 
@@ -22,7 +23,7 @@ export default function LegalLayout({ title, description, html }) {
       </header>
 
       <main className="mx-auto max-w-5xl px-6 py-16">
-        <article className="legal-content" dangerouslySetInnerHTML={{ __html: html }} />
+        <article className="legal-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />
       </main>
 
       <footer className="border-t bg-white">
