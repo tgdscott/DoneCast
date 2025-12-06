@@ -104,6 +104,7 @@ class WebsiteGenerationRequest(BaseModel):
     design_vibe: Optional[str] = Field(default=None, description="Desired visual vibe (e.g. 'Modern', 'Retro')")
     color_preference: Optional[str] = Field(default=None, description="Specific color preferences")
     additional_notes: Optional[str] = Field(default=None, description="Other design notes")
+    host_bio: str = Field(..., min_length=50, description="Required host bio to prefill the website")
 
 
 @router.get("", response_model=PodcastWebsiteResponse)

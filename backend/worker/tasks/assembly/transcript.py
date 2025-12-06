@@ -785,6 +785,35 @@ def prepare_transcript_context(
             )
             words_json_path = None
 
+    # CRITICAL FIX: Fail fast if cleanup is requested but transcript is missing
+    # This prevents "silent failure" where user expects filler removal but gets raw audio
+    if not words_json_path:
+        cleanup_required = False
+        settings = media_context.cleanup_settings or {}
+        try:
+            # Check explicit cleanup settings
+            if settings.get("removeFillers") or settings.get("removePauses"):
+                cleanup_required = True
+            
+            # Check intents that require transcript
+            if intents:
+                flubber_val = str(intents.get("flubber") or "").lower()
+                intern_val = str(intents.get("intern") or "").lower()
+                if flubber_val == "yes" or intern_val == "yes":
+                    cleanup_required = True
+        except Exception:
+            pass
+
+        if cleanup_required:
+            error_msg = (
+                f"Transcript not found for {base_audio_name} but cleanup is requested "
+                f"(removeFillers={settings.get('removeFillers')}, removePauses={settings.get('removePauses')}). "
+                "Cannot remove filler words or silence without a transcript. "
+                "Please ensure the file was transcribed successfully."
+            )
+            logging.error(f"[assemble] ❌ {error_msg}")
+            raise RuntimeError(error_msg)
+
     # ========== SPEAKER IDENTIFICATION: Map generic labels to real names ==========
     # After transcript is loaded, map "Speaker A/B/C" to actual host/guest names
     # based on podcast speaker configuration and episode guest list

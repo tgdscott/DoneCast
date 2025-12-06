@@ -96,10 +96,27 @@ steps:
         # This avoids errors if submit/trigger passes values for them.
         echo "MEDIA_ROOT=${_MEDIA_ROOT}" >/dev/null || true
 
+  # ---------- Warm cache: pull latest images for cache-from ----------
+  - name: gcr.io/cloud-builders/docker
+    id: api-cache-pull
+    waitFor: ['-']
+    entrypoint: bash
+    args: ['-c', 'docker pull ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:latest || exit 0']
+  - name: gcr.io/cloud-builders/docker
+    id: worker-cache-pull
+    waitFor: ['-']
+    entrypoint: bash
+    args: ['-c', 'docker pull ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WORKER_SERVICE}:latest || exit 0']
+  - name: gcr.io/cloud-builders/docker
+    id: web-cache-pull
+    waitFor: ['-']
+    entrypoint: bash
+    args: ['-c', 'docker pull ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_WEB_SERVICE}:latest || exit 0']
+
   # ---------- API & WORKER: build in parallel with BuildKit caching ----------
   - name: gcr.io/cloud-builders/docker
     id: api-build
-    waitFor: ['-']
+    waitFor: ['api-cache-pull']
     env:
       - 'DOCKER_BUILDKIT=1'
     args:
@@ -151,12 +168,14 @@ steps:
   # ---------- WEB: build & push (can run in parallel with API/Worker builds) ----------
   - name: gcr.io/cloud-builders/docker
     id: web-build
-    waitFor: ['-']
+    waitFor: ['web-cache-pull']
     entrypoint: sh
     secretEnv:
       - GOOGLE_CLIENT_ID
       - SENTRY_DSN
       - VITE_POSTHOG_KEY
+    env:
+      - 'DOCKER_BUILDKIT=1'
     args:
       - -c
       - |
@@ -184,6 +203,8 @@ steps:
         echo "==> Building web image"
         docker build "$${WEB_DIR}" \
           --file "$${WEB_DIR}/Dockerfile" \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from "$${IMG_LATEST}" \
           --build-arg VITE_GOOGLE_CLIENT_ID="$${VGCID}" \
           --build-arg VITE_API_BASE="${_VITE_API_BASE}" \
           --build-arg VITE_SENTRY_DSN="$${SENTRY}" \

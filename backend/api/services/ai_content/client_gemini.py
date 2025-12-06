@@ -93,8 +93,7 @@ def _get_model():
             return None
         raise RuntimeError("Gemini model class unavailable")
     # Model name resolution: prefer explicit env/setting otherwise fallback
-    # Use gemini-2.5-flash-lite for both dev and production as requested
-    default_model = "gemini-2.5-flash-lite"
+    default_model = "gemini-1.5-flash"
     
     model_name = (
         os.getenv("GEMINI_MODEL")
@@ -204,11 +203,14 @@ def generate(content: str, **kwargs) -> str:
             provider = "gemini"
             # Public Gemini path
         if provider == "gemini":
-            # Resolve model with GEMINI-specific inputs only to avoid cross-provider mixups.
+            # Resolve model with GEMINI-specific inputs, but allow VERTEX_MODEL as fallback
+            # This ensures consistency if user sets VERTEX_MODEL but uses AI_PROVIDER=gemini
             model_name = (
                 os.getenv("GEMINI_MODEL")
                 or getattr(settings, "GEMINI_MODEL", None)
-                or "gemini-2.5-flash-lite"
+                or os.getenv("VERTEX_MODEL")
+                or getattr(settings, "VERTEX_MODEL", None)
+                or "gemini-1.5-flash"
             )
             if isinstance(model_name, str) and model_name.startswith("models/"):
                 model_name = model_name.split("/", 1)[1]
@@ -333,12 +335,12 @@ def generate(content: str, **kwargs) -> str:
             )
             location = os.getenv("VERTEX_LOCATION") or getattr(settings, "VERTEX_LOCATION", "us-central1")
             
-            # CRITICAL: Production default to gemini-2.5-flash-lite, dev default to gemini-1.5-flash
+            # CRITICAL: Production default to gemini-1.5-flash, dev default to gemini-1.5-flash
             # This ensures production uses the optimized model even if VERTEX_MODEL env var is missing/overridden
             env = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or getattr(settings, "APP_ENV", "dev")).strip().lower()
             is_production = env in {"prod", "production", "stage", "staging"}
-            # Use gemini-2.5-flash-lite for both dev and production as requested
-            default_model = "gemini-2.5-flash-lite"
+            # Use gemini-1.5-flash for both dev and production
+            default_model = "gemini-1.5-flash"
             
             v_model = (
                 os.getenv("VERTEX_MODEL") 

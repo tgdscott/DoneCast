@@ -256,3 +256,24 @@ def test_update_domain_requires_plan(authed_client: TestClient, db: DBSession, u
     )
     assert resp3.status_code == 200, resp3.text
     assert resp3.json()["custom_domain"] is None
+
+
+def test_generate_css_from_theme_respects_colors():
+    theme = {
+        "primary_color": "#123456",
+        "secondary_color": "#abcdef",
+        "accent_color": "#fedcba",
+        "background_color": "#0f172a",
+        "text_color": "#ffffff",
+        "mood": "professional",
+    }
+
+    css = podcast_websites._generate_css_from_theme(theme, "Test Podcast")
+
+    assert "/* Auto-generated CSS for Test Podcast */" in css
+    assert "--color-primary: #123456;" in css
+    assert "--color-secondary: #abcdef;" in css
+    assert "--color-accent: #fedcba;" in css
+    assert "--color-background: #0f172a;" in css
+    assert "--color-text-primary:" in css
+    assert "color: var(--color-text-primary);" in css

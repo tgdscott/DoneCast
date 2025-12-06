@@ -26,6 +26,8 @@ const WARMUP_MESSAGES = [
 
 export function WarmupLoader({ isVisible }) {
   const [currentMessage, setCurrentMessage] = useState(WARMUP_MESSAGES[0]);
+  const [logoIndex, setLogoIndex] = useState(0);
+  const logoSources = ["/logo.png", "/assets/branding/logo-horizontal.png", "/assets/branding/favicon.png"];
 
   useEffect(() => {
     if (!isVisible) {
@@ -51,13 +53,23 @@ export function WarmupLoader({ isVisible }) {
     >
       <div className="bg-white dark:bg-slate-900 rounded-lg shadow-2xl p-8 max-w-sm w-full mx-4 border border-slate-200 dark:border-slate-700">
         <div className="flex flex-col items-center justify-center space-y-4">
-          <img
-            src="/assets/branding/favicon.png"
-            alt="DoneCast icon"
-            className="h-10 w-10 animate-pulse"
-            aria-hidden="true"
-            loading="eager"
-          />
+          {logoIndex < logoSources.length ? (
+            <img
+              src={logoSources[logoIndex]}
+              alt="DoneCast icon"
+              className="h-20 w-20 animate-pulse"
+              aria-hidden="true"
+              loading="eager"
+              onError={() => setLogoIndex((idx) => idx + 1)}
+            />
+          ) : (
+            <div
+              className="flex h-20 w-20 items-center justify-center rounded-lg bg-slate-100 text-lg font-semibold text-slate-700 animate-pulse"
+              aria-hidden="true"
+            >
+              DC
+            </div>
+          )}
           <div className="text-center space-y-2">
             <p className="text-sm font-medium text-slate-900 dark:text-slate-100 animate-pulse">
               {currentMessage}

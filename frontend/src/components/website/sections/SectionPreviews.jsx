@@ -8,6 +8,12 @@ import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
 import { ensureReadablePair, normalizeHexColor } from "@/components/website/theme/colorAccessibility";
 
+// Basic markdown/emphasis cleanup to keep AI copy from rendering stray asterisks/underscores
+const sanitizeCopy = (text) => {
+  if (typeof text !== "string") return text;
+  return text.replace(/[\*_`]+/g, "").replace(/\s{2,}/g, " ").trim();
+};
+
 // Helper to get icon component by name
 export function getSectionIcon(iconName) {
   const icons = {
@@ -51,8 +57,8 @@ export function HeroSectionPreview({ config, enabled, podcast }) {
   } = config || {};
   
   // Use config title or fall back to podcast title
-  const displayTitle = title || podcast?.title || "Your Podcast Name";
-  const displaySubtitle = subtitle || podcast?.description || "A captivating tagline that hooks listeners";
+  const displayTitle = sanitizeCopy(title || podcast?.title || "Your Podcast Name");
+  const displaySubtitle = sanitizeCopy(subtitle || podcast?.description || "A captivating tagline that hooks listeners");
   const coverUrl = podcast?.cover_url;
   
   // Debug logging for cover image (dev only)
@@ -92,8 +98,9 @@ export function HeroSectionPreview({ config, enabled, podcast }) {
     <div
       className={`w-full relative overflow-hidden ${heroClass}`}
       style={useCSSVars ? {
-        // Let CSS variables handle colors - don't set inline styles
         opacity: enabled ? 1 : 0.6,
+        color: heroColors.text || txtColor,
+        backgroundColor: "var(--hero-bg, var(--bg, transparent))",
       } : {
         backgroundColor: heroColors.background || bgColor,
         color: heroColors.text || txtColor,
@@ -175,7 +182,7 @@ export function HeroSectionPreview({ config, enabled, podcast }) {
                 <Button 
                   size="lg" 
                   className={variant === "marquee-style" ? "btn ticket-style" : ""}
-                  style={useCSSVars ? undefined : { 
+                  style={{ 
                     color: buttonColors.text || bgColor,
                     backgroundColor: buttonColors.background || txtColor,
                   }}
@@ -211,8 +218,8 @@ export function AboutSectionPreview({ config, enabled, podcast }) {
   } = config || {};
   
   // Use config or fall back to podcast data
-  const displayHeading = heading || `About ${podcast?.title || 'the Show'}`;
-  const displayBody = body || podcast?.description || "Tell listeners what your podcast is about and why they should tune in.";
+  const displayHeading = sanitizeCopy(heading || `About ${podcast?.title || 'the Show'}`);
+  const displayBody = sanitizeCopy(body || podcast?.description || "Tell listeners what your podcast is about and why they should tune in.");
 
   return (
     <div
@@ -326,19 +333,17 @@ export function LatestEpisodesSectionPreview({ config, enabled, podcast, episode
           <p className="text-xs text-slate-500">Showing your {count} most recent episodes</p>
         </div>
         <div className="divide-y divide-slate-100">
-          {[1, 2].map((i) => (
-            <div key={i} className="px-6 py-4 flex items-center justify-between">
-              <div>
-                <div className="text-sm font-semibold text-slate-900">Episode {i}</div>
-                {show_descriptions && (
-                  <p className="text-xs text-slate-500">Episode description...</p>
-                )}
-              </div>
-              <Button size="sm" variant="outline">
-                <Radio className="mr-2 h-3 w-3" /> Play
-              </Button>
+          <div className="px-6 py-4 flex items-center justify-between">
+            <div>
+              <div className="text-sm font-semibold text-slate-900">Sample Episode</div>
+              {show_descriptions && (
+                <p className="text-xs text-slate-500">Your latest published episode will appear here with a play button.</p>
+              )}
             </div>
-          ))}
+            <Button size="sm" variant="outline" disabled>
+              <Radio className="mr-2 h-3 w-3" /> Play
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -607,8 +612,35 @@ export function SubscribeSectionPreview({ config, enabled, podcast }) {
     show_rss = true,
   } = config || {};
   
-  // Use config URLs or fall back to podcast RSS
-  const rss_url = config?.rss_url || podcast?.rss_url;
+  // Use config URLs or fall back to podcast RSS and server-provided feed URL
+  const rss_url = config?.rss_url || podcast?.rss_url || podcast?.rss_feed_url;
+
+  const hasAnyPlatform = !!(
+    apple_podcasts_url ||
+    spotify_url ||
+    google_podcasts_url ||
+    youtube_url ||
+    (show_rss && rss_url)
+  );
+
+  const renderButton = (label, url, icon = null) => {
+    if (!url) {
+      return (
+        <Button size="lg" variant="outline" disabled title={`${label} link not set yet`}>
+          {icon}
+          {label}
+        </Button>
+      );
+    }
+    return (
+      <Button size="lg" variant="outline" asChild>
+        <a href={url} target="_blank" rel="noopener noreferrer">
+          {icon}
+          {label}
+        </a>
+      </Button>
+    );
+  };
 
   return (
     <div
@@ -620,57 +652,16 @@ export function SubscribeSectionPreview({ config, enabled, podcast }) {
         <p className="text-slate-600 mb-8">Listen on your favorite podcast platform</p>
         
         <div className="flex gap-4 flex-wrap justify-center">
-          {apple_podcasts_url && (
-            <Button size="lg" variant="outline" asChild>
-              <a href={apple_podcasts_url} target="_blank" rel="noopener noreferrer">
-                Apple Podcasts
-              </a>
-            </Button>
-          )}
-          
-          {spotify_url && (
-            <Button size="lg" variant="outline" asChild>
-              <a href={spotify_url} target="_blank" rel="noopener noreferrer">
-                Spotify
-              </a>
-            </Button>
-          )}
-          
-          {google_podcasts_url && (
-            <Button size="lg" variant="outline" asChild>
-              <a href={google_podcasts_url} target="_blank" rel="noopener noreferrer">
-                Google Podcasts
-              </a>
-            </Button>
-          )}
-          
-          {youtube_url && (
-            <Button size="lg" variant="outline" asChild>
-              <a href={youtube_url} target="_blank" rel="noopener noreferrer">
-                YouTube
-              </a>
-            </Button>
-          )}
-          
-          {show_rss && rss_url && (
-            <Button size="lg" variant="outline" asChild>
-              <a href={rss_url} target="_blank" rel="noopener noreferrer">
-                <Rss className="mr-2 h-4 w-4" /> RSS Feed
-              </a>
-            </Button>
-          )}
-          
-          {/* Show placeholder buttons if no URLs configured */}
-          {!apple_podcasts_url && !spotify_url && !google_podcasts_url && !youtube_url && !rss_url && (
-            <>
-              <Button size="lg" variant="outline" disabled>Apple Podcasts</Button>
-              <Button size="lg" variant="outline" disabled>Spotify</Button>
-              <Button size="lg" variant="outline" disabled>
-                <Rss className="mr-2 h-4 w-4" /> RSS
-              </Button>
-            </>
-          )}
+          {renderButton("Apple Podcasts", apple_podcasts_url)}
+          {renderButton("Spotify", spotify_url)}
+          {renderButton("Google Podcasts", google_podcasts_url)}
+          {renderButton("YouTube", youtube_url)}
+          {show_rss && renderButton("RSS Feed", rss_url, <Rss className="mr-2 h-4 w-4" />)}
         </div>
+
+        {!hasAnyPlatform && (
+          <p className="mt-4 text-xs text-slate-500">Add your links in Website Builder to make these buttons live.</p>
+        )}
       </div>
     </div>
   );
@@ -898,10 +889,12 @@ export function FooterSectionPreview({ config, enabled, podcast }) {
   const {
     show_social_links = true,
     show_subscribe_links = true,
+    show_legal_links = false,
     copyright_text,
     background_color = "#1e293b",
     text_color = "#94a3b8",
     layout = "columns",
+    social_links = {},
   } = config || {};
 
   const footerColors = ensureReadablePair({
@@ -917,6 +910,47 @@ export function FooterSectionPreview({ config, enabled, podcast }) {
   
   // Use config copyright or generate from podcast title
   const displayCopyright = copyright_text || `© ${new Date().getFullYear()} ${podcast?.title || 'Your Podcast'}. All rights reserved.`;
+
+  const socialPlatforms = [
+    { key: "x", label: "X", icon: "X", url: social_links.x },
+    { key: "instagram", label: "Instagram", icon: "IG", url: social_links.instagram },
+    { key: "youtube", label: "YouTube", icon: "YT", url: social_links.youtube },
+    { key: "facebook", label: "Facebook", icon: "FB", url: social_links.facebook },
+    { key: "tiktok", label: "TikTok", icon: "TT", url: social_links.tiktok },
+    { key: "linkedin", label: "LinkedIn", icon: "IN", url: social_links.linkedin },
+  ];
+
+  const rssUrl = podcast?.rss_url || podcast?.rss_feed_url;
+
+  const renderSocialIcon = (platform) => {
+    const hasUrl = !!platform.url;
+    const commonClasses = "w-10 h-10 rounded-full flex items-center justify-center border border-white/15 bg-white/5 text-xs font-semibold";
+    if (!hasUrl) {
+      return (
+        <button
+          key={platform.key}
+          className={`${commonClasses} opacity-60 cursor-not-allowed`}
+          type="button"
+          title={`${platform.label} link not set yet`}
+          aria-disabled
+        >
+          {platform.icon}
+        </button>
+      );
+    }
+    return (
+      <a
+        key={platform.key}
+        href={platform.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={`${commonClasses} hover:opacity-100 transition-opacity`}
+        title={platform.label}
+      >
+        {platform.icon}
+      </a>
+    );
+  };
 
   return (
     <div
@@ -934,11 +968,10 @@ export function FooterSectionPreview({ config, enabled, podcast }) {
             {show_social_links && (
               <div>
                 <h4 className="font-semibold mb-3">Follow Us</h4>
-                <div className="space-y-2 text-sm">
-                  <div className="opacity-80 hover:opacity-100 transition-opacity cursor-pointer">Twitter</div>
-                  <div className="opacity-80 hover:opacity-100 transition-opacity cursor-pointer">Instagram</div>
-                  <div className="opacity-80 hover:opacity-100 transition-opacity cursor-pointer">YouTube</div>
+                <div className="flex gap-3 flex-wrap" aria-label="Social links">
+                  {socialPlatforms.map(renderSocialIcon)}
                 </div>
+                <p className="text-xs opacity-70 mt-2">Add your handles in Website Builder to activate.</p>
               </div>
             )}
 
@@ -946,45 +979,44 @@ export function FooterSectionPreview({ config, enabled, podcast }) {
             {show_subscribe_links && (
               <div>
                 <h4 className="font-semibold mb-3">Subscribe</h4>
-                <div className="space-y-2">
-                  <div className="opacity-80 hover:opacity-100 transition-opacity cursor-pointer">Apple Podcasts</div>
-                  <div className="opacity-80 hover:opacity-100 transition-opacity cursor-pointer">Spotify</div>
-                  {podcast?.rss_url && (
-                    <a href={podcast.rss_url} target="_blank" rel="noopener noreferrer" className="block opacity-80 hover:opacity-100 transition-opacity">
-                      RSS Feed
+                <div className="space-y-2 text-sm">
+                  {rssUrl ? (
+                    <a href={rssUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 opacity-90 hover:opacity-100 transition-opacity">
+                      <Rss className="h-4 w-4" /> RSS Feed
                     </a>
+                  ) : (
+                    <span className="opacity-70 text-xs">Add your RSS feed to enable this link.</span>
                   )}
                 </div>
               </div>
             )}
 
-            {/* Legal */}
-            <div>
-              <h4 className="font-semibold mb-3">Legal</h4>
-              <div className="space-y-2">
-                <div className="opacity-80 hover:opacity-100 transition-opacity cursor-pointer">Privacy Policy</div>
-                <div className="opacity-80 hover:opacity-100 transition-opacity cursor-pointer">Terms of Service</div>
+            {/* Legal - hidden by default (user-managed) */}
+            {show_legal_links && (
+              <div>
+                <h4 className="font-semibold mb-3">Legal</h4>
+                <div className="space-y-2">
+                  <div className="opacity-80 hover:opacity-100 transition-opacity cursor-pointer">Privacy Policy</div>
+                  <div className="opacity-80 hover:opacity-100 transition-opacity cursor-pointer">Terms of Service</div>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         ) : (
           <div className="space-y-6 text-sm">
             {show_social_links && (
-              <div className="flex gap-6 justify-center">
-                {["Twitter", "Instagram", "YouTube"].map((platform) => (
-                  <span key={platform} className="opacity-80 hover:opacity-100 transition-opacity cursor-pointer">{platform}</span>
-                ))}
+              <div className="flex gap-3 justify-center flex-wrap" aria-label="Social links">
+                {socialPlatforms.map(renderSocialIcon)}
               </div>
             )}
             {show_subscribe_links && (
               <div className="flex gap-6 justify-center flex-wrap">
-                {["Apple Podcasts", "Spotify"].map((platform) => (
-                  <span key={platform} className="opacity-80 hover:opacity-100 transition-opacity cursor-pointer">{platform}</span>
-                ))}
-                {podcast?.rss_url && (
-                  <a href={podcast.rss_url} target="_blank" rel="noopener noreferrer" className="opacity-80 hover:opacity-100 transition-opacity">
-                    RSS
+                {rssUrl ? (
+                  <a href={rssUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 opacity-90 hover:opacity-100 transition-opacity">
+                    <Rss className="h-4 w-4" /> RSS
                   </a>
+                ) : (
+                  <span className="opacity-70 text-xs">Add your RSS feed to enable subscribe links.</span>
                 )}
               </div>
             )}

@@ -7,7 +7,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple, cast
 from uuid import UUID
 
 import requests
@@ -58,7 +58,6 @@ Build a clean, modern starter website that matches the podcast's unique brand an
    Create these core sections:
    - **Home**: Hero with title, short tagline, brief description, and preview of recent episodes
    - **Episodes**: List format with titles, short summaries, and player links
-   - **About**: Short host bios and what the podcast is about
    - **Contact/Subscribe**: Links to major podcast platforms, email form or contact info, and social links
 
 4. **Content Generation**
@@ -146,7 +145,7 @@ _BASE_DOMAIN = settings.PODCAST_WEBSITE_BASE_DOMAIN.strip() or "donecast.com"
 _PROMPT_BUCKET = settings.PODCAST_WEBSITE_GCS_BUCKET.strip() if settings.PODCAST_WEBSITE_GCS_BUCKET else ""
 _CUSTOM_DOMAIN_MIN_TIER = settings.PODCAST_WEBSITE_CUSTOM_DOMAIN_MIN_TIER.strip().lower() or "pro"
 
-_TIER_ORDER = ["free", "creator", "pro", "unlimited"]
+_TIER_ORDER = ["hobby", "creator", "pro", "executive"]
 
 DEFAULT_SECTION_SUGGESTIONS: List[Dict[str, Any]] = [
     {
@@ -725,6 +724,9 @@ def _build_context_prompt(ctx: WebsiteContext, include_layout: Optional[Dict[str
             lines.append(f"**Color Preferences:** {design_prefs['color_preference']}")
         if design_prefs.get('additional_notes'):
             lines.append(f"**Additional Notes:** {design_prefs['additional_notes']}")
+        if design_prefs.get('host_bio'):
+            lines.append("**Host Bio (user-provided, prioritize this in the hosts section):**")
+            lines.append(design_prefs['host_bio'])
         lines.append("")
         lines.append("**IMPORTANT:** The user's design preferences above should override default assumptions from the cover art if they conflict.")
     
@@ -832,6 +834,44 @@ def _build_context_prompt(ctx: WebsiteContext, include_layout: Optional[Dict[str
     return "\n".join(lines)
 
 
+def _close_unmatched_structures(text: str) -> str:
+    """Append closing brackets/braces for any unmatched JSON structures."""
+    stack: List[str] = []
+    in_string = False
+    escape_next = False
+
+    for char in text:
+        if escape_next:
+            escape_next = False
+            continue
+        if char == "\\":
+            escape_next = True
+            continue
+        if char == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if char in "{[":
+            stack.append(char)
+        elif char == "}" and stack and stack[-1] == "{":
+            stack.pop()
+        elif char == "]" and stack and stack[-1] == "[":
+            stack.pop()
+
+    if not stack:
+        return text
+
+    closing = []
+    while stack:
+        opener = stack.pop()
+        if opener == "{":
+            closing.append("}")
+        else:
+            closing.append("]")
+    return text + "".join(closing)
+
+
 def _repair_json(raw: str) -> str:
     """Attempt to repair common JSON issues from AI responses, especially truncation."""
     # First, try to extract just the JSON object
@@ -846,6 +886,7 @@ def _repair_json(raw: str) -> str:
     escape_next = False
     last_safe_pos = 0  # Last position where we were not in a string
     brace_depth = 0
+    bracket_depth = 0
     
     i = 0
     while i < len(raw):
@@ -879,6 +920,12 @@ def _repair_json(raw: str) -> str:
                 brace_depth -= 1
                 if brace_depth >= 0:
                     last_safe_pos = len(result) + 1
+            elif char == "[":
+                bracket_depth += 1
+            elif char == "]":
+                bracket_depth -= 1
+                if bracket_depth >= 0:
+                    last_safe_pos = len(result) + 1
         
         result.append(char)
         i += 1
@@ -890,12 +937,8 @@ def _repair_json(raw: str) -> str:
         # Find the last safe position (end of last complete string)
         # If we can't find one, try to close the current string
         if last_safe_pos > 0:
-            # Truncate at last safe position and close structure
+            # Truncate at last safe position
             repaired = repaired[:last_safe_pos]
-            # Close any open braces
-            open_braces = repaired.count("{") - repaired.count("}")
-            if open_braces > 0:
-                repaired += "}" * open_braces
         else:
             # No safe position found - try to close current string
             # Find where the string started (last quote before current position)
@@ -912,12 +955,8 @@ def _repair_json(raw: str) -> str:
             else:
                 # Fallback: just append quote
                 repaired = repaired + '"'
-            
-            # Close any open braces
-            open_braces = repaired.count("{") - repaired.count("}")
-            if open_braces > 0:
-                repaired += "}" * open_braces
     
+    repaired = _close_unmatched_structures(repaired)
     return repaired
 
 
@@ -1050,7 +1089,7 @@ def _normalize_layout(data: Dict[str, Any], ctx: WebsiteContext) -> PodcastWebsi
         episode_cards = baseline["episodes"]
     merged["episodes"] = episode_cards[:6]
 
-    raw_cta = data.get("call_to_action") if isinstance(data.get("call_to_action"), dict) else {}
+    raw_cta = cast(Dict[str, Any], data.get("call_to_action")) if isinstance(data.get("call_to_action"), dict) else {}
     merged["call_to_action"] = {
         "heading": str(raw_cta.get("heading") or baseline["call_to_action"]["heading"]).strip() or baseline["call_to_action"]["heading"],
         "body": str(raw_cta.get("body") or baseline["call_to_action"]["body"]).strip() or baseline["call_to_action"]["body"],
@@ -1109,7 +1148,7 @@ def _normalize_layout(data: Dict[str, Any], ctx: WebsiteContext) -> PodcastWebsi
         ]
     merged["additional_sections"] = sections
 
-    theme = data.get("theme") if isinstance(data.get("theme"), dict) else {}
+    theme = cast(Dict[str, Any], data.get("theme")) if isinstance(data.get("theme"), dict) else {}
     merged["theme"] = {
         "primary_color": str(theme.get("primary_color") or baseline["theme"]["primary_color"]).strip() or baseline["theme"]["primary_color"],
         "secondary_color": str(theme.get("secondary_color") or baseline["theme"]["secondary_color"]).strip() or baseline["theme"]["secondary_color"],
@@ -1117,7 +1156,7 @@ def _normalize_layout(data: Dict[str, Any], ctx: WebsiteContext) -> PodcastWebsi
     }
 
     # Handle SEO fields (optional, with sensible defaults)
-    seo = data.get("seo") if isinstance(data.get("seo"), dict) else {}
+    seo = cast(Dict[str, Any], data.get("seo")) if isinstance(data.get("seo"), dict) else {}
     podcast_name = ctx.podcast.name
     default_title = f"{podcast_name} | Podcast"
     default_description = (ctx.podcast.description or f"Listen to {podcast_name}").strip()
@@ -1647,7 +1686,14 @@ a:hover {{
     return css
 
 
-def _create_default_sections(podcast: Podcast, cover_url: Optional[str], theme: Optional[Dict[str, str]] = None, content: Optional[PodcastWebsiteContent] = None):
+def _create_default_sections(
+    podcast: Podcast,
+    cover_url: Optional[str],
+    theme: Optional[Dict[str, str]] = None,
+    content: Optional[PodcastWebsiteContent] = None,
+    host_names: Optional[List[str]] = None,
+    host_bio: Optional[str] = None,
+):
     """Create default section configuration for new websites.
     
     Args:
@@ -1655,6 +1701,8 @@ def _create_default_sections(podcast: Podcast, cover_url: Optional[str], theme: 
         cover_url: URL to podcast cover art
         theme: Theme colors extracted from cover art
         content: Optional content generated by AI to populate sections
+        host_names: Optional list of discovered host names
+        host_bio: Optional user-provided host bio to prefill hosts section
     
     Returns:
         Tuple of (sections_order, sections_config, sections_enabled)
@@ -1691,13 +1739,32 @@ def _create_default_sections(podcast: Podcast, cover_url: Optional[str], theme: 
             about_heading = content.about.get("heading") or about_heading
             about_body = content.about.get("body") or about_body
 
+    # Host info (user-provided host bio takes precedence)
+    cleaned_host_bio = host_bio.strip() if host_bio else None
+    if cleaned_host_bio and len(cleaned_host_bio) < 50:
+        cleaned_host_bio = None
+    host_entries: List[Dict[str, str]] = []
+    primary_host_name = None
+    if host_names:
+        primary_host_name = host_names[0]
+    elif podcast.name:
+        primary_host_name = podcast.name
+
+    if content and content.hosts and len(content.hosts) > 0 and not cleaned_host_bio:
+        host_entries = content.hosts
+    elif cleaned_host_bio:
+        host_entries = [{"name": primary_host_name or "Host", "bio": cleaned_host_bio}]
+    elif host_names:
+        host_entries = [{"name": primary_host_name or "Host", "bio": ""}]
+
     sections_order = ["header", "hero", "about", "latest-episodes", "subscribe", "footer"]
     
     # Check if we should add a hosts section
     if content and content.hosts and len(content.hosts) > 0:
         # Only add if it looks like real data (not placeholder)
         first_host = content.hosts[0]
-        if first_host.get("name") and "Your Host" not in first_host.get("name"):
+        name_val = (first_host.get("name") or "").strip()
+        if name_val and "Your Host" not in name_val:
             # Insert after about
             try:
                 idx = sections_order.index("about")
@@ -1736,8 +1803,8 @@ def _create_default_sections(podcast: Podcast, cover_url: Optional[str], theme: 
         },
         "hosts": {
             "type": "hosts",
-            "heading": "Meet the Host" if content and len(content.hosts) == 1 else "Meet the Hosts",
-            "hosts": content.hosts if content else [],
+            "heading": "Meet the Host" if (content and len(content.hosts) == 1) or (host_entries and len(host_entries) == 1) else "Meet the Hosts",
+            "hosts": host_entries,
             "layout": "grid",
         },
         "latest-episodes": {
@@ -1751,7 +1818,7 @@ def _create_default_sections(podcast: Podcast, cover_url: Optional[str], theme: 
         "subscribe": {
             "type": "subscribe",
             "heading": "Subscribe & Listen",
-            "rss_url": podcast.rss_url,
+            "rss_url": podcast.rss_url or getattr(podcast, "rss_feed_url", None),
             "show_rss": True,
             "layout": "icons",
         },
@@ -1760,6 +1827,8 @@ def _create_default_sections(podcast: Podcast, cover_url: Optional[str], theme: 
             "layout": "columns",
             "show_social_links": True,
             "show_subscribe_links": True,
+            "show_legal_links": False,
+            "social_links": {},
             "copyright_text": f"© {datetime.utcnow().year} {podcast.name}. All rights reserved.",
             "background_color": primary_color,
             "text_color": text_color,
@@ -1781,7 +1850,7 @@ def _create_default_sections(podcast: Podcast, cover_url: Optional[str], theme: 
 
 def create_or_refresh_site(session: Session, podcast: Podcast, user: User, design_prefs: Optional[Dict[str, Any]] = None) -> Tuple[PodcastWebsite, PodcastWebsiteContent]:
     website = session.exec(select(PodcastWebsite).where(PodcastWebsite.podcast_id == podcast.id)).first()
-    desired_slug = _slugify_base(podcast.name)
+    desired_slug = _slugify_base(podcast.name or "unnamed-show")
     is_new_website = website is None
     
     if website is None:
@@ -1796,25 +1865,43 @@ def create_or_refresh_site(session: Session, podcast: Podcast, user: User, desig
         # ensure slug remains unique even if podcast renamed
         website.subdomain = _ensure_unique_subdomain(session, desired_slug, website.id)
 
-    cover_url, theme = _derive_visual_identity(podcast)
+    try:
+        cover_url, theme = _derive_visual_identity(podcast)
+    except Exception as exc:
+        log.exception("[Website] Failed to derive visual identity for podcast %s: %s", podcast.id, exc)
+        cover_url, theme = None, None
     ctx = WebsiteContext(
         podcast=podcast,
         host_names=_discover_hosts(podcast, user),
         episodes=_fetch_recent_episodes(session, podcast.id),
         cover_url=cover_url,
-        theme_colors=theme,
+        theme_colors=theme or {},
     )
 
-    prompt = _build_context_prompt(ctx, design_prefs=design_prefs)
-    raw = _invoke_site_builder(prompt)
-    content = _normalize_layout(raw, ctx)
+    try:
+        prompt = _build_context_prompt(ctx, design_prefs=design_prefs)
+        raw = _invoke_site_builder(prompt)
+        content = _normalize_layout(raw, ctx)
+    except PodcastWebsiteAIError:
+        # Bubble up known AI errors for 502 handling in router
+        raise
+    except Exception as exc:
+        log.exception("[Website] Unexpected error from AI site builder for podcast %s: %s", podcast.id, exc)
+        raise PodcastWebsiteAIError("AI website builder failed. Please try again later.")
 
     website.apply_layout(_serialize_content(content))
     website.status = PodcastWebsiteStatus.draft
     
     # For new websites, set up default sections and generate AI theme
     if is_new_website or not website.get_sections_order():
-        sections_order, sections_config, sections_enabled = _create_default_sections(podcast, cover_url, theme, content)
+        sections_order, sections_config, sections_enabled = _create_default_sections(
+            podcast,
+            cover_url,
+            theme,
+            content,
+            ctx.host_names,
+            (design_prefs or {}).get("host_bio"),
+        )
         
         # Store design preferences in metadata if provided
         if design_prefs:
@@ -1893,15 +1980,15 @@ def create_or_refresh_site(session: Session, podcast: Podcast, user: User, desig
         elif not website.global_css:
             # Fallback to default theme if extraction failed
             default_theme = {
-            "primary_color": "#0f172a",
-            "secondary_color": "#ffffff",
-            "accent_color": "#2563eb",
-            "background_color": "#f8fafc",
-            "text_color": "#ffffff",
-            "mood": "balanced",
-        }
-        css = _generate_css_from_theme(default_theme, podcast.name)
-        website.global_css = css
+                "primary_color": "#0f172a",
+                "secondary_color": "#ffffff",
+                "accent_color": "#2563eb",
+                "background_color": "#f8fafc",
+                "text_color": "#ffffff",
+                "mood": "balanced",
+            }
+            css = _generate_css_from_theme(default_theme, podcast.name)
+            website.global_css = css
 
     payload = {
         "type": "initial",
@@ -1929,7 +2016,7 @@ def apply_ai_update(session: Session, website: PodcastWebsite, podcast: Podcast,
         host_names=_discover_hosts(podcast, user),
         episodes=_fetch_recent_episodes(session, podcast.id),
         cover_url=cover_url,
-        theme_colors=theme,
+        theme_colors=theme or {},
     )
 
     current_layout = website.parsed_layout()

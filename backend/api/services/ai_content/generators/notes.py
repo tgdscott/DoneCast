@@ -135,6 +135,11 @@ def suggest_notes(inp: SuggestNotesIn) -> SuggestNotesOut:
     
     try:
         text = generate(prompt, max_tokens=768, system_instruction=system_instruction)
+        # If AI returns empty/near-empty response, retry with direct Gemini call
+        if len(text.strip()) < 40:
+            logging.getLogger(__name__).warning("[ai_notes] Primary call returned empty/short response, retrying")
+            from ..client_gemini import generate as gemini_generate
+            text = gemini_generate(prompt, max_tokens=768, system_instruction=system_instruction)
     except RuntimeError as e:
         # Handle Gemini content blocking gracefully
         if "GEMINI_CONTENT_BLOCKED" in str(e):

@@ -471,11 +471,28 @@ def generate_theme_css(theme_spec: ThemeSpec, section_configs: Dict[str, Any]) -
                 muted = "#cbd5e1"  # Light gray
             else:
                 muted = "#64748b"  # Medium gray
+
+    # Validate accent color contrast against background (used for links)
+    accent_rgb = _hex_to_rgb_tuple(accent)
+    accent_contrast = _get_contrast_ratio(accent_rgb, bg_rgb)
+    if accent_contrast < 4.5:
+        log.warning(
+            "Theme accent color contrast %.2f:1 below WCAG AA minimum (4.5:1) for bg %s. "
+            "Auto-correcting to readable color.",
+            accent_contrast, bg
+        )
+        # Try primary if it has good contrast
+        if primary_contrast >= 4.5:
+            accent = primary
+        else:
+            # Fallback to safe text color
+            accent = _ensure_readable_text_color(accent, bg, min_contrast=4.5)
     
         # Persist corrected palette values so future steps have the safe versions
         colors["text"] = text
         colors["muted"] = muted
         colors["primary_text"] = primary_text
+        colors["accent"] = accent
 
     # Log the colors being used for debugging
     log.info("Generating CSS with colors: primary=%s, bg=%s, text=%s (contrast: %.2f:1)", 

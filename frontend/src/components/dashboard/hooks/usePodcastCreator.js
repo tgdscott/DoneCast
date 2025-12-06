@@ -178,6 +178,9 @@ export default function usePodcastCreator({
       setCreditPurchaseData(data);
       setShowCreditPurchase(true);
     },
+    // Disable long-running assembly timeout toast on Step 6 summary card;
+    // it's primarily useful during Step 5 AI work.
+    enableTimeoutToast: false,
   });
 
   useEffect(() => {

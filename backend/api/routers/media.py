@@ -374,7 +374,7 @@ async def upload_media_files(
         )
         session.add(media_item)
         created_items.append(media_item)
-        log.info("[upload.storage] MediaItem created: id=%s, filename='%s'", media_item.id, media_item.filename)
+        log.info("[upload.storage] MediaItem created: id=%s, filename='%s', use_auphonic=%s", media_item.id, media_item.filename, media_item.use_auphonic)
 
         # Kick off immediate background transcription for main content uploads
         try:

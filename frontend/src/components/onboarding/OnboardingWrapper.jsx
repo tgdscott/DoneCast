@@ -449,25 +449,6 @@ export default function OnboardingWrapper({ steps, index, setIndex, onComplete, 
           New Podcast Setup
         </div>
 
-        <div className="absolute top-4 right-4 flex flex-col items-end gap-3 text-sm">
-          <ComfortControls
-            largeText={prefs.largeText}
-            setLargeText={prefs.setLargeText ?? (() => {})}
-            highContrast={prefs.highContrast}
-            setHighContrast={prefs.setHighContrast ?? (() => {})}
-          />
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={logout}
-            className="text-muted-foreground hover:text-foreground"
-            aria-label="Logout"
-          >
-            <LogOut className="mr-2 h-4 w-4" />
-            <span className="hidden sm:inline">Logout</span>
-          </Button>
-        </div>
-
         <div className="relative z-10 flex min-h-screen items-center justify-center px-6 py-16">
           <div className="w-full">
             {HeroContent ? HeroContent({ onContinue: handleNext, prefs }) : null}

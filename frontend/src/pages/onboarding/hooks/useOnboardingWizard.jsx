@@ -129,6 +129,7 @@ export default function useOnboardingWizard({
       podcastDescription: "",
       coverArt: null,
       elevenlabsApiKey: "",
+      hostBio: "",
     };
     if (!user?.email) return defaults;
     try {
@@ -152,6 +153,7 @@ export default function useOnboardingWizard({
           podcastName: formData.podcastName,
           podcastDescription: formData.podcastDescription,
           elevenlabsApiKey: formData.elevenlabsApiKey,
+          hostBio: formData.hostBio,
         };
         localStorage.setItem(`ppp.onboarding.form.${user.email}`, JSON.stringify(toSave));
       } catch (e) {
@@ -786,6 +788,83 @@ export default function useOnboardingWizard({
     [token, toast, selectedVoiceId, introVoiceId, outroVoiceId, firstTimeUser]
   );
 
+  const ensureSegmentAsset = useCallback(
+    async (kind) => {
+      const isIntro = kind === "intro";
+      const mode = isIntro ? introMode : outroMode;
+      if (mode === "none") return null;
+      const script = isIntro ? introScript : outroScript;
+      const file = isIntro ? introFile : outroFile;
+      const currentAsset = isIntro ? introAsset : outroAsset;
+      const options = isIntro ? introOptions : outroOptions;
+      const selectedId = isIntro ? selectedIntroId : selectedOutroId;
+
+      if (currentAsset && currentAsset.filename) {
+        return currentAsset;
+      }
+
+      if (mode === "existing" && selectedId) {
+        const existing = options.find((item) => String(item.id || item.filename) === selectedId);
+        if (existing) {
+          if (isIntro) {
+            setIntroAsset(existing);
+          } else {
+            setOutroAsset(existing);
+          }
+          return existing;
+        }
+        return null;
+      }
+
+      if (mode === "record") {
+        return currentAsset;
+      }
+
+      const asset = await generateOrUploadTTS(kind, mode, script, file, currentAsset);
+      if (!asset) {
+        return null;
+      }
+
+      const key = String(asset.id || asset.filename || "");
+      if (isIntro) {
+        setIntroAsset(asset);
+        if (key) {
+          setSelectedIntroId(key);
+          setIntroOptions((previous) => {
+            const exists = previous.some((item) => String(item.id || item.filename) === key);
+            return exists ? previous : [...previous, asset];
+          });
+        }
+      } else {
+        setOutroAsset(asset);
+        if (key) {
+          setSelectedOutroId(key);
+          setOutroOptions((previous) => {
+            const exists = previous.some((item) => String(item.id || item.filename) === key);
+            return exists ? previous : [...previous, asset];
+          });
+        }
+      }
+
+      return asset;
+    },
+    [
+      introMode,
+      outroMode,
+      introScript,
+      outroScript,
+      introFile,
+      outroFile,
+      introAsset,
+      outroAsset,
+      introOptions,
+      outroOptions,
+      selectedIntroId,
+      selectedOutroId,
+      generateOrUploadTTS,
+    ]
+  );
+
   const preparePodcastPayload = useCallback(async () => {
     const nameClean = (formData.podcastName || "").trim();
     const descClean = (formData.podcastDescription || "").trim();
@@ -841,7 +920,7 @@ export default function useOnboardingWizard({
       }
 
       const api = makeApi(token);
-      let podcasts = [];
+             let podcasts = [];
       try {
         const response = await api.get("/api/podcasts/");
         podcasts = Array.isArray(response) ? response : response?.items || [];
@@ -858,13 +937,18 @@ export default function useOnboardingWizard({
           selected = podcasts.find((p) => p.name && p.name.trim().toLowerCase() === nameClean) || null;
         }
         selected = selected || podcasts[podcasts.length - 1];
-      } else if (path === "new") {
+             } else if (path === "new") {
         try {
           const payload = await preparePodcastPayload();
           const created = await api.raw("/api/podcasts/", {
             method: "POST",
             body: payload,
           });
+                    try {
+                      await api.post("/api/onboarding/sessions", { podcast_id: created.id });
+                    } catch (error) {
+                      console.warn("[Onboarding] Failed to register onboarding session", error);
+                    }
           selected = created;
         } catch (creationErr) {
           console.error("[Onboarding] Failed to auto-create podcast:", creationErr);
@@ -906,7 +990,7 @@ export default function useOnboardingWizard({
     } finally {
       ensurePodcastPromiseRef.current = null;
     }
-  }, [token, targetPodcastId, formData.podcastName, path, preparePodcastPayload, setTargetPodcastId, setRssFeedUrl, toast]);
+    }, [token, targetPodcastId, formData.podcastName, path, preparePodcastPayload, setTargetPodcastId, setRssFeedUrl, toast]);
 
   const refreshRssMetadata = useCallback(async () => {
     if (!token) {
@@ -1063,6 +1147,13 @@ export default function useOnboardingWizard({
         ? existingShows.some(p => p.name && p.name.trim().toLowerCase() === nameClean)
         : false;
       const podcastAlreadyCreated = targetPodcast || targetPodcastId || hasMatchingPodcast || existingShows.length > 0;
+
+      try {
+        await ensureSegmentAsset("intro");
+        await ensureSegmentAsset("outro");
+      } catch (error) {
+        console.warn("[Onboarding] Failed to ensure intro/outro assets", error);
+      }
 
       if (podcastAlreadyCreated) {
         const reason = targetPodcast ? 'targetPodcast' : targetPodcastId ? 'targetPodcastId' : hasMatchingPodcast ? 'name match' : 'any existing';
@@ -1297,6 +1388,7 @@ export default function useOnboardingWizard({
     musicChoice,
     path,
     preparePodcastPayload,
+    ensureSegmentAsset,
   ]);
 
   useEffect(() => {
@@ -1584,13 +1676,20 @@ export default function useOnboardingWizard({
   }, [token, formData.podcastName, formData.podcastDescription]);
 
   // Reset function to clear all onboarding state and start over
-  const handleStartOver = useCallback(() => {
+  const handleStartOver = useCallback(async () => {
     const confirmed = window.confirm(
       "Are you sure you want to start over? This will clear all your progress and you'll need to start from the beginning."
     );
     if (!confirmed) return;
 
     try {
+      if (token) {
+        try {
+          await makeApi(token).post("/api/onboarding/reset");
+        } catch (resetError) {
+          console.warn("[Onboarding] Failed to reset server-side onboarding session", resetError);
+        }
+      }
       // Clear all localStorage keys related to onboarding
       // Remove user-specific step key
       if (user?.email) {
@@ -1807,8 +1906,8 @@ export default function useOnboardingWizard({
           ? "We'll use this to personalize your dashboard."
           : step.id === "choosePath"
             ? "If you have an existing podcast, import it here."
-            : step.id === "showDetails"
-              ? "Short and clear works best."
+              : step.id === "showDetails"
+                ? "Short and clear works best. Host bio is required (50+ chars) to power your site."
               : step.id === "format"
                 ? "This is for your reference."
                 : step.id === "coverArt"
@@ -1836,7 +1935,20 @@ export default function useOnboardingWizard({
       validate:
         step.validate && typeof step.validate === "function"
           ? step.validate
-          : step.id === "publishCadence"
+          : step.id === "showDetails"
+            ? async () => {
+              const bio = (formData.hostBio || "").trim();
+              if (!bio || bio.length < 50) {
+                toast({
+                  variant: "destructive",
+                  title: "Host bio required",
+                  description: "Add at least 50 characters about yourself to continue.",
+                });
+                return false;
+              }
+              return true;
+            }
+            : step.id === "publishCadence"
             ? async () => {
               if (!freqUnit) {
                 setCadenceError("Please choose a frequency.");

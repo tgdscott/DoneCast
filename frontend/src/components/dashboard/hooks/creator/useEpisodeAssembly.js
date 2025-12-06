@@ -53,6 +53,7 @@ export default function useEpisodeAssembly({
   useAdvancedAudio = false,
   usage = null, // Add usage prop for credit checking
   onShowCreditPurchase = null, // Callback to show credit purchase modal
+  enableTimeoutToast = true, // Control whether to show long-running assembly toast
 }) {
   // Assembly state
   const [isAssembling, setIsAssembling] = useState(false);
@@ -375,15 +376,20 @@ export default function useEpisodeAssembly({
             pollingIntervalRef.current = null;
           }
           setIsAssembling(false);
-          setError(
-            'Assembly is taking longer than expected. This may indicate a service issue. ' +
-            'You can safely leave - we\'ll notify you when it completes, or check Episode History later.'
-          );
-          toast({
-            variant: 'destructive',
-            title: 'Assembly Timeout',
-            description: 'Taking longer than expected. Check Episode History later or contact support.',
-          });
+
+          // Optional UX: long-running assembly warning. Useful during
+          // metadata/AI steps, but can be noisy on Step 6 summary.
+          if (enableTimeoutToast) {
+            setError(
+              'Assembly is taking longer than expected. This may indicate a service issue. ' +
+              'You can safely leave - we\'ll notify you when it completes, or check Episode History later.'
+            );
+            toast({
+              variant: 'destructive',
+              title: 'Assembly Timeout',
+              description: 'Taking longer than expected. Check Episode History later or contact support.',
+            });
+          }
           return;
         }
 

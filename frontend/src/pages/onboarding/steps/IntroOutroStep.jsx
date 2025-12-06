@@ -99,10 +99,10 @@ export default function IntroOutroStep({ wizard }) {
     let copy;
     if (descriptionSnippet) {
       const withPeriod = descriptionSnippet.endsWith(".") ? descriptionSnippet : `${descriptionSnippet}.`;
-      const hostPart = hostNameDisplay ? `I'm ${hostNameDisplay}, ` : "";
-      copy = `Welcome to ${showName}. ${withPeriod} ${hostPart}and I'm glad you're here. Let's jump in.`;
+      const hostPart = hostNameDisplay ? `${hostNameDisplay}, ` : "";
+      copy = `Welcome to ${showName}. ${withPeriod} All hosted by${hostPart}. We're glad you're here. Let's jump in.`;
     } else {
-      const hostPart = hostNameDisplay ? `I'm ${hostNameDisplay}, ` : "";
+      const hostPart = hostNameDisplay ? `${hostNameDisplay}, ` : "";
       copy = `Welcome to ${showName}. ${hostPart}let's jump in.`;
     }
     return copy.replace(/\s{2,}/g, " ").trim();
@@ -110,7 +110,7 @@ export default function IntroOutroStep({ wizard }) {
 
   const outroSuggestion = React.useMemo(() => {
     const hostPart = hostNameDisplay ? `I'm ${hostNameDisplay}, ` : "";
-    const copy = `Thanks for listening to ${showName}. ${hostPart}follow or share the show so more listeners can find it. I'll see you next time.`;
+    const copy = `Thanks for listening to ${showName} and please subscribe. We look forward to seeing you next time.`;
     return copy.replace(/\s{2,}/g, " ").trim();
   }, [showName, hostNameDisplay]);
 

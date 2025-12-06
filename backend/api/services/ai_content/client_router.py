@@ -17,41 +17,18 @@ def get_provider() -> str:
 
 
 def generate(content: str, **kwargs) -> str:
-    """Generate text using the configured AI provider.
-    
-    Routes to the appropriate client based on AI_PROVIDER env var:
-    - groq: Uses Groq API (fast, free tier)
-    - gemini: Uses Google Gemini API
-    - vertex: Uses Google Vertex AI
-    
-    Automatically falls back to Gemini if the Groq client is misconfigured or
-    raises an exception (missing API key, network failure, etc.).
+    """Generate text via Gemini for all providers.
+
+    Permanent design decision: all text generation (titles, notes, tags
+    fallback, etc.) uses the Gemini client so behavior is consistent and not
+    dependent on external provider quirks. We still read AI_PROVIDER for
+    observability, but it no longer changes routing.
     """
     provider = get_provider()
-    
-    if provider == "groq":
-        groq_key = (os.getenv("GROQ_API_KEY") or "").strip()
-        if not groq_key:
-            _log.warning("[ai_router] GROQ_API_KEY missing; falling back to Gemini provider")
-        else:
-            from . import client_groq
-            try:
-                return client_groq.generate(content, **kwargs)
-            except Exception as exc:  # pragma: no cover - depends on live API failures
-                _log.error(
-                    "[ai_router] Groq provider failed: %s. Falling back to Gemini.",
-                    exc,
-                    exc_info=True,
-                )
-        provider = "gemini"
-    
-    if provider in ("gemini", "vertex"):
-        from . import client_gemini
-        return client_gemini.generate(content, **kwargs)
-    else:
-        _log.warning(f"[ai_router] Unknown provider '{provider}', falling back to gemini")
-        from . import client_gemini
-        return client_gemini.generate(content, **kwargs)
+    if provider not in ("gemini", "vertex"):
+        _log.info("[ai_router] Forcing provider to Gemini (was '%s')", provider)
+    from . import client_gemini
+    return client_gemini.generate(content, **kwargs)
 
 
 def generate_json(content: str, **kwargs) -> Any:

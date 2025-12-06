@@ -115,12 +115,25 @@ async def create_podcast(
     else:
         log.warning("User does not have a Spreaker access token. Skipping Spreaker show creation.")
 
+    # Determine owner name from user profile
+    owner_name_parts = []
+    if current_user.first_name:
+        owner_name_parts.append(current_user.first_name)
+    if current_user.last_name:
+        owner_name_parts.append(current_user.last_name)
+    
+    owner_name = " ".join(owner_name_parts).strip() or "Unknown"
+
     db_podcast = Podcast(
         name=name_clean,
         description=desc_clean,
         spreaker_show_id=spreaker_show_id,
         user_id=current_user.id,
         format=format if format else None,
+        # Set defaults for RSS feed requirements
+        contact_email=current_user.email,
+        owner_name=owner_name,
+        author_name=owner_name,
     )
 
     if spreaker_show_id and client is not None:

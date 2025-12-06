@@ -33,15 +33,7 @@ export default function DashboardSidebar({
       aria-label="Dashboard navigation"
     >
       <div className="px-6 py-5 border-b border-gray-200">
-        <div className="flex items-center gap-3">
-          <Logo size={32} />
-          <div>
-            <p className="text-base font-semibold" style={{ color: "#2C3E50" }}>
-              DoneCast
-            </p>
-            <p className="text-xs text-gray-500">Creator Control Center</p>
-          </div>
-        </div>
+        <Logo size={32} />
       </div>
 
       <nav className="flex-1 overflow-y-auto px-4 py-6" role="navigation">

@@ -65,7 +65,7 @@ export default function WelcomeStep({ onContinue, prefs }) {
         <img
           src="/assets/branding/logo-horizontal.png"
           alt="DoneCast"
-          className="mx-auto h-14 w-auto select-none"
+          className="mx-auto h-40 w-auto select-none"
           draggable={false}
         />
         <p className="mt-6 text-3xl font-semibold tracking-tight text-balance md:text-4xl">

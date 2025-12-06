@@ -229,6 +229,14 @@ export default function WebsiteStep({ wizard }) {
       setTargetPodcastId(createdPodcast.id);
       toast({ title: "Great!", description: "Your podcast show has been created." });
 
+      // Register this podcast as part of the current onboarding session so
+      // Start Over can nuke only this run's data.
+      try {
+        await api.post("/api/onboarding/sessions", { podcast_id: createdPodcast.id });
+      } catch (err) {
+        console.warn("[WebsiteStep] Failed to register onboarding session", err);
+      }
+
       // Now generate website
       await handleGenerateWebsite(createdPodcast.id);
     } catch (err) {
@@ -269,6 +277,7 @@ export default function WebsiteStep({ wizard }) {
         design_vibe: designVibe,
         color_preference: colorPreference,
         additional_notes: additionalNotes,
+        host_bio: (formData.hostBio || "").trim() || undefined,
       });
 
       if (response?.default_domain) {

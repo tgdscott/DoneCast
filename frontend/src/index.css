@@ -89,7 +89,7 @@
     pointer-events: none;
   }
 
-  /* Podcast Plus Plus palette */
+  /* DoneCast palette */
   .brand-plusplus {
     --background: 0 0% 100%;
     --foreground: 210 59% 11%;        /* Ink #0B1B2B */
@@ -105,11 +105,11 @@
     --muted-foreground: 180 59% 14%;
     --border: 220 13% 91%;
     --ring: 220 100% 30%;
-    /* Plus Plus look (softer, friendlier, clearly different) */
+    /* DoneCast look (softer, friendlier, clearly different) */
     --radius: 14px;
   }
 
-  /* Plus Plus background accent behind hero and global font */
+  /* DoneCast background accent behind hero and global font */
   html.brand-plusplus body {
     background-image:
       radial-gradient(80rem 40rem at 120% -10%, hsl(185 84% 93%) 0%, transparent 60%),
@@ -120,7 +120,7 @@
     /* Use default base sizing to avoid oversized text; components can opt-in to larger sizes */
   }
 
-  /* Plus Plus links and accents clearly blue */
+  /* DoneCast links and accents clearly blue */
   html.brand-plusplus a { color: hsl(var(--primary)); }
   html.brand-plusplus a:hover { opacity: .9; }
   html.pref-large-text {

@@ -1492,13 +1492,6 @@ export default function PodcastPlusDashboard() {
               >
                 {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
               </Button>
-              <div className="flex items-center gap-2 lg:hidden">
-                <Logo size={28} lockup />
-                <div>
-                  <p className="text-xs text-gray-500">DoneCast</p>
-                  <p className="text-base font-semibold text-gray-800">Creator Desktop</p>
-                </div>
-              </div>
               <Button
                 variant="outline"
                 size="sm"
@@ -1514,7 +1507,7 @@ export default function PodcastPlusDashboard() {
                 Dashboard
               </Button>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4">
               <div className="relative">
                 <Button
                   variant="ghost"
