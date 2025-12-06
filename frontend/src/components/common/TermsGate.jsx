@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import termsHtml from "@/legal/terms-of-use.html?raw";
 import { useAuth } from "@/AuthContext.jsx";
 import { Button } from "@/components/ui/button";
+import DOMPurify from 'dompurify';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import {
   Dialog,
@@ -132,7 +133,7 @@ export default function TermsGate() {
               </div>
             </div>
             <div className="max-h-[60vh] overflow-y-auto rounded-lg border border-slate-200 bg-white p-6">
-              <article className="prose prose-slate max-w-none" dangerouslySetInnerHTML={{ __html: syncedTermsHtml }} />
+              <article className="prose prose-slate max-w-none" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(syncedTermsHtml) }} />
             </div>
             {error && (
               <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">

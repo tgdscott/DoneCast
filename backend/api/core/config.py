@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     DB_NAME: str = ""
     INSTANCE_CONNECTION_NAME: str = ""
     DATABASE_URL: Optional[str] = None
+    REDIS_HOST: str = ""
+    REDIS_PORT: int = 6379
     SECRET_KEY: str = "dev-secret-key-change-me"  # Used for signing JWTs
     # Accept either SESSION_SECRET_KEY or legacy SESSION_SECRET from environment
     SESSION_SECRET_KEY: str = (
