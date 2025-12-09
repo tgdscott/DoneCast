@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, APIRouter, HTTPException
 import logging
 import traceback
 
@@ -66,6 +66,48 @@ def _safe_import(mod: str, name: str = "router"):
 health_router          = _safe_import("api.routers.health")
 auth_me_router         = _safe_import("api.routers.auth_me")
 auth                   = _safe_import("api.routers.auth")
+if auth is None:
+    # If the auth package failed to import (for example a failing optional
+    # submodule like verification or terms), try to load the OAuth subrouter
+    # directly so critical login endpoints (e.g. /api/auth/login/google) are
+    # still available. This is defensive and logged so operators can see
+    # which import path actually succeeded.
+    try:
+        m = __import__("api.routers.auth.oauth", fromlist=["router"])
+        auth = m.router  # type: ignore[assignment]
+        log.info("Imported auth.oauth subrouter as fallback to restore login endpoints")
+    except Exception:
+        log.warning("Fallback import of api.routers.auth.oauth failed; auth router unavailable")
+
+# Also attempt to load the oauth subrouter directly. We will register this
+# under `/api/auth` even if the aggregated auth package fails so Google login
+# remains available. Any import failure is logged for diagnosis.
+oauth_subrouter = None
+try:
+    oauth_subrouter = _safe_import("api.routers.auth.oauth")
+    if oauth_subrouter is not None:
+        log.info("Found oauth subrouter via _safe_import; will register under /api/auth")
+    else:
+        log.warning("OAuth subrouter not found; login endpoints will be unavailable unless auth package imports")
+except Exception:
+    oauth_subrouter = None
+    log.exception("OAuth subrouter import failed; login endpoints will be unavailable")
+
+# If the real oauth subrouter is unavailable, define a minimal fallback so
+# /api/auth/login/google exists and returns a clear 503 instead of 404.
+if oauth_subrouter is None:
+    fallback_oauth_router = APIRouter()
+
+    @fallback_oauth_router.get("/login/google")
+    async def _oauth_login_unavailable():
+        raise HTTPException(status_code=503, detail="Google login temporarily unavailable (oauth import failed)")
+
+    @fallback_oauth_router.get("/google/callback")
+    async def _oauth_callback_unavailable():
+        raise HTTPException(status_code=503, detail="Google login temporarily unavailable (oauth import failed)")
+
+    oauth_subrouter = fallback_oauth_router
+    log.warning("Registered minimal OAuth fallback router: returns 503 instead of 404 while oauth import is broken")
 media                  = _safe_import("api.routers.media")
 gcs_uploads            = _safe_import("api.routers.gcs_uploads")
 episodes               = _safe_import("api.routers.episodes")
@@ -129,6 +171,13 @@ def attach_routers(app: FastAPI) -> dict:
     availability['auth_me'] = auth_me_router is not None
     _maybe(app, auth)
     availability['auth'] = auth is not None
+    # Always register the oauth subrouter independently so login routes stay
+    # alive even when other auth submodules fail to import.
+    if oauth_subrouter is not None:
+        _maybe(app, oauth_subrouter, prefix="/api/auth")
+        availability['auth_oauth_fallback'] = True
+    else:
+        availability['auth_oauth_fallback'] = False
     _maybe(app, media)
     availability['media'] = media is not None
     _maybe(app, media_bundle_router)
@@ -232,6 +281,34 @@ def attach_routers(app: FastAPI) -> dict:
 
     # Cloud Tasks internal hook (no prefix: it already has /api/tasks)
     app.include_router(tasks_router)
+
+    # Log a concise availability summary so startup logs show which
+    # namespaces were successfully registered. This helps debug cases
+    # where an import-time error prevented a package from mounting routes.
+    try:
+        log.info("Router availability summary at startup: %s", availability)
+    except Exception:
+        log.warning("Failed to log router availability summary")
+
+    # Temporary diagnostic endpoint: returns a list of registered routes
+    # and the availability map. This is useful when operators report
+    # missing endpoints (404) but startup logs are inconclusive.
+    # Remove this endpoint after diagnosis.
+    try:
+        def _register_debug_routes(app: FastAPI):
+            @app.get("/api/debug/routes")
+            async def _debug_routes():
+                routes = []
+                for r in app.routes:
+                    path = getattr(r, 'path', None) or getattr(r, 'path_regex', None) or str(r)
+                    methods = list(getattr(r, 'methods', [])) if getattr(r, 'methods', None) else None
+                    routes.append({"path": str(path), "methods": methods})
+                return {"routes": routes, "availability": availability}
+
+        _register_debug_routes(app)
+        log.info("Temporary debug endpoint /api/debug/routes registered")
+    except Exception:
+        log.exception("Failed to register /api/debug/routes diagnostic endpoint")
 
     # Return availability map so callers can make fail-fast decisions at
     # startup (for example: fail in prod if critical routers are missing).

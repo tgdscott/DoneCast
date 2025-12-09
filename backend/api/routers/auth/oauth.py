@@ -25,13 +25,20 @@ try:
 except ImportError:
     VERIFICATION_AVAILABLE = False
 
-from .utils import (
-    AUTHLIB_ERROR,
-    build_oauth_client,
-    create_access_token,
-    external_base_url,
-    is_admin_email,
-)
+# Import utils defensively; log any failures for diagnosis
+try:
+    from .utils import (
+        AUTHLIB_ERROR,
+        build_oauth_client,
+        create_access_token,
+        external_base_url,
+        is_admin_email,
+    )
+except Exception as e:
+    # If utils import fails, log and re-raise so safe_import handler can diagnose
+    import logging as _log
+    _log.getLogger(__name__).exception("[OAUTH] Failed to import oauth.utils: %s", e)
+    raise
 
 router = APIRouter()
 log = logging.getLogger(__name__)

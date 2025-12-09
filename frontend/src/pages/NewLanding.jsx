@@ -260,7 +260,7 @@ export default function NewLanding() {
               <img
                 src="/assets/branding/logo-horizontal.png"
                 alt="DoneCast"
-                className="h-8 w-auto"
+                className="h-20 w-auto"
                 loading="eager"
               />
             </Link>

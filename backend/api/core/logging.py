@@ -17,8 +17,22 @@ class _OneLineFormatter(logging.Formatter):
 
 def configure_logging(level: int = logging.INFO) -> None:
     global _configured
+    # If we've already configured logging, do nothing (idempotent)
+    if _configured:
+        return
+
     logger = logging.getLogger()
     logger.setLevel(level)
+
+    # If other modules already attached handlers (e.g. via basicConfig),
+    # remove them so we don't end up with duplicate StreamHandlers.
+    # This centralizes logging to a single canonical handler.
+    if logger.handlers:
+        for h in list(logger.handlers):
+            try:
+                logger.removeHandler(h)
+            except Exception:
+                pass
 
     # Drop any previously attached redaction filters so we can re-add with current settings
     for f in list(logger.filters):

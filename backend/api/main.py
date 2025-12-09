@@ -33,7 +33,17 @@ def create_app() -> FastAPI:
         FastAPI: Configured application instance ready for use by ASGI server.
     """
     from api.core.logging import get_logger
-    
+
+    # Provide a singleton app instance so multiple imports/calls don't
+    # re-run full application initialization (which causes duplicated
+    # startup logs and handlers). If an app already exists, return it.
+    global _APP_SINGLETON  # declared below
+    try:
+        if _APP_SINGLETON is not None:
+            return _APP_SINGLETON
+    except NameError:
+        _APP_SINGLETON = None
+
     # Step 1: Configure logging and Sentry
     from api.config.logging import configure_logging, setup_sentry
     configure_logging()
@@ -101,6 +111,8 @@ def create_app() -> FastAPI:
     
     log.info("[startup] Application configured successfully")
     
+    # Cache the created app for subsequent imports/calls
+    _APP_SINGLETON = app
     return app
 
 

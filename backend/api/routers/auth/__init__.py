@@ -3,8 +3,27 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
+import logging
 
-from . import credentials, oauth, terms, verification
+log = logging.getLogger(__name__)
+
+# Import submodules defensively so a failure in one doesn't prevent the
+# entire `auth` package from importing. If an optional submodule fails
+# to import (for example due to a missing env var or optional dependency),
+# we log the error and continue to register the remaining auth routes.
+_submodules = ["credentials", "verification", "oauth", "terms"]
+_imported_subrouters = []
+for _name in _submodules:
+    try:
+        m = __import__(f"{__name__}.{_name}", fromlist=["router"])
+        sub = getattr(m, "router", None)
+        if sub is not None:
+            _imported_subrouters.append(sub)
+    except Exception as e:  # pragma: no cover - defensive startup handling
+        # Keep startup resilient; log a warning with the module name and brief error
+        tb = getattr(e, "__repr__", lambda: repr(e))()
+        log.warning("Auth submodule %s failed to import: %s", _name, tb)
+
 from .utils import (
     AUTHLIB_ERROR,
     JOSE_IMPORT_ERROR,
@@ -23,8 +42,7 @@ from .utils import (
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
-
-for subrouter in (credentials.router, verification.router, oauth.router, terms.router):
+for subrouter in _imported_subrouters:
     router.include_router(subrouter, tags=["Authentication"])
 
 __all__ = [

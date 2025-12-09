@@ -42,6 +42,7 @@ from api.services.billing import credits as billing_credits
 from api.services.ai_content.client_router import get_provider
 from uuid import UUID
 from api.services.episodes import repo as _ep_repo
+from api.core.errors import audit_and_raise_conflict
 try:
     from api.limits import limiter as _limiter
 except Exception:
@@ -328,7 +329,7 @@ def post_title(
     except RuntimeError as e:
         msg = str(e)
         if msg == "TRANSCRIPT_NOT_READY":
-            raise HTTPException(status_code=409, detail="TRANSCRIPT_NOT_READY")
+            audit_and_raise_conflict("TRANSCRIPT_NOT_READY", context={"module": "ai_suggestions", "endpoint": "ai/title"})
         mapped = map_ai_error(msg)
         raise HTTPException(status_code=mapped["status"], detail=mapped)
     except Exception as e:
@@ -389,7 +390,7 @@ def post_notes(
     except RuntimeError as e:
         msg = str(e)
         if msg == "TRANSCRIPT_NOT_READY":
-            raise HTTPException(status_code=409, detail="TRANSCRIPT_NOT_READY")
+            audit_and_raise_conflict("TRANSCRIPT_NOT_READY", context={"module": "ai_suggestions", "endpoint": "ai/notes"})
         mapped = map_ai_error(msg)
         raise HTTPException(status_code=mapped["status"], detail=mapped)
     except Exception as e:
@@ -445,7 +446,7 @@ def post_tags(
     except RuntimeError as e:
         msg = str(e)
         if msg == "TRANSCRIPT_NOT_READY":
-            raise HTTPException(status_code=409, detail="TRANSCRIPT_NOT_READY")
+            audit_and_raise_conflict("TRANSCRIPT_NOT_READY", context={"module": "ai_suggestions", "endpoint": "ai/tags"})
         mapped = map_ai_error(msg)
         raise HTTPException(status_code=mapped["status"], detail=mapped)
     except Exception as e:
@@ -543,7 +544,7 @@ def intent_hints(
                     _log.warning("[intent-hints] failed to read text transcript %s: %s", tpath, exc, exc_info=True)
                     raise HTTPException(status_code=500, detail="TRANSCRIPT_LOAD_ERROR")
     if words is None:
-        raise HTTPException(status_code=409, detail="TRANSCRIPT_NOT_READY")
+        audit_and_raise_conflict("TRANSCRIPT_NOT_READY", context={"module": "ai_suggestions", "endpoint": "intent-hints", "episode_id": episode_id})
     commands_cfg = get_user_commands(current_user) if current_user is not None else {}
     sfx_entries = list(_gather_user_sfx_entries(session, current_user))
     intents = analyze_intents(words, commands_cfg, sfx_entries)

@@ -24,6 +24,7 @@ from api.services.ai_content.generators.title import suggest_title
 from api.services.ai_content.generators.notes import suggest_notes
 from api.services.ai_content.generators.tags import suggest_tags
 from api.services.transcripts import discover_transcript_for_episode, discover_or_materialize_transcript
+from api.core.errors import audit_conflict_log_only
 
 _log = logging.getLogger(__name__)
 
@@ -117,6 +118,10 @@ def generate_title(inp: SuggestTitleIn, session: Session) -> SuggestTitleOut:
             or discover_or_materialize_transcript(str(inp.episode_id), hint)
         )
     if not inp.transcript_path:
+        try:
+            audit_conflict_log_only("TRANSCRIPT_NOT_READY", context={"module": "ai_suggestion_service", "function": "generate_title", "episode_id": str(inp.episode_id)})
+        except Exception:
+            pass
         raise RuntimeError("TRANSCRIPT_NOT_READY")
     
     # Step 2: Load template settings
@@ -173,6 +178,11 @@ def generate_notes(inp: SuggestNotesIn, session: Session) -> SuggestNotesOut:
             or discover_or_materialize_transcript(str(inp.episode_id), hint)
         )
     if not inp.transcript_path:
+        # Log an auditable debug id for operators, then raise the existing RuntimeError
+        try:
+            audit_conflict_log_only("TRANSCRIPT_NOT_READY", context={"module": "ai_suggestion_service", "function": "generate_notes", "episode_id": str(inp.episode_id)})
+        except Exception:
+            pass
         raise RuntimeError("TRANSCRIPT_NOT_READY")
     
     # Step 2: Load template settings
@@ -232,6 +242,10 @@ def generate_tags(inp: SuggestTagsIn, session: Session) -> SuggestTagsOut:
             or discover_or_materialize_transcript(str(inp.episode_id), hint)
         )
     if not inp.transcript_path:
+        try:
+            audit_conflict_log_only("TRANSCRIPT_NOT_READY", context={"module": "ai_suggestion_service", "function": "generate_tags", "episode_id": str(inp.episode_id)})
+        except Exception:
+            pass
         raise RuntimeError("TRANSCRIPT_NOT_READY")
     
     # Step 2: Load template settings

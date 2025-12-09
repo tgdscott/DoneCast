@@ -10,7 +10,7 @@ from api.core.database import get_session
 from api.models.onboarding import OnboardingSession
 from api.models.podcast import Podcast
 from api.models.user import User
-from ..auth.dependencies import get_current_user
+from api.routers.auth import get_current_user
 
 
 router = APIRouter(prefix="/api/onboarding", tags=["onboarding"])

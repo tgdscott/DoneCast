@@ -202,7 +202,9 @@ try {
 
   $env:CELERY_EAGER = if ($env:CELERY_EAGER) { $env:CELERY_EAGER } else { '1' }
 
-  & $pythonExe -m uvicorn api.app:app --host $apiHost --port $apiPort --env-file $envFile --log-config none --no-access-log
+  # Use --log-level to reduce default startup logging; passing 'none' to --log-config
+  # is invalid (uvicorn expects a path). Keep access log disabled to avoid triplicate output.
+  & $pythonExe -m uvicorn api.app:app --host $apiHost --port $apiPort --env-file $envFile --log-level warning --no-access-log
 } finally {
   Pop-Location
 }

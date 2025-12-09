@@ -14,8 +14,8 @@ def test_successful_login(page: Page):
     page.goto("http://localhost:8000/login")  # <<< CONFIRM THIS URL IS CORRECT
 
     # 2. Input valid credentials
-    page.get_by_role("textbox", name="Email").fill("test_user@example.com") 
-    page.get_by_role("textbox", name="Password").fill("SuperSecretPassword")
+    page.get_by_role("textbox", name="Email Address").fill("test_user@example.com") 
+    page.get_by_role("textbox", name="password").fill("SuperSecretPassword")
     # 3. Click the login button
    
     # 4. Assert successful navigation/state change

@@ -319,6 +319,15 @@ def build_oauth_client() -> tuple[OAuthType, str]:
             logger.warning(message)
         raise RuntimeError(message)
 
+    # Check for required env vars before attempting OAuth client setup
+    client_id = getattr(settings, 'GOOGLE_CLIENT_ID', '') or ''
+    client_secret = getattr(settings, 'GOOGLE_CLIENT_SECRET', '') or ''
+    
+    if not client_id or not client_secret:
+        message = f"Google OAuth not configured (GOOGLE_CLIENT_ID={'set' if client_id else 'missing'}, GOOGLE_CLIENT_SECRET={'set' if client_secret else 'missing'})"
+        logger.error("[OAUTH] %s", message)
+        raise RuntimeError(message)
+
     # Create custom httpx client with longer timeout to handle slow network/firewall
     try:
         import httpx
@@ -337,8 +346,8 @@ def build_oauth_client() -> tuple[OAuthType, str]:
     register_kwargs = {
         "name": "google",
         "server_metadata_url": "https://accounts.google.com/.well-known/openid-configuration",
-        "client_id": settings.GOOGLE_CLIENT_ID,
-        "client_secret": settings.GOOGLE_CLIENT_SECRET,
+        "client_id": client_id,
+        "client_secret": client_secret,
         "client_kwargs": {"scope": "openid email profile"},
     }
     
@@ -349,10 +358,10 @@ def build_oauth_client() -> tuple[OAuthType, str]:
     oauth_client.register(**register_kwargs)
     
     # Cache the client for future requests
-    _oauth_client_cache = (oauth_client, settings.GOOGLE_CLIENT_ID)
+    _oauth_client_cache = (oauth_client, client_id)
     logger.info("OAuth: Client initialized and cached")
     
-    return oauth_client, settings.GOOGLE_CLIENT_ID
+    return oauth_client, client_id
 
 
 def ensure_admin_flag(user: User, session: Session | None = None) -> None:
