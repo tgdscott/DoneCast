@@ -1187,25 +1187,6 @@ export default function PodcastPlusDashboard() {
         const canCreateEpisode = podcasts.length > 0 && templates.length > 0;
         return (
           <div className="space-y-8">
-            {/* Onboarding nudge */}
-            {(() => {
-              let show = false;
-              try {
-                const completed = localStorage.getItem('ppp.onboarding.completed');
-                show = !completed;
-              } catch {}
-              return show ? (
-                <div className="rounded-lg border bg-amber-50 text-amber-900 p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <div className="font-medium">Finish setting up your DoneCast onboarding</div>
-                      <div className="text-sm">Complete intro/outro, distribution, and website to streamline episode creation.</div>
-                    </div>
-                    <a href="/onboarding" className="px-3 py-2 rounded bg-primary text-white">Resume</a>
-                  </div>
-                </div>
-              ) : null;
-            })()}
             {/* Hero / Greeting */}
             <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
               <div>
