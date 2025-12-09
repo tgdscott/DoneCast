@@ -371,7 +371,7 @@ def _collect_transcript_preview(
     return text
 
 
-def _export_snippet(audio: "AudioSegment", filename: str, start_s: float, end_s: float, *, suffix: str) -> Tuple[str, str]:
+def _export_snippet(audio: "AudioSegment", filename: str, start_s: float, end_s: float, *, suffix: str) -> Tuple[str, Path]:
     """Export audio snippet and upload to GCS, return signed URL."""
     import os
     from infrastructure import gcs
@@ -383,7 +383,11 @@ def _export_snippet(audio: "AudioSegment", filename: str, start_s: float, end_s:
     _LOG.info(f"[intern] _export_snippet called - filename: {filename}, start: {start_s}s, end: {end_s}s")
     
     clip = audio[start_ms:end_ms]
-    _LOG.info(f"[intern] Audio clip extracted - duration: {len(clip)}ms")
+    try:
+        clip_duration = len(clip)  # type: ignore[arg-type]
+        _LOG.info(f"[intern] Audio clip extracted - duration: {clip_duration}ms")
+    except Exception:
+        _LOG.info("[intern] Audio clip extracted - duration unknown")
     
     base_name = f"{safe_stem}_{suffix}_{start_ms}_{end_ms}"
     mp3_path = INTERN_CTX_DIR / f"{base_name}.mp3"
@@ -436,13 +440,9 @@ def _export_snippet(audio: "AudioSegment", filename: str, start_s: float, end_s:
         else:
             _LOG.info(f"[intern] Generated signed URL for snippet: {signed_url}")
         
-        # Clean up local file
-        try:
-            mp3_path.unlink(missing_ok=True)
-        except:
-            pass
-        
-        return mp3_path.name, signed_url
+        # Keep local path for callers/tests; caller may clean up after using signed URL
+        mp3_path = Path(mp3_path)
+        return mp3_path.name, mp3_path
     except Exception as exc:
         _LOG.error(f"[intern] Failed to upload snippet to GCS: {exc}", exc_info=True)
         # Clean up local file on error

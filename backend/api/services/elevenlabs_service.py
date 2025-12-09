@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from typing import Any, Dict, List, Optional
 
@@ -175,12 +176,17 @@ class ElevenLabsService:
         
         # Filter out blacklisted voice IDs
         voices = [v for v in voices if v.get("voice_id") not in self._BLACKLISTED_VOICE_IDS]
-        
-        # Merge supplemental female voices (avoid duplicates by voice_id)
-        existing_ids = {v.get("voice_id") for v in voices if v.get("voice_id")}
-        for supp_voice in self._SUPPLEMENTAL_FEMALE_VOICES:
-            if supp_voice["voice_id"] not in existing_ids:
-                voices.append(supp_voice)
+
+        # Optionally merge supplemental female voices (feature flag)
+        include_supplemental = (
+            os.getenv("ELEVENLABS_INCLUDE_SUPPLEMENTAL_VOICES", "").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
+        if include_supplemental:
+            existing_ids = {v.get("voice_id") for v in voices if v.get("voice_id")}
+            for supp_voice in self._SUPPLEMENTAL_FEMALE_VOICES:
+                if supp_voice["voice_id"] not in existing_ids:
+                    voices.append(supp_voice)
         
         return voices  # type: ignore[return-value]
 

@@ -22,7 +22,10 @@ class EpisodeStatus(str, Enum):
     """Processing status for episodes."""
     pending = "pending"
     processing = "processing"
+    awaiting_audio_decision = "awaiting_audio_decision"
+    failed = "failed"
     processed = "processed"
+    completed = "completed"
     published = "published"
     error = "error"
 

@@ -17,14 +17,22 @@ class _OneLineFormatter(logging.Formatter):
 
 def configure_logging(level: int = logging.INFO) -> None:
     global _configured
-    if _configured:
-        return
     logger = logging.getLogger()
     logger.setLevel(level)
 
-    # Remove existing handlers (avoid double logs if reloaded)
+    # Drop any previously attached redaction filters so we can re-add with current settings
+    for f in list(logger.filters):
+        name = f.__class__.__name__
+        if name in {"RedactionFilter", "RedactFilter"}:
+            logger.removeFilter(f)
     for h in list(logger.handlers):
-        logger.removeHandler(h)
+        for f in list(h.filters):
+            name = f.__class__.__name__
+            if name in {"RedactionFilter", "RedactFilter"}:
+                try:
+                    h.removeFilter(f)
+                except Exception:
+                    pass
 
     handler = logging.StreamHandler(sys.stdout)
     fmt = _OneLineFormatter("[%(asctime)s] %(levelname)s %(name)s: %(message)s")
@@ -48,7 +56,13 @@ def configure_logging(level: int = logging.INFO) -> None:
                 pass
             return True
 
-    handler.addFilter(RedactFilter())
+    redact_filter = RedactFilter()
+    handler.addFilter(redact_filter)
+    # Ensure all existing handlers also redact
+    for h in logger.handlers:
+        h.addFilter(redact_filter)
+    # Attach at the logger level so caplog-style collectors see redacted messages.
+    logger.addFilter(redact_filter)
     # Also attach global redaction filter (masks emails/tokens/Authorization)
     install_redaction_filter(logger)
     logger.addHandler(handler)

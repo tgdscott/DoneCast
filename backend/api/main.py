@@ -102,3 +102,10 @@ def create_app() -> FastAPI:
     log.info("[startup] Application configured successfully")
     
     return app
+
+
+# Provide a module-level app for compatibility with tests and legacy imports
+app = create_app()
+
+
+__all__ = ["create_app", "app"]

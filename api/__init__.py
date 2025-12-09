@@ -105,7 +105,18 @@ class _BackendAliasLoader(importlib_abc.Loader):
         return backend_mod
 
     def exec_module(self, module):  # type: ignore[override]
-        # Nothing to execute; we've aliased to the canonical module object.
+        # Align __package__ with the alias spec parent to avoid Python 3.12
+        # __package__ vs __spec__.parent deprecation warnings when the same
+        # backend module object is shared under the alias name.
+        try:
+            spec = getattr(module, "__spec__", None)
+            pkg = getattr(module, "__package__", None)
+            if spec and pkg and spec.parent and pkg != spec.parent:
+                module.__package__ = spec.parent
+        except Exception:
+            # Do not fail aliasing if this adjustment is not possible.
+            pass
+
         return None
 
 

@@ -277,86 +277,81 @@ def execute_intern_commands(
                     if not answer_text:
                         answer_text = "The intern is out to lunch."
 
-                    try:
-                        spoken_prompt = (cmd.get("local_context") or "").strip()
-                        prompts = [spoken_prompt, (query_text or "").strip()]
-                        seen = set()
-                        prompts = [p for p in prompts if p and not (p in seen or seen.add(p))]
-                        
-                        # CRITICAL FIX: Ensure answer_text is not the same as the prompt/question
-                        # If answer_text matches the prompt exactly or is very similar, it means AI echoed the question
-                        prompt_normalized = _norm(spoken_prompt) if spoken_prompt else ""
-                        query_normalized = _norm(query_text) if query_text else ""
-                        answer_normalized = _norm(answer_text)
-                        
-                        # Check if answer is essentially the same as the prompt (AI echoed question back)
-                        if answer_normalized and prompt_normalized:
-                            if answer_normalized == prompt_normalized or answer_normalized.startswith(prompt_normalized[:min(20, len(prompt_normalized))]):
-                                log.append(f"[INTERN_ANSWER_ECHO_DETECTED] Answer matches prompt - AI echoed question back")
-                                # Don't use the echoed prompt, use a fallback
-                                answer_text = "The intern is processing that request."
-                                answer_normalized = _norm(answer_text)
-                        
-                        if answer_normalized and query_normalized:
-                            if answer_normalized == query_normalized or answer_normalized.startswith(query_normalized[:min(20, len(query_normalized))]):
-                                log.append(f"[INTERN_ANSWER_ECHO_DETECTED] Answer matches query_text - AI echoed question back")
-                                answer_text = "The intern is processing that request."
-                                answer_normalized = _norm(answer_text)
-                        
-                        # Now strip any remaining prompt-like content from the answer
-                        answer_text = _strip_prompt_prefix_suffix(answer_text, prompts, log)
-                        # Also remove duplicated or prompt-like tail phrases to avoid end-echo in TTS
-                        answer_text = _dedupe_tail(answer_text, log)
-                        answer_text = _strip_promptish_tail(answer_text, prompts, log)
-                        
-                        # Final safety check: ensure answer is not empty after stripping
-                        if not answer_text or not answer_text.strip():
-                            log.append(f"[INTERN_ANSWER_EMPTY_AFTER_STRIP] Using fallback answer")
+                    # Post-process answer to avoid echoing the prompt or query
+                    spoken_prompt = (cmd.get("local_context") or "").strip()
+                    prompts = [spoken_prompt, (query_text or "").strip()]
+                    seen = set()
+                    prompts = [p for p in prompts if p and not (p in seen or seen.add(p))]
+
+                    prompt_normalized = _norm(spoken_prompt) if spoken_prompt else ""
+                    query_normalized = _norm(query_text) if query_text else ""
+                    answer_normalized = _norm(answer_text)
+
+                    if answer_normalized and prompt_normalized:
+                        if answer_normalized == prompt_normalized or answer_normalized.startswith(prompt_normalized[:min(20, len(prompt_normalized))]):
+                            log.append("[INTERN_ANSWER_ECHO_DETECTED] Answer matches prompt - AI echoed question back")
                             answer_text = "The intern is processing that request."
+                            answer_normalized = _norm(answer_text)
+
+                    if answer_normalized and query_normalized:
+                        if answer_normalized == query_normalized or answer_normalized.startswith(query_normalized[:min(20, len(query_normalized))]):
+                            log.append("[INTERN_ANSWER_ECHO_DETECTED] Answer matches query_text - AI echoed question back")
+                            answer_text = "The intern is processing that request."
+                            answer_normalized = _norm(answer_text)
+
+                    answer_text = _strip_prompt_prefix_suffix(answer_text, prompts, log)
+                    answer_text = _dedupe_tail(answer_text, log)
+                    answer_text = _strip_promptish_tail(answer_text, prompts, log)
+
+                    if not answer_text or not answer_text.strip():
+                        log.append("[INTERN_ANSWER_EMPTY_AFTER_STRIP] Using fallback answer")
+                        answer_text = "The intern is processing that request."
                 except Exception as e:
                     log.append(f"[INTERN_ANSWER_PROCESSING_ERROR] {e}; using answer as-is")
-                    # If processing fails, use answer as-is but ensure it's not empty
                     if not answer_text or not answer_text.strip():
                         answer_text = "The intern is processing that request."
-                try:
-                    if mutable_words is not None and (answer_text or "").strip():
-                        ctx_end = _safe_float(cmd.get("context_end"))
-                        if ctx_end is None:
-                            ctx_end = _safe_float(cmd.get("time"))
-                        if ctx_end is None:
-                            ctx_end = 0.0
-                        insert_idx = len(mutable_words)
-                        for _idx, _w in enumerate(mutable_words):
-                            try:
-                                if float((_w or {}).get("start", 1e12)) >= ctx_end:
-                                    insert_idx = _idx
-                                    break
-                            except Exception:
-                                continue
-                        tokens = [t for t in (answer_text or "").split() if t]
-                        if tokens:
-                            base_t = float(ctx_end)
-                            synthetic_entries = [
-                                {
-                                    "word": t,
-                                    "speaker": "AI",
-                                    "start": base_t + (k * 0.30),
-                                    "end": base_t + (k * 0.30) + 0.25,
-                                }
-                                for k, t in enumerate(tokens)
-                            ]
-                            mutable_words[insert_idx:insert_idx] = synthetic_entries
-                            log.append(f"[INTERN_TRANSCRIPT_INSERT] words={len(tokens)} at_index={insert_idx}")
-                except Exception:
-                    pass
-                if insane_verbose:
-                    log.append(f"[INTERN_ANSWER_TEXT] '{(answer_text or '')[:200]}'")
-                log.append(f"[INTERN_ANSWER] len={len(answer_text or '')}")
-                cmd["final_answer_text"] = answer_text
-            except Exception as e:
-                log.append(f"[INTERN_ANSWER_ERROR] {e}; using fallback reply")
-                answer_text = "The intern is out to lunch."
-                cmd["final_answer_text"] = answer_text
+                    try:
+                        if mutable_words is not None and (answer_text or "").strip():
+                            ctx_end = _safe_float(cmd.get("context_end"))
+                            if ctx_end is None:
+                                ctx_end = _safe_float(cmd.get("time"))
+                            if ctx_end is None:
+                                ctx_end = 0.0
+
+                            insert_idx = len(mutable_words)
+                            for _idx, _w in enumerate(mutable_words):
+                                try:
+                                    if float((_w or {}).get("start", 1e12)) >= ctx_end:
+                                        insert_idx = _idx
+                                        break
+                                except Exception:
+                                    continue
+
+                            tokens = [t for t in (answer_text or "").split() if t]
+                            if tokens:
+                                base_t = float(ctx_end)
+                                synthetic_entries = [
+                                    {
+                                        "word": t,
+                                        "speaker": "AI",
+                                        "start": base_t + (k * 0.30),
+                                        "end": base_t + (k * 0.30) + 0.25,
+                                    }
+                                    for k, t in enumerate(tokens)
+                                ]
+                                mutable_words[insert_idx:insert_idx] = synthetic_entries
+                                log.append(f"[INTERN_TRANSCRIPT_INSERT] words={len(tokens)} at_index={insert_idx}")
+                    except Exception:
+                        pass
+
+                    if insane_verbose:
+                        log.append(f"[INTERN_ANSWER_TEXT] '{(answer_text or '')[:200]}'")
+                    log.append(f"[INTERN_ANSWER] len={len(answer_text or '')}")
+                    cmd["final_answer_text"] = answer_text
+                except Exception as e:
+                    log.append(f"[INTERN_ANSWER_ERROR] {e}; using fallback reply")
+                    answer_text = "The intern is out to lunch."
+                    cmd["final_answer_text"] = answer_text
             try:
                 # Check if user provided pre-generated audio URL
                 override_audio_url = (cmd.get("override_audio_url") or "").strip()

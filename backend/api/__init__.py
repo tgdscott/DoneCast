@@ -12,4 +12,15 @@ under different names (which would register duplicate SQLModel tables).
 
 # Do not add any import-time side effects here.
 
+# Provide lazy access to subpackages for compatibility with tests that monkeypatch
+# using dotted paths like "api.services.transcription..." without performing an
+# explicit import first.
+import importlib
+
+
+def __getattr__(name):  # pragma: no cover - simple import shim
+	if name == "services":
+		return importlib.import_module(f"{__name__}.services")
+	raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
 

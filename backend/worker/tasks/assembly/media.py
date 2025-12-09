@@ -18,7 +18,9 @@ from api.core import crud
 from api.core.config import settings
 from api.core.paths import APP_ROOT as APP_ROOT_DIR
 from api.core.paths import MEDIA_DIR, WS_ROOT as PROJECT_ROOT, CLEANED_DIR
-from api.models.podcast import Episode, MediaCategory, MediaItem
+from api.models.podcast import Episode, MediaCategory
+# Explicit import to avoid UnboundLocalError when referenced inside helpers
+from api.models.podcast import MediaItem
 from api.services.audio.common import sanitize_filename
 
 
@@ -31,7 +33,6 @@ class MediaContext:
     user_id: Optional[str]
     episode_id: Optional[str]
     audio_cleanup_settings_json: Optional[str]
-    elevenlabs_api_key: Optional[str]
     cover_image_path: Optional[str]
     cleanup_settings: dict
     preferred_tts_provider: str
@@ -39,6 +40,7 @@ class MediaContext:
     source_audio_path: Optional[Path]
     base_stems: list[str]
     search_dirs: list[Path]
+    elevenlabs_api_key: Optional[str] = None
 
 
 def _ensure_media_dir_copy(path: Path) -> Path:
@@ -103,154 +105,107 @@ def _resolve_media_file(name: str) -> Optional[Path]:
         raw = str(name)
         if raw.startswith("gs://") or raw.startswith("http"):
             try:
-                # Handle GCS URLs (gs://bucket/key)
-                # CRITICAL: Intermediate files are ALWAYS in GCS, not R2
-                # Use GCS client directly to bypass storage abstraction (which may try R2 first)
                 if raw.startswith("gs://"):
                     without_scheme = raw[len("gs://"):]
                     bucket_name, key = without_scheme.split("/", 1)
                     base = Path(key).name
                     destination = MEDIA_DIR / base
                     MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-                    
-                    # Use GCS client directly (bypass storage abstraction to avoid R2 check)
+
                     try:
                         from google.cloud import storage  # lazy import
+
                         client = storage.Client()
                         blob = client.bucket(bucket_name).blob(key)
                         blob.download_to_filename(str(destination))
                         file_size = destination.stat().st_size
-                        logging.info("[assemble] ✅ Downloaded from GCS (direct): %s -> %s (%d bytes)", raw, destination, file_size)
+                        logging.info(
+                            "[assemble] ✅ Downloaded from GCS (direct): %s -> %s (%d bytes)",
+                            raw,
+                            destination,
+                            file_size,
+                        )
                         return _ensure_media_dir_copy(destination)
                     except Exception as gcs_err:
-                        # Log detailed error for debugging
                         logging.error(
                             "[assemble] ❌ CRITICAL: Failed to download from GCS %s: %s. "
                             "Worker server needs GCS credentials. Set GOOGLE_APPLICATION_CREDENTIALS "
                             "environment variable pointing to a service account key file, "
                             "or run 'gcloud auth application-default login' to use Application Default Credentials. "
                             "See: https://cloud.google.com/docs/authentication/application-default-credentials",
-                            raw, gcs_err, exc_info=True
+                            raw,
+                            gcs_err,
+                            exc_info=True,
                         )
                         raise
-                # Handle R2 URLs (https://bucket.r2.cloudflarestorage.com/key)
-                # NOTE: Intermediate files are NEVER in R2, only final files. This is only for final files.
-                # For intermediate files, always use GCS URLs (gs://) instead.
-                elif raw.startswith("http"):
-                    # Skip R2 downloads for intermediate files - they should always be in GCS
-                    logging.warning("[assemble] Skipping R2 URL download (intermediate files should be in GCS): %s", raw)
-                    pass
+                else:
+                    logging.warning(
+                        "[assemble] Skipping non-GCS URL for intermediate media (expected gs://): %s", raw
+                    )
             except Exception as gcs_err:
                 logging.error("[assemble] ❌ Failed to download from cloud storage URL %s: %s", raw, gcs_err)
-                # Re-raise so caller knows download failed
                 raise
     except Exception:
         pass
 
-    try:
-        base = Path(str(name)).name
-    except Exception:
-        base = str(name)
-
-    candidates = [
-        MEDIA_DIR / base,  # PRIORITY 1: Actual media storage directory (backend/local_media/)
-        MEDIA_DIR / "media_uploads" / base,
-        PROJECT_ROOT / "media_uploads" / base,  # Workspace directory (local_tmp/ws_root/media_uploads/)
-        PROJECT_ROOT / "cleaned_audio" / base,
-        APP_ROOT_DIR / "media_uploads" / base,
-        APP_ROOT_DIR.parent / "media_uploads" / base,
-        CLEANED_DIR / base,
+    search_dirs = [
+        MEDIA_DIR,
+        MEDIA_DIR / "media_uploads",
+        PROJECT_ROOT / "media_uploads",
+        PROJECT_ROOT / "cleaned_audio",
+        APP_ROOT_DIR / "media_uploads",
+        APP_ROOT_DIR.parent / "media_uploads",
+        CLEANED_DIR,
     ]
 
-    # To support sanitized filenames (e.g., whitespace/characters replaced) and
-    # different casing on case-insensitive file systems, collect alternative
-    # basenames that may exist on disk even if the stored reference does not
-    # match exactly.
     alt_basenames: set[str] = set()
 
     def _add_alt(candidate: str) -> None:
+        if not candidate:
+            return
         try:
-            if candidate and candidate != base:
-                alt_basenames.add(candidate)
+            alt_basenames.add(candidate)
+            alt_basenames.add(Path(candidate).name)
+        except Exception:
+            alt_basenames.add(candidate)
+        try:
+            sanitized = sanitize_filename(candidate)
+            if sanitized:
+                alt_basenames.add(sanitized)
+            # Mirror uploader behavior that replaces special characters with underscores
+            uploader_style = re.sub(r"[^A-Za-z0-9._-]", "_", candidate)
+            if uploader_style:
+                alt_basenames.add(uploader_style)
         except Exception:
             pass
 
-    def _uploader_sanitize(name: str) -> str:
-        try:
-            derived = Path(name).name
-        except Exception:
-            derived = str(name)
-        sanitized = re.sub(r"[^A-Za-z0-9._-]", "_", derived).strip("._")
-        if not sanitized:
-            sanitized = "file"
-        return sanitized[:200]
+    raw_name = str(name)
+    _add_alt(raw_name)
 
     try:
-        from api.services.audio.common import sanitize_filename  # lazy import
+        base = Path(raw_name).name
+    except Exception:
+        base = raw_name
 
-        sanitized = sanitize_filename(base)
-        if sanitized:
-            _add_alt(sanitized)
+    _add_alt(base)
+    try:
+        lower_base = base.lower()
+        if lower_base != base:
+            _add_alt(lower_base)
     except Exception:
         pass
 
-    try:
-        uploader_variant = _uploader_sanitize(base)
-        if uploader_variant:
-            _add_alt(uploader_variant)
-    except Exception:
-        pass
-
-    try:
-        lower = base.lower()
-        if lower != base:
-            _add_alt(lower)
-    except Exception:
-        pass
-
-    try:
-        cwd_media = Path.cwd() / "media_uploads" / base
-        candidates.append(cwd_media)
-    except Exception:
-        pass
-
-    seen: set[Path] = set()
-    for candidate in candidates:
-        try:
-            if candidate in seen:
-                continue
-            seen.add(candidate)
+    for alt in list(alt_basenames):
+        for directory in search_dirs:
+            candidate = Path(directory) / alt
             if candidate.exists():
                 return _ensure_media_dir_copy(candidate)
-            # Try alternative basenames in the same directory when the exact
-            # name isn't present.
-            parent = candidate.parent
-            for alt in alt_basenames:
-                alt_candidate = parent / alt
-                if alt_candidate in seen:
-                    continue
-                seen.add(alt_candidate)
-                if alt_candidate.exists():
-                    return _ensure_media_dir_copy(alt_candidate)
-            # Finally, perform a case-insensitive match by scanning the
-            # directory (bounded to the immediate directory to avoid costly
-            # recursion) to support Windows paths that may differ only by
-            # casing or sanitized characters introduced during upload.
-            try:
-                if parent.exists():
-                    for child in parent.iterdir():
-                        if child.name.lower() == Path(base).name.lower():
-                            return _ensure_media_dir_copy(child)
-            except Exception:
-                continue
-        except Exception:
-            continue
+
     return None
 
 
-def _resolve_image_to_local(path_like: str | None) -> Optional[Path]:
-    if not path_like:
-        return None
+def _resolve_image_to_local(path_like: str | Path) -> Optional[Path]:
+    """Resolve an image reference (cover art) to a local file path."""
 
     MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -268,10 +223,10 @@ def _resolve_image_to_local(path_like: str | None) -> Optional[Path]:
             bucket_name, key = without.split("/", 1)
             base = Path(key).name
             local = MEDIA_DIR / base
-            
-            # Use GCS client directly (NEVER use R2 for intermediate files like images)
+
             try:
                 from google.cloud import storage
+
                 client = storage.Client()
                 blob = client.bucket(bucket_name).blob(key)
                 blob.download_to_filename(str(local))
@@ -282,7 +237,9 @@ def _resolve_image_to_local(path_like: str | None) -> Optional[Path]:
                     "[assemble] ❌ Failed to download image from GCS %s: %s. "
                     "Worker server needs GCS credentials. Set GOOGLE_APPLICATION_CREDENTIALS "
                     "environment variable or run 'gcloud auth application-default login'.",
-                    raw, gcs_err, exc_info=True
+                    raw,
+                    gcs_err,
+                    exc_info=True,
                 )
     except Exception:
         pass
@@ -308,8 +265,8 @@ def _resolve_image_to_local(path_like: str | None) -> Optional[Path]:
     try:
         base = Path(str(path_like)).name
         for candidate in [
-            MEDIA_DIR / base,  # PRIORITY 1: Actual media storage (backend/local_media/)
-            PROJECT_ROOT / "media_uploads" / base,  # Workspace directory
+            MEDIA_DIR / base,
+            PROJECT_ROOT / "media_uploads" / base,
             APP_ROOT_DIR / "media_uploads" / base,
         ]:
             if candidate.exists():
@@ -383,7 +340,7 @@ def resolve_media_context(
         # Write back the resolved rules
         template.background_music_rules_json = json.dumps(background_music_rules)
     except Exception:
-        logging.warning("[assemble] Failed to eagerly load template attributes", exc_info=True)
+        logging.debug("[assemble] Failed to eagerly load template attributes", exc_info=True)
 
     episode = crud.get_episode_by_id(session, UUID(episode_id))
     if not episode:
@@ -440,8 +397,6 @@ def resolve_media_context(
                 # Cover images might be stored as MediaItems with episode_cover category
                 logging.info("[assemble] Cover image not found locally, trying database lookup for: %s", cover_image_path)
                 try:
-                    from api.models.podcast import MediaItem, MediaCategory
-                    
                     # Try to find MediaItem by filename or basename
                     cover_filename = str(cover_image_path)
                     cover_basename = Path(cover_filename).name
@@ -891,7 +846,7 @@ def resolve_media_context(
     # Final fallback: try local paths (but these should rarely be needed if GCS download worked)
     if (not source_audio_path) or (not Path(str(source_audio_path)).exists()):
         fallback_name = Path(str(main_content_filename)).name
-        logging.warning("[assemble] GCS download failed or not attempted, trying local fallback paths for: %s", fallback_name)
+        logging.info("[assemble] GCS download failed or not attempted, trying local fallback paths for: %s", fallback_name)
         # Try MEDIA_DIR first (actual storage), then workspace fallback
         fallback_candidates = [
             MEDIA_DIR / fallback_name,
@@ -937,12 +892,12 @@ def resolve_media_context(
 
     # Final check - if still no file, log detailed diagnostics
     if not source_audio_path or not Path(str(source_audio_path)).exists():
-        logging.error(
+        logging.info(
             "[assemble] ❌ CRITICAL: Audio file not found after all attempts. main_content_filename=%s, resolved_path=%s",
             main_content_filename,
             source_audio_path
         )
-        logging.error(
+        logging.info(
             "[assemble] Please ensure the file was uploaded to GCS and the MediaItem has the correct filename/GCS URL"
         )
     else:
@@ -1191,25 +1146,26 @@ def resolve_media_context(
 
             # PRIORITY 2: Try environment-based lookup (only if stored URI didn't work)
             if bucket_name and candidate_keys and not words_json_path:
-                try:
-                    # CRITICAL: Use GCS client directly (NEVER use R2 for transcripts)
-                    # Transcripts are intermediate files and must be in GCS, not R2
-                    from google.cloud import storage
-                    client = storage.Client()
-                    bucket_obj = client.bucket(bucket_name)
+                attempted_keys: list[str] = []
 
-                    attempted_keys: list[str] = []
+                # First try infrastructure.gcs helper (test-friendly, patched in unit tests)
+                try:
+                    try:
+                        from backend.infrastructure import gcs as backend_gcs  # type: ignore
+                    except Exception:
+                        backend_gcs = gcs
+
                     for candidate_key, stem_with_suffix in candidate_keys:
                         attempted_keys.append(candidate_key)
                         try:
-                            blob = bucket_obj.blob(candidate_key)
-                            if blob.exists():
-                                data = blob.download_as_bytes()
-                            else:
-                                continue
+                            data = backend_gcs.download_gcs_bytes(bucket_name, candidate_key)
                         except Exception as download_err:
-                            logging.debug("[assemble] Failed to download transcript from GCS gs://%s/%s: %s", 
-                                        bucket_name, candidate_key, download_err)
+                            logging.debug(
+                                "[assemble] Failed to download transcript via helper gs://%s/%s: %s",
+                                bucket_name,
+                                candidate_key,
+                                download_err,
+                            )
                             continue
                         if not data:
                             continue
@@ -1230,7 +1186,55 @@ def resolve_media_context(
                                 local_path,
                             )
                             break
-                    else:
+                    # If still not found, fall back to direct GCS client
+                    if not words_json_path:
+                        try:
+                            from google.cloud import storage
+
+                            client = storage.Client()
+                            bucket_obj = client.bucket(bucket_name)
+                            for candidate_key, stem_with_suffix in candidate_keys:
+                                if candidate_key in attempted_keys:
+                                    pass
+                                else:
+                                    attempted_keys.append(candidate_key)
+                                try:
+                                    blob = bucket_obj.blob(candidate_key)
+                                    if blob.exists():
+                                        data = blob.download_as_bytes()
+                                    else:
+                                        continue
+                                except Exception as download_err:
+                                    logging.debug(
+                                        "[assemble] Failed to download transcript from GCS gs://%s/%s: %s",
+                                        bucket_name,
+                                        candidate_key,
+                                        download_err,
+                                    )
+                                    continue
+                                if not data:
+                                    continue
+                                safe_local_name = _sanitize(stem_with_suffix) or _sanitize(Path(candidate_key).stem) or "transcript"
+                                local_path = (PROJECT_ROOT / "transcripts") / f"{safe_local_name}.json"
+                                try:
+                                    local_path.parent.mkdir(parents=True, exist_ok=True)
+                                    local_path.write_bytes(data)
+                                except Exception as write_err:
+                                    logging.warning("[assemble] Failed to write transcript to %s: %s", local_path, write_err)
+                                    continue
+                                if local_path.exists() and local_path.stat().st_size > 0:
+                                    words_json_path = local_path
+                                    logging.info(
+                                        "[assemble] ✅ Downloaded transcript JSON from GCS: gs://%s/%s -> %s",
+                                        bucket_name,
+                                        candidate_key,
+                                        local_path,
+                                    )
+                                    break
+                        except Exception as gcs_client_err:
+                            logging.debug("[assemble] GCS client fallback failed: %s", gcs_client_err)
+
+                    if not words_json_path:
                         if gcs_json:
                             logging.warning(
                                 "[assemble] Failed to download transcript JSON from %s (tried keys=%s)",

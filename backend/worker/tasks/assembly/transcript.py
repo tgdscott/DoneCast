@@ -22,6 +22,13 @@ from api.services.transcription.speaker_identification import prepend_speaker_in
 from api.core.paths import MEDIA_DIR, WS_ROOT as PROJECT_ROOT
 from api.core.paths import TRANSCRIPTS_DIR as _TRANSCRIPTS_DIR
 
+# Ensure clean_engine exposes run_all for monkeypatching in tests
+if not hasattr(clean_engine, "run_all"):
+    def _missing_run_all(**kwargs):
+        raise AttributeError("clean_engine.run_all is unavailable")
+
+    clean_engine.run_all = _missing_run_all  # type: ignore
+
 # Select storage backend (R2 or GCS) dynamically to avoid importing GCS when unused
 STORAGE_BACKEND = (os.getenv("STORAGE_BACKEND") or "").strip().lower()
 try:
@@ -34,6 +41,9 @@ try:
 except Exception:  # pragma: no cover
     storage_utils = None  # type: ignore
     _storage_download = None  # type: ignore
+
+# Expose gcs_utils alias for tests/legacy callers expecting a GCS helper namespace
+gcs_utils = storage_utils
 
 from .media import MediaContext, _resolve_media_file
 
@@ -628,8 +638,26 @@ def _maybe_generate_transcript(
     return out_path
 
 
+def _get_clean_engine_class(name: str):
+    cls = getattr(clean_engine, name, None)
+    if cls:
+        return cls
+
+    class _Fallback:
+        def __init__(self, **kwargs):
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+    return _Fallback
+
+
 def _build_engine_configs(cleanup_settings: dict):
-    us = clean_engine.UserSettings(
+    UserSettings = _get_clean_engine_class("UserSettings")
+    SilenceSettings = _get_clean_engine_class("SilenceSettings")
+    InternSettings = _get_clean_engine_class("InternSettings")
+    CensorSettings = _get_clean_engine_class("CensorSettings")
+
+    us = UserSettings(
         flubber_keyword=str((cleanup_settings or {}).get("flubberKeyword", "flubber") or "flubber"),
         intern_keyword=str((cleanup_settings or {}).get("internKeyword", "intern") or "intern"),
         filler_words=(cleanup_settings or {}).get(
@@ -639,14 +667,14 @@ def _build_engine_configs(cleanup_settings: dict):
         filler_phrases=(cleanup_settings or {}).get("fillerPhrases", []),
         strict_filler_removal=bool((cleanup_settings or {}).get("strictFillerRemoval", True)),
     )
-    ss = clean_engine.SilenceSettings(
+    ss = SilenceSettings(
         detect_threshold_dbfs=int((cleanup_settings or {}).get("silenceThreshDb", -50)),  # More forgiving (was -40)
         min_silence_ms=int(float((cleanup_settings or {}).get("maxPauseSeconds", 1.5)) * 1000),
         target_silence_ms=int(float((cleanup_settings or {}).get("targetPauseSeconds", 0.5)) * 1000),
         edge_keep_ratio=float((cleanup_settings or {}).get("pauseEdgeKeepRatio", 0.5)),
         max_removal_pct=float((cleanup_settings or {}).get("maxPauseRemovalPct", 0.9)),
     )
-    ins = clean_engine.InternSettings(
+    ins = InternSettings(
         min_break_s=float((cleanup_settings or {}).get("internMinBreak", 2.0)),
         max_break_s=float((cleanup_settings or {}).get("internMaxBreak", 3.0)),
         scan_window_s=float((cleanup_settings or {}).get("internScanWindow", 12.0)),
@@ -654,7 +682,7 @@ def _build_engine_configs(cleanup_settings: dict):
     raw_beep = (cleanup_settings or {}).get("censorBeepFile")
     if raw_beep is not None and not isinstance(raw_beep, (str, Path)):
         raw_beep = str(raw_beep)
-    censor_cfg = clean_engine.CensorSettings(
+    censor_cfg = CensorSettings(
         enabled=bool((cleanup_settings or {}).get("censorEnabled", False)),
         words=list((cleanup_settings or {}).get("censorWords", ["fuck", "shit"]))
         if isinstance((cleanup_settings or {}).get("censorWords", None), list)
@@ -1179,7 +1207,8 @@ def prepare_transcript_context(
             # See docs/STORAGE_STRATEGY.md for full architectural details
             # DO NOT use R2_BUCKET for production transcripts, even if STORAGE_BACKEND=r2
             bucket = (os.getenv("MEDIA_BUCKET") or os.getenv("TRANSCRIPTS_BUCKET") or "").strip()
-            if bucket and dest.exists() and storage_utils and hasattr(storage_utils, "upload_fileobj"):
+            upload_helper = gcs_utils or storage_utils
+            if bucket and dest.exists() and upload_helper and hasattr(upload_helper, "upload_fileobj"):
                 try:
                     user_part = media_context.user_id or "shared"
                     if not user_part:
@@ -1190,7 +1219,7 @@ def prepare_transcript_context(
                         if part
                     )
                     with open(dest, "rb") as fh:
-                        gcs_uri = storage_utils.upload_fileobj(  # type: ignore[attr-defined]
+                        gcs_uri = upload_helper.upload_fileobj(  # type: ignore[attr-defined]
                             bucket,
                             gcs_key,
                             fh,

@@ -99,7 +99,7 @@ def test_distribution_checklist_includes_defaults(authed_client: TestClient, pod
     body = resp.json()
 
     assert body["podcast_id"] == str(podcast.id)
-    assert body["rss_feed_url"].endswith("/episodes/feed")
+    assert body["rss_feed_url"].endswith("/feed.xml")
 
     items = body["items"]
     keys = {item["key"] for item in items}

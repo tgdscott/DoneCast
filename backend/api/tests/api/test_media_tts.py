@@ -111,7 +111,7 @@ def test_tts_minimal_success_elevenlabs(monkeypatch: pytest.MonkeyPatch, authed_
     assert data["filename"].endswith(".mp3")
     assert data["category"] == "intro"
     # Check file exists
-    fp = MEDIA_DIR / data["filename"]
+    fp = Path(data["local_filename"])
     assert fp.exists() and fp.stat().st_size > 0
 
     # Cleanup artifacts

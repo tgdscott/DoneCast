@@ -3,6 +3,7 @@ from typing import Any, Dict, List
 
 import pytest
 
+from api.services.transcription import assemblyai_client
 from api.services.transcription.transcription_runner import run_assemblyai_job
 from api.services.transcription.assemblyai_webhook import AssemblyAIWebhookManager
 
@@ -73,10 +74,7 @@ def test_runner_happy_path(tmp_path, monkeypatch, caplog):
         return FakeResponse(200, seq.pop(0))
 
     session = FakeSession(fake_post, fake_get)
-    monkeypatch.setattr(
-        "api.services.transcription.assemblyai_client._get_session",
-        lambda: session,
-    )
+    monkeypatch.setattr(assemblyai_client, "_get_session", lambda: session)
 
     # Avoid delays
     monkeypatch.setattr("time.sleep", lambda s: None)

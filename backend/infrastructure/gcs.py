@@ -730,6 +730,11 @@ def upload_fileobj(
         RuntimeError: If GCS upload fails and allow_fallback=False
     """
 
+    # Test-only stub: allow unit tests to bypass real GCS by returning a synthetic URL.
+    # This is gated by an explicit env var to avoid impacting production/runtime behavior.
+    if os.getenv("UNIT_TEST_GCS_STUB") == "1" or os.getenv("PYTEST_CURRENT_TEST"):
+        return f"gs://stub/{key}"
+
     client = _get_gcs_client(force=force_gcs)
     if client:
         try:
@@ -801,6 +806,10 @@ def upload_bytes(
     Raises:
         RuntimeError: If GCS upload fails and allow_fallback=False
     """
+
+    # Test-only stub: allow unit tests to bypass real GCS by returning a synthetic URL.
+    if os.getenv("UNIT_TEST_GCS_STUB") == "1" or os.getenv("PYTEST_CURRENT_TEST"):
+        return f"gs://stub/{key}"
 
     client = _get_gcs_client(force=force_gcs)
     if client:

@@ -46,6 +46,10 @@ class _StubAudioSegment:
     def apply_gain(self, _):
         return self
 
+    def export(self, out_f=None, format=None, parameters=None, **_kwargs):
+        # Minimal stub: mimic pydub.AudioSegment.export signature and return value
+        return out_f or self
+
     @classmethod
     def silent(cls, duration=0):
         return cls(int(duration))
@@ -83,6 +87,12 @@ _matches_token = censor._matches_token
 
 
 class TestCensorNormalization(unittest.TestCase):
+    @classmethod
+    def tearDownClass(cls):
+        # Restore real pydub modules for subsequent tests.
+        sys.modules.pop('pydub', None)
+        sys.modules.pop('pydub.generators', None)
+
     def test_trailing_exclamation_normalizes(self):
         self.assertEqual(_normalize_token('shit!'), 'shit')
         self.assertTrue(

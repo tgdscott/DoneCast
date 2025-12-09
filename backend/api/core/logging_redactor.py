@@ -24,23 +24,25 @@ AUTH_HEADER_RE = re.compile(r"(?im)^(authorization:\s*)(.+)$")
 
 
 class RedactionFilter(logging.Filter):
-    """Logging filter that redacts sensitive info with ***.
+    """Logging filter that redacts sensitive info with friendly markers.
 
-    - Emails
-    - Authorization headers values
-    - Token-like secrets (bearer, sk_, api_key, api-token, token)
+    - Emails → <redacted-email>
+    - Token-like secrets (bearer, sk_, api_key, api-token, token) → replacement (defaults to <redacted-secret>)
+    - Authorization header values → replacement
     """
 
-    def __init__(self, replacement: str = "***") -> None:
+    def __init__(self, replacement: str = "<redacted-secret>") -> None:
         super().__init__()
         self.replacement = replacement
 
     def filter(self, record: logging.LogRecord) -> bool:  # always keep record
         try:
             msg = record.getMessage()
-            msg = AUTH_HEADER_RE.sub(lambda m: f"{m.group(1)}{self.replacement}", msg)
-            msg = EMAIL_RE.sub(self.replacement, msg)
-            msg = TOKEN_LIKE_RE.sub(self.replacement, msg)
+            email_replacement = "<redacted-email>"
+            secret_replacement = self.replacement
+            msg = AUTH_HEADER_RE.sub(lambda m: f"{m.group(1)}{secret_replacement}", msg)
+            msg = EMAIL_RE.sub(email_replacement, msg)
+            msg = TOKEN_LIKE_RE.sub(secret_replacement, msg)
             if msg != record.getMessage():
                 record.msg = msg
                 record.args = ()
@@ -49,10 +51,11 @@ class RedactionFilter(logging.Filter):
         return True
 
 
-def install_redaction_filter(logger: logging.Logger | None = None, *, replacement: str = "***") -> None:
+def install_redaction_filter(logger: logging.Logger | None = None, *, replacement: str = "<redacted-secret>") -> None:
     """Attach the redaction filter to all stream/file handlers on the provided logger (root if None)."""
     logger = logger or logging.getLogger()
     filt = RedactionFilter(replacement=replacement)
+    logger.addFilter(filt)
     for h in list(logger.handlers):
         try:
             h.addFilter(filt)

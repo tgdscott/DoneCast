@@ -20,24 +20,24 @@ try:
 except ImportError:
     tasks_v2 = None  # type: ignore
 
-_ENV_VALUE = (
-    os.getenv("APP_ENV")
-    or os.getenv("ENV")
-    or os.getenv("PYTHON_ENV")
-    or ""
-).strip().lower()
-
-IS_DEV_ENV = _ENV_VALUE in {"", "dev", "development", "local"}
-IS_TEST_ENV = _ENV_VALUE in {"test", "testing"}
-
 log = logging.getLogger("tasks.client")
 
 
 def should_use_cloud_tasks() -> bool:
     """Return ``True`` when Cloud Tasks HTTP dispatch should be used."""
 
-    if IS_DEV_ENV or IS_TEST_ENV:
-        log.info("event=tasks.cloud.disabled reason=dev_env is_dev=%s is_test=%s", IS_DEV_ENV, IS_TEST_ENV)
+    env_value = (
+        os.getenv("APP_ENV")
+        or os.getenv("ENV")
+        or os.getenv("PYTHON_ENV")
+        or ""
+    ).strip().lower()
+    is_dev_env = env_value in {"", "dev", "development", "local"}
+    is_test_env = env_value in {"test", "testing"}
+    is_prod_env = env_value == "production"
+
+    if is_dev_env or is_test_env:
+        log.info("event=tasks.cloud.disabled reason=dev_env is_dev=%s is_test=%s", is_dev_env, is_test_env)
         return False
 
     if os.getenv("TASKS_FORCE_HTTP_LOOPBACK"):
@@ -60,6 +60,8 @@ def should_use_cloud_tasks() -> bool:
         log.warning(
             "event=tasks.cloud.disabled reason=missing_config missing=%s", missing
         )
+        if is_prod_env:
+            raise ValueError(f"Missing required Cloud Tasks configuration: {', '.join(missing)}")
         return False
 
     log.info("event=tasks.cloud.enabled all_checks_passed")
@@ -105,6 +107,8 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
     # Get environment variables
     app_env = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "").strip().lower()
     is_production = app_env == "production"
+    is_dev_env = app_env in {"", "dev", "development", "local"}
+    is_test_env = app_env in {"test", "testing"}
     use_worker_in_dev_raw = os.getenv("USE_WORKER_IN_DEV", "false")
     use_worker_in_dev = use_worker_in_dev_raw and use_worker_in_dev_raw.lower().strip() in {"true", "1", "yes", "on"}
     worker_url_base = os.getenv("WORKER_URL_BASE")
@@ -119,7 +123,7 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
     if is_worker_task and worker_url_base:
         if is_production:
             should_use_worker = True
-        elif IS_DEV_ENV:
+        elif is_dev_env:
             should_use_worker = use_worker_in_dev
     
     # CRITICAL: For assembly tasks, inline processing is NEVER allowed
@@ -137,7 +141,7 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
     print("=" * 80)
     print(f"WORKER SERVER ROUTING DECISION:")
     print(f"  path={path}")
-    print(f"  APP_ENV={app_env} (is_production={is_production}, IS_DEV_ENV={IS_DEV_ENV})")
+    print(f"  APP_ENV={app_env} (is_production={is_production}, is_dev_env={is_dev_env}, is_test_env={is_test_env})")
     print(f"  USE_WORKER_IN_DEV={use_worker_in_dev_raw} (parsed={use_worker_in_dev})")
     print(f"  WORKER_URL_BASE={worker_url_base}")
     print(f"  is_worker_task={is_worker_task} (path contains '/assemble' or '/process-chunk')")
@@ -163,7 +167,7 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
         timeout = 1800.0 if "/assemble" in path else 300.0
         
         log.info("event=tasks.dev.using_worker_server path=%s url=%s timeout=%s", path, url, timeout)
-        if IS_DEV_ENV:
+        if is_dev_env:
             print(f"DEV MODE: Sending {path} to worker server at {url} with timeout {timeout}s")
         else:
             print(f"PROD MODE: Sending {path} to worker server at {url} with timeout {timeout}s")
@@ -175,7 +179,7 @@ def _dispatch_local_task(path: str, body: dict) -> dict:
                     # Success: return JSON response
                     result = r.json() if r.content else {}
                     log.info("event=tasks.dev.worker_success path=%s status=%s", path, r.status_code)
-                    if IS_DEV_ENV:
+                    if is_dev_env:
                         print(f"DEV MODE: Worker server responded with status {r.status_code}")
                     else:
                         print(f"PROD MODE: Worker server responded with status {r.status_code}")

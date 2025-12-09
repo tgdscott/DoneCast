@@ -13,17 +13,19 @@ from api.models.settings import load_admin_settings
 
 def is_on_trial(user: User) -> bool:
     """Check if user is currently on a free trial."""
-    if not user.trial_started_at or not user.trial_expires_at:
+    trial_started_at = getattr(user, "trial_started_at", None)
+    trial_expires_at = getattr(user, "trial_expires_at", None)
+    if not trial_started_at or not trial_expires_at:
         return False
     
     now = datetime.now(timezone.utc)
     
     # Ensure datetimes are timezone-aware for comparison
-    trial_start = user.trial_started_at
+    trial_start = trial_started_at
     if trial_start.tzinfo is None:
         trial_start = trial_start.replace(tzinfo=timezone.utc)
     
-    trial_end = user.trial_expires_at
+    trial_end = trial_expires_at
     if trial_end.tzinfo is None:
         trial_end = trial_end.replace(tzinfo=timezone.utc)
     
@@ -32,13 +34,14 @@ def is_on_trial(user: User) -> bool:
 
 def is_trial_expired(user: User) -> bool:
     """Check if user's trial has expired."""
-    if not user.trial_expires_at:
+    trial_expires_at = getattr(user, "trial_expires_at", None)
+    if not trial_expires_at:
         return False
     
     now = datetime.now(timezone.utc)
     
     # Ensure datetime is timezone-aware for comparison
-    trial_end = user.trial_expires_at
+    trial_end = trial_expires_at
     if trial_end.tzinfo is None:
         trial_end = trial_end.replace(tzinfo=timezone.utc)
     
@@ -66,11 +69,12 @@ def get_effective_tier(user: User) -> str:
 def has_active_subscription(user: User) -> bool:
     """Check if user has an active paid subscription."""
     # Check if user has a subscription that hasn't expired
-    if user.subscription_expires_at:
+    subscription_expires_at = getattr(user, "subscription_expires_at", None)
+    if subscription_expires_at:
         now = datetime.now(timezone.utc)
         
         # Ensure datetime is timezone-aware for comparison
-        sub_expires = user.subscription_expires_at
+        sub_expires = subscription_expires_at
         if sub_expires.tzinfo is None:
             sub_expires = sub_expires.replace(tzinfo=timezone.utc)
         
@@ -78,7 +82,7 @@ def has_active_subscription(user: User) -> bool:
     
     # Check if user has a paid tier (not free)
     paid_tiers = {"hobby", "creator", "pro", "executive", "enterprise"}
-    return user.tier in paid_tiers
+    return getattr(user, "tier", None) in paid_tiers
 
 
 def start_trial(user: User, session: Session, trial_days: Optional[int] = None) -> None:

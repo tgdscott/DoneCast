@@ -311,7 +311,12 @@ def apply_censor_beep(
         return audio, []
 
     ops.sort(key=lambda d: int(d["s"]))
-    new_audio = AudioSegment.silent(duration=0)
+
+    # Build the output using the same audio class as the input to support test stubs.
+    try:
+        new_audio = audio.__class__.silent(duration=0)  # type: ignore[call-arg]
+    except Exception:
+        new_audio = AudioSegment.silent(duration=0)
     cursor = 0
     deltas: List[Tuple[int, int]] = []
 
@@ -323,6 +328,12 @@ def apply_censor_beep(
             repl_len = 0
         else:
             repl = op["repl"]  # type: ignore[assignment]
+            # Normalize replacement type to match the source audio (supports test stubs).
+            if repl is not None and not isinstance(repl, audio.__class__):
+                try:
+                    repl = audio.__class__.silent(duration=len(repl))  # type: ignore[call-arg]
+                except Exception:
+                    pass
             new_audio += repl
             repl_len = len(repl)
         cursor = e

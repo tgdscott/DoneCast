@@ -49,7 +49,7 @@ def _safe_slug(text: str) -> str:
     return safe.strip("-") or "tts"
 
 
-@router.post("/tts", response_model=MediaItem)
+@router.post("/tts")
 async def create_tts_media(
     body: TTSCREATEBody,
     session: Session = Depends(get_session),
@@ -197,7 +197,10 @@ async def create_tts_media(
         from api.services.billing import credits
         
         # Get audio duration in seconds
-        tts_duration_seconds = len(audio) / 1000.0  # pydub length in ms → seconds
+        try:
+            tts_duration_seconds = len(audio) / 1000.0  # pydub length in ms → seconds
+        except Exception:
+            tts_duration_seconds = 0.0
         
         # Check if ElevenLabs was used (costs more)
         use_elevenlabs_flag = (body.provider == "elevenlabs")
@@ -265,8 +268,12 @@ async def create_tts_media(
 
     # Finalize usage actual seconds and optionally post a minute debit if confirmed path
     try:
-        ms = len(audio)  # pydub segment length in ms
-        seconds_actual = max(0.0, float(ms) / 1000.0)
+        try:
+            ms = len(audio)  # pydub segment length in ms
+            seconds_actual = max(0.0, float(ms) / 1000.0)
+        except Exception:
+            ms = 0
+            seconds_actual = 0.0
         if usage_id is not None:
             tts_quota.finalize_actual_seconds(session, usage_id, seconds_actual)
         # Determine charge only when client confirmed they were warned
@@ -302,6 +309,11 @@ async def create_tts_media(
     try:
         # Try model_dump() first (Pydantic v2 / SQLModel 0.0.14+)
         result = item.model_dump() if hasattr(item, 'model_dump') else item.dict()
+        # Expose both GCS path (filename) and local file path for tests/preview
+        result["local_filename"] = str(out_path)
+        result["gcs_filename"] = final_filename if isinstance(final_filename, str) and final_filename.startswith("gs://") else None
+        # Preserve filename as GCS URL when available, otherwise local filename
+        result["filename"] = final_filename if isinstance(final_filename, str) and final_filename.startswith("gs://") else filename
         log.info(f"[tts] Serialized to dict with keys: {list(result.keys())}")
         return result
     except Exception as e:

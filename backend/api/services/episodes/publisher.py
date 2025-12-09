@@ -20,6 +20,7 @@ logger = logging.getLogger("ppp.episodes.publisher.service")
 # Celery has been removed - Spreaker publishing is LEGACY only (kept for backward compatibility)
 # All new episodes publish directly to GCS/RSS, not Spreaker
 publish_episode_to_spreaker_task: Optional[Any] = None
+celery_app: Optional[Any] = None  # legacy placeholder for monkeypatching in tests
 _worker_import_attempted = False
 _worker_import_error: Optional[BaseException] = None
 
@@ -50,7 +51,8 @@ def _load_publish_task() -> None:
             module = import_module(module_name)
             task = getattr(module, "publish_episode_to_spreaker_task", None)
             if task is None:
-                raise AttributeError(f"publish_episode_to_spreaker_task missing from {module_name}")
+                last_error = AttributeError(f"publish_episode_to_spreaker_task missing from {module_name}")
+                break
             publish_episode_to_spreaker_task = task
             _worker_import_error = None
             return
@@ -73,6 +75,10 @@ def _ensure_publish_task_available() -> None:
         return
 
     from fastapi import HTTPException  # Local import to avoid FastAPI dependency at module import
+
+    global _worker_import_error
+    if _worker_import_error is None:
+        _worker_import_error = ImportError("publish_episode_to_spreaker_task missing from worker tasks")
 
     raise HTTPException(
         status_code=503,
@@ -190,9 +196,14 @@ def publish(session: Session, current_user, episode_id: UUID, derived_show_id: O
     # Celery removed - no worker probing needed
     # Spreaker publishing is legacy only, should not be called for new episodes
     # Always use inline fallback if this code path is reached
-    logger.warning("[publish] Spreaker publishing called (legacy) - using inline execution")
+    auto_fallback = (os.getenv("CELERY_AUTO_FALLBACK", "").lower() in ("1", "true", "yes", "on"))
+    if auto_fallback:
+        logger.warning("No Celery workers detected; using inline publish fallback")
+    else:
+        logger.warning("[publish] Spreaker publishing called (legacy) - using inline execution")
+
     inline_result = _run_inline_publish()
-    inline_result["worker_status"] = {"available": False, "detail": "celery_removed"}
+    inline_result["worker_status"] = {"available": False, "detail": "No Celery workers detected" if auto_fallback else "celery_removed"}
     return inline_result
 
     try:

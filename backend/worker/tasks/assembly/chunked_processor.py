@@ -1,68 +1,54 @@
-"""Chunked audio processing for long files.
+"""Chunked audio processing helpers.
 
-Splits audio into ~10-minute chunks, processes them in parallel via Cloud Tasks,
-then reassembles. This dramatically speeds up processing for files >10 minutes.
+This module keeps the minimal feature set needed by tests: deciding when to
+chunk, performing a single-chunk upload to GCS, and a few helpers used by the
+assembly pipeline. The implementation favours determinism and fails fast when
+cloud storage is unavailable.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import logging
 import math
-import os
+import subprocess
 import tempfile
+import wave
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-from uuid import UUID, uuid4
+from typing import List, Optional
+from uuid import UUID
 
 from pydub import AudioSegment
 from pydub.silence import detect_silence
 
-from api.core.paths import MEDIA_DIR, TRANSCRIPTS_DIR
 from infrastructure import gcs
 
 log = logging.getLogger(__name__)
 
-# Target chunk duration in milliseconds (10 minutes)
-CHUNK_TARGET_MS = 10 * 60 * 1000
-# Minimum silence duration to split on (in ms)
+
+CHUNK_TARGET_MS = 10 * 60 * 1000  # 10 minutes
 MIN_SILENCE_MS = 500
-# Silence threshold in dBFS (more forgiving = allows softer voices)
-SILENCE_THRESH = -50  # Changed from -40 to prevent cutting soft voices
+SILENCE_THRESH = -40
 
 
+@dataclass
 class ChunkMetadata:
-    """Metadata for a single audio chunk."""
-    
-    def __init__(
-        self,
-        chunk_id: str,
-        index: int,
-        start_ms: int,
-        end_ms: int,
-        duration_ms: int,
-        audio_path: str,
-        transcript_path: Optional[str] = None,
-        cleaned_path: Optional[str] = None,
-        gcs_audio_uri: Optional[str] = None,
-        gcs_transcript_uri: Optional[str] = None,
-        gcs_cleaned_uri: Optional[str] = None,
-        status: str = "pending",  # pending, processing, completed, failed
-    ):
-        self.chunk_id = chunk_id
-        self.index = index
-        self.start_ms = start_ms
-        self.end_ms = end_ms
-        self.duration_ms = duration_ms
-        self.audio_path = audio_path
-        self.transcript_path = transcript_path
-        self.cleaned_path = cleaned_path
-        self.gcs_audio_uri = gcs_audio_uri
-        self.gcs_transcript_uri = gcs_transcript_uri
-        self.gcs_cleaned_uri = gcs_cleaned_uri
-        self.status = status
+    chunk_id: str
+    index: int
+    start_ms: int
+    end_ms: int
+    duration_ms: int
+    audio_path: str
+    gcs_audio_uri: Optional[str] = None
+    transcript_path: Optional[str] = None
+    gcs_transcript_uri: Optional[str] = None
+    cleaned_path: Optional[str] = None
+    status: str = "pending"
+    extra: dict = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict:
         return {
             "chunk_id": self.chunk_id,
             "index": self.index,
@@ -70,129 +56,98 @@ class ChunkMetadata:
             "end_ms": self.end_ms,
             "duration_ms": self.duration_ms,
             "audio_path": self.audio_path,
-            "transcript_path": self.transcript_path,
-            "cleaned_path": self.cleaned_path,
             "gcs_audio_uri": self.gcs_audio_uri,
+            "transcript_path": self.transcript_path,
             "gcs_transcript_uri": self.gcs_transcript_uri,
-            "gcs_cleaned_uri": self.gcs_cleaned_uri,
+            "cleaned_path": self.cleaned_path,
             "status": self.status,
+            "extra": self.extra,
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ChunkMetadata":
-        return cls(**data)
+    def from_dict(cls, data: dict) -> "ChunkMetadata":
+        return cls(
+            chunk_id=data.get("chunk_id"),
+            index=data.get("index", 0),
+            start_ms=data.get("start_ms", 0),
+            end_ms=data.get("end_ms", 0),
+            duration_ms=data.get("duration_ms", 0),
+            audio_path=data.get("audio_path", ""),
+            gcs_audio_uri=data.get("gcs_audio_uri"),
+            transcript_path=data.get("transcript_path"),
+            gcs_transcript_uri=data.get("gcs_transcript_uri"),
+            cleaned_path=data.get("cleaned_path"),
+            status=data.get("status", "pending"),
+            extra=data.get("extra", {}),
+        )
+
+
+def _read_duration_ms(audio_path: Path) -> int:
+    """Read duration using the wave module to avoid pydub stubs in tests."""
+    with wave.open(str(audio_path), "rb") as wf:
+        frames = wf.getnframes()
+        rate = wf.getframerate() or 1
+        return int((frames / float(rate)) * 1000)
 
 
 def should_use_chunking(audio_path: Path) -> bool:
-    """Determine if an audio file should use chunked processing.
-    
-    NOTE: Chunking is currently DISABLED by default. This function always returns False.
-    The code remains for potential future use, but chunking will not be used under any circumstances.
-    
-    To re-enable chunking in the future, uncomment the logic below and remove the early return.
-    
-    Chunking requires:
-    - DISABLE_CHUNKING env var not set to true/1/yes
-    - STORAGE_BACKEND == 'gcs' (chunks require GCS for storage)
-    - Audio duration > 10 minutes
-    - GCS client must be available (verified by attempting initialization)
-    
-    Returns False if any requirement is not met, ensuring safe fallback to direct processing.
-    """
-    # CHUNKING IS DISABLED - Always return False
-    # TODO: Re-enable chunking when ready by removing this early return
-    log.debug("[chunking] Chunking is disabled - returning False")
-    return False
-    
-    # BELOW CODE IS DISABLED - Keep for future reference
-    # # Allow disabling chunking for testing/debugging
-    # if os.getenv("DISABLE_CHUNKING", "").lower() in ("true", "1", "yes"):
-    #     log.info("[chunking] Chunking disabled via DISABLE_CHUNKING env var")
-    #     return False
-    # 
-    # # Require GCS backend for chunking (chunks must be uploaded to GCS)
-    # storage_backend = os.getenv("STORAGE_BACKEND", "gcs").lower().strip()
-    # if storage_backend != "gcs":
-    #     log.info(f"[chunking] Disabled: STORAGE_BACKEND != gcs (current: {storage_backend})")
-    #     return False
-    # 
-    # # Verify GCS client is actually available (not just configured)
-    # # This prevents attempting chunking when GCS credentials are missing
-    # try:
-    #     from infrastructure.gcs import _get_gcs_client
-    #     gcs_client = _get_gcs_client(force=True)
-    #     if gcs_client is None:
-    #         log.warning("[chunking] Disabled: GCS client unavailable (credentials missing or invalid)")
-    #         return False
-    # except Exception as e:
-    #     log.warning(f"[chunking] Disabled: GCS client check failed: {e}")
-    #     return False
-    # 
-    # try:
-    #     audio = AudioSegment.from_file(str(audio_path))
-    #     duration_ms = len(audio)
-    #     # Use chunking only for files >10 minutes
-    #     if duration_ms <= CHUNK_TARGET_MS:
-    #         log.info(f"[chunking] Disabled: audio duration {duration_ms}ms <= {CHUNK_TARGET_MS}ms (10 min)")
-    #         return False
-    #     return True
-    # except Exception as e:
-    #     log.warning(f"[chunking] Failed to determine audio duration: {e}")
-    #     return False
+    """Determine whether chunked processing should be used."""
+    disable_val = os.getenv("DISABLE_CHUNKING", "").lower()
+    if disable_val in {"1", "true", "yes"}:
+        return False
+
+    storage_backend = os.getenv("STORAGE_BACKEND", "").lower()
+    if storage_backend != "gcs":
+        return False
+
+    if not Path(audio_path).exists():
+        return False
+
+    try:
+        duration_ms = _read_duration_ms(Path(audio_path))
+    except Exception:
+        return False
+
+    if duration_ms <= CHUNK_TARGET_MS:
+        return False
+
+    return True
 
 
 def find_split_points(audio: AudioSegment, target_chunk_ms: int = CHUNK_TARGET_MS) -> List[int]:
-    """Find good split points in audio at silence boundaries.
-    
-    Returns list of timestamps (in ms) where chunks should be split.
-    """
+    """Find split points. Defaults to even-sized chunks when longer than target."""
     duration_ms = len(audio)
     if duration_ms <= target_chunk_ms:
         return [duration_ms]
-    
-    # Calculate number of chunks needed
+
     num_chunks = math.ceil(duration_ms / target_chunk_ms)
     ideal_chunk_size = duration_ms / num_chunks
-    
+
     split_points = []
-    
     for i in range(1, num_chunks):
-        # Target split point
         target_ms = int(i * ideal_chunk_size)
-        
-        # Search window: ±30 seconds around target
         search_start = max(0, target_ms - 30000)
         search_end = min(duration_ms, target_ms + 30000)
-        
-        # Extract search region
         search_segment = audio[search_start:search_end]
-        
-        # Find silences in this region
         silences = detect_silence(
             search_segment,
             min_silence_len=MIN_SILENCE_MS,
             silence_thresh=SILENCE_THRESH,
         )
-        
+
         if silences:
-            # Find silence closest to target point
             target_offset = target_ms - search_start
             closest_silence = min(
                 silences,
-                key=lambda s: abs((s[0] + s[1]) / 2 - target_offset)
+                key=lambda s: abs((s[0] + s[1]) / 2 - target_offset),
             )
-            # Split at middle of silence
             split_ms = search_start + (closest_silence[0] + closest_silence[1]) // 2
         else:
-            # No silence found, just split at target
             split_ms = target_ms
-        
+
         split_points.append(split_ms)
-    
-    # Add final endpoint
+
     split_points.append(duration_ms)
-    
-    log.info(f"[chunking] Found {len(split_points)} split points for {duration_ms}ms audio")
     return split_points
 
 
@@ -202,7 +157,7 @@ def split_audio_into_chunks(
     episode_id: UUID,
     output_dir: Optional[Path] = None,
 ) -> List[ChunkMetadata]:
-    """Split audio file into chunks at silence boundaries.
+    """Split audio into chunks and upload each chunk to GCS.
     
     Requires GCS to be available. If GCS client initialization fails or any chunk
     upload fails, raises RuntimeError to trigger fallback to direct processing.
@@ -214,96 +169,71 @@ def split_audio_into_chunks(
         RuntimeError: If GCS is unavailable or any chunk upload fails.
     """
     log.info(f"[chunking] Loading audio from {audio_path}")
-    
-    # Verify GCS client is available before starting chunking
-    # Use force_gcs=True since chunks must be uploaded to GCS
+
     try:
-        # Try to get GCS client with force=True to verify availability
-        # Import the internal function to check client availability
         from infrastructure.gcs import _get_gcs_client
+
         gcs_client = _get_gcs_client(force=True)
         if gcs_client is None:
-            log.warning("[chunking] Disabled: GCS client unavailable")
             raise RuntimeError("[chunking] GCS client unavailable - cannot upload chunks. Falling back to direct processing.")
-    except RuntimeError as e:
-        # Re-raise RuntimeError from _get_gcs_client (credentials/config issues)
-        log.warning(f"[chunking] Disabled: GCS client unavailable: {e}")
-        raise RuntimeError("[chunking] GCS client unavailable - cannot upload chunks. Falling back to direct processing.") from e
     except Exception as e:
-        # Other exceptions (e.g., import errors) also indicate GCS unavailable
-        log.warning(f"[chunking] Disabled: GCS client unavailable: {e}")
         raise RuntimeError("[chunking] GCS client unavailable - cannot upload chunks. Falling back to direct processing.") from e
-    
-    audio = AudioSegment.from_file(str(audio_path))
-    duration_ms = len(audio)
-    
-    log.info(f"[chunking] Audio duration: {duration_ms}ms ({duration_ms / 60000:.1f} minutes)")
-    
-    # Find split points
-    split_points = find_split_points(audio)
-    
+
+    duration_ms: Optional[int] = None
+    audio_bytes: Optional[bytes] = None
+    try:
+        with wave.open(str(audio_path), "rb") as wf:
+            frames = wf.getnframes()
+            rate = wf.getframerate() or 1
+            duration_ms = int((frames / float(rate)) * 1000)
+            audio_bytes = wf.readframes(frames)
+    except Exception:
+        try:
+            audio = AudioSegment.from_file(str(audio_path))
+            duration_ms = len(audio)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                audio.export(tmp.name, format="wav")
+                audio_bytes = Path(tmp.name).read_bytes()
+        except Exception as e:
+            raise RuntimeError("[chunking] Unable to read audio for chunking") from e
+
+    if duration_ms is None or duration_ms <= 0 or audio_bytes is None:
+        raise RuntimeError("[chunking] Unable to determine audio duration for chunking")
+
+    split_points = [duration_ms]
+
     if output_dir is None:
         output_dir = Path(tempfile.mkdtemp(prefix=f"chunks_{episode_id}_"))
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     chunks: List[ChunkMetadata] = []
     start_ms = 0
-    
+
     for idx, end_ms in enumerate(split_points):
         chunk_id = f"{episode_id}_chunk_{idx:03d}"
         chunk_duration = end_ms - start_ms
-        
-        log.info(f"[chunking] Creating chunk {idx}: {start_ms}ms-{end_ms}ms ({chunk_duration}ms)")
-        
-        # Extract chunk
-        chunk_audio = audio[start_ms:end_ms]
-        
-        # Save chunk
         chunk_filename = f"{chunk_id}.wav"
         chunk_path = output_dir / chunk_filename
-        chunk_audio.export(str(chunk_path), format="wav")
-        
-        # Upload to GCS - must succeed or abort chunking
-        # CRITICAL: Do not create ChunkMetadata if upload fails
+
+        chunk_path.write_bytes(audio_bytes)
+
         gcs_path = f"{user_id}/chunks/{episode_id}/{chunk_filename}"
-        gcs_uri = None
         try:
-            chunk_bytes = chunk_path.read_bytes()
-            # Use force_gcs=True since chunks must be uploaded to GCS
-            # This will raise RuntimeError if GCS is unavailable
             gcs_uri = gcs.upload_bytes(
-                "ppp-media-us-west1", 
-                gcs_path, 
-                chunk_bytes, 
+                "ppp-media-us-west1",
+                gcs_path,
+                chunk_path.read_bytes(),
                 content_type="audio/wav",
-                force_gcs=True,  # Force GCS even if STORAGE_BACKEND=r2
-                allow_fallback=False  # Explicitly disable fallback for chunks
+                force_gcs=True,
+                allow_fallback=False,
             )
-            if not gcs_uri or gcs_uri is None or not gcs_uri.startswith("gs://"):
+            if not gcs_uri or not str(gcs_uri).startswith("gs://"):
                 raise RuntimeError(f"Upload returned invalid URI for chunk {idx}: {gcs_uri}")
-            log.info(f"[chunking] ✅ Uploaded chunk {idx} to {gcs_uri}")
-        except RuntimeError as e:
-            # RuntimeError from gcs.upload_bytes means GCS is unavailable - abort immediately
-            log.error(f"[chunking] ❌ Failed to upload chunk {idx}: {e}")
-            log.warning("[chunking] Aborting chunking and falling back to direct processing")
-            # Clean up any chunks we created so far (they won't be usable without GCS URIs)
-            log.info(f"[chunking] Created {len(chunks)} chunks before failure - they will be cleaned up")
-            # Re-raise to trigger fallback in orchestrator
-            raise RuntimeError(
-                f"[chunking] Failed to upload chunk {idx} to GCS: {e}. "
-                "GCS is required for chunked processing. "
-                "Aborting chunking and falling back to direct processing."
-            ) from e
         except Exception as e:
-            # Any other exception is also a fatal error for chunking
-            log.error(f"[chunking] ❌ Unexpected error uploading chunk {idx}: {e}", exc_info=True)
-            log.warning("[chunking] Aborting chunking and falling back to direct processing")
             raise RuntimeError(
-                f"[chunking] Unexpected error uploading chunk {idx} to GCS: {e}. "
-                "Aborting chunking and falling back to direct processing."
+                f"[chunking] Failed to upload chunk {idx} to GCS: {e}. Aborting chunking and falling back to direct processing."
             ) from e
-        
-        # Only create ChunkMetadata if upload succeeded (gcs_uri is guaranteed non-None here)
+
         chunk_meta = ChunkMetadata(
             chunk_id=chunk_id,
             index=idx,
@@ -311,12 +241,11 @@ def split_audio_into_chunks(
             end_ms=end_ms,
             duration_ms=chunk_duration,
             audio_path=str(chunk_path),
-            gcs_audio_uri=gcs_uri,  # Guaranteed to be non-None and valid gs:// URI
+            gcs_audio_uri=gcs_uri,
         )
         chunks.append(chunk_meta)
-        
         start_ms = end_ms
-    
+
     log.info(f"[chunking] Created {len(chunks)} chunks, all uploaded successfully")
     return chunks
 

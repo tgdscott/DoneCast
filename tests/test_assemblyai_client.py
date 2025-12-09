@@ -5,6 +5,7 @@ import builtins
 import types
 import pytest
 
+from api.services.transcription import assemblyai_client
 from api.services.transcription.assemblyai_client import (
     upload_audio,
     start_transcription,
@@ -66,10 +67,7 @@ def test_upload_audio_success(tmp_path, monkeypatch, caplog):
         assert all(isinstance(c, (bytes, bytearray)) for c in chunks)
         return FakeResponse(200, {"upload_url": "https://mock/upload/123"})
 
-    monkeypatch.setattr(
-        "api.services.transcription.assemblyai_client._get_session",
-        lambda: FakeSession(post=fake_post),
-    )
+    monkeypatch.setattr(assemblyai_client, "_get_session", lambda: FakeSession(post=fake_post))
 
     # Act
     out = upload_audio(audio, api_key="KEY", base_url="https://mock", log=[])
@@ -90,10 +88,7 @@ def test_upload_audio_failure(tmp_path, monkeypatch):
     def fake_post(url, headers=None, data=None):
         return FakeResponse(500, {"error": "oops"})
 
-    monkeypatch.setattr(
-        "api.services.transcription.assemblyai_client._get_session",
-        lambda: FakeSession(post=fake_post),
-    )
+    monkeypatch.setattr(assemblyai_client, "_get_session", lambda: FakeSession(post=fake_post))
 
     with pytest.raises(AssemblyAITranscriptionError) as ei:
         upload_audio(audio, api_key="K", base_url="https://mock", log=[])
@@ -110,10 +105,7 @@ def test_start_transcription_success(monkeypatch, caplog):
         captured["headers"] = dict(headers or {})
         return FakeResponse(200, {"id": "job_1", "status": "queued"})
 
-    monkeypatch.setattr(
-        "api.services.transcription.assemblyai_client._get_session",
-        lambda: FakeSession(post=fake_post),
-    )
+    monkeypatch.setattr(assemblyai_client, "_get_session", lambda: FakeSession(post=fake_post))
 
     out = start_transcription(
         upload_url="https://mock/upload/123",
@@ -139,10 +131,7 @@ def test_start_transcription_failure(monkeypatch):
     def fake_post(url, json=None, headers=None):
         return FakeResponse(400, {"error": "bad"})
 
-    monkeypatch.setattr(
-        "api.services.transcription.assemblyai_client._get_session",
-        lambda: FakeSession(post=fake_post),
-    )
+    monkeypatch.setattr(assemblyai_client, "_get_session", lambda: FakeSession(post=fake_post))
 
     with pytest.raises(AssemblyAITranscriptionError) as ei:
         start_transcription(
@@ -164,10 +153,7 @@ def test_get_transcription_success(monkeypatch, caplog):
         captured["headers"] = dict(headers or {})
         return FakeResponse(200, {"id": "job_1", "status": "completed", "text": "hello"})
 
-    monkeypatch.setattr(
-        "api.services.transcription.assemblyai_client._get_session",
-        lambda: FakeSession(get=fake_get),
-    )
+    monkeypatch.setattr(assemblyai_client, "_get_session", lambda: FakeSession(get=fake_get))
 
     out = get_transcription("job_1", api_key="KEY", base_url="https://mock", log=[])
     assert out["status"] == "completed"
@@ -181,10 +167,7 @@ def test_get_transcription_failure(monkeypatch):
     def fake_get(url, headers=None):
         return FakeResponse(503, {"error": "down"})
 
-    monkeypatch.setattr(
-        "api.services.transcription.assemblyai_client._get_session",
-        lambda: FakeSession(get=fake_get),
-    )
+    monkeypatch.setattr(assemblyai_client, "_get_session", lambda: FakeSession(get=fake_get))
 
     with pytest.raises(AssemblyAITranscriptionError) as ei:
         get_transcription("job_1", api_key="KEY", base_url="https://mock", log=[])

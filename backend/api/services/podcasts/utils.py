@@ -234,7 +234,10 @@ def build_distribution_item_payload(
             disabled_reason = host_def.get("rss_missing_help") or "Add your RSS feed first."
         elif not has_published_episodes:
             # RSS feed exists but no episodes - platforms will reject it
-            disabled_reason = "Publish at least one episode before submitting. Apple Podcasts and Spotify require episodes with audio."
+            disabled_reason = (
+                "Publish at least one episode before submitting. "
+                "Apple Podcasts and Spotify require episodes with audio in your RSS feed."
+            )
     
     if requires_spreaker_show and not context.get("spreaker_show_id"):
         disabled_reason = host_def.get("spreaker_missing_help") or "Link your show to Spreaker first."

@@ -131,7 +131,7 @@ class Settings(BaseSettings):
     # CRITICAL: Only change TERMS_VERSION when terms content actually changes!
     # Changing this forces ALL users to re-accept terms. See TERMS_VERSION_MANAGEMENT_CRITICAL.md
     # If you change this, run: python migrate_terms_version.py (if you don't need re-acceptance)
-    TERMS_VERSION: str = "2025-10-22"
+    TERMS_VERSION: str = "2025-11-02"
     # Default legal / marketing URLs (rebranded from getpodcastplus.com -> podcastplusplus.com -> donecast.com)
     TERMS_URL: str = "https://app.donecast.com/terms"
 

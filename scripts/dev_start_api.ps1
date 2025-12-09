@@ -202,7 +202,7 @@ try {
 
   $env:CELERY_EAGER = if ($env:CELERY_EAGER) { $env:CELERY_EAGER } else { '1' }
 
-  & $pythonExe -m uvicorn api.app:app --host $apiHost --port $apiPort --env-file $envFile
+  & $pythonExe -m uvicorn api.app:app --host $apiHost --port $apiPort --env-file $envFile --log-config none --no-access-log
 } finally {
   Pop-Location
 }

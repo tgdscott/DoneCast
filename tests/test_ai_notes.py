@@ -5,7 +5,7 @@ def test_notes_parsing_and_nonempty_description(monkeypatch):
     mod = importlib.import_module('api.services.ai_content.generators.notes')
 
     # Return a simple formatted response
-    def fake_generate(prompt, max_tokens=None):
+    def fake_generate(prompt, max_tokens=None, system_instruction=None):
         return (
             "Description: This episode dives into testing AI notes.\n\n"
             "Bullets:\n"

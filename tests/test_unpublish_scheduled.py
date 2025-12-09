@@ -26,6 +26,9 @@ def test_unpublish_cancels_scheduled(monkeypatch):
         def __init__(self):
             self.id = uuid.uuid4()
             self.spreaker_access_token = 'token'
+            # trial fields to satisfy trial_service guards
+            self.trial_started_at = None
+            self.trial_expires_at = None
 
     class StubSess:
         def add(self, _):

@@ -22,6 +22,7 @@ def _delegate_orchestrator(
     podcast_id: str,
     intents: dict | None = None,
     skip_charge: bool = False,
+    force_auphonic: bool | None = None,
 ):
     """Import the heavy orchestrator lazily and delegate execution to it."""
 
@@ -41,6 +42,7 @@ def _delegate_orchestrator(
         podcast_id=podcast_id,
         intents=intents,
         skip_charge=skip_charge,
+        force_auphonic=force_auphonic,
     )
 
 
@@ -56,6 +58,7 @@ def orchestrate_create_podcast_episode(
     podcast_id: str,
     intents: dict | None = None,
     skip_charge: bool = False,
+    force_auphonic: bool | None = None,
 ):
     return _delegate_orchestrator(
         episode_id=episode_id,
@@ -68,6 +71,7 @@ def orchestrate_create_podcast_episode(
         podcast_id=podcast_id,
         intents=intents,
         skip_charge=skip_charge,
+        force_auphonic=force_auphonic,
     )
 
 
@@ -86,6 +90,7 @@ if celery_app is not None:
         intents: dict | None = None,
         *,
         skip_charge: bool = False,
+        force_auphonic: bool | None = None,
     ):
         """Celery task wrapper delegating to the orchestrator helper."""
 
@@ -100,6 +105,7 @@ if celery_app is not None:
             podcast_id=podcast_id,
             intents=intents,
             skip_charge=skip_charge,
+            force_auphonic=force_auphonic,
         )
 else:  # pragma: no cover - exercised indirectly via inline import
 
@@ -115,6 +121,7 @@ else:  # pragma: no cover - exercised indirectly via inline import
         intents: dict | None = None,
         *,
         skip_charge: bool = False,
+        force_auphonic: bool | None = None,
     ):
         return _delegate_orchestrator(
             episode_id=episode_id,
@@ -127,8 +134,19 @@ else:  # pragma: no cover - exercised indirectly via inline import
             podcast_id=podcast_id,
             intents=intents,
             skip_charge=skip_charge,
+            force_auphonic=force_auphonic,
         )
 
 
-__all__ = ["create_podcast_episode", "orchestrate_create_podcast_episode"]
+try:
+    from .transcribe_episode import transcribe_episode  # type: ignore
+except Exception:
+    transcribe_episode = None  # type: ignore
+
+
+__all__ = [
+    "create_podcast_episode",
+    "orchestrate_create_podcast_episode",
+    "transcribe_episode",
+]
 
