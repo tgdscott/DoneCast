@@ -1,31 +1,20 @@
 import logging
 from typing import Optional, Any
 
+import redis
 from api.core.config import settings
 
 log = logging.getLogger("api.core.redis_client")
 
-# Defensive redis import - fail gracefully if redis not installed
-try:
-    import redis
-    REDIS_AVAILABLE = True
-except ImportError:
-    redis = None  # type: ignore[assignment]
-    REDIS_AVAILABLE = False
-
-_redis_client: Optional[Any] = None  # Any because redis.Redis may not be available
+_redis_client: Optional[redis.Redis] = None
 
 
-def get_redis_client() -> Optional[Any]:
+def get_redis_client() -> Optional[redis.Redis]:
     """
     Lazy-initializes and returns a Redis client.
-    Returns None if redis module not available or connection fails (fail-open strategy).
+    Returns None if connection fails (fail-open strategy).
     """
     global _redis_client
-
-    if not REDIS_AVAILABLE:
-        log.warning("Redis module not installed - Redis features unavailable")
-        return None
 
     if _redis_client is not None:
         return _redis_client
