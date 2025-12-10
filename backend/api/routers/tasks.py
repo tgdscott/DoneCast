@@ -57,9 +57,9 @@ async def _dispatch_transcription(
     filename: str, 
     user_id: str | None,
     request_id: str | None, 
-        audio_quality_label: str | None = None
-        audio_quality_metrics: dict | None = None
-        use_auphonic: bool | None = None
+    audio_quality_label: str | None = None,
+    audio_quality_metrics: dict | None = None,
+    use_auphonic: bool | None = None,
     *, 
     suppress_errors: bool,
     guest_ids: list[str] | None = None
