@@ -41,10 +41,15 @@ async def upload_media_files(
     current_user: User = Depends(get_current_user),
     files: List[UploadFile] = File(...),
     friendly_names: Optional[str] = Form(None),
-    use_auphonic: Optional[bool] = Form(False),  # CRITICAL: Sole source of truth for transcription routing
+    use_auphonic: Optional[bool] = Form(None),  # Deprecated: ignored. Routing via decision helper + ALWAYS_USE_ADVANCED_PROCESSING setting
     guest_ids: Optional[str] = Form(None) # JSON string of guest IDs
 ):
-    """Upload one or more media files with optional friendly names."""
+    """Upload one or more media files with optional friendly names.
+    
+    ROUTING NOTE: The 'use_auphonic' form parameter is deprecated and ignored.
+    Auphonic routing is now determined entirely by the decision helper, which
+    considers: audio quality metrics, user tier, and ALWAYS_USE_ADVANCED_PROCESSING setting.
+    """
     created_items = []
     names = json.loads(friendly_names) if friendly_names else []
     guests_list = json.loads(guest_ids) if guest_ids else []
@@ -369,25 +374,75 @@ async def upload_media_files(
             user_id=current_user.id,
             category=category,
             expires_at=expires_at,
-            use_auphonic=bool(use_auphonic or False),  # CRITICAL: Sole source of truth for transcription routing
+            use_auphonic=False,  # Will be set by decision helper below
             guest_ids=guests_list if category == MediaCategory.main_content else None
         )
         session.add(media_item)
         created_items.append(media_item)
-        log.info("[upload.storage] MediaItem created: id=%s, filename='%s', use_auphonic=%s", media_item.id, media_item.filename, media_item.use_auphonic)
+        log.info("[upload.storage] MediaItem created: id=%s, filename='%s'", media_item.id, media_item.filename)
 
         # Kick off immediate background transcription for main content uploads
         try:
             if category == MediaCategory.main_content:
-                # Use Cloud Tasks to schedule transcription
-                # Pass the GCS URL (final_filename) so transcription can download from GCS if needed
-                from infrastructure.tasks_client import enqueue_http_task  # type: ignore
-                task_result = enqueue_http_task("/api/tasks/transcribe", {
-                    "filename": final_filename,  # Use GCS URL instead of just filename
-                    "user_id": str(current_user.id),  # Pass user_id for tier-based routing
-                    "guest_ids": guests_list # Pass guest IDs for speaker identification
-                })
-                log.info("Transcription task enqueued for %s: %s", final_filename, task_result)
+                # Analyze audio immediately after upload and before transcription routing
+                try:
+                    from api.services.audio.quality import analyze_audio_file
+                    from api.services.auphonic_helper import decide_audio_processing
+                    import json as _json
+
+                    metrics = analyze_audio_file(final_filename)
+                    audio_label = metrics.get("quality_label") if isinstance(metrics, dict) else None
+
+                    # Decide routing based on quality, tier, and operator setting
+                    # NOTE: use_auphonic form parameter is ignored here; decision is authoritative
+                    try:
+                        from api.services.trial_service import get_effective_tier
+                        user_tier = get_effective_tier(current_user)
+                    except Exception:
+                        user_tier = None
+
+                    decision = decide_audio_processing(
+                        audio_quality_label=audio_label,
+                        current_user_tier=user_tier,
+                        media_item_override_use_auphonic=None,  # Never override; let decision matrix + tier + config decide
+                    )
+
+                    final_use_auphonic = bool(decision.get("use_auphonic", False))
+                    
+                    # Persist metrics and decision in new dedicated columns (durable, queryable)
+                    try:
+                        media_item.audio_quality_metrics_json = _json.dumps(metrics) if metrics else None
+                        media_item.audio_quality_label = audio_label
+                        media_item.audio_processing_decision_json = _json.dumps(decision) if decision else None
+                        media_item.use_auphonic = final_use_auphonic
+                        log.info("[upload.quality] MediaItem %s: label=%s, use_auphonic=%s, reason=%s", 
+                                 media_item.id, audio_label, final_use_auphonic, decision.get("reason"))
+                    except Exception as persist_err:
+                        log.warning("[upload.quality] Failed to persist metrics for %s: %s", media_item.id, persist_err)
+
+                    # Use Cloud Tasks to schedule transcription and include analysis+decision
+                    from infrastructure.tasks_client import enqueue_http_task  # type: ignore
+                    task_payload = {
+                        "filename": final_filename,
+                        "user_id": str(current_user.id),
+                        "guest_ids": guests_list,
+                        "audio_quality_label": audio_label,
+                        "audio_quality_metrics": metrics,
+                        "use_auphonic": final_use_auphonic,
+                    }
+                    task_result = enqueue_http_task("/api/tasks/transcribe", task_payload)
+                    log.info("[upload.transcribe] Task enqueued for %s: job_id=%s (use_auphonic=%s, label=%s, reason=%s)", 
+                             final_filename, task_result, final_use_auphonic, audio_label, decision.get("reason"))
+                except Exception as analysis_err:
+                    # If analysis or decision fails, fall back to original behavior (enqueue without metrics)
+                    log.warning("[upload.quality] Analysis/decision failed for %s: %s", final_filename, analysis_err, exc_info=True)
+                    from infrastructure.tasks_client import enqueue_http_task  # type: ignore
+                    task_result = enqueue_http_task("/api/tasks/transcribe", {
+                        "filename": final_filename,
+                        "user_id": str(current_user.id),
+                        "guest_ids": guests_list
+                    })
+                    log.info("[upload.transcribe] Task enqueued (fallback, no analysis): %s", task_result)
         except Exception as e:
             # Non-fatal; upload should still succeed
             # But log the error so we can diagnose why transcription isn't starting
@@ -424,6 +479,66 @@ async def upload_media_files(
     
     for item in created_items:
         session.refresh(item)
+    
+    # Send completion emails for main_content uploads with quality assessment
+    if category == MediaCategory.main_content and current_user.email:
+        try:
+            from api.services.upload_completion_mailer import send_upload_success_email
+            
+            for item in created_items:
+                # Extract quality info from persistent columns
+                audio_label = item.audio_quality_label
+                processing_decision = None
+                if item.audio_processing_decision_json:
+                    try:
+                        import json as _json
+                        processing_decision = _json.loads(item.audio_processing_decision_json)
+                    except Exception:
+                        pass
+                
+                processing_type = "advanced" if item.use_auphonic else "standard"
+                
+                # Extract metrics if available
+                audio_metrics = None
+                if item.audio_quality_metrics_json:
+                    try:
+                        import json as _json
+                        audio_metrics = _json.loads(item.audio_quality_metrics_json)
+                    except Exception:
+                        pass
+                
+                # Send email (non-blocking; don't fail upload if email fails)
+                try:
+                    email_sent = send_upload_success_email(
+                        user=current_user,
+                        media_item=item,
+                        quality_label=audio_label,
+                        processing_type=processing_type,
+                        audio_quality_metrics=audio_metrics,
+                    )
+                    if email_sent:
+                        log.info(
+                            "[upload.email] Success notification sent: user=%s media_id=%s quality=%s",
+                            current_user.email,
+                            item.id,
+                            audio_label,
+                        )
+                    else:
+                        log.warning(
+                            "[upload.email] Success notification rejected by mailer: user=%s media_id=%s",
+                            current_user.email,
+                            item.id,
+                        )
+                except Exception as email_err:
+                    log.exception(
+                        "[upload.email] Exception sending success email: user=%s media_id=%s error=%s",
+                        current_user.email,
+                        item.id,
+                        email_err,
+                    )
+        except Exception as e:
+            log.error("[upload.email] Failed to send completion emails: %s", e, exc_info=True)
+            # Don't fail the upload - email is non-critical
     
     return created_items
 

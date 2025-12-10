@@ -18,6 +18,7 @@ import { makeApi } from '@/lib/apiClient';
  * @param {Function} options.setCurrentStep - Step navigation setter
  * @param {Function} options.refreshUsage - Refresh usage/quota callback
  * @param {number} options.audioDurationSec - Audio duration for quota checks
+ * @param {boolean} options.transcriptReady - Whether a transcript exists for the main audio
  * @param {Object} options.minutesPrecheck - Minutes quota precheck result
  * @param {boolean} options.minutesPrecheckPending - Whether precheck is in progress
  * @param {Function} options.setMinutesDialog - Minutes dialog setter
@@ -33,6 +34,7 @@ export default function useEpisodeAssembly({
   token,
   selectedTemplate,
   uploadedFilename,
+  transcriptReady = false,
   episodeDetails,
   ttsValues,
   flubberCutsMs,
@@ -486,7 +488,8 @@ export default function useEpisodeAssembly({
   const missingTitle = !episodeDetails?.title || episodeDetails.title.trim() === '';
   const missingEpisodeNumber = !episodeDetails?.episodeNumber || episodeDetails.episodeNumber.toString().trim() === '';
   const blockingQuota = quotaExceeded;
-  const canProceedToStep5 = !missingTitle && !missingEpisodeNumber && !blockingQuota;
+  // Require a ready transcript before allowing the user to proceed to Step 5
+  const canProceedToStep5 = !missingTitle && !missingEpisodeNumber && !blockingQuota && !!transcriptReady;
 
   return {
     // State

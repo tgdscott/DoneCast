@@ -155,6 +155,7 @@ export default function usePodcastCreator({
     token,
     selectedTemplate: stepNav.selectedTemplate,
     uploadedFilename: fileUpload.uploadedFilename,
+    transcriptReady: fileUpload.transcriptReady,
     episodeDetails: metadata.episodeDetails,
     ttsValues: voiceConfig.ttsValues,
     flubberCutsMs: aiFeatures.flubberCutsMs,

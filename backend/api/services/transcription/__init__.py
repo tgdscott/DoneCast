@@ -135,6 +135,7 @@ def _store_media_transcript_metadata(
     key: Optional[str] = None,
     gcs_uri: Optional[str] = None,
     gcs_url: Optional[str] = None,
+    words: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     """Persist transcript metadata for a media upload for future reuse."""
 
@@ -157,6 +158,9 @@ def _store_media_transcript_metadata(
         payload["gcs_json"] = gcs_uri
     if gcs_url:
         payload.setdefault("gcs_url", gcs_url)
+    # If words provided explicitly, include them in the payload so DB-only retrieval is possible
+    if words and isinstance(words, list) and len(words) > 0:
+        payload.setdefault("words", words)
     
     if not payload:
         return
@@ -604,6 +608,7 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None, guest_id
                         key=gcs_key if gcs_bucket else None,
                         gcs_uri=gcs_uri,
                         gcs_url=None,
+                        words=transcript_words,
                     )
                     
                     # Update MediaTranscript with words if not already included
@@ -818,55 +823,69 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None, guest_id
             gcs_uri = None
             bucket = None
             key = None
+            # Use a resilient upload helper that will attempt the configured storage helper
+            # and fall back to direct google.cloud.storage upload with retries.
+            def _upload_transcript_to_gcs(bucket_name: str, key_name: str, data_bytes: bytes) -> Optional[str]:
+                """Attempt to upload bytes to the configured storage.
+
+                Returns a GCS URI string (gs://bucket/key) on success, or None on failure.
+                """
+                # First, try the existing storage abstraction if available
+                try:
+                    from infrastructure import storage  # type: ignore
+                    storage_url = storage.upload_bytes(
+                        bucket_name,
+                        key_name,
+                        data_bytes,
+                        content_type="application/json; charset=utf-8",
+                    )
+                    if storage_url:
+                        if storage_url.startswith("gs://"):
+                            return storage_url
+                        # If storage abstraction returned non-gs URL, still try the direct client
+                except Exception as primary_exc:
+                    logging.warning("[transcription] storage.upload_bytes failed: %s", primary_exc, exc_info=True)
+
+                # Fallback: use google.cloud.storage directly with small retries
+                try:
+                    from google.cloud import storage as gcs_storage
+                    client = gcs_storage.Client()
+                    bucket = client.bucket(bucket_name)
+                    blob = bucket.blob(key_name)
+
+                    # Try upload with retries
+                    attempts = 3
+                    for attempt in range(1, attempts + 1):
+                        try:
+                            blob.upload_from_string(data_bytes, content_type="application/json; charset=utf-8")
+                            return f"gs://{bucket_name}/{key_name}"
+                        except Exception as e:
+                            logging.warning("[transcription] Direct GCS upload attempt %d failed: %s", attempt, e)
+                            if attempt == attempts:
+                                raise
+                except Exception as gcs_exc:
+                    logging.error("[transcription] Direct GCS upload failed: %s", gcs_exc, exc_info=True)
+                    return None
+
             try:
                 bucket = _resolve_transcripts_bucket()
-                from infrastructure import storage  # type: ignore
-
                 key = f"transcripts/{safe_stem}.json"
-                storage_url = storage.upload_bytes(
-                    bucket,
-                    key,
-                    payload.encode("utf-8"),
-                    content_type="application/json; charset=utf-8",
-                )
-                
-                # CRITICAL: Production transcripts (JSON) MUST be stored in GCS, not R2
-                # Production transcripts are used during episode construction (flubber, intern mode, word timestamps)
-                # Final formatted transcripts (.txt) are uploaded to R2 separately after assembly completes
-                # See docs/STORAGE_STRATEGY.md for full architectural details
-                if storage_url:
-                    if storage_url.startswith("gs://"):
-                        gcs_uri = storage_url
-                        gcs_url = f"https://storage.googleapis.com/{bucket}/{key}"
-                    else:
-                        # ERROR: Production transcripts should not be in R2
-                        # If storage_url is not gs://, something is wrong
-                        logging.error(
-                            "[transcription] DATA INTEGRITY ERROR: Production transcript storage returned non-GCS URL: %s. "
-                            "Production transcripts (JSON) MUST be stored in GCS (not R2) because they are used during episode construction. "
-                            "Final formatted transcripts (.txt) are uploaded to R2 separately after assembly. "
-                            "Storage backend should be GCS, not R2.",
-                            storage_url
-                        )
-                        # Fallback: construct GCS URI from bucket/key
-                        gcs_uri = f"gs://{bucket}/{key}"
-                        gcs_url = f"https://storage.googleapis.com/{bucket}/{key}"
+                uploaded = _upload_transcript_to_gcs(bucket, key, payload.encode("utf-8"))
+                if uploaded:
+                    gcs_uri = uploaded
+                    gcs_url = f"https://storage.googleapis.com/{bucket}/{key}"
                 else:
                     gcs_uri = None
-                
-                # DIAGNOSTIC: Confirm cloud storage upload worked
-                logging.info("🟢 [STEP_9_COMPLETE] Cloud storage upload SUCCESS - gcs_uri='%s', gcs_url='%s'", gcs_uri, gcs_url)
+                    gcs_url = None
+
+                logging.info("🟢 [STEP_9_COMPLETE] Cloud storage upload result - gcs_uri='%s', gcs_url='%s'", gcs_uri, gcs_url)
             except Exception as upload_exc:
-                # CRITICAL FIX: Don't fail transcription if cloud storage upload fails
-                # Local transcript is already saved, and recovery logic can retry upload later
                 logging.error(
-                    "[transcription] ⚠️ Failed to upload transcript to cloud storage (will use local copy): %s",
+                    "[transcription] ⚠️ Failed to upload transcript to cloud storage after retries: %s",
                     upload_exc,
                     exc_info=True,
                 )
-                # DIAGNOSTIC: Log that cloud storage upload failed
-                logging.warning("🔴 [STEP_9_FAILED] Cloud storage upload FAILED - continuing with bucket=None, key=None, gcs_uri=None")
-                # Don't raise - allow transcription to complete with local transcript
+                logging.warning("🔴 [STEP_9_FAILED] Cloud storage upload FAILED - continuing with local copy and DB metadata save")
 
             # CRITICAL FIX: Use original_filename (GCS URI) not local_name (downloaded file)
             # This ensures database lookups match the filename stored in MediaItem
@@ -878,6 +897,7 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None, guest_id
             try:
                 # CRITICAL: Include words in metadata payload for database-only retrieval
                 # This ensures transcripts can be found even if GCS is unavailable
+                # Ensure we persist words into DB metadata too (so transcripts are findable even if GCS later disappears)
                 _store_media_transcript_metadata(
                     original_filename,  # ← FIX: Was 'filename' before, use original GCS URI
                     stem=stem,
@@ -886,6 +906,7 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None, guest_id
                     key=key,
                     gcs_uri=gcs_uri,
                     gcs_url=gcs_url,
+                    words=words,
                 )
                 # After saving metadata, update it with words if not already included
                 try:
@@ -992,35 +1013,68 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None, guest_id
                 exc_info=True
             )
 
-        # CRITICAL: Mark MediaItem as transcript_ready BEFORE notifying watchers
-        # This ensures files become available for assembly even without watchers
+        # CRITICAL: Mark MediaItem as transcript_ready ONLY if transcript persisted
+        # We consider persistence successful when either:
+        # - A GCS URI/url exists for the transcript (gcs_uri/gcs_url), OR
+        # - A MediaTranscript record exists and contains "words" in its metadata
         try:
             from api.core.database import get_session
             from api.models.podcast import MediaItem
+            from api.models.transcription import MediaTranscript
             from sqlmodel import select
-            
+
             session = next(get_session())
+
+            # Determine whether transcript metadata contains words
+            transcript_has_words = False
+            try:
+                candidates = _candidate_filenames(original_filename)
+                if original_filename not in candidates:
+                    candidates.insert(0, original_filename)
+                record = session.exec(
+                    select(MediaTranscript).where(MediaTranscript.filename.in_(candidates))
+                ).first()
+                if record:
+                    try:
+                        meta = json.loads(record.transcript_meta_json or "{}")
+                        if isinstance(meta.get("words"), list) and len(meta.get("words")) > 0:
+                            transcript_has_words = True
+                    except Exception:
+                        transcript_has_words = False
+            except Exception:
+                # Non-fatal - we'll rely on gcs_uri/gcs_url if DB check fails
+                transcript_has_words = False
+
+            can_mark_ready = bool(gcs_uri or gcs_url or transcript_has_words)
+
             media_item = session.exec(
                 select(MediaItem).where(MediaItem.filename == filename)
             ).first()
-            
+
             if media_item:
-                # Mark as transcript_ready regardless of content (even empty/instrumental)
-                # This allows users to proceed with assembly and see what was transcribed
-                media_item.transcript_ready = True
-                
-                session.add(media_item)
-                session.commit()
-                
-                if not words or len(words) == 0:
-                    logging.warning("[transcription] ⚠️ Empty transcript (instrumental/no speech) for %s", filename)
+                if can_mark_ready:
+                    media_item.transcript_ready = True
+                    session.add(media_item)
+                    session.commit()
+
+                    if transcript_has_words:
+                        logging.info("[transcription] ✅ Marked MediaItem %s as transcript_ready (words=%d)", media_item.id, len(words))
+                    else:
+                        logging.info("[transcription] ✅ Marked MediaItem %s as transcript_ready (gcs present)", media_item.id)
                 else:
-                    logging.info("[transcription] ✅ Marked MediaItem %s as transcript_ready (words=%d)", 
-                                 media_item.id, len(words))
+                    # DO NOT mark as ready if we have no durable transcript
+                    logging.warning(
+                        "[transcription] ⚠️ Transcript NOT persisted for %s - not marking MediaItem %s as ready (gcs_uri=%s, gcs_url=%s, words_in_db=%s)",
+                        filename,
+                        media_item.id,
+                        bool(gcs_uri),
+                        bool(gcs_url),
+                        transcript_has_words,
+                    )
             else:
                 logging.warning("[transcription] ⚠️ Could not find MediaItem for filename=%s", filename)
         except Exception as mark_err:
-            logging.error("[transcription] ❌ Failed to mark MediaItem as ready: %s", mark_err, exc_info=True)
+            logging.error("[transcription] ❌ Failed to determine/mark MediaItem transcript readiness: %s", mark_err, exc_info=True)
             # Don't fail the entire transcription if this fails
 
         # ========== CHARGE CREDITS FOR TRANSCRIPTION (AFTER SUCCESS) ==========

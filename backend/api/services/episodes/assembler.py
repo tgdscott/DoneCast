@@ -19,6 +19,8 @@ from api.models.podcast import Episode
 from api.models.settings import AppSetting
 from api.services.billing import usage as usage_svc
 from api.services.transcription import load_media_transcript_metadata_for_filename
+from api.services.auphonic_helper import decide_audio_processing, should_use_auphonic_for_media
+from api.services.audio.quality import analyze_audio_file
 
 # Celery has been removed - all assembly uses Cloud Tasks or inline execution
 # No longer need to import create_podcast_episode or celery_app
@@ -999,7 +1001,70 @@ def assemble_or_queue(
             meta["episode_details"] = episode_details
         if intents:
             meta["intents"] = intents
-        meta["use_auphonic"] = bool(use_auphonic)
+        # Determine Auphonic usage via centralized helper
+        try:
+            # Determine audio quality label: prefer explicit episode_details, then read from uploaded MediaItem
+            audio_quality_label = None
+            audio_quality_metrics = None
+            try:
+                if isinstance(episode_details, dict):
+                    audio_quality_label = episode_details.get("audio_quality_label") or episode_details.get("aq_label")
+
+                # If no label provided, try to load from MediaItem's new persistent columns
+                if not audio_quality_label:
+                    try:
+                        from api.core.database import get_session
+                        from api.models.podcast import MediaItem
+                        from sqlmodel import select
+
+                        session = next(get_session())
+                        filename_search = str(main_content_filename).split("/")[-1] if "/" in str(main_content_filename) else str(main_content_filename)
+                        media_item = session.exec(
+                            select(MediaItem)
+                            .where(MediaItem.user_id == getattr(ep, 'user_id', None))
+                            .where(MediaItem.filename.contains(filename_search))
+                            .order_by(MediaItem.created_at.desc())
+                        ).first()
+                        if media_item:
+                            # PREFERRED: Read from new dedicated columns (durable, queryable)
+                            audio_quality_label = getattr(media_item, 'audio_quality_label', None)
+                            if getattr(media_item, 'audio_quality_metrics_json', None):
+                                import json as _json
+                                try:
+                                    audio_quality_metrics = _json.loads(media_item.audio_quality_metrics_json)
+                                    meta.setdefault("audio_quality_metrics", {})
+                                    meta["audio_quality_metrics"] = audio_quality_metrics
+                                except Exception:
+                                    pass
+                            # FALLBACK: Check old auphonic_metadata blob for backward compatibility
+                            if not audio_quality_label and getattr(media_item, 'auphonic_metadata', None):
+                                try:
+                                    meta_blob = _json.loads(media_item.auphonic_metadata or "{}")
+                                    metrics = meta_blob.get("audio_quality_metrics") or meta_blob.get("audio_quality")
+                                    if isinstance(metrics, dict):
+                                        audio_quality_label = metrics.get("quality_label") or metrics.get("label")
+                                        meta.setdefault("audio_quality_metrics", {})
+                                        meta["audio_quality_metrics"] = metrics
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+
+                # Allow explicit flag passed into function to take precedence
+                decision = decide_audio_processing(
+                    audio_quality_label=audio_quality_label,
+                    current_user_tier=tier,
+                    media_item_override_use_auphonic=(True if use_auphonic else None),
+                )
+            final_use_auphonic = bool(decision.get("use_auphonic", False))
+            meta["use_auphonic"] = final_use_auphonic
+            # Also store the decision metadata for observability
+            meta.setdefault("audio_processing_decision", {})
+            meta["audio_processing_decision"]["decision"] = decision.get("decision")
+            meta["audio_processing_decision"]["reason"] = decision.get("reason")
+        except Exception:
+            # Fallback to provided flag
+            meta["use_auphonic"] = bool(use_auphonic)
         meta = _merge_transcript_metadata_from_upload(session, meta, str(main_content_filename))
         ep.meta_json = _json.dumps(meta)
         session.add(ep)

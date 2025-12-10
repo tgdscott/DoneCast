@@ -59,8 +59,10 @@ def configure_middleware(app: FastAPI, settings: Settings) -> None:
     # Security and Request ID middleware
     from api.middleware.request_id import RequestIDMiddleware
     from api.middleware.security_headers import SecurityHeadersMiddleware
+    from api.middleware.sentry import SentryContextMiddleware
     app.add_middleware(RequestIDMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(SentryContextMiddleware)
     
     # Response logging middleware for CORS debugging
     class ResponseLoggingMiddleware(BaseHTTPMiddleware):

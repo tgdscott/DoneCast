@@ -59,8 +59,15 @@ class MediaItem(SQLModel, table=True):
     transcription_error: Optional[str] = Field(default=None, description="Error message if transcription failed or detected instrumental/silence")
     
     # CRITICAL: Sole source of truth for transcription routing
-    # Set when file is uploaded based on checkbox. Determines Auphonic vs AssemblyAI.
-    use_auphonic: bool = Field(default=False, description="True if Auphonic transcription was requested (set by upload checkbox)")
+    # Set by decision helper based on audio quality, user tier, and config. Determines Auphonic vs AssemblyAI.
+    use_auphonic: bool = Field(default=False, description="True if Auphonic transcription should be used (set by decision helper)")
+    
+    # Audio quality analysis (persisted from analyzer.analyze_audio_file)
+    audio_quality_metrics_json: Optional[str] = Field(default=None, description="JSON string with analyzer metrics: LUFS, SNR, dnsmos, duration, etc.")
+    audio_quality_label: Optional[str] = Field(default=None, description="Audio quality tier: good, slightly_bad, fairly_bad, very_bad, incredibly_bad, abysmal, unknown")
+    
+    # Audio processing decision (persisted from auphonic_helper.decide_audio_processing)
+    audio_processing_decision_json: Optional[str] = Field(default=None, description="JSON string: {use_auphonic: bool, decision: string, reason: string}")
     
     # Auphonic integration fields
     auphonic_processed: bool = Field(default=False, description="True if Auphonic processed this file")

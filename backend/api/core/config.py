@@ -98,6 +98,17 @@ class Settings(BaseSettings):
     AUDIO_NORMALIZE_TARGET_LUFS: float = Field(default=-16.0, description="Target loudness in LUFS (podcast standard)")
     AUDIO_NORMALIZE_TP_CEILING_DBTP: float = Field(default=-1.0, description="True-peak ceiling in dBTP")
 
+    # --- Audio processing decision matrix ---
+    # JSON string mapping quality labels to processing suggestions.
+    # Example: '{"slightly_bad": "standard", "fairly_bad": "ask", "very_bad": "advanced", "incredibly_bad": "advanced"}'
+    AUDIO_PROCESSING_DECISION_MATRIX: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional JSON string that maps audio-quality labels to processing decisions. "
+            "Decisions are one of: 'standard', 'advanced', 'ask'. If not provided, sensible defaults are used."
+        ),
+    )
+
     # --- Spreaker API ---
     SPREAKER_API_TOKEN: str = ""
     SPREAKER_CLIENT_ID: str = ""
@@ -122,6 +133,10 @@ class Settings(BaseSettings):
     PODCAST_WEBSITE_BASE_DOMAIN: str = "donecast.com"
     PODCAST_WEBSITE_GCS_BUCKET: str = "ppp-websites-us-west1"
     PODCAST_WEBSITE_CUSTOM_DOMAIN_MIN_TIER: str = "pro"
+
+    # --- Operator Overrides ---
+    # When True, always use advanced processing (Auphonic) regardless of quality analysis
+    ALWAYS_USE_ADVANCED_PROCESSING: bool = Field(default=False, description="If true, force advanced/Auphonic processing for all uploads")
     
     # --- Cloud CDN (for faster media delivery and lower bandwidth costs) ---
     CDN_ENABLED: bool = True  # Set to False to bypass CDN and use direct GCS URLs
@@ -277,6 +292,31 @@ class Settings(BaseSettings):
                 )
 
         return self
+
+    def get_audio_processing_matrix(self) -> dict:
+        """Return the audio processing decision matrix as a dict.
+
+        Reads `AUDIO_PROCESSING_DECISION_MATRIX` (if set) and parses JSON.
+        Falls back to a conservative default mapping when unset or invalid.
+        """
+        raw = (self.AUDIO_PROCESSING_DECISION_MATRIX or "").strip()
+        if raw:
+            try:
+                import json as _json
+                parsed = _json.loads(raw)
+                if isinstance(parsed, dict):
+                    return {str(k): str(v) for k, v in parsed.items()}
+            except Exception:
+                log.warning("[config] Invalid AUDIO_PROCESSING_DECISION_MATRIX; falling back to defaults")
+
+        # Conservative default mapping
+        return {
+            "slightly_bad": "standard",
+            "fairly_bad": "ask",
+            "very_bad": "advanced",
+            "incredibly_bad": "advanced",
+            "abysmal": "advanced",
+        }
 
     # pydantic-settings v2 uses model_config; keep fallback Config for older versions
     # Use absolute paths to ensure we find .env files regardless of working directory

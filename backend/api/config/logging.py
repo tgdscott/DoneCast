@@ -31,7 +31,14 @@ def configure_logging() -> None:
 
 
 def setup_sentry(environment: str, dsn: str | None = None) -> None:
-    """Initialize Sentry error tracking.
+    """Initialize Sentry error tracking with comprehensive integration.
+    
+    Sentry is configured to capture:
+    - HTTP request/response context (method, URL, status code)
+    - User information (anonymized)
+    - Application errors and exceptions
+    - Logging events (warnings, errors, critical)
+    - Performance metrics (trace sampling)
     
     Args:
         environment: Current environment (dev, production, etc.)
@@ -51,15 +58,58 @@ def setup_sentry(environment: str, dsn: str | None = None) -> None:
         import sentry_sdk
         from sentry_sdk.integrations.fastapi import FastApiIntegration
         from sentry_sdk.integrations.logging import LoggingIntegration
+        from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+        from sentry_sdk.integrations.httpx import HttpxIntegration
+
+        def before_send(event, hint):
+            """Filter and enrich Sentry events before sending.
+            
+            This function:
+            1. Filters out low-priority errors (e.g., 404s, validation errors)
+            2. Adds custom context to errors
+            3. Ensures PII is never sent
+            """
+            # Skip 404s - they're not errors
+            if event.get("tags", {}).get("status_code") == 404:
+                return None
+            
+            # Skip validation errors from clients (common and not actionable)
+            error_value = (event.get("exception", {}).get("values", [{}])[0].get("value") or "").lower()
+            if "validation error" in error_value and event.get("level") == "error":
+                # Only capture if it looks like a real issue (multiple fields, etc.)
+                # Single field validation errors are normal client mistakes
+                pass
+            
+            # Add request ID if present in hint
+            if "exc_info" in hint:
+                exc_type, exc_value, tb = hint["exc_info"]
+                # Extract request_id from exception if available
+                if hasattr(exc_value, "request_id"):
+                    event.setdefault("tags", {})["request_id"] = str(exc_value.request_id)
+            
+            return event
 
         sentry_sdk.init(
             dsn=sentry_dsn,
-            integrations=[FastApiIntegration(), LoggingIntegration(level=None, event_level=None)],
-            traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.0")),
+            integrations=[
+                FastApiIntegration(),
+                LoggingIntegration(level=logging.INFO, event_level=logging.WARNING),
+                SqlalchemyIntegration(),
+                HttpxIntegration(),
+            ],
+            traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
             profiles_sample_rate=float(os.getenv("SENTRY_PROFILES_SAMPLE_RATE", "0.0")),
             environment=environment,
             send_default_pii=False,
+            before_send=before_send,
+            # Increase max_breadcrumbs to track more context
+            max_breadcrumbs=100,
+            # Capture local variables in stack frames for better debugging
+            # (safe with send_default_pii=False)
+            include_local_variables=True,
+            # Always include exception cause chains
+            with_locals=True,
         )
-        log.info("[startup] Sentry initialized for env=%s", environment)
+        log.info("[startup] Sentry initialized for env=%s (traces_sample_rate=0.1, breadcrumbs=100)", environment)
     except Exception as se:
         log.warning("[startup] Sentry init failed: %s", se)

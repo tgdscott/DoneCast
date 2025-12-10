@@ -57,6 +57,9 @@ async def _dispatch_transcription(
     filename: str, 
     user_id: str | None,
     request_id: str | None, 
+        audio_quality_label: str | None = None
+        audio_quality_metrics: dict | None = None
+        use_auphonic: bool | None = None
     *, 
     suppress_errors: bool,
     guest_ids: list[str] | None = None
@@ -72,10 +75,72 @@ async def _dispatch_transcription(
         log.info("event=tasks.transcribe.done filename=%s request_id=%s", filename, request_id)
     except FileNotFoundError as err:
         log.warning("event=tasks.transcribe.not_found filename=%s request_id=%s", filename, request_id)
+        
+        # Report as bug if user context available
+        if user_id:
+            try:
+                from api.core.database import get_session
+                from api.models.user import User
+                from api.services.bug_reporter import report_transcription_failure
+                from sqlmodel import select
+                
+                session = next(get_session())
+                user = session.exec(select(User).where(User.id == user_id)).first()
+                
+                if user:
+                    report_transcription_failure(
+                        session=session,
+                        user=user,
+                        media_filename=filename,
+                        transcription_service="AssemblyAI" if not use_auphonic else "Auphonic",
+                        error_message="Audio file not found in storage",
+                        request_id=request_id,
+                    )
+            except Exception as report_err:
+                log.warning("Failed to report transcription FileNotFoundError as bug: %s", report_err)
+        
         if not suppress_errors:
             raise err
     except Exception as exc:  # pragma: no cover - defensive
         log.exception("event=tasks.transcribe.error filename=%s err=%s", filename, exc)
+        
+        # Report as bug - ALWAYS report transcription failures
+        if user_id:
+            try:
+                from api.core.database import get_session
+                from api.models.user import User
+                from api.services.bug_reporter import report_transcription_failure
+                from api.services.upload_completion_mailer import send_upload_failure_email
+                from sqlmodel import select
+                
+                session = next(get_session())
+                user = session.exec(select(User).where(User.id == user_id)).first()
+                
+                if user:
+                    # Report bug to tracking system
+                    report_transcription_failure(
+                        session=session,
+                        user=user,
+                        media_filename=filename,
+                        transcription_service="AssemblyAI" if not use_auphonic else "Auphonic",
+                        error_message=str(exc),
+                        request_id=request_id,
+                    )
+                    
+                    # Send user notification email
+                    try:
+                        send_upload_failure_email(
+                            user=user,
+                            filename=filename,
+                            error_message="Failed to transcribe your audio. This has been reported to our support team.",
+                            error_code="TRANSCRIPTION_FAILED",
+                            request_id=request_id,
+                        )
+                    except Exception as email_err:
+                        log.warning("Failed to send transcription failure email: %s", email_err)
+            except Exception as report_err:
+                log.warning("Failed to report transcription error as bug: %s", report_err)
+        
         if not suppress_errors:
             raise exc
 

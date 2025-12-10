@@ -211,11 +211,29 @@ export default function useFileUpload({
         } catch {}
       }
 
-      const ready = !!item.transcript_ready;
-      setTranscriptReady(ready);
-      transcriptReadyRef.current = ready;
-      const path = ready ? item.transcript_path || null : null;
-      setTranscriptPath(path);
+      // Verify transcript readiness with a fresh server-side check to avoid stale flags
+      const api = apiClient;
+      let freshReady = !!item.transcript_ready;
+      let freshPath = freshReady ? item.transcript_path || null : null;
+      if (api && item.id) {
+        try {
+          const fresh = await api.get(`/api/media/${item.id}`);
+          freshReady = !!fresh?.transcript_ready;
+          freshPath = freshReady ? (fresh.transcript_path || null) : null;
+        } catch (err) {
+          // If the fetch fails, assume transcript is not ready to be safe.
+          freshReady = false;
+          freshPath = null;
+        }
+      }
+
+      setTranscriptReady(freshReady);
+      transcriptReadyRef.current = freshReady;
+      setTranscriptPath(freshPath);
+
+      if (!freshReady) {
+        try { setStatusMessage('Transcript not yet available for selected file.'); } catch (_) {}
+      }
 
       if (onPreuploadSelect) {
         onPreuploadSelect(item);

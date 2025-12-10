@@ -166,7 +166,8 @@ export default function StepSelectPreprocessed({
     if (typeof onNext === 'function') onNext();
   };
 
-  const canContinue = !!selected;
+  // Block continue if selected item is not truly ready, or if any error/404/403 is present
+  const canContinue = !!selected && selected.transcript_ready && !loading && !minutesPrecheckPending && !minutesBlocking && !minutesPrecheckError && !selected.transcription_error && !selected.audio_404 && !selected.audio_403;
 
   const formatDurationSafe = typeof formatDuration === 'function' ? formatDuration : () => null;
   const parseNumber = (value) => {
@@ -457,8 +458,19 @@ export default function StepSelectPreprocessed({
         </Button>
         <div className="flex flex-col items-end gap-1">
           <Button
-            onClick={handleContinue}
+            onClick={() => {
+              if (!canContinue) {
+                window?.toast?.({
+                  variant: 'destructive',
+                  title: 'Cannot continue',
+                  description: 'This audio is missing a transcript, has an error, or is not available. Please resolve before proceeding.'
+                });
+                return;
+              }
+              handleContinue();
+            }}
             disabled={!canContinue || loading || minutesPrecheckPending || minutesBlocking}
+            variant={!canContinue ? 'destructive' : 'default'}
           >
             Continue
           </Button>

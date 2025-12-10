@@ -235,10 +235,14 @@ export default function PodcastCreator({
     }
   }, [creatorMode, currentStep, templates, selectedTemplate, handleTemplateSelect]);
 
+  // Defensive: If selectedPreuploadItem is missing transcript, audio, or has any error, block progression
   const selectedPreuploadItem = React.useMemo(
     () => {
       if (!selectedPreupload) return null;
-      return preuploadedItems.find((item) => item.filename === selectedPreupload) || null;
+      const item = preuploadedItems.find((item) => item.filename === selectedPreupload) || null;
+      if (!item) return null;
+      if (!item.transcript_ready || item.transcription_error || item.audio_404 || item.audio_403) return null;
+      return item;
     },
     [preuploadedItems, selectedPreupload]
   );
@@ -506,7 +510,13 @@ export default function PodcastCreator({
             onCoverModeChange={setCoverMode}
             onRemoveCover={clearCover}
             onBack={() => setCurrentStep(3)}
-            onSkip={() => setCurrentStep(5)}
+            onSkip={() => {
+              if (!transcriptReady) {
+                toast({ variant: 'destructive', title: 'Transcript required', description: 'Please wait for the transcript to be generated before continuing.' });
+                return;
+              }
+              setCurrentStep(5);
+            }}
             onContinue={async () => {
               try {
                 if (episodeDetails.coverArt && coverNeedsUpload) {
@@ -515,7 +525,11 @@ export default function PodcastCreator({
               } catch (e) {
                 // Error toast is handled inside handleUploadProcessedCover; proceed anyway
               } finally {
-                setCurrentStep(5);
+                if (!transcriptReady) {
+                  toast({ variant: 'destructive', title: 'Transcript required', description: 'Please wait for the transcript to be generated before continuing.' });
+                } else {
+                  setCurrentStep(5);
+                }
               }
             }}
           />
