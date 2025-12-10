@@ -109,7 +109,7 @@ def attach_routes(app: FastAPI) -> None:
                     parsed = urlparse(o)
                     host = (parsed.hostname or "").lower()
                     if host:
-                        for suffix in ("podcastplusplus.com", "getpodcastplus.com"):
+                        for suffix in ("donecast.com", "podcastplusplus.com", "getpodcastplus.com"):
                             if host == suffix or host.endswith(f".{suffix}"):
                                 chosen = f"{parsed.scheme}://{parsed.netloc}"
                                 break
