@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import List, Optional
+from typing import List, Optional, Any
 from uuid import UUID
 from datetime import datetime, timezone
 
@@ -406,4 +406,168 @@ async def get_feedback_detail(
         "user_action": feedback.user_action,
         "browser_info": feedback.browser_info,
         "error_logs": feedback.error_logs,
+    }
+
+
+# Sentry Event Models
+class SentryEventResponse(BaseModel):
+    """Sentry error event for admin view."""
+    id: str
+    issue_id: str
+    title: str
+    error_type: str
+    message: str
+    level: str  # fatal, error, warning, info, debug
+    environment: str
+    user_email: Optional[str] = None
+    user_count: Optional[int] = None
+    first_seen: datetime
+    last_seen: datetime
+    event_count: int
+    status: str  # unresolved, resolved, ignored
+    url: str  # Link to Sentry dashboard
+
+
+class SentryStatsResponse(BaseModel):
+    """Statistics on Sentry error events."""
+    total_unresolved: int
+    critical_errors: int  # fatal + error
+    warnings: int
+    most_recent: Optional[datetime] = None
+    api_available: bool  # Whether Sentry API is configured
+
+
+@router.get("/sentry/events", response_model=list[SentryEventResponse])
+async def list_sentry_events(
+    current_user: User = Depends(get_current_user),
+    limit: int = Query(20, le=100, description="Max results to return"),
+    hours_back: int = Query(24, description="How many hours back to search"),
+    severity: Optional[str] = Query(None, regex="^(fatal|error|warning|info|debug)$"),
+) -> list[SentryEventResponse]:
+    """List recent Sentry error events.
+    
+    Admin only. Show production errors captured by Sentry in real-time.
+    Requires SENTRY_ORG_TOKEN environment variable to be configured.
+    
+    Args:
+        limit: Number of events to return (1-100)
+        hours_back: How far back to search in Sentry history
+        severity: Filter by error level (optional)
+    """
+    _check_admin(current_user)
+    
+    from api.services.sentry_client import get_sentry_client
+    
+    client = get_sentry_client()
+    
+    # Fetch issues from Sentry
+    issues = await client.get_recent_issues(
+        limit=limit,
+        hours_back=hours_back,
+        severity_filter=severity,
+    )
+    
+    events = []
+    for issue in issues:
+        # Get affected user count
+        user_count = await client.get_user_affected_count(issue.get("id", ""))
+        
+        events.append(SentryEventResponse(
+            id=issue.get("id", ""),
+            issue_id=issue.get("id", ""),
+            title=issue.get("title", "Unknown Error"),
+            error_type=issue.get("type", "error"),
+            message=issue.get("metadata", {}).get("type", "") or issue.get("title", ""),
+            level=issue.get("level", "error"),
+            environment=issue.get("environment", "unknown"),
+            user_email=None,  # Sentry doesn't provide individual user emails at issue level
+            user_count=user_count or issue.get("userCount"),
+            first_seen=datetime.fromisoformat(issue["firstSeen"].replace("Z", "+00:00")),
+            last_seen=datetime.fromisoformat(issue["lastSeen"].replace("Z", "+00:00")),
+            event_count=issue.get("count", 0),
+            status=issue.get("status", "unresolved"),
+            url=issue.get("permalink", f"https://sentry.io/organizations/donecast/issues/{issue.get('id', '')}/"),
+        ))
+    
+    log.info(f"Admin {current_user.email} listed {len(events)} Sentry events")
+    return events
+
+
+@router.get("/sentry/stats", response_model=SentryStatsResponse)
+async def get_sentry_stats(
+    current_user: User = Depends(get_current_user),
+) -> SentryStatsResponse:
+    """Get statistics on Sentry error events.
+    
+    Admin only. Quick overview of production errors in Sentry.
+    """
+    _check_admin(current_user)
+    
+    from api.services.sentry_client import get_sentry_client
+    
+    client = get_sentry_client()
+    
+    # Fetch recent issues
+    issues = await client.get_recent_issues(limit=100, hours_back=24)
+    
+    if not issues:
+        return SentryStatsResponse(
+            total_unresolved=0,
+            critical_errors=0,
+            warnings=0,
+            most_recent=None,
+            api_available=bool(client.auth_token),
+        )
+    
+    # Count by severity
+    critical_count = sum(1 for i in issues if i.get("level") in ("fatal", "error"))
+    warning_count = sum(1 for i in issues if i.get("level") == "warning")
+    
+    # Get most recent
+    most_recent = None
+    if issues:
+        try:
+            most_recent = datetime.fromisoformat(
+                issues[0]["lastSeen"].replace("Z", "+00:00")
+            )
+        except (KeyError, ValueError):
+            pass
+    
+    return SentryStatsResponse(
+        total_unresolved=len(issues),
+        critical_errors=critical_count,
+        warnings=warning_count,
+        most_recent=most_recent,
+        api_available=bool(client.auth_token),
+    )
+
+
+@router.get("/sentry/events/{issue_id}", response_model=dict[str, Any])
+async def get_sentry_event_details(
+    issue_id: str,
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Get detailed information about a specific Sentry issue.
+    
+    Admin only. Fetch detailed error context, affected users, recent events.
+    """
+    _check_admin(current_user)
+    
+    from api.services.sentry_client import get_sentry_client
+    
+    client = get_sentry_client()
+    
+    # Fetch issue details and recent events
+    issue_details = await client.get_issue_details(issue_id)
+    recent_events = await client.get_issue_events(issue_id, limit=10)
+    
+    if not issue_details:
+        raise HTTPException(status_code=404, detail=f"Issue {issue_id} not found in Sentry")
+    
+    log.info(f"Admin {current_user.email} viewed Sentry issue {issue_id}")
+    
+    return {
+        "issue": issue_details,
+        "recent_events": recent_events,
+        "event_count": len(recent_events),
     }
