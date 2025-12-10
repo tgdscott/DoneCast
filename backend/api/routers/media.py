@@ -405,6 +405,7 @@ async def upload_media_files(
                         audio_quality_label=audio_label,
                         current_user_tier=user_tier,
                         media_item_override_use_auphonic=None,  # Never override; let decision matrix + tier + config decide
+                        user_quality_threshold=getattr(current_user, 'audio_processing_threshold_label', None),
                     )
 
                     final_use_auphonic = bool(decision.get("use_auphonic", False))
@@ -1028,7 +1029,8 @@ async def presign_upload(
     # Generate unique object path in user's media directory
     # IMPORTANT: Match the path structure used by standard upload
     # main_content goes to media_uploads/, others go to media/{category}/
-    user_id = current_user.id.hex
+    # Handle both UUID objects and string IDs
+    user_id = str(current_user.id).replace('-', '') if isinstance(current_user.id, str) else current_user.id.hex
     file_ext = Path(request.filename).suffix.lower()
     unique_name = f"{uuid.uuid4().hex}{file_ext}"
     
