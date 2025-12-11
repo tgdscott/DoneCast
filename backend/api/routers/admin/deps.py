@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import logging
-import time
+
 from typing import Optional
 
 from fastapi import Depends, HTTPException, status
-from sqlalchemy.exc import OperationalError
+from fastapi import Depends, HTTPException, status
 from sqlmodel import Session
 
 from api.routers.auth import get_current_user
@@ -51,24 +51,4 @@ def get_current_superadmin_user(current_user: User = Depends(get_current_user)) 
     return current_user
 
 
-def commit_with_retry(session: Session, attempts: int = 3, base_sleep: float = 0.2) -> None:
-    """Commit the session with retries for transient database errors (PostgreSQL)."""
-    last_err: Optional[Exception] = None
-    for attempt in range(attempts):
-        try:
-            session.commit()
-            return
-        except OperationalError as exc:  # pragma: no cover - env specific
-            msg = str(exc).lower()
-            # PostgreSQL transient errors (connection issues, deadlocks, etc.)
-            if any(keyword in msg for keyword in ["connection", "deadlock", "timeout", "locked"]):
-                last_err = exc
-                time.sleep(base_sleep * (attempt + 1))
-                continue
-            raise
-        except Exception as exc:  # pragma: no cover
-            last_err = exc
-            break
-    if last_err is not None:
-        log.error("Admin commit_with_retry failed after %s attempts", attempts)
-        raise last_err
+

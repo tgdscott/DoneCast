@@ -213,6 +213,13 @@ async def transcribe_endpoint(request: Request, x_tasks_auth: str | None = Heade
     if not filename:
         raise HTTPException(status_code=400, detail="filename required")
 
+    # transcribe_media_file requires a user_id to determine routing (Auphonic vs AssemblyAI).
+    # In dev we allow missing user_id (local dispatch may be used), but in non-dev environments
+    # we should fail fast with a clear error rather than allowing a 500 later in the worker.
+    if not user_id and not _IS_DEV:
+        log.warning("event=tasks.transcribe.missing_user_id filename=%s request_id=%s", filename, request.headers.get("x-request-id"))
+        raise HTTPException(status_code=400, detail="user_id required for transcription")
+
     request_id = request.headers.get("x-request-id")
 
     if _IS_DEV:

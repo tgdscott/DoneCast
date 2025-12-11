@@ -1205,183 +1205,183 @@ export default function PodcastPlusDashboard() {
             )}
             <div className="space-y-6">
               {/* Create Episode Card */}
-                <Card className="shadow-sm border border-gray-200">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-lg">Create Episode</CardTitle>
-                    <CardDescription>Create a new episode from your shows & templates.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                    <div className="flex items-center gap-3 text-sm">
-                      <button
-                        onClick={() => setCurrentView('podcastManager')}
-                        className="flex flex-col items-center gap-1 px-4 py-2 rounded-full border border-gray-300 hover:border-gray-400 hover:bg-gray-50 transition-colors cursor-pointer"
-                        title="View all shows"
-                      >
-                        <div className="text-[11px] tracking-wide text-gray-500">Shows</div>
-                        <div className="font-semibold text-gray-800">{podcasts.length}</div>
-                      </button>
-                      <button
-                        onClick={() => setCurrentView('episodeHistory')}
-                        className="flex flex-col items-center gap-1 px-4 py-2 rounded-full border border-gray-300 hover:border-gray-400 hover:bg-gray-50 transition-colors cursor-pointer"
-                        title="View all episodes"
-                      >
-                        <div className="text-[11px] tracking-wide text-gray-500">Episodes</div>
-                        <div className="font-semibold text-gray-800">{stats?.total_episodes ?? '–'}</div>
-                      </button>
-                    </div>
-                    <div className="flex flex-col gap-2 w-full md:w-auto">
-                      {canCreateEpisode && (
-                        <>
+              <Card className="shadow-sm border border-gray-200">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg">Create Episode</CardTitle>
+                  <CardDescription>Create a new episode from your shows & templates.</CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                  <div className="flex items-center gap-3 text-sm">
+                    <button
+                      onClick={() => setCurrentView('podcastManager')}
+                      className="flex flex-col items-center gap-1 px-4 py-2 rounded-full border border-gray-300 hover:border-gray-400 hover:bg-gray-50 transition-colors cursor-pointer"
+                      title="View all shows"
+                    >
+                      <div className="text-[11px] tracking-wide text-gray-500">Shows</div>
+                      <div className="font-semibold text-gray-800">{podcasts.length}</div>
+                    </button>
+                    <button
+                      onClick={() => setCurrentView('episodeHistory')}
+                      className="flex flex-col items-center gap-1 px-4 py-2 rounded-full border border-gray-300 hover:border-gray-400 hover:bg-gray-50 transition-colors cursor-pointer"
+                      title="View all episodes"
+                    >
+                      <div className="text-[11px] tracking-wide text-gray-500">Episodes</div>
+                      <div className="font-semibold text-gray-800">{stats?.total_episodes ?? '–'}</div>
+                    </button>
+                  </div>
+                  <div className="flex flex-col gap-2 w-full md:w-auto">
+                    {canCreateEpisode && (
+                      <>
+                        <Button
+                          className="flex-1 md:flex-none"
+                          variant="default"
+                          title="Record or upload new audio"
+                          data-tour-id="dashboard-record-upload"
+                          onClick={async () => {
+                            setCreatorMode('standard');
+                            setWasRecorded(false);
+                            // Refresh preuploaded items before showing options
+                            if (!preuploadLoading && preuploadItems.length === 0) {
+                              try { await requestPreuploadRefresh(); } catch { }
+                            }
+                            setCurrentView('episodeStart');
+                          }}
+                        >
+                          <Mic className="w-4 h-4 mr-2" />
+                          Record or Upload Audio
+                        </Button>
+                        {preuploadItems.some((item) => item?.transcript_ready) && (
                           <Button
+                            variant="green"
                             className="flex-1 md:flex-none"
-                            variant="default"
-                            title="Record or upload new audio"
-                            data-tour-id="dashboard-record-upload"
+                            title="Assemble episode from ready audio"
+                            data-tour-id="dashboard-assemble-episode"
                             onClick={async () => {
-                              setCreatorMode('standard');
+                              setCreatorMode('preuploaded');
                               setWasRecorded(false);
-                              // Refresh preuploaded items before showing options
+                              setPreselectedMainFilename(null);
+                              setPreselectedTranscriptReady(false);
+                              resetPreuploadFetchedFlag();
                               if (!preuploadLoading && preuploadItems.length === 0) {
                                 try { await requestPreuploadRefresh(); } catch { }
                               }
-                              setCurrentView('episodeStart');
+                              setCurrentView('createEpisode');
                             }}
                           >
-                            <Mic className="w-4 h-4 mr-2" />
-                            Record or Upload Audio
+                            <Library className="w-4 h-4 mr-2" />
+                            Assemble New Episode
                           </Button>
-                          {preuploadItems.some((item) => item?.transcript_ready) && (
-                            <Button
-                              variant="green"
-                              className="flex-1 md:flex-none"
-                              title="Assemble episode from ready audio"
-                              data-tour-id="dashboard-assemble-episode"
-                              onClick={async () => {
-                                setCreatorMode('preuploaded');
-                                setWasRecorded(false);
-                                setPreselectedMainFilename(null);
-                                setPreselectedTranscriptReady(false);
-                                resetPreuploadFetchedFlag();
-                                if (!preuploadLoading && preuploadItems.length === 0) {
-                                  try { await requestPreuploadRefresh(); } catch { }
-                                }
-                                setCurrentView('createEpisode');
-                              }}
-                            >
-                              <Library className="w-4 h-4 mr-2" />
-                              Assemble New Episode
-                            </Button>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
               {/* Recent Activity & Listening Metrics */}
               <Card className="shadow-sm border border-gray-200">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-lg">Recent Activity</CardTitle>
-                    <CardDescription>Production pace and listening at a glance.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="text-sm text-gray-700 space-y-4">
-                    <div className="grid md:grid-cols-2 gap-3">
-                      <div className="p-3 rounded border bg-white flex flex-col gap-1">
-                        <span className="text-[11px] tracking-wide text-gray-500">Episodes published in last 30 days</span>
-                        <span className="text-lg font-semibold">{stats?.episodes_last_30d ?? '–'}</span>
-                      </div>
-                      <div className="p-3 rounded border bg-white flex flex-col gap-1">
-                        <span className="text-[11px] tracking-wide text-gray-500">Episodes scheduled</span>
-                        <span className="text-lg font-semibold">{typeof stats?.upcoming_scheduled === 'number' ? stats.upcoming_scheduled : '–'}</span>
-                      </div>
-                      <div className="p-3 rounded border bg-white flex flex-col gap-1">
-                        <span className="text-[11px] tracking-wide text-gray-500">Last episode published</span>
-                        <span className="text-sm font-medium">{formatRelative(stats?.last_published_at)}</span>
-                      </div>
-                      <div className="p-3 rounded border bg-white flex flex-col gap-1">
-                        <span className="text-[11px] tracking-wide text-gray-500">Last assembly result</span>
-                        <span className={`text-sm font-medium ${stats?.last_assembly_status === 'error' ? 'text-red-600' : stats?.last_assembly_status === 'success' ? 'text-green-600' : stats?.last_assembly_status === 'pending' ? 'text-amber-600' : 'text-gray-600'}`}>{formatAssemblyStatus(stats?.last_assembly_status)}</span>
-                      </div>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg">Recent Activity</CardTitle>
+                  <CardDescription>Production pace and listening at a glance.</CardDescription>
+                </CardHeader>
+                <CardContent className="text-sm text-gray-700 space-y-4">
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <div className="p-3 rounded border bg-white flex flex-col gap-1">
+                      <span className="text-[11px] tracking-wide text-gray-500">Episodes published in last 30 days</span>
+                      <span className="text-lg font-semibold">{stats?.episodes_last_30d ?? '–'}</span>
                     </div>
-                    {(typeof stats?.plays_last_30d === 'number' || typeof stats?.plays_7d === 'number' || typeof stats?.plays_365d === 'number' || typeof stats?.plays_all_time === 'number' || typeof stats?.show_total_plays === 'number' || (Array.isArray(stats?.top_episodes) && stats.top_episodes.length > 0)) && (
-                      <div className="space-y-3">
-                        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Listening Stats</div>
+                    <div className="p-3 rounded border bg-white flex flex-col gap-1">
+                      <span className="text-[11px] tracking-wide text-gray-500">Episodes scheduled</span>
+                      <span className="text-lg font-semibold">{typeof stats?.upcoming_scheduled === 'number' ? stats.upcoming_scheduled : '–'}</span>
+                    </div>
+                    <div className="p-3 rounded border bg-white flex flex-col gap-1">
+                      <span className="text-[11px] tracking-wide text-gray-500">Last episode published</span>
+                      <span className="text-sm font-medium">{formatRelative(stats?.last_published_at)}</span>
+                    </div>
+                    <div className="p-3 rounded border bg-white flex flex-col gap-1">
+                      <span className="text-[11px] tracking-wide text-gray-500">Last assembly result</span>
+                      <span className={`text-sm font-medium ${stats?.last_assembly_status === 'error' ? 'text-red-600' : stats?.last_assembly_status === 'success' ? 'text-green-600' : stats?.last_assembly_status === 'pending' ? 'text-amber-600' : 'text-gray-600'}`}>{formatAssemblyStatus(stats?.last_assembly_status)}</span>
+                    </div>
+                  </div>
+                  {(typeof stats?.plays_last_30d === 'number' || typeof stats?.plays_7d === 'number' || typeof stats?.plays_365d === 'number' || typeof stats?.plays_all_time === 'number' || typeof stats?.show_total_plays === 'number' || (Array.isArray(stats?.top_episodes) && stats.top_episodes.length > 0)) && (
+                    <div className="space-y-3">
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Listening Stats</div>
 
-                        {/* Time Period Cards */}
-                        <div className="grid md:grid-cols-2 gap-3">
-                          {typeof stats?.plays_7d === 'number' && (
-                            <div className="p-3 rounded border bg-white flex flex-col gap-1">
-                              <span className="text-[11px] tracking-wide text-gray-500">Downloads Last 7 Days</span>
-                              <span className="text-lg font-semibold">{stats.plays_7d.toLocaleString()}</span>
-                            </div>
-                          )}
-                          {typeof stats?.plays_30d === 'number' && (
-                            <div className="p-3 rounded border bg-white flex flex-col gap-1">
-                              <span className="text-[11px] tracking-wide text-gray-500">Downloads Last 30 Days</span>
-                              <span className="text-lg font-semibold">{stats.plays_30d.toLocaleString()}</span>
-                            </div>
-                          )}
-                          {typeof stats?.plays_365d === 'number' && (
-                            <div className="p-3 rounded border bg-white flex flex-col gap-1">
-                              <span className="text-[11px] tracking-wide text-gray-500">Downloads Last Year</span>
-                              <span className="text-lg font-semibold">{stats.plays_365d.toLocaleString()}</span>
-                            </div>
-                          )}
-                          {typeof stats?.plays_all_time === 'number' && (
-                            <div className="p-3 rounded border bg-white flex flex-col gap-1">
-                              <span className="text-[11px] tracking-wide text-gray-500">All-Time Downloads</span>
-                              <span className="text-lg font-semibold">{stats.plays_all_time.toLocaleString()}</span>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Top Episodes Section */}
-                        {Array.isArray(stats?.top_episodes) && stats.top_episodes.length > 0 && (
-                          <div className="space-y-2">
-                            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-3">Top Episodes (All-Time)</div>
-                            {stats.top_episodes.slice(0, 3).map((ep, idx) => (
-                              <div key={ep.episode_id || idx} className="p-3 rounded border bg-gradient-to-r from-blue-50 to-white flex items-center justify-between">
-                                <div className="flex items-center gap-2 flex-1 min-w-0">
-                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">#{idx + 1}</Badge>
-                                  <span className="text-[11px] tracking-wide text-gray-700 font-medium truncate" title={ep.title}>{ep.title}</span>
-                                </div>
-                                <div className="text-right ml-3">
-                                  <div className="text-base font-bold text-gray-900">{ep.downloads_all_time?.toLocaleString() || 0}</div>
-                                  <div className="text-[9px] text-gray-500">downloads</div>
-                                </div>
-                              </div>
-                            ))}
+                      {/* Time Period Cards */}
+                      <div className="grid md:grid-cols-2 gap-3">
+                        {typeof stats?.plays_7d === 'number' && (
+                          <div className="p-3 rounded border bg-white flex flex-col gap-1">
+                            <span className="text-[11px] tracking-wide text-gray-500">Downloads Last 7 Days</span>
+                            <span className="text-lg font-semibold">{stats.plays_7d.toLocaleString()}</span>
+                          </div>
+                        )}
+                        {typeof stats?.plays_30d === 'number' && (
+                          <div className="p-3 rounded border bg-white flex flex-col gap-1">
+                            <span className="text-[11px] tracking-wide text-gray-500">Downloads Last 30 Days</span>
+                            <span className="text-lg font-semibold">{stats.plays_30d.toLocaleString()}</span>
+                          </div>
+                        )}
+                        {typeof stats?.plays_365d === 'number' && (
+                          <div className="p-3 rounded border bg-white flex flex-col gap-1">
+                            <span className="text-[11px] tracking-wide text-gray-500">Downloads Last Year</span>
+                            <span className="text-lg font-semibold">{stats.plays_365d.toLocaleString()}</span>
+                          </div>
+                        )}
+                        {typeof stats?.plays_all_time === 'number' && (
+                          <div className="p-3 rounded border bg-white flex flex-col gap-1">
+                            <span className="text-[11px] tracking-wide text-gray-500">All-Time Downloads</span>
+                            <span className="text-lg font-semibold">{stats.plays_all_time.toLocaleString()}</span>
                           </div>
                         )}
                       </div>
-                    )}
 
-                    {/* Recent Episodes Section */}
-                    {Array.isArray(stats?.recent_episodes) && stats.recent_episodes.length > 0 && (
-                      <div className="space-y-2">
-                        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-3">Most Recent Episodes</div>
-                        {stats.recent_episodes.map((ep, idx) => (
-                          <div key={ep.episode_id || idx} className="p-3 rounded border bg-white flex items-center justify-between">
-                            <div className="flex items-center gap-2 flex-1 min-w-0">
-                              <span className="text-[11px] tracking-wide text-gray-700 font-medium truncate" title={ep.title}>{ep.title}</span>
+                      {/* Top Episodes Section */}
+                      {Array.isArray(stats?.top_episodes) && stats.top_episodes.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-3">Top Episodes (All-Time)</div>
+                          {stats.top_episodes.slice(0, 3).map((ep, idx) => (
+                            <div key={ep.episode_id || idx} className="p-3 rounded border bg-gradient-to-r from-blue-50 to-white flex items-center justify-between">
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">#{idx + 1}</Badge>
+                                <span className="text-[11px] tracking-wide text-gray-700 font-medium truncate" title={ep.title}>{ep.title}</span>
+                              </div>
+                              <div className="text-right ml-3">
+                                <div className="text-base font-bold text-gray-900">{ep.downloads_all_time?.toLocaleString() || 0}</div>
+                                <div className="text-[9px] text-gray-500">downloads</div>
+                              </div>
                             </div>
-                            <div className="text-right ml-3 flex flex-col items-end">
-                              <div className="text-base font-bold text-gray-900">{ep.downloads_all_time?.toLocaleString() || 0}</div>
-                              <div className="text-[9px] text-gray-500">{formatRelative(ep.publish_at)}</div>
-                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Recent Episodes Section */}
+                  {Array.isArray(stats?.recent_episodes) && stats.recent_episodes.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-3">Most Recent Episodes</div>
+                      {stats.recent_episodes.map((ep, idx) => (
+                        <div key={ep.episode_id || idx} className="p-3 rounded border bg-white flex items-center justify-between">
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <span className="text-[11px] tracking-wide text-gray-700 font-medium truncate" title={ep.title}>{ep.title}</span>
                           </div>
-                        ))}
-                      </div>
-                    )}
+                          <div className="text-right ml-3 flex flex-col items-end">
+                            <div className="text-base font-bold text-gray-900">{ep.downloads_all_time?.toLocaleString() || 0}</div>
+                            <div className="text-[9px] text-gray-500">{formatRelative(ep.publish_at)}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
-                    <p className="text-[11px] text-gray-400">Analytics powered by OP3 (Open Podcast Prefix Project). Updates every 3 hours.</p>
-                    {stats?.op3_enabled && (stats?.plays_7d === 0 && stats?.plays_30d === 0 && stats?.plays_all_time === 0) && (
-                      <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
-                        <p className="font-semibold mb-1">📊 Showing 0 downloads?</p>
-                        <p className="mb-2">OP3 only tracks downloads from <strong>podcast apps</strong> (Apple Podcasts, Spotify, etc.). YouTube views are not included.</p>
-                        <p className="text-[10px] text-blue-600">Tip: If you distribute via YouTube, consider manually tracking those views separately.</p>
-                      </div>
-                    )}
-                  </CardContent>
+                  <p className="text-[11px] text-gray-400">Analytics powered by OP3 (Open Podcast Prefix Project). Updates every 3 hours.</p>
+                  {stats?.op3_enabled && (stats?.plays_7d === 0 && stats?.plays_30d === 0 && stats?.plays_all_time === 0) && (
+                    <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
+                      <p className="font-semibold mb-1">📊 Showing 0 downloads?</p>
+                      <p className="mb-2">OP3 only tracks downloads from <strong>podcast apps</strong> (Apple Podcasts, Spotify, etc.). YouTube views are not included.</p>
+                      <p className="text-[10px] text-blue-600">Tip: If you distribute via YouTube, consider manually tracking those views separately.</p>
+                    </div>
+                  )}
+                </CardContent>
               </Card>
             </div>
           </div>
@@ -1487,6 +1487,50 @@ export default function PodcastPlusDashboard() {
                 <Home className="w-4 h-4 mr-2" />
                 Dashboard
               </Button>
+              {podcasts.length > 0 && templates.length > 0 && (
+                <>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="flex-1 md:flex-none"
+                    title="Record or upload new audio"
+                    onClick={async () => {
+                      setCreatorMode('standard');
+                      setWasRecorded(false);
+                      // Refresh preuploaded items before showing options
+                      if (!preuploadLoading && preuploadItems.length === 0) {
+                        try { await requestPreuploadRefresh(); } catch { }
+                      }
+                      setCurrentView('episodeStart');
+                    }}
+                  >
+                    <Mic className="w-4 h-4 mr-2" />
+                    Record or Upload Audio
+                  </Button>
+                  {preuploadItems.some((item) => item?.transcript_ready) && (
+                    <Button
+                      variant="green"
+                      size="sm"
+                      className="flex-1 md:flex-none"
+                      title="Assemble episode from ready audio"
+                      onClick={async () => {
+                        setCreatorMode('preuploaded');
+                        setWasRecorded(false);
+                        setPreselectedMainFilename(null);
+                        setPreselectedTranscriptReady(false);
+                        resetPreuploadFetchedFlag();
+                        if (!preuploadLoading && preuploadItems.length === 0) {
+                          try { await requestPreuploadRefresh(); } catch { }
+                        }
+                        setCurrentView('createEpisode');
+                      }}
+                    >
+                      <Library className="w-4 h-4 mr-2" />
+                      Assemble New Episode
+                    </Button>
+                  )}
+                </>
+              )}
             </div>
             <div className="flex items-center gap-4">
               <div className="relative">

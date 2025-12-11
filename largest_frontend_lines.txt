@@ -1,0 +1,26 @@
+﻿
+FullName                                                                                                  Lines
+--------                                                                                                  -----
+C:\Users\windo\OneDrive\PodWebDeploy\frontend\src\pages\onboarding\hooks\useOnboardingWizard.jsx           1929
+C:\Users\windo\OneDrive\PodWebDeploy\frontend\src\components\dashboard\EpisodeHistory.jsx                  1723
+C:\Users\windo\OneDrive\PodWebDeploy\frontend\src\components\dashboard.jsx                                 1559
+C:\Users\windo\OneDrive\PodWebDeploy\frontend\src\components\admin-dashboard.jsx                           1366
+C:\Users\windo\OneDrive\PodWebDeploy\frontend\src\pages\Guides.jsx                                         1196
+C:\Users\windo\OneDrive\PodWebDeploy\frontend\src\ab\pages\CreatorUpload.jsx                               1123
+C:\Users\windo\OneDrive\PodWebDeploy\frontend\src\components\website\sections\SectionPreviews.jsx          1048
+C:\Users\windo\OneDrive\PodWebDeploy\frontend\src\components\admin\AdminLandingEditor.jsx                   998
+C:\Users\windo\OneDrive\PodWebDeploy\frontend\src\components\onboarding\OnboardingWizard.jsx                947
+C:\Users\windo\OneDrive\PodWebDeploy\frontend\src\components\assistant\AIAssistant.jsx                      918
+C:\Users\windo\OneDrive\PodWebDeploy\frontend\src\components\dashboard\CreditLedger.jsx                     901
+C:\Users\windo\OneDrive\PodWebDeploy\frontend\src\components\dashboard\BillingPage.jsx                      802
+C:\Users\windo\OneDrive\PodWebDeploy\frontend\src\pages\Pricing.jsx                                         793
+C:\Users\windo\OneDrive\PodWebDeploy\frontend\src\components\website\VisualEditor.jsx                       768
+C:\Users\windo\OneDrive\PodWebDeploy\frontend\src\components\dashboard\template-editor\TemplateEditor.jsx   764
+C:\Users\windo\OneDrive\PodWebDeploy\frontend\src\components\website\PersistentPlayer.jsx                   741
+C:\Users\windo\OneDrive\PodWebDeploy\frontend\src\components\dashboard\PodcastCreator.jsx                   717
+C:\Users\windo\OneDrive\PodWebDeploy\frontend\src\components\admin\AdminTierEditorV2.jsx                    714
+C:\Users\windo\OneDrive\PodWebDeploy\frontend\src\components\onboarding\OnboardingWrapper.jsx               693
+C:\Users\windo\OneDrive\PodWebDeploy\frontend\src\components\LoginModal.jsx                                 687
+
+
+

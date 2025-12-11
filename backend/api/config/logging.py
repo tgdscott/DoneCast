@@ -51,7 +51,7 @@ def setup_sentry(environment: str, dsn: str | None = None) -> None:
     
     # Skip Sentry in dev/test environments
     if not sentry_dsn or environment in ("dev", "development", "test", "testing", "local"):
-        log.info("[startup] Sentry disabled (missing DSN or dev/test env)")
+        log.debug("[startup] Sentry disabled (missing DSN or dev/test env)")
         return
     
     try:

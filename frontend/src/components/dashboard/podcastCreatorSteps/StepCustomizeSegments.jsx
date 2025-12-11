@@ -1,9 +1,19 @@
 import React from 'react';
-import { ArrowLeft, ArrowUp, ArrowDown, Lightbulb, ListChecks, AlertTriangle, Loader2 } from 'lucide-react';
+import { ArrowLeft, ArrowUp, ArrowDown, Lightbulb, AlertTriangle, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '../../ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../../ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../../ui/alert-dialog';
 import { Label } from '../../ui/label';
 import { Textarea } from '../../ui/textarea';
 import { formatDisplayName, isUuidLike } from '@/lib/displayNames';
@@ -25,8 +35,8 @@ export default function StepCustomizeSegments({
   segmentsDirty = false,
   isBundlingSegments = false,
   bundleError = null,
-  onReorderSegments = () => {},
-  onComposeSegments = () => {},
+  onReorderSegments = () => { },
+  onComposeSegments = () => { },
 }) {
   React.useEffect(() => {
     try {
@@ -36,11 +46,12 @@ export default function StepCustomizeSegments({
         segmentsLength: Array.isArray(selectedTemplate?.segments) ? selectedTemplate.segments.length : 0,
         rawSegments: selectedTemplate?.segments,
       });
-    } catch (_) {}
+    } catch (_) { }
   }, [selectedTemplate]);
 
   const [isGuideOpen, setIsGuideOpen] = React.useState(false);
   const [showValidation, setShowValidation] = React.useState(false);
+  const [showBlankWarning, setShowBlankWarning] = React.useState(false);
 
   const bundleBlocking = Boolean(segmentsDirty || isBundlingSegments || bundleError);
 
@@ -93,30 +104,30 @@ export default function StepCustomizeSegments({
         const voiceId = segment?.source?.voice_id || '';
         const resolvedFriendly = voiceNameById[voiceId];
         const providedLabel = segment?.source?.voice_name || segment?.source?.voice_label;
-        
+
         const baseVoiceLabel =
           (!voiceId || voiceId === 'default')
             ? 'Default voice'
             : resolvedFriendly && !isUuidLike(resolvedFriendly)
-            ? resolvedFriendly
-            : providedLabel && !isUuidLike(providedLabel)
-            ? providedLabel
-            : 'AI Voice'; // Generic fallback while resolving - NEVER show raw UUID
+              ? resolvedFriendly
+              : providedLabel && !isUuidLike(providedLabel)
+                ? providedLabel
+                : 'AI Voice'; // Generic fallback while resolving - NEVER show raw UUID
         const isResolvingVoice = Boolean(
           voicesLoading &&
-            voiceId &&
-            voiceId !== 'default' &&
-            !resolvedFriendly &&
-            (!providedLabel || isUuidLike(providedLabel))
+          voiceId &&
+          voiceId !== 'default' &&
+          !resolvedFriendly &&
+          (!providedLabel || isUuidLike(providedLabel))
         );
         const voiceTitle =
           resolvedFriendly && !isUuidLike(resolvedFriendly)
             ? resolvedFriendly
             : providedLabel && !isUuidLike(providedLabel)
-            ? providedLabel
-            : voiceId && voiceId !== 'default'
-            ? formatDisplayName(voiceId, { fallback: '' }) || undefined
-            : undefined;
+              ? providedLabel
+              : voiceId && voiceId !== 'default'
+                ? formatDisplayName(voiceId, { fallback: '' }) || undefined
+                : undefined;
         const value = ttsValues?.[promptKey] || '';
         const errorMessageId = isMissing ? `${fieldId}-error` : undefined;
         return (
@@ -178,35 +189,27 @@ export default function StepCustomizeSegments({
 
   const handleContinue = React.useCallback(
     (event) => {
-      if (!canContinue || bundleBlocking) {
+      if (bundleBlocking) {
         event?.preventDefault?.();
         event?.stopPropagation?.();
-        if (!canContinue) {
-          setShowValidation(true);
-        }
-        const firstMissingKey = missingSegmentKeys[0];
-        if (firstMissingKey !== undefined && typeof window !== 'undefined') {
-          const fieldId = String(firstMissingKey);
-          window.requestAnimationFrame?.(() => {
-            const el = document.getElementById(fieldId);
-            if (el) {
-              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              if (typeof el.focus === 'function') {
-                try {
-                  el.focus({ preventScroll: true });
-                } catch (_) {
-                  el.focus();
-                }
-              }
-            }
-          });
-        }
+        return;
+      }
+
+      // Check for empty TTS segments
+      // We want to warn the user if they're leaving AI scripts blank, as they might expect generation
+      const blankSegments = ttsSegmentsWithKey.filter(({ key }) => {
+        const val = ttsValues?.[key];
+        return !val || !val.trim();
+      });
+
+      if (blankSegments.length > 0) {
+        setShowBlankWarning(true);
         return;
       }
 
       onNext();
     },
-    [canContinue, missingSegmentKeys, onNext, bundleBlocking]
+    [bundleBlocking, onNext, ttsSegmentsWithKey, ttsValues]
   );
 
   React.useEffect(() => {
@@ -309,28 +312,9 @@ export default function StepCustomizeSegments({
                 <Lightbulb className="h-5 w-5 text-amber-500" aria-hidden="true" />
                 How these segments play out
               </DialogTitle>
-              <DialogDescription>
-                Each block below becomes a chapter in your final episode. Tweak the script, switch voices, or swap in uploaded clips—changes are saved immediately.
-              </DialogDescription>
             </DialogHeader>
-            <div className="space-y-3 text-sm text-slate-700">
-              <ul className="space-y-2">
-                <li className="flex items-start gap-2">
-                  <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
-                  <span><strong>Content</strong> anchors your uploaded audio. Intro/outro and ad slots wrap around it automatically.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
-                  <span><strong>TTS segments</strong> use the template’s default voice—edit the script here or tap “Change voice” for a different tone.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <ListChecks className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" aria-hidden="true" />
-                  <span><strong>Static clips</strong> pull from your media library. Upload new stingers or music in the Template step if you need variety.</span>
-                </li>
-              </ul>
-              <p className="text-xs text-slate-500">
-                Pro tip: want to reuse this structure later? Save these updates back to the template once you love the flow.
-              </p>
+            <div className="py-4 text-slate-700">
+              Tips coming soon
             </div>
           </DialogContent>
         </Dialog>
@@ -398,6 +382,23 @@ export default function StepCustomizeSegments({
           </Button>
         </div>
       </div>
+
+      <AlertDialog open={showBlankWarning} onOpenChange={setShowBlankWarning}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Empty Voice Scripts?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have {ttsSegmentsWithKey.filter(({ key }) => !ttsValues?.[key]?.trim()).length} AI voice segment(s) with no text. These segments will be skipped in the final audio.
+              <br /><br />
+              Are you sure you want to continue?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Go back</AlertDialogCancel>
+            <AlertDialogAction onClick={onNext}>Continue anyway</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

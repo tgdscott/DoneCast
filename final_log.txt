@@ -1,0 +1,2351 @@
+Current Directory: C:\Users\windo\OneDrive\PodWebDeploy
+
+--- Reading gcloud_output.txt ---
+﻿spec:
+  template:
+    spec:
+      containers:
+      - env:
+        - name: CLOUDPOD_MAX_MIX_BUFFER_BYTES
+          value: '536870912'
+        - name: INSTANCE_CONNECTION_NAME
+          value: podcast612:us-west1:podcast-db
+        - name: GOOGLE_CLOUD_PROJECT
+          value: podcast612
+        - name: APP_ENV
+          value: production
+        - name: CORS_ALLOWED_ORIGINS
+          value: https://donecast.com;https://www.donecast.com;https://app.donecast.com;https://api.donecast.com;https://podcastplusplus.com;https://www.podcastplusplus.com;https://app.podcastplusplus.com;https://api.podcastplusplus.com;https://getpodcastplus.com;https://www.getpodcastplus.com;https://app.getpodcastplus.com
+        - name: DB_POOL_SIZE
+          value: '20'
+        - name: DB_MAX_OVERFLOW
+          value: '20'
+        - name: DB_POOL_RECYCLE
+          value: '1800'
+        - name: DB_POOL_TIMEOUT
+          value: '10'
+        - name: DB_POOL_PRE_PING
+          value: 'true'
+        - name: DB_CONNECT_TIMEOUT
+          value: '60'
+        - name: DB_STATEMENT_TIMEOUT_MS
+          value: '300000'
+        - name: STORAGE_BACKEND
+          value: r2
+        - name: AI_PROVIDER
+          value: gemini
+        - name: VERTEX_PROJECT
+          value: podcast612
+        - name: VERTEX_LOCATION
+          value: us-central1
+        - name: VERTEX_MODEL
+          value: gemini-2.5-flash-lite
+        - name: GEMINI_MODEL
+          value: gemini-2.5-flash
+        - name: TASKS_LOCATION
+          value: us-west1
+        - name: TASKS_QUEUE
+          value: podcast-transcription-queue
+        - name: TASKS_URL_BASE
+          value: https://api.donecast.com
+        - name: WORKER_URL_BASE
+          value: https://assemble.donecast.com
+        - name: ENABLE_LOCAL_WORKER
+          value: 'false'
+        - name: ENABLE_CELERY
+          value: 'false'
+        - name: ADMIN_EMAIL
+          value: scott@scottgerhardt.com
+        - name: MEDIA_ROOT
+          value: /tmp
+        - name: OAUTH_BACKEND_BASE
+          value: https://api.donecast.com
+        - name: MEDIA_BUCKET
+          value: ppp-media-us-west1
+        - name: TRANSCRIPTS_BUCKET
+          value: ppp-transcripts-us-west1
+        - name: GCS_CHUNK_MB
+          value: '32'
+        - name: SMTP_HOST
+          value: smtp.mailgun.org
+        - name: SMTP_PORT
+          value: '587'
+        - name: SMTP_USER
+          value: admin@donecast.com
+        - name: SMTP_FROM
+          value: no-reply@donecast.com
+        - name: DISABLE_STARTUP_MIGRATIONS
+          value: '1'
+        - name: FEEDBACK_SHEET_ID
+          value: 1dnIMPYvaoGe5hRdJ9W1k9CFua3y2I6aW55BLDMxH_6k
+        - name: GOOGLE_SHEETS_ENABLED
+          value: 'true'
+        - name: REDIS_HOST
+          value: 10.32.186.35
+        - name: REDIS_PORT
+          value: '6379'
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: DB_USER
+        - name: DB_PASS
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: DB_PASS
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: DB_NAME
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: DATABASE_URL
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: SECRET_KEY
+        - name: SESSION_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: SESSION_SECRET
+        - name: GCS_SIGNER_KEY_JSON
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: gcs-signer-key
+        - name: AUPHONIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: AUPHONIC_API_KEY
+        - name: R2_ACCOUNT_ID
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: r2-account-id
+        - name: R2_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: r2-access-key-id
+        - name: R2_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: r2-secret-access-key
+        - name: R2_BUCKET
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: r2-bucket
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: GEMINI_API_KEY
+        - name: ELEVENLABS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: ELEVENLABS_API_KEY
+        - name: ASSEMBLYAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: ASSEMBLYAI_API_KEY
+        - name: TASKS_AUTH
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: TASKS_AUTH
+        - name: SMTP_PASS
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: SMTP_PASS
+        - name: GOOGLE_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: GOOGLE_CLIENT_ID
+        - name: GOOGLE_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: GOOGLE_CLIENT_SECRET
+        - name: STRIPE_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: STRIPE_SECRET_KEY
+        - name: STRIPE_PUBLISHABLE_KEY
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: STRIPE_PUBLISHABLE_KEY
+        - name: STRIPE_WEBHOOK_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: STRIPE_WEBHOOK_SECRET
+        - name: SPREAKER_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: SPREAKER_API_TOKEN
+        - name: SPREAKER_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: SPREAKER_CLIENT_ID
+        - name: SPREAKER_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: SPREAKER_CLIENT_SECRET
+        - name: TWILIO_ACCOUNT_SID
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: TWILIO_ACCOUNT_SID
+        - name: TWILIO_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: TWILIO_AUTH_TOKEN
+        - name: TWILIO_PHONE_NUMBER
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: TWILIO_PHONE_NUMBER
+        - name: SENTRY_DSN
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: SENTRY_DSN
+        - name: SENTRY_ORG_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: SENTRY_ORG_TOKEN
+        - name: POSTHOG_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: VITE_POSTHOG_KEY
+status:
+  address:
+    url: https://podcast-api-kge7snpz7a-uw.a.run.app
+  latestCreatedRevisionName: podcast-api-00909-7lz
+
+--- Reading pip_output.txt ---
+﻿python : C:\Python312\python.exe: No module named pip
+At line:1 char:1
++ python -m pip install "sentry-sdk[fastapi]" > pip_output.txt 2>&1
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Python312\py...odule named pip:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+--- Reading python_path.txt ---
+
+--- Reading pip_venv_output.txt ---
+﻿Collecting sentry-sdk[fastapi]
+  Downloading sentry_sdk-2.47.0-py2.py3-none-any.whl.metadata (10 kB)
+Requirement already satisfied: urllib3>=1.26.11 in c:\users\windo\onedrive\podwebdeploy\.venv\lib\site-packages (from sentry-sdk[fastapi]) (2.5.0)
+Requirement already satisfied: certifi in c:\users\windo\onedrive\podwebdeploy\.venv\lib\site-packages (from sentry-sdk[fastapi]) (2025.10.5)
+Requirement already satisfied: fastapi>=0.79.0 in c:\users\windo\onedrive\podwebdeploy\.venv\lib\site-packages (from sentry-sdk[fastapi]) (0.116.1)
+Requirement already satisfied: starlette<0.48.0,>=0.40.0 in c:\users\windo\onedrive\podwebdeploy\.venv\lib\site-packages (from fastapi>=0.79.0->sentry-sdk[fastapi]) (0.47.2)
+Requirement already satisfied: pydantic!=1.8,!=1.8.1,!=2.0.0,!=2.0.1,!=2.1.0,<3.0.0,>=1.7.4 in c:\users\windo\onedrive\podwebdeploy\.venv\lib\site-packages (from fastapi>=0.79.0->sentry-sdk[fastapi]) (2.11.9)
+Requirement already satisfied: typing-extensions>=4.8.0 in c:\users\windo\onedrive\podwebdeploy\.venv\lib\site-packages (from fastapi>=0.79.0->sentry-sdk[fastapi]) (4.15.0)
+Requirement already satisfied: annotated-types>=0.6.0 in c:\users\windo\onedrive\podwebdeploy\.venv\lib\site-packages (from pydantic!=1.8,!=1.8.1,!=2.0.0,!=2.0.1,!=2.1.0,<3.0.0,>=1.7.4->fastapi>=0.79.0->sentry-sdk[fastapi]) (0.7.0)
+Requirement already satisfied: pydantic-core==2.33.2 in c:\users\windo\onedrive\podwebdeploy\.venv\lib\site-packages (from pydantic!=1.8,!=1.8.1,!=2.0.0,!=2.0.1,!=2.1.0,<3.0.0,>=1.7.4->fastapi>=0.79.0->sentry-sdk[fastapi]) (2.33.2)
+Requirement already satisfied: typing-inspection>=0.4.0 in c:\users\windo\onedrive\podwebdeploy\.venv\lib\site-packages (from pydantic!=1.8,!=1.8.1,!=2.0.0,!=2.0.1,!=2.1.0,<3.0.0,>=1.7.4->fastapi>=0.79.0->sentry-sdk[fastapi]) (0.4.2)
+Requirement already satisfied: anyio<5,>=3.6.2 in c:\users\windo\onedrive\podwebdeploy\.venv\lib\site-packages (from starlette<0.48.0,>=0.40.0->fastapi>=0.79.0->sentry-sdk[fastapi]) (4.11.0)
+Requirement already satisfied: idna>=2.8 in c:\users\windo\onedrive\podwebdeploy\.venv\lib\site-packages (from anyio<5,>=3.6.2->starlette<0.48.0,>=0.40.0->fastapi>=0.79.0->sentry-sdk[fastapi]) (3.11)
+Requirement already satisfied: sniffio>=1.1 in c:\users\windo\onedrive\podwebdeploy\.venv\lib\site-packages (from anyio<5,>=3.6.2->starlette<0.48.0,>=0.40.0->fastapi>=0.79.0->sentry-sdk[fastapi]) (1.3.1)
+Downloading sentry_sdk-2.47.0-py2.py3-none-any.whl (411 kB)
+Installing collected packages: sentry-sdk
+Successfully installed sentry-sdk-2.47.0
+
+--- Reading curl_test.txt ---
+
+--- Reading prod_test_output.txt ---
+﻿--- Testing Production Endpoint ---
+URL: https://podcast-api-kge7snpz7a-uw.a.run.app/api/episodes/precheck/minutes
+Status Code: 405
+Response Body: {"error":{"code":"http_error","message":"Method Not Allowed","technical_message":null,"details":{"status_code":405},"retryable":false,"request_id":"8b68439a-95e5-413f-8fbb-61303f44a46c"}}
+
+--- Reading prod_debug_output.txt ---
+﻿--- Fetching Debug Routes ---
+Debug Status: 200
+Availability: {
+  "health": true,
+  "auth_me": true,
+  "auth": true,
+  "auth_oauth_fallback": true,
+  "media": true,
+  "media_bundle_router": true,
+  "media_upload_alias": true,
+  "gcs_uploads": true,
+  "assistant": true,
+  "episodes": true,
+  "templates": true,
+  "flubber": true,
+  "intern": true,
+  "users": true,
+  "admin": true,
+  "podcasts": true,
+  "importer": true,
+  "public": true,
+  "waitlist_router": true,
+  "debug": true,
+  "music_router": true,
+  "billing_router": true,
+  "billing_internal_router": true,
+  "billing_config_router": true,
+  "billing_webhook_router": true,
+  "billing_ledger_router": true,
+  "notifications_router": true,
+  "ai_metadata": true,
+  "sections_router": true,
+  "ai_suggestions": true,
+  "transcripts_router": true,
+  "elevenlabs_router": true,
+  "media_tts_router": true,
+  "dashboard_router": true,
+  "recurring": true,
+  "assemblyai_router": true,
+  "rss_feed_router": true,
+  "analytics_router": true,
+  "contact_router": true,
+  "website_sections_router": true,
+  "sites_router": true,
+  "website_publish_router": true,
+  "auphonic_router": true,
+  "speakers_router": true,
+  "worker_health_router": true,
+  "affiliate_router": true,
+  "onboarding_router": true
+}
+
+Relevant Routes:
+  /api/episodes/precheck/minutes/ ['POST']
+  /api/episodes/precheck/minutes ['POST']
+  /api/episodes/precheck/minutes/ ['GET']
+  /api/episodes/precheck/minutes ['GET']
+  /api/media/tts/precheck ['POST']
+
+--- Retrying Precheck (just in case) ---
+Precheck Status: 401
+
+--- Reading cloud_run_logs.json ---
+﻿[
+  {
+    "httpRequest": {
+      "latency": "0.013428330s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "POST",
+      "requestSize": "416",
+      "requestUrl": "https://podcast-api-kge7snpz7a-uw.a.run.app/api/episodes/precheck/minutes",
+      "responseSize": "900",
+      "serverIp": "34.143.72.2",
+      "status": 405,
+      "userAgent": "python-requests/2.32.3"
+    },
+    "insertId": "693a58dd000886c74040a637",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:38:37.804745779Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "a3e759dc6bb2c95c",
+    "timestamp": "2025-12-11T05:38:37.543936Z",
+    "trace": "projects/podcast612/traces/989e0c91416ffb82a64660ee327f3b8f"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.012609102s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "POST",
+      "requestSize": "438",
+      "requestUrl": "https://podcast-api-kge7snpz7a-uw.a.run.app/api/episodes/precheck/minutes",
+      "responseSize": "900",
+      "serverIp": "34.143.72.2",
+      "status": 405,
+      "userAgent": "python-requests/2.32.3"
+    },
+    "insertId": "693a58370009f87445d87d03",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:35:51.654944619Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "85d2ca8c10a1ac37",
+    "timestamp": "2025-12-11T05:35:51.639064Z",
+    "trace": "projects/podcast612/traces/f4ff29cc3ed0f04775a3db14e754493d",
+    "traceSampled": true
+  },
+  {
+    "httpRequest": {
+      "latency": "0.069472058s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1510",
+      "requestUrl": "https://api.donecast.com/api/admin/metrics/episodes-today",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a542e000f0c712e6fef78",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:18:39.090451116Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "6905052a8936be99",
+    "timestamp": "2025-12-11T05:18:38.915606Z",
+    "trace": "projects/podcast612/traces/a09ed05c2d083aec58262f2a153fccd4"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.067970464s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1511",
+      "requestUrl": "https://api.donecast.com/api/admin/metrics/growth-metrics",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a542e000f05e2412937ed",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:18:39.090451116Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "71e6352ced7ffce5",
+    "timestamp": "2025-12-11T05:18:38.915482Z",
+    "trace": "projects/podcast612/traces/c1b8ea4ea7c4a8d758262f2a153fc55b"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.067446404s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1521",
+      "requestUrl": "https://api.donecast.com/api/admin/metrics/recent-activity?limit=10",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a542e000f039885b4f665",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:18:39.090451116Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "e6a569cc6fc09109",
+    "timestamp": "2025-12-11T05:18:38.915383Z",
+    "trace": "projects/podcast612/traces/ce2fc0b5fab511e558262f2a153fc501"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.067289271s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1510",
+      "requestUrl": "https://api.donecast.com/api/admin/metrics/system-health",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a542e000f01e266be0ca1",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:18:39.090451116Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "d01996072d5fcb8d",
+    "timestamp": "2025-12-11T05:18:38.915108Z",
+    "trace": "projects/podcast612/traces/0b452d13c5e4ec3358262f2a153fcd2e"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.063757085s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1499",
+      "requestUrl": "https://api.donecast.com/api/admin/users/full",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a542e000eeddd7d56b740",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:18:39.090451116Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "f36aeadb2a0f3c48",
+    "timestamp": "2025-12-11T05:18:38.913175Z",
+    "trace": "projects/podcast612/traces/ef9e55b93827f1cc58262f2a153fc3f3"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.068757484s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1521",
+      "requestUrl": "https://api.donecast.com/api/admin/metrics/recent-activity?limit=10",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a5423000c32b41c0a7bbd",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:18:28.099582014Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "4e18e4dfdea2f3f7",
+    "timestamp": "2025-12-11T05:18:27.729556Z",
+    "trace": "projects/podcast612/traces/4a445c88952895c058262f2a153fc428"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.069774671s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1510",
+      "requestUrl": "https://api.donecast.com/api/admin/metrics/system-health",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a5423000c36f419629af2",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:18:28.099582014Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "49b9abb4836b456d",
+    "timestamp": "2025-12-11T05:18:27.729510Z",
+    "trace": "projects/podcast612/traces/8a6754247f3255c858262f2a153fcc55"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.068680327s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1510",
+      "requestUrl": "https://api.donecast.com/api/admin/metrics/episodes-today",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a5423000c316b6c3b00cc",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:18:28.099582014Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "4432c08fe7217471",
+    "timestamp": "2025-12-11T05:18:27.729131Z",
+    "trace": "projects/podcast612/traces/5614fdd15a86a7e358262f2a153fcbfb"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.068409617s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1511",
+      "requestUrl": "https://api.donecast.com/api/admin/metrics/growth-metrics",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a5423000c305fe0cb2c9c",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:18:28.099582014Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "497af159fff5bcf1",
+    "timestamp": "2025-12-11T05:18:27.729069Z",
+    "trace": "projects/podcast612/traces/b70cc9c0863ff7c158262f2a153fc482"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.068342123s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1499",
+      "requestUrl": "https://api.donecast.com/api/admin/users/full",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a5423000c23e5be3f01de",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:18:28.099582014Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "0a49b0ea074480ea",
+    "timestamp": "2025-12-11T05:18:27.725677Z",
+    "trace": "projects/podcast612/traces/0a043f64e4e780c058262f2a153fcaed"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.062671869s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1478",
+      "requestUrl": "https://api.donecast.com/api/admin/metrics/growth-metrics",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a541c0002f35581ccc656",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:18:20.440754661Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "866485d407d521aa",
+    "timestamp": "2025-12-11T05:18:20.129332Z",
+    "trace": "projects/podcast612/traces/fce5006f0c0c60000ec81cc54cd69b49"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.068023561s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1478",
+      "requestUrl": "https://api.donecast.com/api/admin/metrics/system-health",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a541c0002a225d7c16494",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:18:20.440754661Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "81b5ecf616b297a9",
+    "timestamp": "2025-12-11T05:18:20.103365Z",
+    "trace": "projects/podcast612/traces/7f6c4bd1a2503b020ec81cc54cd690fe"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.067679267s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1488",
+      "requestUrl": "https://api.donecast.com/api/admin/metrics/recent-activity?limit=10",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a541c0002a0c30bfcd981",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:18:20.440754661Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "0a0eef44294f06bd",
+    "timestamp": "2025-12-11T05:18:20.103230Z",
+    "trace": "projects/podcast612/traces/6602656b13dd8aea0ec81cc54cd696b3"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.067407504s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1476",
+      "requestUrl": "https://api.donecast.com/api/admin/metrics/episodes-today",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a541c00029fab79a34e28",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:18:20.440754661Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "e59dbe674ef0517c",
+    "timestamp": "2025-12-11T05:18:20.103032Z",
+    "trace": "projects/podcast612/traces/55ca9783a13e27c00ec81cc54cd69c68"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.070736520s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1467",
+      "requestUrl": "https://api.donecast.com/api/admin/users/full",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a541c000295f84d797376",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:18:20.440754661Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "5c08c4409b9ec0ed",
+    "timestamp": "2025-12-11T05:18:20.097127Z",
+    "trace": "projects/podcast612/traces/0863dd9ac3fe2fc00ec81cc54cd6945b"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.018846610s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1217",
+      "requestUrl": "https://api.donecast.com/api/admin/metrics/growth-metrics",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a5414000291d0b375cef4",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:18:12.448292467Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "e518f95d62fb8954",
+    "timestamp": "2025-12-11T05:18:12.148346Z",
+    "trace": "projects/podcast612/traces/034360633c3173570ec81cc54cd69d7a"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.018827113s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1227",
+      "requestUrl": "https://api.donecast.com/api/admin/metrics/recent-activity?limit=10",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a54140002915e141378aa",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:18:12.448292467Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "e9b118f16a59ae3c",
+    "timestamp": "2025-12-11T05:18:12.147931Z",
+    "trace": "projects/podcast612/traces/41723d77e6a52fc10ec81cc54cd6932f"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.019284407s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1217",
+      "requestUrl": "https://api.donecast.com/api/admin/metrics/system-health",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a54140002911cb2d88102",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:18:12.448292467Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "00a82f4a5a99bd6a",
+    "timestamp": "2025-12-11T05:18:12.147243Z",
+    "trace": "projects/podcast612/traces/1ac48586ac866dba0ec81cc54cd69e99"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.027822755s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1205",
+      "requestUrl": "https://api.donecast.com/api/admin/users/full",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a54140001af092615fab4",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:18:12.115101872Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "e920150f4aba6b9a",
+    "timestamp": "2025-12-11T05:18:12.081209Z",
+    "trace": "projects/podcast612/traces/44a074c307f4ceb60ec81cc54cd69791"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.028648841s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1218",
+      "requestUrl": "https://api.donecast.com/api/admin/metrics/episodes-today",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a54140001af0290ebc0c5",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:18:12.115101872Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "17612366b213f2ab",
+    "timestamp": "2025-12-11T05:18:12.080158Z",
+    "trace": "projects/podcast612/traces/b226c903d3e994200ec81cc54cd698b0"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.007359679s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1304",
+      "requestUrl": "https://api.donecast.com/api/media/48437577-4365-48a0-b0b4-e102fbb50a08",
+      "responseSize": "1031",
+      "serverIp": "142.251.108.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a53cb0009e81082a9d542",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T05:16:59.841779998Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "a38c9572bf9c3616",
+    "timestamp": "2025-12-11T05:16:59.640533Z",
+    "trace": "projects/podcast612/traces/2a56b5a1fb62549e20fde21d4606b0e0"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.009394109s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "74.7.244.45",
+      "requestMethod": "GET",
+      "requestSize": "496",
+      "requestUrl": "https://api.podcastplusplus.com/robots.txt",
+      "responseSize": "734",
+      "serverIp": "173.194.219.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36; compatible; OAI-SearchBot/1.3; robots.txt; +https://openai.com/searchbot"
+    },
+    "insertId": "693a33a3000ca316eb546d06",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T02:59:47.830935714Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "37decf80ad913d3a",
+    "timestamp": "2025-12-11T02:59:47.817244Z",
+    "trace": "projects/podcast612/traces/6d873393eb3c20faff7e42bedd0df78a",
+    "traceSampled": true
+  },
+  {
+    "httpRequest": {
+      "latency": "0.016039713s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1305",
+      "requestUrl": "https://api.donecast.com/api/media/48437577-4365-48a0-b0b4-e102fbb50a08",
+      "responseSize": "1031",
+      "serverIp": "142.250.138.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a20b10003d2e028b99bc9",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T01:38:57.437583626Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "386cfabdf6ed6acd",
+    "timestamp": "2025-12-11T01:38:57.233011Z",
+    "trace": "projects/podcast612/traces/77aac00fa99a4ee64951b00f240539b1"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.007649764s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "POST",
+      "requestSize": "1529",
+      "requestUrl": "https://api.donecast.com/api/episodes/precheck/minutes",
+      "responseSize": "1040",
+      "serverIp": "142.250.138.121",
+      "status": 405,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a20b10003977e710bc18a",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T01:38:57.437583626Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "995ca8daad120f73",
+    "timestamp": "2025-12-11T01:38:57.226277Z",
+    "trace": "projects/podcast612/traces/280d40376789a1bf4951b00f240536fd"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.053126952s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1324",
+      "requestUrl": "https://api.donecast.com/api/recurring/templates/bfd659d9-8088-4019-aefb-c41ad1f4b58a/next",
+      "responseSize": "1060",
+      "serverIp": "142.250.138.121",
+      "status": 403,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a20ac000f34861f60f613",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T01:38:53.109794563Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "4915a4f8cf373809",
+    "timestamp": "2025-12-11T01:38:52.941922Z",
+    "trace": "projects/podcast612/traces/6a318a4975a95a974951b00f240533f4"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.041885977s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1333",
+      "requestUrl": "https://api.donecast.com/api/episodes/last/numbering?podcast_id=d369f2ea-acef-48af-aa74-192cc9cdab0f",
+      "responseSize": "1031",
+      "serverIp": "142.250.138.121",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a20ac000f03f9265ce3c1",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T01:38:53.109794563Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "e4f2d4ed7a9ede2c",
+    "timestamp": "2025-12-11T01:38:52.940962Z",
+    "trace": "projects/podcast612/traces/7524c08cf7f2c29d4951b00f24053a9a"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.054402302s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1324",
+      "requestUrl": "https://api.donecast.com/api/recurring/templates/bfd659d9-8088-4019-aefb-c41ad1f4b58a/next",
+      "responseSize": "1060",
+      "serverIp": "142.250.138.121",
+      "status": 403,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a20ac000f347cd92d65f5",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T01:38:53.109794563Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "aded8498662c58bd",
+    "timestamp": "2025-12-11T01:38:52.940718Z",
+    "trace": "projects/podcast612/traces/999ac8a86c3a310b4951b00f24053140"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.118897931s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1309",
+      "requestUrl": "https://api.donecast.com/api/templates/bfd659d9-8088-4019-aefb-c41ad1f4b58a",
+      "responseSize": "1060",
+      "serverIp": "142.250.138.121",
+      "status": 403,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a20ac000ab3e694dec2b2",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T01:38:52.777313836Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "bae3453c2ad4ff4c",
+    "timestamp": "2025-12-11T01:38:52.580975Z",
+    "trace": "projects/podcast612/traces/2b5d0ea096aa23164951b00f240535db"
+  },
+  {
+    "errorGroups": [
+      {
+        "id": "CM7pqPen5a74cA"
+      }
+    ],
+    "insertId": "693a1ed2000a0ab81c255d9e",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-12-11T01:30:58.829191418Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "textPayload": "Traceback (most recent call last):\n  File \"/usr/local/lib/python3.11/site-packages/uvicorn/protocols/http/httptools_impl.py\", line 409, in run_asgi\n    result = await app(  # type: ignore[func-returns-value]\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/uvicorn/middleware/proxy_headers.py\", line 60, in __call__\n    return await self.app(scope, receive, send)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/applications.py\", line 1054, in __call__\n    await super().__call__(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/applications.py\", line 113, in __call__\n    await self.middleware_stack(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 186, in __call__\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 164, in __call__\n    await self.app(scope, receive, _send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 182, in __call__\n    with recv_stream, send_stream, collapse_excgroups():\n  File \"/usr/local/lib/python3.11/contextlib.py\", line 158, in __exit__\n    self.gen.throw(typ, value, traceback)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/_utils.py\", line 83, in collapse_excgroups\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 184, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/app/backend/api/core/rate_limiter.py\", line 50, in dispatch\n    raise HTTPException(\nfastapi.exceptions.HTTPException: 429: Rate limit exceeded. Try again in 60 seconds.",
+    "timestamp": "2025-12-11T01:30:58.658104Z"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.007561497s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "OPTIONS",
+      "requestSize": "673",
+      "requestUrl": "https://api.donecast.com/api/podcasts/",
+      "responseSize": "448",
+      "serverIp": "142.250.187.147",
+      "status": 500,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a1ed2000a0b5ca8660153",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T01:30:58.830282831Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "spanId": "c4b933aab7a603c4",
+    "timestamp": "2025-12-11T01:30:58.649220Z",
+    "trace": "projects/podcast612/traces/ae00014c03936918112ed0cc0bc7ea29"
+  },
+  {
+    "errorGroups": [
+      {
+        "id": "CM7pqPen5a74cA"
+      }
+    ],
+    "insertId": "693a1ed20004759c81ce082c",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-12-11T01:30:58.496239090Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "textPayload": "Traceback (most recent call last):\n  File \"/usr/local/lib/python3.11/site-packages/uvicorn/protocols/http/httptools_impl.py\", line 409, in run_asgi\n    result = await app(  # type: ignore[func-returns-value]\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/uvicorn/middleware/proxy_headers.py\", line 60, in __call__\n    return await self.app(scope, receive, send)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/applications.py\", line 1054, in __call__\n    await super().__call__(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/applications.py\", line 113, in __call__\n    await self.middleware_stack(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 186, in __call__\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 164, in __call__\n    await self.app(scope, receive, _send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 182, in __call__\n    with recv_stream, send_stream, collapse_excgroups():\n  File \"/usr/local/lib/python3.11/contextlib.py\", line 158, in __exit__\n    self.gen.throw(typ, value, traceback)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/_utils.py\", line 83, in collapse_excgroups\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 184, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/app/backend/api/core/rate_limiter.py\", line 50, in dispatch\n    raise HTTPException(\nfastapi.exceptions.HTTPException: 429: Rate limit exceeded. Try again in 60 seconds.",
+    "timestamp": "2025-12-11T01:30:58.292252Z"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.007432981s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "OPTIONS",
+      "requestSize": "671",
+      "requestUrl": "https://api.donecast.com/api/users/me",
+      "responseSize": "448",
+      "serverIp": "142.250.187.147",
+      "status": 500,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a1ed2000476bfba6e5670",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T01:30:58.497421087Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "spanId": "0917149643e19aa9",
+    "timestamp": "2025-12-11T01:30:58.283036Z",
+    "trace": "projects/podcast612/traces/047413452f70f30c112ed0cc0bc7e255",
+    "traceSampled": true
+  },
+  {
+    "errorGroups": [
+      {
+        "id": "CM7pqPen5a74cA"
+      }
+    ],
+    "insertId": "693a1ece0009f7584fa3a9f6",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-12-11T01:30:54.833145299Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "textPayload": "Traceback (most recent call last):\n  File \"/usr/local/lib/python3.11/site-packages/uvicorn/protocols/http/httptools_impl.py\", line 409, in run_asgi\n    result = await app(  # type: ignore[func-returns-value]\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/uvicorn/middleware/proxy_headers.py\", line 60, in __call__\n    return await self.app(scope, receive, send)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/applications.py\", line 1054, in __call__\n    await super().__call__(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/applications.py\", line 113, in __call__\n    await self.middleware_stack(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 186, in __call__\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 164, in __call__\n    await self.app(scope, receive, _send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 182, in __call__\n    with recv_stream, send_stream, collapse_excgroups():\n  File \"/usr/local/lib/python3.11/contextlib.py\", line 158, in __exit__\n    self.gen.throw(typ, value, traceback)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/_utils.py\", line 83, in collapse_excgroups\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 184, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/app/backend/api/core/rate_limiter.py\", line 50, in dispatch\n    raise HTTPException(\nfastapi.exceptions.HTTPException: 429: Rate limit exceeded. Try again in 60 seconds.",
+    "timestamp": "2025-12-11T01:30:54.653144Z"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.006560958s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "OPTIONS",
+      "requestSize": "673",
+      "requestUrl": "https://api.donecast.com/api/podcasts/",
+      "responseSize": "448",
+      "serverIp": "142.250.187.147",
+      "status": 500,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a1ece0009ead0b4d6cdfb",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T01:30:54.833387460Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "spanId": "83fc90f22691276d",
+    "timestamp": "2025-12-11T01:30:54.641792Z",
+    "trace": "projects/podcast612/traces/34b4fddef9152bf9112ed0cc0bc7e65b"
+  },
+  {
+    "errorGroups": [
+      {
+        "id": "CM7pqPen5a74cA"
+      }
+    ],
+    "insertId": "693a1ece0002cfbdbc8bc3fa",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-12-11T01:30:54.497302543Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "textPayload": "Traceback (most recent call last):\n  File \"/usr/local/lib/python3.11/site-packages/uvicorn/protocols/http/httptools_impl.py\", line 409, in run_asgi\n    result = await app(  # type: ignore[func-returns-value]\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/uvicorn/middleware/proxy_headers.py\", line 60, in __call__\n    return await self.app(scope, receive, send)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/applications.py\", line 1054, in __call__\n    await super().__call__(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/applications.py\", line 113, in __call__\n    await self.middleware_stack(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 186, in __call__\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 164, in __call__\n    await self.app(scope, receive, _send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 182, in __call__\n    with recv_stream, send_stream, collapse_excgroups():\n  File \"/usr/local/lib/python3.11/contextlib.py\", line 158, in __exit__\n    self.gen.throw(typ, value, traceback)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/_utils.py\", line 83, in collapse_excgroups\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 184, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/app/backend/api/core/rate_limiter.py\", line 50, in dispatch\n    raise HTTPException(\nfastapi.exceptions.HTTPException: 429: Rate limit exceeded. Try again in 60 seconds.",
+    "timestamp": "2025-12-11T01:30:54.184253Z"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.008925058s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "OPTIONS",
+      "requestSize": "671",
+      "requestUrl": "https://api.donecast.com/api/users/me",
+      "responseSize": "448",
+      "serverIp": "142.250.187.147",
+      "status": 500,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a1ece0002c5ecb8ec759d",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T01:30:54.499228497Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "spanId": "2d9b28e7ad00eb44",
+    "timestamp": "2025-12-11T01:30:54.171129Z",
+    "trace": "projects/podcast612/traces/8e4d5265844d4800112ed0cc0bc7e409"
+  },
+  {
+    "errorGroups": [
+      {
+        "id": "CM7pqPen5a74cA"
+      }
+    ],
+    "insertId": "693a1ec700033c4cbd574de9",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-12-11T01:30:47.505668765Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "textPayload": "Traceback (most recent call last):\n  File \"/usr/local/lib/python3.11/site-packages/uvicorn/protocols/http/httptools_impl.py\", line 409, in run_asgi\n    result = await app(  # type: ignore[func-returns-value]\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/uvicorn/middleware/proxy_headers.py\", line 60, in __call__\n    return await self.app(scope, receive, send)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/applications.py\", line 1054, in __call__\n    await super().__call__(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/applications.py\", line 113, in __call__\n    await self.middleware_stack(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 186, in __call__\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 164, in __call__\n    await self.app(scope, receive, _send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 182, in __call__\n    with recv_stream, send_stream, collapse_excgroups():\n  File \"/usr/local/lib/python3.11/contextlib.py\", line 158, in __exit__\n    self.gen.throw(typ, value, traceback)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/_utils.py\", line 83, in collapse_excgroups\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 184, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/app/backend/api/core/rate_limiter.py\", line 50, in dispatch\n    raise HTTPException(\nfastapi.exceptions.HTTPException: 429: Rate limit exceeded. Try again in 60 seconds.",
+    "timestamp": "2025-12-11T01:30:47.212044Z"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.006781588s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "OPTIONS",
+      "requestSize": "678",
+      "requestUrl": "https://api.donecast.com/api/notifications/",
+      "responseSize": "448",
+      "serverIp": "142.250.187.147",
+      "status": 500,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a1ec700033d38bc8db2fc",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T01:30:47.506307463Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "spanId": "0b39efcad1596291",
+    "timestamp": "2025-12-11T01:30:47.203854Z",
+    "trace": "projects/podcast612/traces/7dbf3a5bbdec0b64112ed0cc0bc7ef8e"
+  },
+  {
+    "errorGroups": [
+      {
+        "id": "CM7pqPen5a74cA"
+      }
+    ],
+    "insertId": "693a1ec6000d4a08f53052d2",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-12-11T01:30:47.175653644Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "textPayload": "Traceback (most recent call last):\n  File \"/usr/local/lib/python3.11/site-packages/uvicorn/protocols/http/httptools_impl.py\", line 409, in run_asgi\n    result = await app(  # type: ignore[func-returns-value]\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/uvicorn/middleware/proxy_headers.py\", line 60, in __call__\n    return await self.app(scope, receive, send)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/applications.py\", line 1054, in __call__\n    await super().__call__(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/applications.py\", line 113, in __call__\n    await self.middleware_stack(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 186, in __call__\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 164, in __call__\n    await self.app(scope, receive, _send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 182, in __call__\n    with recv_stream, send_stream, collapse_excgroups():\n  File \"/usr/local/lib/python3.11/contextlib.py\", line 158, in __exit__\n    self.gen.throw(typ, value, traceback)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/_utils.py\", line 83, in collapse_excgroups\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 184, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/app/backend/api/core/rate_limiter.py\", line 50, in dispatch\n    raise HTTPException(\nfastapi.exceptions.HTTPException: 429: Rate limit exceeded. Try again in 60 seconds.",
+    "timestamp": "2025-12-11T01:30:46.870920Z"
+  },
+  {
+    "errorGroups": [
+      {
+        "id": "CM7pqPen5a74cA"
+      }
+    ],
+    "insertId": "693a1ec6000ce10282cf07e9",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-12-11T01:30:47.175653644Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "textPayload": "Traceback (most recent call last):\n  File \"/usr/local/lib/python3.11/site-packages/uvicorn/protocols/http/httptools_impl.py\", line 409, in run_asgi\n    result = await app(  # type: ignore[func-returns-value]\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/uvicorn/middleware/proxy_headers.py\", line 60, in __call__\n    return await self.app(scope, receive, send)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/applications.py\", line 1054, in __call__\n    await super().__call__(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/applications.py\", line 113, in __call__\n    await self.middleware_stack(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 186, in __call__\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 164, in __call__\n    await self.app(scope, receive, _send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 182, in __call__\n    with recv_stream, send_stream, collapse_excgroups():\n  File \"/usr/local/lib/python3.11/contextlib.py\", line 158, in __exit__\n    self.gen.throw(typ, value, traceback)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/_utils.py\", line 83, in collapse_excgroups\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 184, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/app/backend/api/core/rate_limiter.py\", line 50, in dispatch\n    raise HTTPException(\nfastapi.exceptions.HTTPException: 429: Rate limit exceeded. Try again in 60 seconds.",
+    "timestamp": "2025-12-11T01:30:46.844034Z"
+  },
+  {
+    "errorGroups": [
+      {
+        "id": "CM7pqPen5a74cA"
+      }
+    ],
+    "insertId": "693a1ec6000cc25e0981d6e3",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-12-11T01:30:47.175653644Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "textPayload": "Traceback (most recent call last):\n  File \"/usr/local/lib/python3.11/site-packages/uvicorn/protocols/http/httptools_impl.py\", line 409, in run_asgi\n    result = await app(  # type: ignore[func-returns-value]\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/uvicorn/middleware/proxy_headers.py\", line 60, in __call__\n    return await self.app(scope, receive, send)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/applications.py\", line 1054, in __call__\n    await super().__call__(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/applications.py\", line 113, in __call__\n    await self.middleware_stack(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 186, in __call__\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 164, in __call__\n    await self.app(scope, receive, _send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 182, in __call__\n    with recv_stream, send_stream, collapse_excgroups():\n  File \"/usr/local/lib/python3.11/contextlib.py\", line 158, in __exit__\n    self.gen.throw(typ, value, traceback)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/_utils.py\", line 83, in collapse_excgroups\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 184, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/app/backend/api/core/rate_limiter.py\", line 50, in dispatch\n    raise HTTPException(\nfastapi.exceptions.HTTPException: 429: Rate limit exceeded. Try again in 60 seconds.",
+    "timestamp": "2025-12-11T01:30:46.836190Z"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.073938186s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1276",
+      "requestUrl": "https://api.donecast.com/api/notifications/",
+      "responseSize": "448",
+      "serverIp": "142.250.187.147",
+      "status": 500,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a1ec6000d4b22ee7f0088",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T01:30:47.173506082Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "spanId": "3596cf64efd0b251",
+    "timestamp": "2025-12-11T01:30:46.795831Z",
+    "trace": "projects/podcast612/traces/5418ddeb7655bddb62ec1abfaaa9dbe6"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.050286896s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1281",
+      "requestUrl": "https://api.donecast.com/api/media/main-content",
+      "responseSize": "448",
+      "serverIp": "142.250.187.147",
+      "status": 500,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a1ec6000ce8e6a0fd1744",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T01:30:47.173506082Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "spanId": "206e770d85e7a761",
+    "timestamp": "2025-12-11T01:30:46.794300Z",
+    "trace": "projects/podcast612/traces/c72b8c0f706c423262ec1abfaaa9d137"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.045128740s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1276",
+      "requestUrl": "https://api.donecast.com/api/notifications/",
+      "responseSize": "448",
+      "serverIp": "142.250.187.147",
+      "status": 500,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a1ec6000ccca02996d864",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T01:30:47.173506082Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "spanId": "9045ee1af6ff55f2",
+    "timestamp": "2025-12-11T01:30:46.792045Z",
+    "trace": "projects/podcast612/traces/dbabf2304e6b764862ec1abfaaa9dbd9"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.013187526s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1303",
+      "requestUrl": "https://api.donecast.com/api/media/c7d1c397-cecd-4d72-b8d4-ba7aff937423",
+      "responseSize": "1031",
+      "serverIp": "142.250.187.147",
+      "status": 404,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a1eb3000b7ae8d076fbea",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T01:30:27.857263698Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "6f76d893706677b8",
+    "timestamp": "2025-12-11T01:30:27.737651Z",
+    "trace": "projects/podcast612/traces/efbbae03a731ec21242523c009388039"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.017790420s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "POST",
+      "requestSize": "1529",
+      "requestUrl": "https://api.donecast.com/api/episodes/precheck/minutes",
+      "responseSize": "1040",
+      "serverIp": "142.250.187.147",
+      "status": 405,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a1eb3000b77529970b420",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T01:30:27.857263698Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "181a416c84f8fe41",
+    "timestamp": "2025-12-11T01:30:27.732088Z",
+    "trace": "projects/podcast612/traces/5fcda85264527a81242523c009388355"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.056867571s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1323",
+      "requestUrl": "https://api.donecast.com/api/recurring/templates/bfd659d9-8088-4019-aefb-c41ad1f4b58a/next",
+      "responseSize": "1060",
+      "serverIp": "142.250.187.147",
+      "status": 403,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a1eae000e2c06bca7dcd8",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T01:30:23.195525920Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "3c3c9a2fb874208c",
+    "timestamp": "2025-12-11T01:30:22.870449Z",
+    "trace": "projects/podcast612/traces/ddd548c8b944bae1242523c00938875d"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.052659677s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://donecast.com/",
+      "remoteIp": "64.239.143.220",
+      "requestMethod": "GET",
+      "requestSize": "1324",
+      "requestUrl": "https://api.donecast.com/api/recurring/templates/bfd659d9-8088-4019-aefb-c41ad1f4b58a/next",
+      "responseSize": "1060",
+      "serverIp": "142.250.187.147",
+      "status": 403,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+    },
+    "insertId": "693a1eae000e1c0df80ec003",
+    "labels": {
+      "instanceId": "0007e26d68297203c4d70affa76f66d783fa160062c9936d783b4d3cbcf5d0cc4cf04547b1d6bbc74fc50e897ee8c8329a6c83665c94228679f589c99509193fe1c7d097e5ef8f9d0250ccb77550",
+      "restart": "20251027145630"
+    },
+    "logName": "projects/podcast612/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-12-11T01:30:23.195525920Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "podcast-api",
+        "location": "us-west1",
+        "project_id": "podcast612",
+        "revision_name": "podcast-api-00909-7lz",
+        "service_name": "podcast-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "1f5dd67f9b94805a",
+    "timestamp": "2025-12-11T01:30:22.869803Z",
+    "trace": "projects/podcast612/traces/dca8ebab9a577a94242523c0093880eb"
+  }
+]
+
+--- Reading import_error_log.txt ---
+﻿[2025-12-11 01:28:12,986] WARNING api.routing: _safe_import failed for api.routers.episodes.auphonic; attempts: [('api.routers.episodes.auphonic', 'SyntaxError("expected \'except\' or \'finally\' block", (\'/app/backend/api/services/episodes/assembler.py\', 1059, 13, \'            final_use_auphonic = bool(decision.get("use_auphonic", False))\\n\', 1059, 31))', 'Traceback (most recent call last):\n  File "/app/backend/api/routing.py", line 44, in _safe_import\n    m = __import__(candidate, fromlist=[name])\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/app/backend/api/routers/episodes/__init__.py", line 13, in <module>\n    from .assemble import router as assemble_router\n  File "/app/backend/api/routers/episodes/assemble.py", line 10, in <module>\n    from api.services.episodes import assembler as _svc_assembler')]
+[2025-12-11 01:28:12,986] WARNING api.routing: _safe_import attempt failed for api.routers.episodes.auphonic: Traceback (most recent call last): |   File "/app/backend/api/routing.py", line 44, in _safe_import |     m = __import__(candidate, fromlist=[name]) |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ |   File "/app/backend/api/routers/episodes/__init__.py", line 13, in <module> |     from .assemble import router as assemble_router |   File "/app/backend/api/routers/episodes/assemble.py", line 10, in <module> |     from api.services.episodes import assembler as _svc_assembler
+[2025-12-11 01:28:06,754] WARNING api.routing: _safe_import failed for api.routers.episodes; attempts: [('api.routers.episodes', 'SyntaxError("expected \'except\' or \'finally\' block", (\'/app/backend/api/services/episodes/assembler.py\', 1059, 13, \'            final_use_auphonic = bool(decision.get("use_auphonic", False))\\n\', 1059, 31))', 'Traceback (most recent call last):\n  File "/app/backend/api/routing.py", line 44, in _safe_import\n    m = __import__(candidate, fromlist=[name])\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/app/backend/api/routers/episodes/__init__.py", line 13, in <module>\n    from .assemble import router as assemble_router\n  File "/app/backend/api/routers/episodes/assemble.py", line 10, in <module>\n    from api.services.episodes import assembler as _svc_assembler')]
+[2025-12-11 01:28:06,753] WARNING api.routing: _safe_import attempt failed for api.routers.episodes: Traceback (most recent call last): |   File "/app/backend/api/routing.py", line 44, in _safe_import |     m = __import__(candidate, fromlist=[name]) |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ |   File "/app/backend/api/routers/episodes/__init__.py", line 13, in <module> |     from .assemble import router as assemble_router |   File "/app/backend/api/routers/episodes/assemble.py", line 10, in <module> |     from api.services.episodes import assembler as _svc_assembler
+[2025-12-11 01:28:06,397] INFO api.routing: Found oauth subrouter via _safe_import; will register under /api/auth
+
+--- Reading deploy_output.txt ---
+﻿Starting forceful deployment of podcast-api...
+Working directory: C:\Users\windo\OneDrive\PodWebDeploy
+Running: gcloud builds submit --config=cloudbuild.yaml --project=podcast612 --quiet
+Creating temporary archive of 1308 file(s) totalling 134.0 MiB before compression.
+Uploading tarball of [.] to [gs://podcast612_cloudbuild/source/1765431972.640834-c5fd7cea96a1428e857486249f787079.tgz]
+Created [https://cloudbuild.googleapis.com/v1/projects/podcast612/locations/global/builds/ceb4cf65-7216-40f4-a553-35df05fc5488].
+Logs are available at [ https://console.cloud.google.com/cloud-build/builds/ceb4cf65-7216-40f4-a553-35df05fc5488?project=524304361363 ].
+
+gcloud builds submit only displays logs from Cloud Storage. To view logs from Cloud Logging, run:
+gcloud beta builds submit
+
+Waiting for build to complete. Polling interval: 1 second(s).
+ID                                    CREATE_TIME                DURATION  SOURCE                                                                                    IMAGES                                                              STATUS
+ceb4cf65-7216-40f4-a553-35df05fc5488  2025-12-11T05:51:00+00:00  3M53S     gs://podcast612_cloudbuild/source/1765431972.640834-c5fd7cea96a1428e857486249f787079.tgz  us-west1-docker.pkg.dev/podcast612/cloud-run/podcast-api (+8 more)  SUCCESS
+
+Deployment SUCCESSFUL!
+
+--- Reading local_startup_test.txt ---
+﻿Checking startup from: C:\Users\windo\OneDrive\PodWebDeploy\backend
+[2025-12-10 22:11:15,802] INFO api.config.logging: [startup] Sentry disabled (missing DSN or dev/test env)
+[2025-12-10 22:11:16,021] INFO api.main: [startup] Password hash warmup complete
+[2025-12-10 22:11:16,555] INFO api.core.config: [config] Loaded .env.local from C:\Users\windo\OneDrive\PodWebDeploy\backend\.env.local
+[2025-12-10 22:11:16,791] INFO api.core.database: [db] Checking database configuration...
+[2025-12-10 22:11:16,791] INFO api.core.database: [db] Config state: DATABASE_URL=set, INSTANCE_CONNECTION_NAME=not set, HAS_DISCRETE_CONFIG=True, DB_HOST=not set
+[2025-12-10 22:11:16,791] INFO api.core.database: [db] Using DATABASE_URL for engine (driver=postgresql+psycopg, host=35.199.190.50, port=5432, database=podcast)
+[2025-12-10 22:11:16,791] INFO api.core.database: [db] Database engine created successfully (connection will be tested on first use)
+[2025-12-10 22:11:16,791] INFO api.core.database: [db-pool] Connection pool event listeners registered
+[2025-12-10 22:11:16,791] INFO api.main: [db-pool] Configuration: pool_size=10, max_overflow=15, pool_timeout=30s, total_capacity=25
+[2025-12-10 22:11:17,017] INFO api.services.mailer: [MAILER] SMTP_HOST configured: smtp.mailgun.org
+[2025-12-10 22:11:17,072] INFO api.services.mailer: SMTP host 'smtp.mailgun.org' resolved to 34.160.13.42
+[2025-12-10 22:11:17,077] INFO api.services.mailer: SMTP connectivity probe succeeded to smtp.mailgun.org:587
+[2025-12-10 22:11:17,079] WARNING api.services.sms: Twilio not installed. SMS notifications will be disabled.
+[2025-12-10 22:11:17,079] INFO api.services.sms: Twilio library not installed; SMS disabled
+[2025-12-10 22:11:18,902] INFO root: [celery] Beat schedule configured for purge at 2:00 in America/Los_Angeles
+[2025-12-10 22:11:19,264] INFO api.routing: Found oauth subrouter via _safe_import; will register under /api/auth
+[2025-12-10 22:11:20,243] ERROR api.routers.admin: Failed to import/admin users router: No module named 'api.api' | Traceback (most recent call last): |   File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\admin\__init__.py", line 17, in <module> |     from . import users |   File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\admin\users.py", line 12, in <module> |     from api.api.deps import get_current_admin_user, get_current_superadmin_user | ModuleNotFoundError: No module named 'api.api'
+[2025-12-10 22:11:20,323] ERROR api.routers.admin: Failed to import/admin deletions router: No module named 'api.api' | Traceback (most recent call last): |   File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\admin\__init__.py", line 87, in <module> |     from . import deletions |   File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\admin\deletions.py", line 20, in <module> |     from .users import delete_user as _admin_delete_user |   File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\admin\users.py", line 12, in <module> |     from api.api.deps import get_current_admin_user, get_current_superadmin_user | ModuleNotFoundError: No module named 'api.api'
+[2025-12-10 22:11:20,324] INFO api.routers.admin: Admin router initialized with 49 sub-routers
+[2025-12-10 22:11:20,324] INFO api.routing: Admin router imported successfully: <class 'fastapi.routing.APIRouter'>
+.\.venv\Scripts\python.exe : --- Logging error ---
+At line:1 char:1
++ .\.venv\Scripts\python.exe verify_local_startup.py > local_startup_te ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (--- Logging error ---:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Traceback (most recent call last):
+  File "C:\Python312\Lib\logging\__init__.py", line 1163, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 53: character maps to <undefined>
+Call stack:
+  File "C:\Users\windo\OneDrive\PodWebDeploy\verify_local_startup.py", line 11, in <module>
+    from api.main import create_app
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 994, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\main.py", line 120, in <module>
+    app = create_app()
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\main.py", line 102, in create_app
+    attach_routes(app)
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\config\routes.py", line 22, in attach_routes
+    from api.routing import attach_routers
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 994, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routing.py", line 124, in <module>
+    podcasts               = _safe_import("api.routers.podcasts")
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routing.py", line 44, in _safe_import
+    m = __import__(candidate, fromlist=[name])
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 994, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\podcasts\__init__.py", line 22, in <module>
+    log.info("\u2705 CRUD router included (CRITICAL - contains POST / and GET /)")
+Message: '\u2705 CRUD router included (CRITICAL - contains POST / and GET /)'
+Arguments: ()
+[2025-12-10 22:11:20,357] INFO api.routers.podcasts: CRUD router has 4 routes registered: ["{'POST'} /", "{'GET'} /", "{'PUT'} /{podcast_id}", "{'DELETE'} /{podcast_id}"]
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Python312\Lib\logging\__init__.py", line 1163, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 53: character maps to <undefined>
+Call stack:
+  File "C:\Users\windo\OneDrive\PodWebDeploy\verify_local_startup.py", line 11, in <module>
+    from api.main import create_app
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 994, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\main.py", line 120, in <module>
+    app = create_app()
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\main.py", line 102, in create_app
+    attach_routes(app)
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\config\routes.py", line 22, in attach_routes
+    from api.routing import attach_routers
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 994, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routing.py", line 124, in <module>
+    podcasts               = _safe_import("api.routers.podcasts")
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routing.py", line 44, in _safe_import
+    m = __import__(candidate, fromlist=[name])
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 994, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\podcasts\__init__.py", line 71, in <module>
+    log.info("\u2705 Categories router included")
+Message: '\u2705 Categories router included'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Python312\Lib\logging\__init__.py", line 1163, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 53: character maps to <undefined>
+Call stack:
+  File "C:\Users\windo\OneDrive\PodWebDeploy\verify_local_startup.py", line 11, in <module>
+    from api.main import create_app
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 994, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\main.py", line 120, in <module>
+    app = create_app()
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\main.py", line 102, in create_app
+    attach_routes(app)
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\config\routes.py", line 22, in attach_routes
+    from api.routing import attach_routers
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 994, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routing.py", line 124, in <module>
+    podcasts               = _safe_import("api.routers.podcasts")
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routing.py", line 44, in _safe_import
+    m = __import__(candidate, fromlist=[name])
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 994, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\podcasts\__init__.py", line 80, in <module>
+    log.info("\u2705 Distribution router included")
+Message: '\u2705 Distribution router included'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Python312\Lib\logging\__init__.py", line 1163, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 53: character maps to <undefined>
+Call stack:
+  File "C:\Users\windo\OneDrive\PodWebDeploy\verify_local_startup.py", line 11, in <module>
+    from api.main import create_app
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 994, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\main.py", line 120, in <module>
+    app = create_app()
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\main.py", line 102, in create_app
+    attach_routes(app)
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\config\routes.py", line 22, in attach_routes
+    from api.routing import attach_routers
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 994, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routing.py", line 124, in <module>
+    podcasts               = _safe_import("api.routers.podcasts")
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routing.py", line 44, in _safe_import
+    m = __import__(candidate, fromlist=[name])
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 994, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\podcasts\__init__.py", line 89, in <module>
+    log.info("\u2705 Spreaker router included")
+Message: '\u2705 Spreaker router included'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Python312\Lib\logging\__init__.py", line 1163, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 53: character maps to <undefined>
+Call stack:
+  File "C:\Users\windo\OneDrive\PodWebDeploy\verify_local_startup.py", line 11, in <module>
+    from api.main import create_app
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 994, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\main.py", line 120, in <module>
+    app = create_app()
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\main.py", line 102, in create_app
+    attach_routes(app)
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\config\routes.py", line 22, in attach_routes
+    from api.routing import attach_routers
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 994, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routing.py", line 124, in <module>
+    podcasts               = _safe_import("api.routers.podcasts")
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routing.py", line 44, in _safe_import
+    m = __import__(candidate, fromlist=[name])
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 994, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\podcasts\__init__.py", line 98, in <module>
+    log.info("\u2705 Websites router included")
+Message: '\u2705 Websites router included'
+Arguments: ()
+[2025-12-10 22:11:20,458] INFO api.routers.podcasts: ============================================================
+[2025-12-10 22:11:20,458] INFO api.routers.podcasts: Podcasts router initialization summary:
+[2025-12-10 22:11:20,458] INFO api.routers.podcasts:   Successfully included: crud, categories, distribution, spreaker, websites
+[2025-12-10 22:11:20,458] INFO api.routers.podcasts:   Total routes registered: 30
+[2025-12-10 22:11:20,458] INFO api.routers.podcasts:   Sample routes: POST /podcasts/, GET /podcasts/, PUT /podcasts/{podcast_id}, DELETE /podcasts/{podcast_id}, GET /podcasts/categories
+[2025-12-10 22:11:20,458] INFO api.routers.podcasts: ============================================================
+[2025-12-10 22:11:20,710] INFO api.routing: Podcasts router registered successfully
+[2025-12-10 22:11:20,710] INFO api.routing: Sample registered podcast routes (32 total): ["{'GET'} /api/admin/podcasts", "{'POST'} /api/podcasts/", "{'GET'} /api/podcasts/", "{'PUT'} /api/podcasts/{podcast_id}", "{'DELETE'} /api/podcasts/{podcast_id}", "{'GET'} /api/podcasts/categories", "{'GET'} /api/podcasts/{podcast_id}/distribution/checklist", "{'PUT'} /api/podcasts/{podcast_id}/distribution/checklist/{platform_key}", "{'POST'} /api/podcasts/{podcast_id}/link-spreaker-episodes", "{'POST'} /api/podcasts/{podcast_id}/publish-all"]
+[2025-12-10 22:11:20,848] INFO api.routing: Router availability summary at startup: {'health': True, 'auth_me': True, 'auth': True, 'auth_oauth_fallback': True, 'media': True, 'media_bundle_router': True, 'media_upload_alias': True, 'gcs_uploads': True, 'assistant': True, 'episodes': True, 'templates': True, 'flubber': True, 'intern': True, 'users': True, 'admin': True, 'podcasts': True, 'importer': True, 'public': True, 'waitlist_router': True, 'debug': True, 'music_router': True, 'billing_router': True, 'billing_internal_router': True, 'billing_config_router': True, 'billing_webhook_router': True, 'billing_ledger_router': True, 'notifications_router': True, 'ai_metadata': True, 'sections_router': True, 'ai_suggestions': True, 'transcripts_router': True, 'elevenlabs_router': True, 'media_tts_router': True, 'dashboard_router': True, 'recurring': True, 'assemblyai_router': True, 'rss_feed_router': True, 'analytics_router': True, 'contact_router': True, 'website_sections_router': True, 'sites_router': True, 'website_publish_router': True, 'auphonic_router': True, 'speakers_router': True, 'worker_health_router': True, 'affiliate_router': True, 'onboarding_router': True}
+[2025-12-10 22:11:20,848] INFO api.routing: Temporary debug endpoint /api/debug/routes registered
+[2025-12-10 22:11:20,848] INFO api.config.routes: Admin router registered successfully
+[2025-12-10 22:11:20,848] INFO api.config.routes: Registered admin routes (50 total): ['/api/episodes/admin/missing-spreaker-ids', '/api/admin/summary', '/api/admin/metrics', '/api/admin/episodes-today', '/api/admin/recent-activity', '/api/admin/system-health', '/api/admin/growth-metrics', '/api/admin/promo-codes', '/api/admin/promo-codes/{promo_code_id}', '/api/admin/promo-codes', '/api/admin/promo-codes/{promo_code_id}', '/api/admin/promo-codes/{promo_code_id}', '/api/admin/promo-codes/{promo_code_id}/stats', '/api/admin/podcasts', '/api/admin/music/assets', '/api/admin/music/assets', '/api/admin/music/assets/{asset_id}', '/api/admin/music/assets/{asset_id}', '/api/admin/music/assets/upload', '/api/admin/music/assets/import-url']
+[2025-12-10 22:11:20,849] WARNING api.config.routes: WARNING: /users/full route NOT found in registered admin routes!
+[2025-12-10 22:11:20,851] INFO api.main: [startup] Application configured successfully
+Imported create_app successfully.
+Created app instance successfully.
+Found 38 episode routes.
+Episodes router is active.

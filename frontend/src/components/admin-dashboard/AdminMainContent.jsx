@@ -19,6 +19,7 @@ import AdminMusicLibrary from "@/components/admin/AdminMusicLibrary.jsx";
 import AdminLandingEditor from "@/components/admin/AdminLandingEditor.jsx";
 import DbExplorer from "@/components/admin/DbExplorer.jsx";
 import PromoCodesTab from "@/components/admin-dashboard/tabs/PromoCodesTab.jsx";
+import AffiliateSettingsTab from "@/components/admin-dashboard/tabs/AffiliateSettingsTab.jsx";
 
 /**
  * AdminMainContent - Main content area that handles tab switching and renders tab components
@@ -269,6 +270,11 @@ export default function AdminMainContent({
         <PromoCodesTab token={token} />
       )}
 
+      {/* Referrals Tab (Admin) */}
+      {activeTab === "referrals" && (
+        <AffiliateSettingsTab token={token} />
+      )}
+
       {/* Enhanced Analytics Tab */}
       {activeTab === "analytics" && (
         <AnalyticsTab
@@ -314,7 +320,7 @@ export default function AdminMainContent({
       )}
 
       {/* Other tabs placeholder */}
-      {!["users", "analytics", "settings", "dashboard", "music", "tiers", "landing", "db", "podcasts", "bugs", "billing", "help", "promo-codes"].includes(activeTab) && (
+      {!["users", "analytics", "settings", "dashboard", "music", "tiers", "landing", "db", "podcasts", "bugs", "billing", "help", "promo-codes", "referrals"].includes(activeTab) && (
         <div className="text-center py-12">
           <h3 className="text-xl font-semibold text-gray-600 mb-2">
             {navigationItems.find((item) => item.id === activeTab)?.label} Coming Soon

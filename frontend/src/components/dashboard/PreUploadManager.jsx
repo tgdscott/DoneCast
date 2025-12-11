@@ -30,7 +30,7 @@ export default function PreUploadManager({
   onBack,
   onDone,
   defaultEmail = '',
-  onUploaded = () => {},
+  onUploaded = () => { },
 }) {
   const { toast } = useToast();
   const { user: authUser, refreshUser } = useAuth();
@@ -48,8 +48,6 @@ export default function PreUploadManager({
   const [conversionProgress, setConversionProgress] = useState(null);
   const [submitAfterConvert, setSubmitAfterConvert] = useState(false);
   const [conversionEnabled, setConversionEnabled] = useState(true);
-  const [useAdvancedAudio, setUseAdvancedAudio] = useState(() => Boolean(authUser?.use_advanced_audio_processing));
-  const [isSavingAdvancedAudio, setIsSavingAdvancedAudio] = useState(false);
 
   const CONVERSION_DISABLED_NOTICE =
     'Browser-based audio conversion is disabled. The original file will be uploaded as-is.';
@@ -62,32 +60,7 @@ export default function PreUploadManager({
     }
   }, [publicConfig, publicConfigError]);
 
-  // Sync advanced audio preference with user data
-  useEffect(() => {
-    setUseAdvancedAudio(Boolean(authUser?.use_advanced_audio_processing));
-  }, [authUser?.use_advanced_audio_processing]);
 
-  const handleAdvancedAudioToggle = async (checked) => {
-    const previousValue = useAdvancedAudio;
-    setUseAdvancedAudio(checked);
-    setIsSavingAdvancedAudio(true);
-    try {
-      const api = makeApi(token);
-      await api.put('/api/users/me/audio-pipeline', { use_advanced_audio: checked });
-      if (typeof refreshUser === 'function') {
-        refreshUser({ force: true });
-      }
-    } catch (err) {
-      setUseAdvancedAudio(previousValue);
-      toast({
-        variant: 'destructive',
-        title: 'Could not update audio pipeline',
-        description: err?.detail?.message || err?.message || 'Please try again.',
-      });
-    } finally {
-      setIsSavingAdvancedAudio(false);
-    }
-  };
 
   useEffect(() => {
     if (!conversionEnabled && converting) {
@@ -106,26 +79,26 @@ export default function PreUploadManager({
       event.target.value = '';
     }
     if (!selected) return;
-    
+
     // Validate file BEFORE processing/conversion
     // Check file type
     const fileType = (selected.type || '').toLowerCase();
     const fileName = selected.name.toLowerCase();
-    const isAudioFile = fileType.startsWith('audio/') || 
-                       fileName.endsWith('.mp3') || 
-                       fileName.endsWith('.wav') || 
-                       fileName.endsWith('.m4a') || 
-                       fileName.endsWith('.aac') || 
-                       fileName.endsWith('.ogg') || 
-                       fileName.endsWith('.flac') || 
-                       fileName.endsWith('.opus');
-    
+    const isAudioFile = fileType.startsWith('audio/') ||
+      fileName.endsWith('.mp3') ||
+      fileName.endsWith('.wav') ||
+      fileName.endsWith('.m4a') ||
+      fileName.endsWith('.aac') ||
+      fileName.endsWith('.ogg') ||
+      fileName.endsWith('.flac') ||
+      fileName.endsWith('.opus');
+
     if (!isAudioFile) {
       setError('Please select an audio file. Supported formats: MP3, WAV, M4A, AAC, OGG, FLAC, Opus.');
       setFile(null);
       return;
     }
-    
+
     // Check file size (500MB max for main content)
     const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
     if (selected.size > MAX_FILE_SIZE) {
@@ -134,14 +107,14 @@ export default function PreUploadManager({
       setFile(null);
       return;
     }
-    
+
     // Check minimum file size (should be at least 1KB)
     if (selected.size < 1024) {
       setError('File is too small. Please select a valid audio file.');
       setFile(null);
       return;
     }
-    
+
     setFriendlyName('');
     setSuccessMessage('');
     setError('');
@@ -198,13 +171,13 @@ export default function PreUploadManager({
       setConverting(false);
       setConversionProgress(null);
     }
-    
+
     // Check if upload was queued while converting - trigger it now
     if (submitAfterConvert && preparedFile && friendlyName.trim()) {
       setSubmitAfterConvert(false);
       toast({ title: 'Starting upload...', description: 'Your audio is ready!' });
-      try { 
-        await doUpload(preparedFile); 
+      try {
+        await doUpload(preparedFile);
       } catch (err) {
         console.error('Auto-upload after conversion failed:', err);
       }
@@ -223,16 +196,16 @@ export default function PreUploadManager({
       setError('Enter a friendly name for this episode before uploading.');
       return;
     }
-    
+
     setUploading(true);
     setUploadProgress(0);
     setError('');
-    
+
     // Emit upload start event to reduce polling during upload
     try {
       window.dispatchEvent(new CustomEvent('ppp:upload:start'));
-    } catch {}
-    
+    } catch { }
+
     try {
       await uploadMediaDirect({
         category: 'main_content',
@@ -247,18 +220,18 @@ export default function PreUploadManager({
           }
         },
       });
-      
+
       setUploadProgress(100);
-      
+
       // Emit upload complete event to resume normal polling after cooldown
       try {
         window.dispatchEvent(new CustomEvent('ppp:upload:complete'));
         localStorage.setItem('ppp_last_upload_time', Date.now().toString());
-      } catch {}
-      
+      } catch { }
+
       toast({ title: 'Upload complete!', description: 'Transcription has started. We\'ll email you when it\'s ready.' });
       onUploaded();
-      
+
       // Close modal after short delay so user sees completion
       setTimeout(() => {
         onDone();
@@ -266,10 +239,10 @@ export default function PreUploadManager({
     } catch (err) {
       setUploading(false);
       setUploadProgress(null);
-      
+
       // Provide user-friendly error messages without technical jargon
       let userMessage = 'We couldn\'t complete your upload. Please try again.';
-      
+
       // Check for specific error types
       if (err?.message?.toLowerCase().includes('network')) {
         userMessage = 'Network connection issue. Please check your internet and try again.';
@@ -282,11 +255,11 @@ export default function PreUploadManager({
       } else if (err?.status >= 500) {
         userMessage = 'Server error. Please try again in a moment.';
       }
-      
+
       setError(userMessage);
-      toast({ 
-        variant: 'destructive', 
-        title: 'Upload failed', 
+      toast({
+        variant: 'destructive',
+        title: 'Upload failed',
         description: userMessage
       });
     }
@@ -351,8 +324,8 @@ export default function PreUploadManager({
                   {converting
                     ? 'Preparing audio…'
                     : hasFile
-                    ? file.name
-                    : 'Drag & drop or click to choose an audio file'}
+                      ? file.name
+                      : 'Drag & drop or click to choose an audio file'}
                 </span>
               </label>
             </div>
@@ -427,23 +400,7 @@ export default function PreUploadManager({
                   </div>
                 )}
 
-                <div className="flex items-center justify-between gap-4 pt-2 border-t border-slate-200">
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-slate-900">Use Advanced Audio Processing</p>
-                    <p className="text-xs text-slate-600">
-                      Enable Auphonic pipeline for professional-grade mastering with filler removal, noise reduction, and leveling.
-                    </p>
-                    {isSavingAdvancedAudio && (
-                      <p className="text-xs text-slate-500">Saving your preference…</p>
-                    )}
-                  </div>
-                  <Switch
-                    id="preupload-advanced-audio-toggle"
-                    checked={useAdvancedAudio}
-                    onCheckedChange={handleAdvancedAudioToggle}
-                    disabled={isSavingAdvancedAudio}
-                  />
-                </div>
+
               </div>
             )}
 

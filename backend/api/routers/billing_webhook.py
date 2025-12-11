@@ -176,6 +176,8 @@ async def stripe_webhook(request: Request):
             purchase_type = metadata.get('type')
             promo_code_str = metadata.get('promo_code')
             promo_code_id_str = metadata.get('promo_code_id')
+            referrer_user_id_str = metadata.get('referrer_user_id')
+            referral_type = metadata.get('referral_type')
             
             if user_id and customer_id:
                 user = session.get(User, user_id)
@@ -333,6 +335,66 @@ async def stripe_webhook(request: Request):
                             logger.warning(f"[webhook] Could not determine credits amount for addon purchase (price_id={price.id})")
                 except Exception as e:
                     logger.error(f"[webhook] Error processing addon credits purchase: {e}", exc_info=True)
+
+            # Handle Affiliate Referral Reward
+            if referrer_user_id_str and referral_type == 'affiliate' and user_id:
+                try:
+                    from uuid import UUID
+                    referrer_uuid = UUID(str(referrer_user_id_str))
+                    # user_id is already available as str, cast to UUID if needed, but logging uses str usually
+                    
+                    from api.models.affiliate_settings import AffiliateProgramSettings
+                    from sqlmodel import select
+                    
+                    # Fetch settings
+                    aff_settings = session.exec(
+                        select(AffiliateProgramSettings).where(
+                           AffiliateProgramSettings.user_id == referrer_uuid
+                        )
+                    ).first()
+                    
+                    if not aff_settings:
+                         aff_settings = session.exec(
+                            select(AffiliateProgramSettings).where(
+                                AffiliateProgramSettings.user_id == None
+                            )
+                        ).first()
+                    
+                    if aff_settings and aff_settings.referrer_reward_credits > 0:
+                        reward_amount = float(aff_settings.referrer_reward_credits)
+                        
+                        from api.services.billing.wallet import add_purchased_credits
+                        from ..services.billing.credits import refund_credits
+                        from ..models.usage import LedgerReason
+                        
+                        # Award credits
+                        add_purchased_credits(session, referrer_uuid, reward_amount)
+                        
+                        # Log to ledger
+                        refund_credits(
+                            session=session,
+                            user_id=referrer_uuid,
+                            credits=reward_amount,
+                            reason=LedgerReason.PROMO_CODE_BONUS,
+                            notes=f"Referral reward for referring user {user_id}"
+                        )
+                        
+                        # Notify referrer
+                        try:
+                            note = Notification(
+                                user_id=referrer_uuid,
+                                type="billing",
+                                title="Referral Reward Earned!",
+                                body=f"You earned {int(reward_amount):,} credits because your referred friend subscribed!"
+                            )
+                            session.add(note)
+                            session.commit()
+                        except Exception:
+                            pass
+                            
+                        logger.info(f"[webhook] Awarded {reward_amount} referral credits to user {referrer_user_id_str}")
+                except Exception as e:
+                    logger.error(f"[webhook] Failed to process referral reward: {e}", exc_info=True)
         else:
             logger.debug("Ignoring Stripe event type: %s", kind)
         return {"received": True}

@@ -651,7 +651,7 @@ def _get_clean_engine_class(name: str):
     return _Fallback
 
 
-def _build_engine_configs(cleanup_settings: dict):
+def _build_engine_configs(cleanup_settings: dict, override_silence_settings: Optional[dict] = None):
     UserSettings = _get_clean_engine_class("UserSettings")
     SilenceSettings = _get_clean_engine_class("SilenceSettings")
     InternSettings = _get_clean_engine_class("InternSettings")
@@ -667,13 +667,27 @@ def _build_engine_configs(cleanup_settings: dict):
         filler_phrases=(cleanup_settings or {}).get("fillerPhrases", []),
         strict_filler_removal=bool((cleanup_settings or {}).get("strictFillerRemoval", True)),
     )
-    ss = SilenceSettings(
-        detect_threshold_dbfs=int((cleanup_settings or {}).get("silenceThreshDb", -50)),  # More forgiving (was -40)
-        min_silence_ms=int(float((cleanup_settings or {}).get("maxPauseSeconds", 1.5)) * 1000),
-        target_silence_ms=int(float((cleanup_settings or {}).get("targetPauseSeconds", 0.5)) * 1000),
-        edge_keep_ratio=float((cleanup_settings or {}).get("pauseEdgeKeepRatio", 0.5)),
-        max_removal_pct=float((cleanup_settings or {}).get("maxPauseRemovalPct", 0.9)),
-    )
+    
+    # Apply override silence settings if provided (for length management)
+    if override_silence_settings:
+        logging.info("[assemble] Applying length management silence overrides: %s", override_silence_settings)
+        ss = SilenceSettings(
+            detect_threshold_dbfs=int(override_silence_settings.get("detect_threshold_dbfs", -50)),
+            min_silence_ms=int(override_silence_settings.get("min_silence_ms", 1500)),
+            target_silence_ms=int(override_silence_settings.get("target_silence_ms", 500)),
+            edge_keep_ratio=float(override_silence_settings.get("edge_keep_ratio", 0.5)),
+            max_removal_pct=float(override_silence_settings.get("max_removal_pct", 0.9)),
+        )
+    else:
+        # Use standard settings from cleanup_settings
+        ss = SilenceSettings(
+            detect_threshold_dbfs=int((cleanup_settings or {}).get("silenceThreshDb", -50)),  # More forgiving (was -40)
+            min_silence_ms=int(float((cleanup_settings or {}).get("maxPauseSeconds", 1.5)) * 1000),
+            target_silence_ms=int(float((cleanup_settings or {}).get("targetPauseSeconds", 0.5)) * 1000),
+            edge_keep_ratio=float((cleanup_settings or {}).get("pauseEdgeKeepRatio", 0.5)),
+            max_removal_pct=float((cleanup_settings or {}).get("maxPauseRemovalPct", 0.9)),
+        )
+    
     ins = InternSettings(
         min_break_s=float((cleanup_settings or {}).get("internMinBreak", 2.0)),
         max_break_s=float((cleanup_settings or {}).get("internMaxBreak", 3.0)),
@@ -739,6 +753,7 @@ def prepare_transcript_context(
     user_id: str,
     intents: dict | None,
     auphonic_processed: bool = False,
+    override_silence_settings: Optional[dict] = None,
 ) -> TranscriptContext:
     # Initialize intern_overrides at the VERY START to avoid UnboundLocalError
     # This must be done before any conditional blocks that might reference it
@@ -902,7 +917,7 @@ def prepare_transcript_context(
             # Don't fail assembly if speaker mapping fails
     # ========== END SPEAKER IDENTIFICATION ==========
 
-    us, ss, ins, censor_cfg = _build_engine_configs(media_context.cleanup_settings)
+    us, ss, ins, censor_cfg = _build_engine_configs(media_context.cleanup_settings, override_silence_settings)
     sfx_map = _build_sfx_map(session=session, episode=episode)
 
     def _synth(text: str):

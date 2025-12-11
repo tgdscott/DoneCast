@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Iterator, Optional
 
 from sqlmodel import SQLModel, Session, create_engine
 from sqlalchemy import text
@@ -585,4 +585,28 @@ def session_scope() -> Iterator[Session]:
                 "[db] Session close failed in session_scope cleanup: %s",
                 close_exc,
             )
+
+
+def commit_with_retry(session: Session, attempts: int = 3, base_sleep: float = 0.2) -> None:
+    """Commit the session with retries for transient database errors (PostgreSQL)."""
+    last_err: Optional[Exception] = None
+    for attempt in range(attempts):
+        try:
+            session.commit()
+            return
+        except SAOperationalError as exc:  # pragma: no cover - env specific
+            msg = str(exc).lower()
+            # PostgreSQL transient errors (connection issues, deadlocks, etc.)
+            if any(keyword in msg for keyword in ["connection", "deadlock", "timeout", "locked"]):
+                last_err = exc
+                time.sleep(base_sleep * (attempt + 1))
+                continue
+            raise
+        except Exception as exc:  # pragma: no cover
+            last_err = exc
+            break
+    if last_err is not None:
+        log.error("Admin commit_with_retry failed after %s attempts", attempts)
+        raise last_err
+
 

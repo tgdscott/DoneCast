@@ -21,12 +21,12 @@ export default function StepUploadAudio({
   uploadProgress = null,
   uploadStats = null,
   onFileChange,
-  onSegmentRemove = () => {},
-  onSegmentProcessingChange = () => {},
-  composeSegments = async () => {},
+  onSegmentRemove = () => { },
+  onSegmentProcessingChange = () => { },
+  composeSegments = async () => { },
   fileInputRef,
   onBack,
-  onNext = () => {},
+  onNext = () => { },
   onEditAutomations,
   onIntentSubmit,
   pendingIntentLabels = [],
@@ -42,9 +42,6 @@ export default function StepUploadAudio({
   audioDurationSec: audioDurationSecProp = null,
   episodeStatus = null,
   wasRecorded = false,
-  useAdvancedAudio = false,
-  onAdvancedAudioToggle = () => {},
-  isAdvancedAudioSaving = false,
 }) {
   const [uploadGuests, setUploadGuests] = React.useState([]);
   const audioDurationSec = audioDurationSecProp;
@@ -286,32 +283,7 @@ export default function StepUploadAudio({
         </CardContent>
       </Card>
 
-      {hasSegments && (
-        <Card className="border border-slate-200 bg-white">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg text-slate-900">Default processing for new uploads</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-between gap-4 flex-col sm:flex-row sm:items-center">
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-slate-900">Use Advanced Audio Processing</p>
-                <p className="text-xs text-slate-600">
-                  This sets the default pipeline for future segments. You can still override each segment above.
-                </p>
-                {isAdvancedAudioSaving && (
-                  <p className="text-xs text-slate-500">Saving your preference…</p>
-                )}
-              </div>
-              <Switch
-                id="advanced-audio-toggle"
-                checked={useAdvancedAudio}
-                onCheckedChange={(checked) => onAdvancedAudioToggle(Boolean(checked))}
-                disabled={isAdvancedAudioSaving}
-              />
-            </div>
-          </CardContent>
-        </Card>
-      )}
+
 
       {showProcessingWarning && (
         <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">

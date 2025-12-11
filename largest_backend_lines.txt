@@ -1,0 +1,26 @@
+﻿
+FullName                                                                                         Lines
+--------                                                                                         -----
+C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\admin\users.py                           2340
+C:\Users\windo\OneDrive\PodWebDeploy\backend\api\services\podcast_websites.py                     1960
+C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\assistant.py                             1431
+C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\media.py                                 1428
+C:\Users\windo\OneDrive\PodWebDeploy\backend\api\services\episodes\assembler.py                   1177
+C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\billing.py                               1167
+C:\Users\windo\OneDrive\PodWebDeploy\backend\api\services\audio\orchestrator_steps_lib\export.py  1149
+C:\Users\windo\OneDrive\PodWebDeploy\backend\api\services\transcription\__init__.py               1064
+C:\Users\windo\OneDrive\PodWebDeploy\backend\api\services\ai_theme_generator.py                   1023
+C:\Users\windo\OneDrive\PodWebDeploy\backend\api\services\website_sections.py                     1007
+C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\podcasts\crud.py                          969
+C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\media_pkg_disabled\write.py               920
+C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\tasks.py                                  898
+C:\Users\windo\OneDrive\PodWebDeploy\backend\api\services\ai_content\client_gemini.py              896
+C:\Users\windo\OneDrive\PodWebDeploy\backend\api\services\billing\wallet.py                        796
+C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\sites.py                                  760
+C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\episodes\read.py                          754
+C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\podcasts\websites.py                      738
+C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\importer.py                               710
+C:\Users\windo\OneDrive\PodWebDeploy\backend\api\routers\intern.py                                 699
+
+
+

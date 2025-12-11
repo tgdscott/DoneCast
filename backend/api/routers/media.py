@@ -170,7 +170,10 @@ async def upload_media_files(
 
         # --- FIX: Add uuid4 to filename to ensure uniqueness ---
         safe_orig = _sanitize_name(file.filename)
-        safe_filename = f"{current_user.id.hex}_{uuid4().hex}_{safe_orig}"
+        
+        # Robustly handle current_user.id (could be UUID object or string)
+        user_id_hex = current_user.id.hex if hasattr(current_user.id, "hex") else str(current_user.id).replace("-", "")
+        safe_filename = f"{user_id_hex}_{uuid4().hex}_{safe_orig}"
 
         # Enforce per-category size limit
         max_bytes = CATEGORY_SIZE_LIMITS.get(category, 50 * MB)
@@ -401,25 +404,40 @@ async def upload_media_files(
                     except Exception:
                         user_tier = None
 
+                    # Get user's threshold preference (defensive - column may not exist yet during migration)
+                    try:
+                        user_threshold = getattr(current_user, 'audio_processing_threshold_label', None)
+                    except Exception:
+                        # Column doesn't exist yet - migration pending
+                        user_threshold = None
+                    
                     decision = decide_audio_processing(
                         audio_quality_label=audio_label,
                         current_user_tier=user_tier,
                         media_item_override_use_auphonic=None,  # Never override; let decision matrix + tier + config decide
-                        user_quality_threshold=getattr(current_user, 'audio_processing_threshold_label', None),
+                        user_quality_threshold=user_threshold,
                     )
 
                     final_use_auphonic = bool(decision.get("use_auphonic", False))
                     
                     # Persist metrics and decision in new dedicated columns (durable, queryable)
+                    # Defensive: columns may not exist yet during migration
+                    # IMPORTANT: PostgreSQL JSONB columns expect Python dicts, not JSON strings
                     try:
-                        media_item.audio_quality_metrics_json = _json.dumps(metrics) if metrics else None
+                        media_item.audio_quality_metrics_json = metrics  # Pass dict directly, not JSON string
                         media_item.audio_quality_label = audio_label
-                        media_item.audio_processing_decision_json = _json.dumps(decision) if decision else None
+                        media_item.audio_processing_decision_json = decision  # Pass dict directly, not JSON string
                         media_item.use_auphonic = final_use_auphonic
                         log.info("[upload.quality] MediaItem %s: label=%s, use_auphonic=%s, reason=%s", 
                                  media_item.id, audio_label, final_use_auphonic, decision.get("reason"))
-                    except Exception as persist_err:
-                        log.warning("[upload.quality] Failed to persist metrics for %s: %s", media_item.id, persist_err)
+                    except (AttributeError, Exception) as persist_err:
+                        # Columns don't exist yet - migration pending
+                        # Still set use_auphonic via legacy method if possible
+                        log.warning("[upload.quality] Could not persist quality metrics (migration pending): %s", persist_err)
+                        try:
+                            media_item.use_auphonic = final_use_auphonic
+                        except Exception:
+                            pass
 
                     # Use Cloud Tasks to schedule transcription and include analysis+decision
                     from infrastructure.tasks_client import enqueue_http_task  # type: ignore
@@ -428,7 +446,7 @@ async def upload_media_files(
                         "user_id": str(current_user.id),
                         "guest_ids": guests_list,
                         "audio_quality_label": audio_label,
-                        "audio_quality_metrics": metrics,
+                        "audio_quality_metrics": metrics if metrics else {},  # Ensure dict for JSON serialization
                         "use_auphonic": final_use_auphonic,
                     }
                     task_result = enqueue_http_task("/api/tasks/transcribe", task_payload)
@@ -491,22 +509,14 @@ async def upload_media_files(
                 audio_label = item.audio_quality_label
                 processing_decision = None
                 if item.audio_processing_decision_json:
-                    try:
-                        import json as _json
-                        processing_decision = _json.loads(item.audio_processing_decision_json)
-                    except Exception:
-                        pass
+                    processing_decision = item.audio_processing_decision_json
                 
                 processing_type = "advanced" if item.use_auphonic else "standard"
                 
                 # Extract metrics if available
                 audio_metrics = None
                 if item.audio_quality_metrics_json:
-                    try:
-                        import json as _json
-                        audio_metrics = _json.loads(item.audio_quality_metrics_json)
-                    except Exception:
-                        pass
+                    audio_metrics = item.audio_quality_metrics_json
                 
                 # Send email (non-blocking; don't fail upload if email fails)
                 try:

@@ -28,6 +28,13 @@ class UserBase(SQLModel):
         default=False,
         description="If True, route uploads through the advanced mastering pipeline instead of AssemblyAI-only flow",
     )
+    audio_processing_threshold_label: Optional[str] = Field(
+        default="very_bad",
+        max_length=50,
+        description="Quality threshold for triggering advanced audio processing. "
+                    "Valid values: 'good', 'slightly_bad', 'fairly_bad', 'very_bad', 'incredibly_bad', 'abysmal'. "
+                    "Default 'very_bad' routes top 3 quality levels to standard, bottom 3 to advanced processing.",
+    )
     # Optional profile personalization fields
     first_name: Optional[str] = Field(default=None, max_length=80, description="User given name for personalization")
     last_name: Optional[str] = Field(default=None, max_length=120, description="User family name")
@@ -42,6 +49,9 @@ class UserBase(SQLModel):
     sms_notify_worker_down: bool = Field(default=False, description="Notify admin when worker server is down")
     # Promo code used at signup
     promo_code_used: Optional[str] = Field(default=None, max_length=50, index=True, description="Promo code used during registration")
+    # Speed adjustment factors for length management (values like 1.05 for 5% speedup)
+    speed_up_factor: float = Field(default=1.05, ge=1.0, le=1.25, description="Speed factor for lengthening episodes (1.0-1.25)")
+    slow_down_factor: float = Field(default=0.95, ge=0.75, lt=1.0, description="Speed factor for shortening episodes (0.75-1.0)")
 
 class User(UserBase, table=True):
     """The database model for a User."""

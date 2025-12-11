@@ -204,7 +204,7 @@ async def login_google(request: Request):
                 raise HTTPException(status_code=500, detail="OAuth client not configured")
             
             # Attempt to authorize redirect (this triggers metadata fetch on first call)
-            return await client.authorize_redirect(request, redirect_uri)
+            return await client.authorize_redirect(request, redirect_uri, prompt="select_account")
             
         except RuntimeError as exc:
             # Configuration error, don't retry

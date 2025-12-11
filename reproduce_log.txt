@@ -1,0 +1,7 @@
+Script started
+Starting reproduce function
+Created TestClient from fresh FastAPI with router
+Testing GET /api/auth/login/google...
+Response status: 307
+Called authorize_redirect with kwargs: {'prompt': 'select_account'}
+SUCCESS: prompt='select_account' found in kwargs.

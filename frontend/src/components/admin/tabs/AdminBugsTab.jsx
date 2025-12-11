@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Bug, Zap, MessageSquare } from "lucide-react";
+import AdminSentryPanel from './AdminSentryPanel';
 import { makeApi } from "@/lib/apiClient";
 import { useToast } from '@/hooks/use-toast';
 
@@ -136,6 +137,9 @@ export default function AdminBugsTab({ token }) {
 
   return (
     <div className="space-y-6">
+      {/* Sentry Issues Panel */}
+      <AdminSentryPanel token={token} />
+
       {/* Stats Overview - Bugs vs Feature Requests */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">

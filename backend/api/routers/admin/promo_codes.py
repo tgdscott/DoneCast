@@ -15,7 +15,8 @@ from sqlmodel import Session, select, func
 from api.core.database import get_session
 from api.models.promo_code import PromoCode, PromoCodeCreate, PromoCodeUpdate, PromoCodePublic
 from api.models.user import User
-from .deps import get_current_admin_user, commit_with_retry
+from .deps import get_current_admin_user
+from api.core.database import commit_with_retry
 
 router = APIRouter()
 log = logging.getLogger(__name__)

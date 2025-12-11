@@ -1056,12 +1056,14 @@ def assemble_or_queue(
                     current_user_tier=tier,
                     media_item_override_use_auphonic=(True if use_auphonic else None),
                 )
-            final_use_auphonic = bool(decision.get("use_auphonic", False))
-            meta["use_auphonic"] = final_use_auphonic
-            # Also store the decision metadata for observability
-            meta.setdefault("audio_processing_decision", {})
-            meta["audio_processing_decision"]["decision"] = decision.get("decision")
-            meta["audio_processing_decision"]["reason"] = decision.get("reason")
+                final_use_auphonic = bool(decision.get("use_auphonic", False))
+                meta["use_auphonic"] = final_use_auphonic
+                # Also store the decision metadata for observability
+                meta.setdefault("audio_processing_decision", {})
+                meta["audio_processing_decision"]["decision"] = decision.get("decision")
+                meta["audio_processing_decision"]["reason"] = decision.get("reason")
+            except Exception:
+                raise
         except Exception:
             # Fallback to provided flag
             meta["use_auphonic"] = bool(use_auphonic)

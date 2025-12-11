@@ -37,7 +37,7 @@ import { ensureExt, formatDateName, extractStemFromFilename, isMobileDevice } fr
 export default function Recorder({ onBack, token, onFinish, onSaved, source = "A" }) {
   const { user: authUser, refreshUser } = useAuth();
   const { toast } = useToast();
-  
+
   // Config
   const [maxUploadMb, setMaxUploadMb] = useState(500);
   const MAX_UPLOAD_BYTES = useMemo(() => maxUploadMb * 1024 * 1024, [maxUploadMb]);
@@ -51,23 +51,16 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
   const [savedDisplayName, setSavedDisplayName] = useState("");
   const [transcriptReady, setTranscriptReady] = useState(false);
   const [showTimeoutNotice, setShowTimeoutNotice] = useState(false);
-  const [useAdvancedAudio, setUseAdvancedAudio] = useState(() => {
-    if (typeof authUser?.use_advanced_audio_processing === 'boolean') {
-      return authUser.use_advanced_audio_processing;
-    }
-    return true;
-  });
-  const [isSavingAdvancedAudio, setIsSavingAdvancedAudio] = useState(false);
 
   // Polling refs
   const pollIntervalRef = useRef(null);
   const pollAbortRef = useRef(null);
   const pollStartRef = useRef(0);
-  
+
   // Mic check session cache (6 hours)
   const MIC_CHECK_SESSION_KEY = 'recorder_mic_check_session';
   const MIC_CHECK_VALID_HOURS = 6;
-  
+
   // Check if mic check is still valid from localStorage
   const isMicCheckSessionValid = () => {
     try {
@@ -81,7 +74,7 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
       return false;
     }
   };
-  
+
   // Save mic check session to localStorage
   const saveMicCheckSession = () => {
     try {
@@ -89,37 +82,10 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
         timestamp: Date.now(),
         completed: true
       }));
-    } catch {}
+    } catch { }
   };
 
-  // Sync advanced audio preference when auth user changes
-  useEffect(() => {
-    if (typeof authUser?.use_advanced_audio_processing === 'boolean') {
-      setUseAdvancedAudio(authUser.use_advanced_audio_processing);
-    }
-  }, [authUser?.use_advanced_audio_processing]);
 
-  const handleAdvancedAudioToggle = async (nextValue) => {
-    const previous = useAdvancedAudio;
-    setUseAdvancedAudio(nextValue);
-    setIsSavingAdvancedAudio(true);
-    try {
-      const api = makeApi(token);
-      await api.put('/api/users/me/audio-pipeline', { use_advanced_audio: nextValue });
-      if (typeof refreshUser === 'function') {
-        refreshUser({ force: true });
-      }
-    } catch (err) {
-      setUseAdvancedAudio(previous);
-      toast({
-        variant: 'destructive',
-        title: 'Could not update audio pipeline',
-        description: err?.detail?.message || err?.message || 'Please try again.',
-      });
-    } finally {
-      setIsSavingAdvancedAudio(false);
-    }
-  };
 
   // Device selection
   const deviceSelection = useDeviceSelection();
@@ -164,7 +130,7 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
       recorder.streamRef.current.getTracks().forEach((t) => {
         try {
           t.stop();
-        } catch {}
+        } catch { }
       });
       recorder.streamRef.current = null;
     }
@@ -178,7 +144,7 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
     stopStream,
     onError: (msg) => toast({ variant: "destructive", title: "Error", description: msg })
   });
-  
+
   // Check session cache and mark as completed if still valid (run once on mount)
   useEffect(() => {
     if (isMicCheckSessionValid() && !micCheck.micCheckCompleted) {
@@ -186,9 +152,9 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
       console.log('[Recorder] Restoring mic check session from cache (still valid)');
       micCheck.markMicCheckCompleted();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run only once on mount
-  
+
   // Save session when mic check completes successfully with good analysis
   useEffect(() => {
     // Save as soon as we get a successful analysis (before user clicks continue)
@@ -210,7 +176,7 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
           const clamped = Math.min(Math.max(n, 10), 2048);
           setMaxUploadMb(clamped);
         }
-      } catch {}
+      } catch { }
     })();
     return () => { canceled = true; };
   }, []);
@@ -218,12 +184,12 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
   // Initialize devices on mount
   useEffect(() => {
     let mounted = true;
-    
+
     (async () => {
       try {
         if (!mounted) return;
         console.log('[Recorder] Checking permissions...');
-        
+
         // Check if permission already granted
         if (navigator.permissions?.query) {
           try {
@@ -239,7 +205,7 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
         console.error('[Recorder] Init error:', e);
       }
     })();
-    
+
     return () => {
       mounted = false;
       // Cleanup
@@ -247,8 +213,8 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
       if (recorder.audioUrl) {
         URL.revokeObjectURL(recorder.audioUrl);
       }
-      try { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); } catch {}
-      try { if (pollAbortRef.current) pollAbortRef.current.abort(); } catch {}
+      try { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); } catch { }
+      try { if (pollAbortRef.current) pollAbortRef.current.abort(); } catch { }
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -257,8 +223,8 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
     setTranscriptReady(false);
     setShowTimeoutNotice(false);
     if (!serverStem) {
-      try { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); } catch {}
-      try { if (pollAbortRef.current) pollAbortRef.current.abort(); } catch {}
+      try { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); } catch { }
+      try { if (pollAbortRef.current) pollAbortRef.current.abort(); } catch { }
       pollIntervalRef.current = null;
       pollAbortRef.current = null;
       return;
@@ -269,7 +235,7 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
     pollStartRef.current = Date.now();
 
     const check = async () => {
-      try { if (pollAbortRef.current) pollAbortRef.current.abort(); } catch {}
+      try { if (pollAbortRef.current) pollAbortRef.current.abort(); } catch { }
       const controller = new AbortController();
       pollAbortRef.current = controller;
       try {
@@ -277,7 +243,7 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
         const ready = (res && (res.ready === true || res.status === 'ready' || res === true));
         if (ready) {
           setTranscriptReady(true);
-          try { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); } catch {}
+          try { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); } catch { }
           pollIntervalRef.current = null;
         }
       } catch (e) {
@@ -291,8 +257,8 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
     pollIntervalRef.current = setInterval(check, 5000);
 
     return () => {
-      try { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); } catch {}
-      try { if (pollAbortRef.current) pollAbortRef.current.abort(); } catch {}
+      try { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); } catch { }
+      try { if (pollAbortRef.current) pollAbortRef.current.abort(); } catch { }
     };
   }, [serverStem, token]);
 
@@ -306,12 +272,12 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
     const onKey = (e) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (isEditable(e.target)) return;
-      
+
       // Block spacebar during mic check or when showing mic check analysis
       if (!micCheck.micCheckCompleted || micCheck.isMicChecking || micCheck.micCheckAnalysis) return;
       // Block spacebar when showing recording preview
       if (recorder.hasPreview) return;
-      
+
       const key = e.key || e.code;
       if (key === ' ' || key === 'Spacebar' || key === 'Space') {
         e.preventDefault();
@@ -345,7 +311,7 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
 
       const file = new File([recorder.audioBlob], filenameWithExt, { type: recorder.mimeType || recorder.audioBlob.type || "audio/webm" });
       const userEmail = authUser?.email || '';
-      
+
       const uploaded = await uploadMediaDirect({
         category: 'main_content',
         file,
@@ -354,18 +320,18 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
         notifyWhenReady: !!userEmail,
         notifyEmail: userEmail || undefined,
       });
-      
+
       const first = Array.isArray(uploaded) ? uploaded[0] : null;
       const stored = first && (first.filename || first.name || first.stored_name);
       if (!stored) throw new Error("Upload response missing filename");
       setServerFilename(stored);
       setServerStem(extractStemFromFilename(stored));
-      
+
       const emailMsg = userEmail ? ` We'll email you at ${userEmail} when it's ready.` : '';
       toast({ title: "Recording Saved!", description: `Transcription started.${emailMsg}` });
-      
-      try { window.dispatchEvent(new CustomEvent('ppp:media-uploaded', { detail: first })); } catch {}
-      try { if (typeof onSaved === 'function') onSaved(first); } catch {}
+
+      try { window.dispatchEvent(new CustomEvent('ppp:media-uploaded', { detail: first })); } catch { }
+      try { if (typeof onSaved === 'function') onSaved(first); } catch { }
     } catch (e) {
       const msg = (e && (e.detail || e.message)) || "Upload failed";
       toast({ variant: "destructive", title: "Upload error", description: msg });
@@ -408,141 +374,138 @@ export default function Recorder({ onBack, token, onFinish, onSaved, source = "A
           </div>
         </div>
 
-      <Card className="shadow-sm">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-lg">Recorder</CardTitle>
-          {/* Only show recording instructions after mic check is completed */}
-          {micCheck.micCheckCompleted && (
-            <CardDescription>
-              Press the circle to record, press again to pause, click stop while paused to end recording.
-              <span className="block text-xs text-muted-foreground mt-1">
-                💡 Tip: Press <kbd className="px-1 py-0.5 text-xs bg-muted border rounded">Space</kbd> to start/pause recording
-              </span>
-            </CardDescription>
-          )}
-        </CardHeader>
-
-      <CardContent className="space-y-6">
-        {/* Mic check full-screen overlay when active OR showing analysis results */}
-        {(micCheck.isMicChecking || micCheck.micCheckAnalysis) ? (
-          <MicCheckOverlay
-            isVisible={true}
-            countdown={micCheck.micCheckCountdown}
-            isPlayback={micCheck.micCheckPlayback}
-            analysis={micCheck.micCheckAnalysis}
-            levelPct={audioGraph.levelPct}
-            levelColor={audioGraph.levelColor}
-            inputGain={audioGraph.inputGain}
-            onGainChange={audioGraph.updateGain}
-            onContinue={micCheck.clearAnalysis}
-            onRetry={micCheck.handleMicCheck}
-          />
-        ) : !micCheck.micCheckCompleted && !isMicCheckSessionValid() && !recorder.hasPreview ? (
-          /* Show prominent mic check button before first use (unless session cache valid) */
-          <div className="min-h-[600px] flex flex-col items-center justify-center space-y-8">
-            <div className="text-center space-y-6 w-full max-w-2xl">
-              <div className="text-4xl font-bold text-foreground">
-                🎙️ Make Sure Your Mic Is Working
-              </div>
-              <p className="text-xl text-muted-foreground">
-                Let's do a quick mic check to make sure your audio levels are perfect.
-                It only takes 5 seconds!
-              </p>
-              
-              {/* Microphone selector - shown before mic check */}
-              <div className="w-full max-w-md mx-auto py-4">
-                <DeviceSelector
-                  devices={deviceSelection.devices}
-                  selectedDeviceId={deviceSelection.selectedDeviceId}
-                  onDeviceChange={onChangeDevice}
-                  disabled={micCheck.isMicChecking}
-                />
-              </div>
-              
-              <Button
-                onClick={micCheck.handleMicCheck}
-                size="lg"
-                className="text-xl px-12 py-8"
-                disabled={micCheck.isMicChecking}
-              >
-                Start Mic Check
-              </Button>
-            </div>
-          </div>
-        ) : recorder.hasPreview ? (
-          /* Recording preview and save */
-          <RecordingPreview
-            audioUrl={recorder.audioUrl}
-            audioBlob={recorder.audioBlob}
-            recordingName={recordingName}
-            onNameChange={setRecordingName}
-            onSave={handleSave}
-            isSaving={isSaving}
-            savedDisplayName={savedDisplayName}
-            transcriptReady={transcriptReady}
-            showTimeoutNotice={showTimeoutNotice}
-            maxUploadMb={maxUploadMb}
-            onFinish={onFinish}
-            onStartOver={() => {
-              // Discard recording and start over (mic check already completed, so skip it)
-              recorder.reset();
-              setRecordingName("");
-              setSavedDisplayName("");
-              setServerFilename("");
-              setServerStem("");
-              setTranscriptReady(false);
-              setShowTimeoutNotice(false);
-              // Note: micCheckCompleted stays true, so user goes directly to recording interface
-            }}
-            onDiscard={() => {
-              // Discard recording and return to dashboard
-              recorder.reset();
-              if (onBack) onBack();
-            }}
-            useAdvancedAudio={useAdvancedAudio}
-            onAdvancedAudioToggle={handleAdvancedAudioToggle}
-            isAdvancedAudioSaving={isSavingAdvancedAudio}
-          />
-        ) : (
-          /* Main recording interface */
-          <>
-            {/* Error display */}
-            {deviceSelection.supportError && (
-              <div className="text-sm bg-red-50 border border-red-200 text-red-700 rounded p-3">
-                {deviceSelection.supportError}
-              </div>
+        <Card className="shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Recorder</CardTitle>
+            {/* Only show recording instructions after mic check is completed */}
+            {micCheck.micCheckCompleted && (
+              <CardDescription>
+                Press the circle to record, press again to pause, click stop while paused to end recording.
+                <span className="block text-xs text-muted-foreground mt-1">
+                  💡 Tip: Press <kbd className="px-1 py-0.5 text-xs bg-muted border rounded">Space</kbd> to start/pause recording
+                </span>
+              </CardDescription>
             )}
+          </CardHeader>
 
-            {/* Recording controls */}
-            <RecorderControls
-              isRecording={recorder.isRecording}
-              isPaused={recorder.isPaused}
-              isCountingDown={recorder.isCountingDown}
-              countdown={recorder.countdown}
-              elapsed={recorder.elapsed}
-              hasPreview={recorder.hasPreview}
-              onRecordToggle={() => recorder.handleRecordToggle(deviceSelection.selectedDeviceId, (msg) => {
-                deviceSelection.setSupportError?.(msg) || toast({ variant: "destructive", title: "Error", description: msg });
-              })}
-              onStop={recorder.handleStop}
-              onMicCheck={micCheck.handleMicCheck}
-              micCheckCompleted={micCheck.micCheckCompleted}
-              isMicChecking={micCheck.isMicChecking}
-            />
+          <CardContent className="space-y-6">
+            {/* Mic check full-screen overlay when active OR showing analysis results */}
+            {(micCheck.isMicChecking || micCheck.micCheckAnalysis) ? (
+              <MicCheckOverlay
+                isVisible={true}
+                countdown={micCheck.micCheckCountdown}
+                isPlayback={micCheck.micCheckPlayback}
+                analysis={micCheck.micCheckAnalysis}
+                levelPct={audioGraph.levelPct}
+                levelColor={audioGraph.levelColor}
+                inputGain={audioGraph.inputGain}
+                onGainChange={audioGraph.updateGain}
+                onContinue={micCheck.clearAnalysis}
+                onRetry={micCheck.handleMicCheck}
+              />
+            ) : !micCheck.micCheckCompleted && !isMicCheckSessionValid() && !recorder.hasPreview ? (
+              /* Show prominent mic check button before first use (unless session cache valid) */
+              <div className="min-h-[600px] flex flex-col items-center justify-center space-y-8">
+                <div className="text-center space-y-6 w-full max-w-2xl">
+                  <div className="text-4xl font-bold text-foreground">
+                    🎙️ Make Sure Your Mic Is Working
+                  </div>
+                  <p className="text-xl text-muted-foreground">
+                    Let's do a quick mic check to make sure your audio levels are perfect.
+                    It only takes 5 seconds!
+                  </p>
 
-            {/* Level meter - show during recording, centered under controls */}
-            {(recorder.isRecording || recorder.isPaused) && (
-              <div className="flex justify-center">
-                <LevelMeter
-                  levelPct={audioGraph.levelPct}
-                  levelColor={audioGraph.levelColor}
-                />
+                  {/* Microphone selector - shown before mic check */}
+                  <div className="w-full max-w-md mx-auto py-4">
+                    <DeviceSelector
+                      devices={deviceSelection.devices}
+                      selectedDeviceId={deviceSelection.selectedDeviceId}
+                      onDeviceChange={onChangeDevice}
+                      disabled={micCheck.isMicChecking}
+                    />
+                  </div>
+
+                  <Button
+                    onClick={micCheck.handleMicCheck}
+                    size="lg"
+                    className="text-xl px-12 py-8"
+                    disabled={micCheck.isMicChecking}
+                  >
+                    Start Mic Check
+                  </Button>
+                </div>
               </div>
+            ) : recorder.hasPreview ? (
+              /* Recording preview and save */
+              <RecordingPreview
+                audioUrl={recorder.audioUrl}
+                audioBlob={recorder.audioBlob}
+                recordingName={recordingName}
+                onNameChange={setRecordingName}
+                onSave={handleSave}
+                isSaving={isSaving}
+                savedDisplayName={savedDisplayName}
+                transcriptReady={transcriptReady}
+                showTimeoutNotice={showTimeoutNotice}
+                maxUploadMb={maxUploadMb}
+                onFinish={onFinish}
+                onStartOver={() => {
+                  // Discard recording and start over (mic check already completed, so skip it)
+                  recorder.reset();
+                  setRecordingName("");
+                  setSavedDisplayName("");
+                  setServerFilename("");
+                  setServerStem("");
+                  setTranscriptReady(false);
+                  setShowTimeoutNotice(false);
+                  // Note: micCheckCompleted stays true, so user goes directly to recording interface
+                }}
+                onDiscard={() => {
+                  // Discard recording and return to dashboard
+                  recorder.reset();
+                  if (onBack) onBack();
+                }}
+              />
+            ) : (
+              /* Main recording interface */
+              <>
+                {/* Error display */}
+                {deviceSelection.supportError && (
+                  <div className="text-sm bg-red-50 border border-red-200 text-red-700 rounded p-3">
+                    {deviceSelection.supportError}
+                  </div>
+                )}
+
+                {/* Recording controls */}
+                <RecorderControls
+                  isRecording={recorder.isRecording}
+                  isPaused={recorder.isPaused}
+                  isCountingDown={recorder.isCountingDown}
+                  countdown={recorder.countdown}
+                  elapsed={recorder.elapsed}
+                  hasPreview={recorder.hasPreview}
+                  onRecordToggle={() => recorder.handleRecordToggle(deviceSelection.selectedDeviceId, (msg) => {
+                    deviceSelection.setSupportError?.(msg) || toast({ variant: "destructive", title: "Error", description: msg });
+                  })}
+                  onStop={recorder.handleStop}
+                  onMicCheck={micCheck.handleMicCheck}
+                  micCheckCompleted={micCheck.micCheckCompleted}
+                  isMicChecking={micCheck.isMicChecking}
+                />
+
+                {/* Level meter - show during recording, centered under controls */}
+                {(recorder.isRecording || recorder.isPaused) && (
+                  <div className="flex justify-center">
+                    <LevelMeter
+                      levelPct={audioGraph.levelPct}
+                      levelColor={audioGraph.levelColor}
+                    />
+                  </div>
+                )}
+              </>
             )}
-          </>
-        )}
-      </CardContent>
-    </Card>
+          </CardContent>
+        </Card>
       </div>
     </>
   );

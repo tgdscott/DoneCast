@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from sqlmodel import SQLModel, Field, Relationship, Column
 from sqlalchemy.orm import relationship
-from typing import List, Optional, Literal, TYPE_CHECKING
+from typing import List, Optional, Literal, TYPE_CHECKING, Dict
 from datetime import datetime
 from uuid import UUID, uuid4
 import json
@@ -63,11 +63,11 @@ class MediaItem(SQLModel, table=True):
     use_auphonic: bool = Field(default=False, description="True if Auphonic transcription should be used (set by decision helper)")
     
     # Audio quality analysis (persisted from analyzer.analyze_audio_file)
-    audio_quality_metrics_json: Optional[str] = Field(default=None, description="JSON string with analyzer metrics: LUFS, SNR, dnsmos, duration, etc.")
+    audio_quality_metrics_json: Optional[Dict] = Field(default=None, sa_column=Column(JSON), description="JSON object with analyzer metrics: LUFS, SNR, dnsmos, duration, etc.")
     audio_quality_label: Optional[str] = Field(default=None, description="Audio quality tier: good, slightly_bad, fairly_bad, very_bad, incredibly_bad, abysmal, unknown")
     
     # Audio processing decision (persisted from auphonic_helper.decide_audio_processing)
-    audio_processing_decision_json: Optional[str] = Field(default=None, description="JSON string: {use_auphonic: bool, decision: string, reason: string}")
+    audio_processing_decision_json: Optional[Dict] = Field(default=None, sa_column=Column(JSON), description="JSON object: {use_auphonic: bool, decision: string, reason: string}")
     
     # Auphonic integration fields
     auphonic_processed: bool = Field(default=False, description="True if Auphonic processed this file")

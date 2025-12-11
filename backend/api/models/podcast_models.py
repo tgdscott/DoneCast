@@ -195,6 +195,13 @@ class PodcastTemplateCreate(SQLModel):
     ai_settings: AITemplateSettings = Field(default_factory=AITemplateSettings)
     # New: allow disabling a template without deleting it
     is_active: bool = True
+    
+    # Episode length management settings (all values in seconds)
+    soft_min_length_seconds: Optional[int] = Field(default=None, description="Soft minimum episode length target")
+    soft_max_length_seconds: Optional[int] = Field(default=None, description="Soft maximum episode length target")
+    hard_min_length_seconds: Optional[int] = Field(default=None, description="Hard minimum episode length limit")
+    hard_max_length_seconds: Optional[int] = Field(default=None, description="Hard maximum episode length limit")
+    length_management_enabled: bool = Field(default=False, description="Enable automatic length management")
 
 
 class PodcastTemplate(SQLModel, table=True):
@@ -215,6 +222,13 @@ class PodcastTemplate(SQLModel, table=True):
     default_elevenlabs_voice_id: Optional[str] = Field(default=None)
     # New: default voice id for Intern command detection
     default_intern_voice_id: Optional[str] = Field(default=None)
+    
+    # Episode length management settings
+    soft_min_length_seconds: Optional[int] = Field(default=None)
+    soft_max_length_seconds: Optional[int] = Field(default=None)
+    hard_min_length_seconds: Optional[int] = Field(default=None)
+    hard_max_length_seconds: Optional[int] = Field(default=None)
+    length_management_enabled: bool = Field(default=False)
 
     episodes: List["Episode"] = Relationship(back_populates="template")
 

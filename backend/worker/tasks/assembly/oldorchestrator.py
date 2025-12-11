@@ -1777,6 +1777,89 @@ def orchestrate_create_podcast_episode(
             else:
                 logging.info("[assemble] Advanced audio disabled for this episode")
 
+            # ========== EPISODE LENGTH MANAGEMENT ==========
+            override_silence_settings = None
+            length_mgmt_strategy = None
+            
+            # Check if template has length management enabled
+            template_obj = media_context.template
+            length_mgmt_enabled = False
+            if template_obj:
+                length_mgmt_enabled = getattr(template_obj, 'length_management_enabled', False)
+            
+            if length_mgmt_enabled and template_obj:
+                try:
+                    from api.services.audio.length_manager import (
+                        calculate_episode_length,
+                        analyze_silence_potential,
+                        determine_strategy,
+                    )
+                    
+                    logging.info("[length_mgmt] 🎯 Episode length management enabled for template")
+                    
+                    # Get main content duration
+                    main_content_duration_ms = 0
+                    if media_context.source_audio_path and media_context.source_audio_path.exists():
+                        try:
+                            from pydub import AudioSegment
+                            audio = AudioSegment.from_file(str(media_context.source_audio_path))
+                            main_content_duration_ms = len(audio)
+                            logging.info("[length_mgmt] Main content duration: %.2f minutes", main_content_duration_ms / 60000)
+                        except Exception as duration_err:
+                            logging.warning("[length_mgmt] Could not determine main content duration: %s", duration_err)
+                    
+                    if main_content_duration_ms > 0:
+                        # Calculate projected episode length with template segments
+                        projected_length_ms = calculate_episode_length(
+                            template=template_obj,
+                            main_content_duration_ms=main_content_duration_ms,
+                            segment_overrides=tts_values or {}
+                        )
+                        
+                        # Get length targets from template
+                        soft_min = getattr(template_obj, 'soft_min_length_seconds', None)
+                        soft_max = getattr(template_obj, 'soft_max_length_seconds', None)
+                        hard_min = getattr(template_obj, 'hard_min_length_seconds', None)
+                        hard_max = getattr(template_obj, 'hard_max_length_seconds', None)
+                        
+                        if all([soft_min, soft_max, hard_min, hard_max]):
+                            # Analyze silence potential BEFORE processing
+                            silence_potential = analyze_silence_potential(
+                                words_json_path=Path(words_json_path) if words_json_path else None,
+                                current_settings=media_context.cleanup_settings
+                            )
+                            
+                            # Determine optimal strategy
+                            length_mgmt_strategy = determine_strategy(
+                                template_settings=template_obj,
+                                projected_length_ms=projected_length_ms,
+                                silence_potential=silence_potential,
+                                soft_min=soft_min * 1000,
+                                soft_max=soft_max * 1000,
+                                hard_min=hard_min * 1000,
+                                hard_max=hard_max * 1000
+                            )
+                            
+                            if length_mgmt_strategy["action"] == "adjust_silence":
+                                # Use dynamic silence settings for clean engine
+                                override_silence_settings = length_mgmt_strategy["params"]
+                                logging.info("[length_mgmt] ✅ Will adjust silence removal: %s", override_silence_settings)
+                            elif length_mgmt_strategy["action"] == "apply_speed":
+                                # Speed adjustment will be applied after assembly in _finalize_episode
+                                logging.info("[length_mgmt] ✅ Will apply speed adjustment after assembly: %s", 
+                                           length_mgmt_strategy["params"])
+                            elif length_mgmt_strategy["action"] == "no_change":
+                                logging.info("[length_mgmt] ✅ Episode within target range, no adjustments needed")
+                        else:
+                            logging.warning("[length_mgmt] Length targets not fully configured, skipping")
+                    else:
+                        logging.warning("[length_mgmt] Could not determine main content duration, skipping")
+                        
+                except Exception as length_mgmt_err:
+                    logging.error("[length_mgmt] Failed to execute length management: %s", length_mgmt_err, exc_info=True)
+                    # Don't fail assembly if length management fails
+            # ========== END LENGTH MANAGEMENT ==========
+
             transcript_context = transcript.prepare_transcript_context(
                 session=session,
                 media_context=media_context,
@@ -1787,6 +1870,7 @@ def orchestrate_create_podcast_episode(
                 user_id=user_id,
                 intents=intents,
                 auphonic_processed=auphonic_processed,  # Pass flag to skip processing
+                override_silence_settings=override_silence_settings,  # Pass length management overrides
             )
 
             # Pre-upload final audio if available from assembly service

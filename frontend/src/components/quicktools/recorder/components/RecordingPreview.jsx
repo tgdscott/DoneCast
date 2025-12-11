@@ -33,9 +33,6 @@ import {
  * @param {Function} props.onFinish - Finish callback
  * @param {Function} props.onStartOver - Start over callback (discard & record again)
  * @param {Function} props.onDiscard - Discard & return to dashboard callback
- * @param {boolean} props.useAdvancedAudio - Whether advanced audio processing is enabled
- * @param {Function} props.onAdvancedAudioToggle - Toggle handler for advanced audio processing
- * @param {boolean} props.isAdvancedAudioSaving - Whether preference is being saved
  */
 export const RecordingPreview = ({
   audioUrl,
@@ -51,9 +48,6 @@ export const RecordingPreview = ({
   onFinish,
   onStartOver,
   onDiscard,
-  useAdvancedAudio,
-  onAdvancedAudioToggle,
-  isAdvancedAudioSaving,
 }) => {
   const audioRef = useRef(null);
 
@@ -64,7 +58,7 @@ export const RecordingPreview = ({
         if (audioRef.current) {
           audioRef.current.pause();
         }
-      } catch {}
+      } catch { }
     };
   }, []);
 
@@ -116,28 +110,7 @@ export const RecordingPreview = ({
         </p>
       </div>
 
-      {/* Advanced audio toggle */}
-      <div className="flex flex-col gap-2 rounded-lg border border-slate-200 p-4 bg-slate-50">
-        <div className="flex items-center justify-between gap-4">
-          <div className="space-y-1">
-            <Label htmlFor="recorder-advanced-audio" className="text-base font-medium">
-              Use Advanced Audio Processing
-            </Label>
-            <p className="text-xs text-muted-foreground">
-              If you aren't using specific podcasting equipment. this is highly recommended to make it sound like you are.
-            </p>
-            {isAdvancedAudioSaving && (
-              <p className="text-xs text-slate-500">Saving your preference…</p>
-            )}
-          </div>
-          <Switch
-            id="recorder-advanced-audio"
-            checked={!!useAdvancedAudio}
-            onCheckedChange={(checked) => onAdvancedAudioToggle?.(Boolean(checked))}
-            disabled={isAdvancedAudioSaving}
-          />
-        </div>
-      </div>
+
 
       {/* Save/Status */}
       <div className="space-y-4">
@@ -161,7 +134,7 @@ export const RecordingPreview = ({
                 </>
               )}
             </Button>
-            
+
             {/* Action buttons row */}
             <div className="grid grid-cols-2 gap-3">
               {/* Start Over button with confirmation */}
@@ -191,7 +164,7 @@ export const RecordingPreview = ({
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
-              
+
               {/* Discard & Return button with confirmation */}
               <AlertDialog>
                 <AlertDialogTrigger asChild>
@@ -213,7 +186,7 @@ export const RecordingPreview = ({
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction 
+                    <AlertDialogAction
                       onClick={onDiscard}
                       className="bg-red-600 hover:bg-red-700"
                     >
@@ -230,7 +203,7 @@ export const RecordingPreview = ({
               <CheckCircle className="w-6 h-6 mr-2" />
               <span className="text-lg font-medium">Recording Saved!</span>
             </div>
-            
+
             {/* Transcription Status */}
             {transcriptReady ? (
               <p className="text-center text-green-700 font-medium text-base">
@@ -251,7 +224,7 @@ export const RecordingPreview = ({
                 )}
               </div>
             )}
-            
+
             {/* Finish Button */}
             {onFinish && (
               <Button

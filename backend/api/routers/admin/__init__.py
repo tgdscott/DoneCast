@@ -15,7 +15,7 @@ except Exception as e:
 
 try:
     from . import users
-    router.include_router(users.router)
+    router.include_router(users.router, prefix="/users", tags=["Admin Users"])
     log.debug("Admin users router included")
 except Exception as e:
     log.error("Failed to import/admin users router: %s", e, exc_info=True)
@@ -89,6 +89,13 @@ try:
     log.debug("Admin deletions router included")
 except Exception as e:
     log.error("Failed to import/admin deletions router: %s", e, exc_info=True)
+
+try:
+    from . import affiliate_settings
+    router.include_router(affiliate_settings.router)
+    log.debug("Admin affiliate settings router included")
+except Exception as e:
+    log.error("Failed to import/admin affiliate settings router: %s", e, exc_info=True)
 
 log.info("Admin router initialized with %d sub-routers", len(router.routes))
 

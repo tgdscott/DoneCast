@@ -252,6 +252,46 @@ async def create_embedded_checkout_session(
                 # Promo code not found - don't fail, just ignore it
                 logger.warning(f"[billing] Promo code '{promo_code_upper}' not found for user {current_user.id}")
 
+        # --- Silent Promo (Referral) Logic ---
+        if not discounts and current_user.referred_by_user_id:
+            try:
+                from api.models.affiliate_settings import AffiliateProgramSettings
+                # Check for referrer specific settings
+                aff_settings = session.exec(
+                    select(AffiliateProgramSettings).where(
+                        AffiliateProgramSettings.user_id == current_user.referred_by_user_id
+                    )
+                ).first()
+                # Fallback to global default
+                if not aff_settings:
+                    aff_settings = session.exec(
+                        select(AffiliateProgramSettings).where(
+                            AffiliateProgramSettings.user_id == None
+                        )
+                    ).first()
+                
+                if aff_settings and aff_settings.is_active and aff_settings.referee_discount_percent > 0:
+                    coupon_duration = aff_settings.referee_discount_duration
+                    coupon_id = f"REF_{aff_settings.referee_discount_percent}PC_{coupon_duration.upper()}"
+                    
+                    try:
+                        coupon = stripe.Coupon.retrieve(coupon_id)
+                    except Exception:
+                        coupon = stripe.Coupon.create(
+                            id=coupon_id,
+                            name=f"Referral Discount ({aff_settings.referee_discount_percent}% off)",
+                            percent_off=aff_settings.referee_discount_percent,
+                            duration=coupon_duration,
+                            metadata={"source": "referral_system"}
+                        )
+                    
+                    discounts = [{"coupon": coupon.id}]
+                    metadata['referrer_user_id'] = str(current_user.referred_by_user_id)
+                    metadata['referral_type'] = "affiliate"
+                    logger.info(f"[billing] Applied silent referral discount ({aff_settings.referee_discount_percent}%) for user {current_user.id}")
+            except Exception as e:
+                logger.error(f"[billing] Failed to apply referral discount: {e}", exc_info=True)
+
         # --- Upgrade / Proration Logic ---
         prior_tier = getattr(current_user, 'tier', 'free') or 'free'
         prior_exp = getattr(current_user, 'subscription_expires_at', None)
@@ -485,6 +525,46 @@ async def create_checkout_session(
             else:
                 # Promo code not found - don't fail, just ignore it
                 logger.warning(f"[billing] Promo code '{promo_code_upper}' not found for user {current_user.id}")
+
+        # --- Silent Promo (Referral) Logic ---
+        if not discounts and current_user.referred_by_user_id:
+            try:
+                from api.models.affiliate_settings import AffiliateProgramSettings
+                # Check for referrer specific settings
+                aff_settings = session.exec(
+                    select(AffiliateProgramSettings).where(
+                        AffiliateProgramSettings.user_id == current_user.referred_by_user_id
+                    )
+                ).first()
+                # Fallback to global default
+                if not aff_settings:
+                    aff_settings = session.exec(
+                        select(AffiliateProgramSettings).where(
+                            AffiliateProgramSettings.user_id == None
+                        )
+                    ).first()
+                
+                if aff_settings and aff_settings.is_active and aff_settings.referee_discount_percent > 0:
+                    coupon_duration = aff_settings.referee_discount_duration
+                    coupon_id = f"REF_{aff_settings.referee_discount_percent}PC_{coupon_duration.upper()}"
+                    
+                    try:
+                        coupon = stripe.Coupon.retrieve(coupon_id)
+                    except Exception:
+                        coupon = stripe.Coupon.create(
+                            id=coupon_id,
+                            name=f"Referral Discount ({aff_settings.referee_discount_percent}% off)",
+                            percent_off=aff_settings.referee_discount_percent,
+                            duration=coupon_duration,
+                            metadata={"source": "referral_system"}
+                        )
+                    
+                    discounts = [{"coupon": coupon.id}]
+                    metadata['referrer_user_id'] = str(current_user.referred_by_user_id)
+                    metadata['referral_type'] = "affiliate"
+                    logger.info(f"[billing] Applied silent referral discount ({aff_settings.referee_discount_percent}%) for user {current_user.id}")
+            except Exception as e:
+                logger.error(f"[billing] Failed to apply referral discount: {e}", exc_info=True)
 
         # --- Upgrade / Proration Logic ---
         prior_tier = getattr(current_user, 'tier', 'free') or 'free'

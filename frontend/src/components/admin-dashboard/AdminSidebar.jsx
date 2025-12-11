@@ -22,14 +22,13 @@ export default function AdminSidebar({ navigationItems, activeTab, setActiveTab,
     <div className="w-64 bg-white border-r border-gray-200 flex flex-col">
       {/* Logo */}
       <div className="p-6 border-b border-gray-200">
-        <div className="flex items-center space-x-3">
-          <Headphones className="w-8 h-8" style={{ color: "#2C3E50" }} />
-          <div>
-            <h1 className="text-xl font-bold" style={{ color: "#2C3E50" }}>
-              Podcast Plus Plus
-            </h1>
-            <p className="text-sm text-gray-600">Admin Panel</p>
-          </div>
+        <div className="flex flex-col space-y-1">
+          <img
+            src="/assets/branding/logo-horizontal.png"
+            alt="DoneCast"
+            className="h-10 w-auto object-contain"
+          />
+          <p className="text-sm text-gray-500 pl-1">Admin Panel</p>
         </div>
       </div>
 
@@ -40,11 +39,10 @@ export default function AdminSidebar({ navigationItems, activeTab, setActiveTab,
             <li key={item.id}>
               <button
                 onClick={() => setActiveTab(item.id)}
-                className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-left transition-all ${
-                  activeTab === item.id
+                className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-left transition-all ${activeTab === item.id
                     ? "text-white shadow-md"
                     : "text-gray-600 hover:bg-gray-100 hover:text-gray-800"
-                }`}
+                  }`}
                 style={{
                   backgroundColor: activeTab === item.id ? "#2C3E50" : "transparent",
                 }}>
@@ -69,10 +67,10 @@ export default function AdminSidebar({ navigationItems, activeTab, setActiveTab,
             <p className="text-xs text-gray-500">Platform Administrator</p>
           </div>
         </div>
-        <Button 
-          onClick={() => window.location.href = '/dashboard?view=user'} 
-          variant="ghost" 
-          size="sm" 
+        <Button
+          onClick={() => window.location.href = '/dashboard?view=user'}
+          variant="ghost"
+          size="sm"
           className="w-full justify-start text-gray-600 mb-2"
         >
           <ArrowLeft className="w-4 h-4 mr-2" />

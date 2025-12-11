@@ -183,10 +183,10 @@ class AudioCleanupSettingsPublic(BaseModel):
     settings: Dict[str, Any]
 
 class AudioPipelinePreferenceUpdate(BaseModel):
-    use_advanced_audio: bool
+    audio_processing_threshold_label: str  # Required threshold value
 
 class AudioPipelinePreferencePublic(BaseModel):
-    use_advanced_audio: bool
+    audio_processing_threshold_label: str
 
 class SMSNotificationPreferencesUpdate(BaseModel):
     # Note: phone_number cannot be set via this endpoint - it must be verified via /api/auth/verify-phone first
@@ -396,10 +396,9 @@ async def get_audio_pipeline_preference(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
-    """Return the user's advanced audio processing preference."""
-    return {
-        "use_advanced_audio": bool(getattr(current_user, "use_advanced_audio_processing", False))
-    }
+    """Return the user's audio processing threshold preference."""
+    threshold = getattr(current_user, "audio_processing_threshold_label", "very_bad")
+    return {"audio_processing_threshold_label": threshold}
 
 @router.put("/me/audio-pipeline", response_model=AudioPipelinePreferencePublic)
 async def update_audio_pipeline_preference(
@@ -407,14 +406,23 @@ async def update_audio_pipeline_preference(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
-    """Persist the user's preferred audio processing pipeline."""
-    current_user.use_advanced_audio_processing = bool(payload.use_advanced_audio)
+    """Update the user's audio processing threshold."""
+    # Validate threshold
+    VALID_THRESHOLDS = {'good', 'slightly_bad', 'fairly_bad', 'very_bad', 'incredibly_bad', 'abysmal'}
+    
+    threshold = payload.audio_processing_threshold_label.strip()
+    if not threshold or threshold not in VALID_THRESHOLDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid threshold. Must be one of: {', '.join(sorted(VALID_THRESHOLDS))}"
+        )
+    
+    current_user.audio_processing_threshold_label = threshold
     session.add(current_user)
     session.commit()
     session.refresh(current_user)
-    return {
-        "use_advanced_audio": bool(current_user.use_advanced_audio_processing)
-    }
+    
+    return {"audio_processing_threshold_label": threshold}
 
 @router.get("/me/capabilities", response_model=Dict[str, Any])
 async def get_user_capabilities(

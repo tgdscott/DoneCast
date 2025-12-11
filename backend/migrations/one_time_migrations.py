@@ -64,6 +64,8 @@ def run_one_time_migrations() -> dict[str, bool]:
     results["backfill_transcript_words"] = run_migration_once("backfill_transcript_words", _backfill_transcript_words)
     results["fix_episode_213_cover"] = run_migration_once("fix_episode_213_cover", _fix_episode_213_cover)
     results["cleanup_orphaned_records"] = run_migration_once("cleanup_orphaned_records", _cleanup_orphaned_records)
+    results["add_audio_threshold_label"] = run_migration_once("add_audio_threshold_label", _add_audio_threshold_label)
+    results["add_episode_length_management"] = run_migration_once("add_episode_length_management", _add_episode_length_management)
     
     # Check for pending migrations
     pending = get_pending_migrations()
@@ -1298,5 +1300,46 @@ def _cleanup_orphaned_records() -> bool:
             
     except Exception as e:
         log.error(f"[cleanup] ❌ Orphaned records check failed: {e}", exc_info=True)
+        return False
+
+
+def _add_audio_threshold_label() -> bool:
+    """Add audio_processing_threshold_label column to user table (migration 101)."""
+    import importlib.util
+    import os
+    
+    try:
+        migration_path_101 = os.path.join(os.path.dirname(__file__), '101_add_audio_threshold_label.py')
+        spec_101 = importlib.util.spec_from_file_location('migration_101', migration_path_101)
+        if spec_101 and spec_101.loader:
+            module_101 = importlib.util.module_from_spec(spec_101)
+            spec_101.loader.exec_module(module_101)
+            module_101.upgrade()
+        log.debug("[migrate] Audio threshold label column verified")
+        return True
+    except Exception as e:
+        log.warning("[migrate] Audio threshold label migration failed: %s", e)
+        return False
+
+
+def _add_episode_length_management() -> bool:
+    """Add episode length management fields to templates and users (migration 102)."""
+    import importlib.util
+    import os
+    
+    try:
+        migration_path_102 = os.path.join(os.path.dirname(__file__), '102_add_episode_length_management.py')
+        spec_102 = importlib.util.spec_from_file_location('migration_102', migration_path_102)
+        if spec_102 and spec_102.loader:
+            module_102 = importlib.util.module_from_spec(spec_102)
+            spec_102.loader.exec_module(module_102)
+            from sqlmodel import Session
+            from api.core.database import engine
+            with Session(engine) as session:
+                module_102.migrate(session)
+        log.debug("[migrate] Episode length management fields verified")
+        return True
+    except Exception as e:
+        log.warning("[migrate] Episode length management migration failed: %s", e)
         return False
 

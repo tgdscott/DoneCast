@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import ComfortMenu from "@/components/common/ComfortMenu.jsx";
+import AudioProcessingSettings from "@/components/dashboard/AudioProcessingSettings";
 import AudioCleanupSettings from "@/components/dashboard/AudioCleanupSettings";
 import AdminSettings from "@/components/dashboard/AdminSettings";
 import { AccountDeletionDialog, CancelDeletionDialog } from "@/components/dashboard/AccountDeletionDialog";
@@ -36,7 +37,7 @@ export default function Settings({ token }) {
   const [profileSaving, setProfileSaving] = useState(false);
   const [deletionDialogOpen, setDeletionDialogOpen] = useState(false);
   const [cancelDeletionDialogOpen, setCancelDeletionDialogOpen] = useState(false);
-  
+
   const deviceTimezoneInfo = detectDeviceTimezoneInfo();
 
   const isScheduledForDeletion = authUser?.scheduled_for_deletion_at != null;
@@ -45,7 +46,7 @@ export default function Settings({ token }) {
   useEffect(() => {
     setFirstName(authUser?.first_name || "");
     setLastName(authUser?.last_name || "");
-    
+
     // Initialize timezone settings
     const userTz = authUser?.timezone || "";
     if (userTz === 'device' || !userTz) {
@@ -288,8 +289,9 @@ export default function Settings({ token }) {
           <div className="space-y-6">
             <div className="space-y-2">
               <h2 className="text-2xl font-bold text-gray-900">Audio</h2>
-              <p className="text-gray-600">Manage audio cleanup and storage settings.</p>
+              <p className="text-gray-600">Manage audio cleanup and processing settings.</p>
             </div>
+            <AudioProcessingSettings />
             <AudioCleanupSettings />
             <AdminSettings />
           </div>

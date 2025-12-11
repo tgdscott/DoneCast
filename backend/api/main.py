@@ -54,7 +54,9 @@ def create_app() -> FastAPI:
     log = get_logger("api.main")
     
     # Step 2: Create FastAPI app
-    app = FastAPI(title="DoneCast API")
+    # CRITICAL: Explicitly set debug=False in production to prevent traceback leaks
+    is_dev = env.lower() in ("dev", "development", "local", "test", "testing")
+    app = FastAPI(title="DoneCast API", debug=is_dev)
     
     # Step 3: Add proxy headers middleware early
     if ProxyHeadersMiddleware is not None:
