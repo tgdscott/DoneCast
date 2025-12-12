@@ -169,9 +169,11 @@ def upload_bytes(
             ContentType=content_type,
         )
         
-        # Return public R2 URL
+        # Return public R2 URL with properly encoded key
         account_id = os.getenv("R2_ACCOUNT_ID", "").strip()
-        url = f"https://{bucket_name}.{account_id}.r2.cloudflarestorage.com/{key}"
+        # URL-encode each path segment separately to preserve slashes
+        encoded_key = "/".join(quote(segment, safe="") for segment in key.split("/"))
+        url = f"https://{bucket_name}.{account_id}.r2.cloudflarestorage.com/{encoded_key}"
         
         logger.info(f"[R2] Uploaded {len(data)} bytes to {key}")
         return url

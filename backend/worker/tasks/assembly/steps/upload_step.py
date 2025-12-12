@@ -136,10 +136,26 @@ class UploadStep(PipelineStep):
                         
                         episode.gcs_cover_path = r2_cover_url
                         episode.cover_path = r2_cover_url # Prefer URL for final
-                    except Exception as e:
-                        logger.error(f"[{self.step_name}] Failed to upload cover to R2: {e}")
-                        # Fallback to local filename if upload fails? No, simpler to just log 
-                        episode.cover_path = cover_path.name
+                        logger.info(f"[{self.step_name}] Cover uploaded to R2: {r2_cover_url}")
+                    except Exception as r2_err:
+                        logger.error(f"[{self.step_name}] Failed to upload cover to R2: {r2_err}")
+                        # Fallback to GCS
+                        try:
+                            gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+                            gcs_cover_key = f"{user_id}/episodes/{episode_id}/cover/{cover_path.name}"
+                            with open(cover_path, "rb") as f:
+                                gcs_cover_url = storage.upload_fileobj(gcs_bucket, gcs_cover_key, f, content_type=content_type)
+                            
+                            if gcs_cover_url and (gcs_cover_url.startswith("gs://") or gcs_cover_url.startswith("https://")):
+                                episode.gcs_cover_path = gcs_cover_url
+                                episode.cover_path = gcs_cover_url
+                                logger.warning(f"[{self.step_name}] Cover uploaded to GCS fallback (R2 unavailable): {gcs_cover_url}")
+                            else:
+                                raise RuntimeError(f"GCS upload returned invalid URL: {gcs_cover_url}")
+                        except Exception as gcs_err:
+                            logger.error(f"[{self.step_name}] GCS fallback also failed: {gcs_err}")
+                            # Last resort: store local filename
+                            episode.cover_path = cover_path.name
 
         # 4. Upload Transcripts (JSON Persistence) - KEY FIX
         # ---------------------------------------------------------------------

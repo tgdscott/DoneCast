@@ -214,7 +214,9 @@ async def upload_media_files(
                 try:
                     from infrastructure import r2 as r2_module
                     r2_bucket = os.getenv("R2_BUCKET", "ppp-media").strip()
-                    storage_key = f"covers/episode/{current_user.id.hex}/{safe_filename}"
+                    # Robustly handle current_user.id (could be UUID object or string)
+                    user_id_hex = current_user.id.hex if hasattr(current_user.id, "hex") else str(current_user.id).replace("-", "")
+                    storage_key = f"covers/episode/{user_id_hex}/{safe_filename}"
                     
                     log.info("[upload.storage] Uploading episode_cover to R2 bucket %s, key: %s", r2_bucket, storage_key)
                     
@@ -233,14 +235,16 @@ async def upload_media_files(
                 # R2 is only for final files (assembled episodes and episode covers)
                 # This ensures worker servers can download intermediate files for processing
                 from infrastructure import gcs
+                # Robustly handle current_user.id (could be UUID object or string)
+                user_id_hex = current_user.id.hex if hasattr(current_user.id, "hex") else str(current_user.id).replace("-", "")
                 # Determine storage key based on category
                 if category == MediaCategory.main_content:
                     # Main content goes to media_uploads for worker access
-                    storage_key = f"{current_user.id.hex}/media_uploads/{safe_filename}"
+                    storage_key = f"{user_id_hex}/media_uploads/{safe_filename}"
                 else:
                     # Other categories go to media/{category}
                     # For episode_cover fallback, this puts it in media/episode_cover/...
-                    storage_key = f"{current_user.id.hex}/media/{category.value}/{safe_filename}"
+                    storage_key = f"{user_id_hex}/media/{category.value}/{safe_filename}"
                 
                 log.info("[upload.storage] Uploading %s to GCS bucket %s, key: %s", 
                         category.value, gcs_bucket, storage_key)
@@ -289,13 +293,21 @@ async def upload_media_files(
         
         # Verify final_filename is valid (GCS URL for intermediate files, R2 URL for episode covers)
         if category == MediaCategory.episode_cover:
-            # Episode covers go to R2 - verify it's an R2 URL
-            if not (final_filename.startswith("https://") and ".r2.cloudflarestorage.com" in final_filename):
-                log.error("[upload.storage] CRITICAL: final_filename is not an R2 URL: '%s'", final_filename)
+            # Episode covers SHOULD go to R2, but GCS fallback is allowed
+            # Accept: R2 URLs (https://*.r2.cloudflarestorage.com/*) OR GCS URLs (gs://*)
+            is_r2_url = final_filename.startswith("https://") and ".r2.cloudflarestorage.com" in final_filename
+            is_gcs_url = final_filename.startswith("gs://")
+            
+            if not (is_r2_url or is_gcs_url):
+                log.error("[upload.storage] CRITICAL: final_filename is not a valid R2 or GCS URL: '%s'", final_filename)
                 raise HTTPException(
                     status_code=500,
-                    detail="Internal error: episode cover filename is not an R2 URL. This indicates a bug in the upload process."
+                    detail="Internal error: episode cover filename is not a valid storage URL. This indicates a bug in the upload process."
                 )
+            
+            # Log if we're using GCS fallback (indicates R2 issue that should be investigated)
+            if is_gcs_url:
+                log.warning("[upload.storage] Episode cover uploaded to GCS fallback (R2 unavailable): %s", final_filename)
         else:
             # Intermediate files go to GCS - verify it's a GCS URL
             if not final_filename.startswith("gs://"):

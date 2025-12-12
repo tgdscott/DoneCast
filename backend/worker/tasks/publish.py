@@ -64,7 +64,35 @@ def publish_episode_to_spreaker_task(
             cover_candidate = cover_candidate.strip()
             if cover_candidate:
                 lower = cover_candidate.lower()
-                if lower.startswith(("http://", "https://")):
+                
+                # Handle GCS URLs (from fallback uploads)
+                if lower.startswith("gs://"):
+                    logging.info("[publish] Cover image is in GCS, downloading: %s", cover_candidate)
+                    try:
+                        import tempfile
+                        from infrastructure import gcs
+                        
+                        # Download from GCS
+                        file_bytes = gcs.download_bytes_from_uri(cover_candidate)
+                        if not file_bytes:
+                            raise RuntimeError(f"GCS download returned None for {cover_candidate}")
+                        
+                        # Save to temp file
+                        temp_fd, temp_path = tempfile.mkstemp(suffix=".jpg")
+                        os.close(temp_fd)
+                        with open(temp_path, "wb") as f:
+                            f.write(file_bytes)
+                        
+                        # Ensure cover image constraints (size, format, etc.)
+                        image_file_path = ensure_cover_image_constraints(temp_path)
+                        logging.info("[publish] Downloaded and processed cover from GCS: %s (%d bytes)", 
+                                   cover_candidate, os.path.getsize(image_file_path) if image_file_path else 0)
+                    except Exception as gcs_err:
+                        logging.warning("[publish] Failed to download cover from GCS, trying local lookup: %s", gcs_err)
+                        # Fall through to local file lookup
+                
+                # Handle R2 URLs
+                elif lower.startswith(("http://", "https://")):
                     # Cover is in R2 - download it for publishing
                     logging.info("[publish] Cover image is in R2, downloading: %s", cover_candidate)
                     try:
