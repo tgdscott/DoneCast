@@ -1151,9 +1151,9 @@ def resolve_media_context(
                 # First try infrastructure.gcs helper (test-friendly, patched in unit tests)
                 try:
                     try:
-                        from backend.infrastructure import gcs as backend_gcs  # type: ignore
-                    except Exception:
-                        backend_gcs = gcs
+                        from backend.infrastructure import gcs as backend_gcs
+                    except ImportError:
+                        from infrastructure import gcs as backend_gcs
 
                     for candidate_key, stem_with_suffix in candidate_keys:
                         attempted_keys.append(candidate_key)
