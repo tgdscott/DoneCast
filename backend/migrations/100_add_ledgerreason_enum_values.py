@@ -9,7 +9,7 @@ when trying to debit credits for transcription/assembly/storage operations.
 
 from sqlalchemy import text
 from api.core.database import engine
-from api.core.logging_config import get_logger
+from api.core.logging import get_logger
 
 logger = get_logger(__name__)
 

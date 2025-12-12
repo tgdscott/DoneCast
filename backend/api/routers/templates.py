@@ -22,6 +22,12 @@ router = APIRouter(
     tags=["Templates"],
 )
 
+# Known system templates that should be publicly readable
+# TODO: Move this to a proper "is_public" or "is_system" column in the DB
+SYSTEM_TEMPLATES = {
+    "bfd659d9-8088-4019-aefb-c41ad1f4b58a"  # "Fixed Template" (default system template)
+}
+
 def convert_db_template_to_public(db_template: PodcastTemplate) -> PodcastTemplatePublic:
     """Helper to convert DB model to the public API model."""
     return PodcastTemplatePublic(
@@ -83,8 +89,10 @@ async def get_template(
     db_template = crud.get_template_by_id(session=session, template_id=template_id)
     if not db_template:
         raise HTTPException(status_code=404, detail="Template not found")
-    if db_template.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this template")
+    if str(db_template.user_id) != str(current_user.id):
+        # Allow access if it's a known system template
+        if str(db_template.id) not in SYSTEM_TEMPLATES:
+            raise HTTPException(status_code=403, detail="Not authorized to access this template")
     return convert_db_template_to_public(db_template)
 
 
@@ -98,7 +106,7 @@ async def delete_template(
     db_template = crud.get_template_by_id(session=session, template_id=template_id)
     if not db_template:
         raise HTTPException(status_code=404, detail="Template not found")
-    if db_template.user_id != current_user.id:
+    if str(db_template.user_id) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized to delete this template")
     # Safeguard: if this is the only template for the associated podcast (or user overall), block delete
     try:
@@ -131,7 +139,7 @@ async def update_template(
     db_template = crud.get_template_by_id(session=session, template_id=template_id)
     if not db_template:
         raise HTTPException(status_code=404, detail="Template not found")
-    if db_template.user_id != current_user.id:
+    if str(db_template.user_id) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized to update this template")
 
     # Correctly serialize the lists by iterating through them
@@ -190,7 +198,7 @@ async def duplicate_template(
     db_template = crud.get_template_by_id(session=session, template_id=template_id)
     if not db_template:
         raise HTTPException(status_code=404, detail="Template not found")
-    if db_template.user_id != current_user.id:
+    if str(db_template.user_id) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized to access this template")
 
     # 1. Generate new name

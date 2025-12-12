@@ -6,7 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
-from fastapi import APIRouter, Depends
+from uuid import UUID
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text as _sa_text
 from sqlmodel import Session, select
 
@@ -335,3 +336,17 @@ async def list_main_content_uploads(
 
     return results
 
+
+@router.get("/{media_id}", response_model=MediaItem)
+async def get_media_item(
+    media_id: UUID,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Retrieve a specific media item by ID."""
+    item = session.get(MediaItem, media_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Media item not found")
+    if item.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this media item")
+    return item

@@ -45,24 +45,10 @@ export default function useMediaManagement({ token, episodeDetails, setEpisodeDe
     try {
       data = await api.raw('/api/media/upload/episode_cover', { method: 'POST', body: fd, signal: controller.signal });
     } catch (e) {
-      try {
-        const fd2 = new FormData();
-        fd2.append('file', file);
-        const controller2 = new AbortController();
-        const t2 = setTimeout(() => controller2.abort(), uploadTimeoutMs);
-        let alt;
-        try {
-          alt = await api.raw('/api/media/upload/cover_art', { method: 'POST', body: fd2, signal: controller2.signal });
-        } finally {
-          clearTimeout(t2);
-        }
-        data = [{ filename: alt?.filename || alt?.path || alt?.stored_as }];
-      } catch (e2) {
-        if (e && e.name === 'AbortError') {
-          throw new Error('Cover upload timed out. Please check your connection and try again.');
-        }
-        throw e2;
+      if (e && e.name === 'AbortError') {
+        throw new Error('Cover upload timed out. Please check your connection and try again.');
       }
+      throw e;
     } finally {
       clearTimeout(t);
     }

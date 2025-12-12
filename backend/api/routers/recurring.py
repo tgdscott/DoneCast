@@ -202,8 +202,10 @@ def _assert_template_access(
     template = session.get(PodcastTemplate, template_id)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
-    if template.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Not authorized to modify this template")
+    if str(template.user_id) != str(user_id):
+        # Allow access if it's a known system template
+        if str(template.id) not in SYSTEM_TEMPLATES:
+            raise HTTPException(status_code=403, detail="Not authorized to modify this template")
     return template
 
 
@@ -319,9 +321,14 @@ def replace_template_schedules(
     for schedule_id, schedule in existing.items():
         if schedule_id not in keep_ids:
             session.delete(schedule)
-
     session.commit()
     return list_template_schedules(template_id, session, current_user)
+
+
+# Known system templates that should be publicly readable
+SYSTEM_TEMPLATES = {
+    "bfd659d9-8088-4019-aefb-c41ad1f4b58a"
+}
 
 
 @router.get("/templates/{template_id}/next", response_model=RecurringNextSlotResponse)

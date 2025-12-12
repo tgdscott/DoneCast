@@ -57,3 +57,5 @@ Dockerfile.bak*
 database.db
 cloud-sql-proxy.exe
 
+
+docs/archive/

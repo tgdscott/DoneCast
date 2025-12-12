@@ -6,12 +6,15 @@ import os
 from collections import defaultdict
 from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Form
 from pydantic import BaseModel, Field
+from datetime import datetime
 from typing import List, Optional, Dict
 from uuid import UUID
 from pathlib import Path
-from sqlmodel import Session, select
+from sqlmodel import Session, select, func, col, desc
 from sqlalchemy import text as _sa_text
 from sqlalchemy import desc as _sa_desc
+from sqlalchemy import exc as sa_exc
+from sqlalchemy.orm import selectinload
 
 from ..models.podcast import MediaItem, MediaCategory
 from ..models.transcription import TranscriptionWatch
@@ -22,6 +25,7 @@ from api.routers.auth import get_current_user
 from api.routers.ai_suggestions import _gather_user_sfx_entries
 from api.services.audio.transcript_io import load_transcript_json
 from api.services.intent_detection import analyze_intents, get_user_commands
+from infrastructure import gcs
 
 router = APIRouter(
     prefix="/media",
@@ -387,6 +391,58 @@ async def upload_media_files(
         # Kick off immediate background transcription for main content uploads
         try:
             if category == MediaCategory.main_content:
+                # --- DEDUPLICATION START ---
+                # Before we do expensive analysis and enqueue task, check if this is a re-upload
+                # of an existing file that already has a transcript.
+                is_deduplicated = False
+                dedup_source = None
+                
+                try:
+                    # We need the stem of the NEW filename we just generated
+                    new_stem = Path(final_filename).stem
+                    
+                    is_deduplicated, dedup_source = _attempt_deduplication(
+                        session=session,
+                        user_id=current_user.id,
+                        filesize=bytes_written,
+                        friendly_name=friendly_name,
+                        original_stem=original_filename, # From earlier in function
+                        new_stem=new_stem,
+                        bucket_name=gcs_bucket
+                    )
+                    
+                    if is_deduplicated and dedup_source:
+                        log.info("[upload.dedupe] SUCCESS: Reusing transcript from MediaItem %s for new upload %s", 
+                                    dedup_source.id, media_item.id)
+                        
+                        # Copy metadata
+                        media_item.transcript_ready = True
+                        media_item.audio_quality_metrics_json = dedup_source.audio_quality_metrics_json
+                        media_item.audio_quality_label = dedup_source.audio_quality_label
+                        media_item.audio_processing_decision_json = dedup_source.audio_processing_decision_json
+                        media_item.use_auphonic = dedup_source.use_auphonic
+                        media_item.auphonic_processed = dedup_source.auphonic_processed
+                        media_item.auphonic_cleaned_audio_url = dedup_source.auphonic_cleaned_audio_url
+                        # Note: We don't copy guest_ids unless we want to assume same speakers? 
+                        # Maybe safe to leave as user-provided list.
+                        
+                        session.add(media_item)
+                        session.flush() # Persist changes
+                        
+                        # Skip the rest of the analysis/task enqueue
+                        # We must manual commit here since we are 'continuing' the loop which might
+                        # mean skipping the end-of-loop logic if it existed, but here we are inside the loop
+                        # and the commit happens at the end of the loop? 
+                        # actually commit happens after the loop for all items.
+                        # so 'continue' goes to next file. 
+                        # Logic check: 'created_items' has the item. The commit is at line ~473.
+                        # So 'continue' is safe.
+                        continue 
+                except Exception as dedup_err:
+                    log.warning("[upload.dedupe] Failed to deduplicate: %s", dedup_err)
+                    # Continue to normal processing
+                # --- DEDUPLICATION END ---
+
                 # Analyze audio immediately after upload and before transcription routing
                 try:
                     from api.services.audio.quality import analyze_audio_file
@@ -1483,3 +1539,17 @@ async def list_zoom_recordings(
         log.error(f"[zoom] Failed to detect recordings: {e}", exc_info=True)
         # Return empty list rather than failing - user can still upload manually
         return []
+
+@router.get("/{media_id}", response_model=MediaItem)
+async def get_media_item(
+    media_id: UUID,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Retrieve a specific media item by ID."""
+    item = session.get(MediaItem, media_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Media item not found")
+    if str(item.user_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized to access this media item")
+    return item

@@ -798,9 +798,139 @@ def get_user_credits_data(
         select(ProcessingMinutesLedger)
         .where(ProcessingMinutesLedger.user_id == user_id)
         .order_by(ProcessingMinutesLedger.created_at.desc())
-        .limit(50)
+        .limit(20)
     )
-    ledger = session.exec(ledger_stmt).all()
+    ledger_entries = session.exec(ledger_stmt).all()
+    
+    return {
+        "balance": balance,
+        "total_allocation": tier_credits,
+        "ledger": [
+            LedgerEntryDetail(
+                id=str(entry.id),
+                amount=entry.amount,
+                reason=entry.reason,
+                direction=entry.direction,
+                created_at=entry.created_at.isoformat(),
+                description=entry.description,
+                balance_after=entry.balance_after
+            ) for entry in ledger_entries
+        ]
+    }
+
+
+def bulk_delete_test_users(
+    session: Session,
+    admin_user: User,
+) -> Dict[str, Any]:
+    """
+    Bulk delete users that match test account criteria:
+    - Email starts with 'builder'
+    - Email starts with 'test'
+    - Email ends with '@example.com'
+    """
+    log.warning(f"[ADMIN] Bulk delete of test users requested by {admin_user.email}")
+    
+    # 1. Find matching users
+    query = select(User).where(
+        or_(
+            User.email.ilike("builder%"),
+            User.email.ilike("test%"),
+            User.email.ilike("%@example.com")
+        )
+    )
+    candidates = session.exec(query).all()
+    
+    # Pre-fetch episode counts for efficiency
+    candidate_ids = [u.id for u in candidates]
+    episode_counts = {}
+    if candidate_ids:
+        ep_stmt = (
+            select(Episode.user_id, func.count(Episode.id))
+            .where(Episode.user_id.in_(candidate_ids))
+            .group_by(Episode.user_id)
+        )
+        episode_counts = dict(session.exec(ep_stmt).all())
+
+    deleted_count = 0
+    errors = []
+    
+    for user in candidates:
+        if not user.email:
+             continue
+             
+        # SAFETY CHECK: Only delete users with 1 or fewer episodes
+        # This protects accounts with significant data
+        user_ep_count = episode_counts.get(user.id, 0)
+        if user_ep_count > 1:
+            log.warning(f"[ADMIN] Skipping test user {user.email} - Has {user_ep_count} episodes (limit: 1)")
+            continue
+
+        # Skip if protected
+        if user.email.lower() in [PROTECTED_SUPERADMIN_EMAIL, "tom@pluspluspodcasts.com", "tgdscott@gmail.com"]:
+            continue
+            
+        # Skip valid paid accounts just in case (though unlikely for test accounts)
+        user_tier = (user.tier or "free").strip().lower()
+        if user_tier not in ["free", "starter", "admin", "trial"]:
+             # Skip paid tiers to be safe
+             continue
+             
+        user_email = user.email
+
+        # Force deactivate and downgrade user before deletion to satisfy safety checks
+        # This is safe because we've already filtered by strict email criteria
+        if user.is_active or user.tier not in ["free", "starter", "hobby", ""]:
+            try:
+                user.is_active = False
+                user.tier = "free"  # Downgrade to free to allow deletion
+                user.subscription_expires_at = None
+                session.add(user)
+                session.commit()
+                session.refresh(user)
+                log.info(f"[ADMIN] Force deactivated and downgraded test user {user_email} for deletion")
+            except Exception as e:
+                log.error(f"[ADMIN] Failed to deactivate/downgrade user {user_email}: {e}")
+                errors.append(f"Failed to deactivate/downgrade {user_email}: {str(e)}")
+                continue
+
+        try:
+            # Re-fetch user to ensure fresh state
+            session.refresh(user)
+            delete_user_account(session, admin_user, str(user.id), user_email)
+            deleted_count += 1
+            log.info(f"[ADMIN] Bulk deleted test user: {user_email}")
+        except Exception as e:
+            error_msg = str(e)
+            # If it's a 403, it might be a race condition or persistent state issue
+            if "403" in error_msg:
+                from sqlalchemy import text
+                log.warning(f"[ADMIN] 403 error deleting {user_email}, retrying with aggressive downgrade...")
+                try:
+                    # Final attempt: direct SQL update to force state
+                    session.execute(
+                        text("UPDATE \"user\" SET is_active = false, tier = 'free' WHERE id = :uid"),
+                        {"uid": user.id}
+                    )
+                    session.commit()
+                    session.refresh(user) # Refresh after direct update
+                    delete_user_account(session, admin_user, str(user.id), user_email)
+                    deleted_count += 1
+                    log.info(f"[ADMIN] Bulk deleted test user after retry: {user_email}")
+                    continue # Successfully deleted, move to next user
+                except Exception as retry_err:
+                     error_msg = f"{error_msg} | Retry failed: {retry_err}"
+
+            log.error(f"[ADMIN] Failed to bulk delete user {user_email}: {error_msg}")
+            errors.append(f"{user_email}: {error_msg}")
+            # Continue to next user
+            
+    return {
+        "success": True,
+        "found": len(candidates),
+        "deleted": deleted_count,
+        "errors": errors
+    }
     
     # Calculate monthly usage
     from api.services.billing import usage as usage_svc

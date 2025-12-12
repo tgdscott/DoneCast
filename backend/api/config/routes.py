@@ -93,50 +93,68 @@ def attach_routes(app: FastAPI) -> None:
     # an edge-case (e.g. complex job_id paths, proxies stripping headers, etc.).
     @app.options("/{path:path}")
     def cors_preflight_handler(path: str, request: Request):  # type: ignore[override]
-        origin = request.headers.get("origin") or ""
-        requested_headers = request.headers.get("Access-Control-Request-Headers") or request.headers.get("access-control-request-headers")
+        try:
+            origin = request.headers.get("origin") or ""
+            requested_headers = request.headers.get("Access-Control-Request-Headers") or request.headers.get("access-control-request-headers")
 
-        # Build a permissive (but restricted to our allowlist / known suffixes) selection.
-        allowed_list = settings.cors_allowed_origin_list
-        chosen = None
-        if origin:
-            o = origin.rstrip('/')
-            if o in allowed_list:
-                chosen = o
+            # Build a permissive (but restricted to our allowlist / known suffixes) selection.
+            allowed_list = settings.cors_allowed_origin_list
+            chosen = None
+            if origin:
+                o = origin.rstrip('/')
+                if o in allowed_list:
+                    chosen = o
+                else:
+                    # Suffix fallback for apex / subdomain variants we trust.
+                    try:
+                        parsed = urlparse(o)
+                        host = (parsed.hostname or "").lower()
+                        if host:
+                            for suffix in ("donecast.com", "podcastplusplus.com", "getpodcastplus.com"):
+                                if host == suffix or host.endswith(f".{suffix}"):
+                                    chosen = f"{parsed.scheme}://{parsed.netloc}"
+                                    break
+                    except Exception:  # pragma: no cover - defensive
+                        # If parsing fails, don't crash, just treat as untrusted
+                        log.warning(f"Failed to parse origin '{o}' in preflight handler")
+                        chosen = None
+
+            resp = Response(status_code=204)
+            if chosen:
+                resp.headers['Access-Control-Allow-Origin'] = chosen
+                resp.headers.setdefault('Access-Control-Allow-Credentials', 'true')
+                # Make sure caching layers vary on Origin so we don't leak headers
+                vary_existing = resp.headers.get('Vary')
+                vary_vals = [] if not vary_existing else [v.strip() for v in vary_existing.split(',') if v.strip()]
+                for v in ("Origin", "Referer"):
+                    if v not in vary_vals:
+                        vary_vals.append(v)
+                if vary_vals:
+                    resp.headers['Vary'] = ", ".join(vary_vals)
+            
+            # If no origin was chosen (validation failed), some browsers might still blocked it.
+            # But we returned 204.
+            # In Dev mode, we might want to be looser?
+            # For now, stick to prod security rules.
+
+            resp.headers.setdefault("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
+            if requested_headers:
+                resp.headers['Access-Control-Allow-Headers'] = requested_headers
             else:
-                # Suffix fallback for apex / subdomain variants we trust.
-                try:
-                    parsed = urlparse(o)
-                    host = (parsed.hostname or "").lower()
-                    if host:
-                        for suffix in ("donecast.com", "podcastplusplus.com", "getpodcastplus.com"):
-                            if host == suffix or host.endswith(f".{suffix}"):
-                                chosen = f"{parsed.scheme}://{parsed.netloc}"
-                                break
-                except Exception:  # pragma: no cover - defensive
-                    chosen = None
+                resp.headers.setdefault("Access-Control-Allow-Headers", "*")
+            # Short TTL for preflight cache; browsers will revalidate occasionally.
+            resp.headers.setdefault("Access-Control-Max-Age", "600")
+            return resp
 
-        resp = Response(status_code=204)
-        if chosen:
-            resp.headers['Access-Control-Allow-Origin'] = chosen
-            resp.headers.setdefault('Access-Control-Allow-Credentials', 'true')
-            # Make sure caching layers vary on Origin so we don't leak headers
-            vary_existing = resp.headers.get('Vary')
-            vary_vals = [] if not vary_existing else [v.strip() for v in vary_existing.split(',') if v.strip()]
-            for v in ("Origin", "Referer"):
-                if v not in vary_vals:
-                    vary_vals.append(v)
-            if vary_vals:
-                resp.headers['Vary'] = ", ".join(vary_vals)
-
-        resp.headers.setdefault("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
-        if requested_headers:
-            resp.headers['Access-Control-Allow-Headers'] = requested_headers
-        else:
-            resp.headers.setdefault("Access-Control-Allow-Headers", "*")
-        # Short TTL for preflight cache; browsers will revalidate occasionally.
-        resp.headers.setdefault("Access-Control-Max-Age", "600")
-        return resp
+        except Exception as e:
+            # Fallback for ANY error in preflight handler to prevent 500
+            log.error(f"CRITICAL: Exception in global CORS preflight handler: {e}", exc_info=True)
+            # Return a generic 204 Allow-All (safest to unblock client, even if technically insecure?)
+            # No, keep it defensive. Return 204 without headers -> Client blocks.
+            # Better: Try to return a valid response for the requesting origin if possible?
+            # Safest fallback: Return 204. Browser handles missing headers as CORS error, 
+            # but at least it's not a 500.
+            return Response(status_code=204)
 
 
 def configure_static(app: FastAPI) -> None:

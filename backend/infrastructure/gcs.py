@@ -1131,3 +1131,41 @@ def _convert_to_cdn_url(signed_url: str) -> str:
     # If URL doesn't match expected format, return unchanged
     logger.warning("URL does not match expected GCS format, skipping CDN conversion: %s", signed_url)
     return signed_url
+
+def copy_blob(
+    source_bucket_name: str,
+    source_key: str,
+    dest_bucket_name: str,
+    dest_key: str,
+) -> bool:
+    """Copy a blob from one location to another in GCS.
+    
+    Returns:
+        True if successful, False otherwise.
+    """
+    client = _get_gcs_client(force=True)
+    if not client:
+        return False
+        
+    try:
+        source_bucket = client.bucket(source_bucket_name)
+        source_blob = source_bucket.blob(source_key)
+        dest_bucket = client.bucket(dest_bucket_name)
+        
+        # Determine if source exists
+        if not source_blob.exists():
+            return False
+            
+        # Copy
+        source_bucket.copy_blob(source_blob, dest_bucket, dest_key)
+        logger.info(
+            "Copied gs://%s/%s to gs://%s/%s",
+            source_bucket_name, source_key, dest_bucket_name, dest_key
+        )
+        return True
+    except Exception as e:
+        logger.error(
+            "Failed to copy blob from gs://%s/%s to gs://%s/%s: %s",
+            source_bucket_name, source_key, dest_bucket_name, dest_key, e
+        )
+        return False

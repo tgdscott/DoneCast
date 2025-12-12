@@ -41,16 +41,8 @@ def configure_middleware(app: FastAPI, settings: Settings) -> None:
         https_only=(False if _is_dev else True),
     )
     
-    # CORS middleware
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_allowed_origin_list,
-        allow_origin_regex=r"https://(?:[a-z0-9-]+\.)?(?:donecast\.com|podcastplusplus\.com|getpodcastplus\.com)",
-        allow_methods=["*"],
-        allow_headers=["*"],
-        expose_headers=["*"],
-        allow_credentials=True,
-    )
+    # CORS Middleware moved to the end to ensure it runs first (outermost)
+    pass
     
     # Dev Safety Middleware (Cloud SQL Proxy protection)
     from api.middleware.dev_safety import dev_read_only_middleware
@@ -97,3 +89,15 @@ def configure_middleware(app: FastAPI, settings: Settings) -> None:
     # Install exception handlers
     from api.exceptions import install_exception_handlers
     install_exception_handlers(app)
+
+    # CORS middleware - Added last so it is the OUTERMOST middleware (first to see request)
+    # This prevents other middleware (Auth, SecurityHeaders, etc.) from interfering with OPTIONS requests
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_allowed_origin_list,
+        allow_origin_regex=r"https://(?:[a-z0-9-]+\.)?(?:donecast\.com|podcastplusplus\.com|getpodcastplus\.com)",
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["*"],
+        allow_credentials=True,
+    )

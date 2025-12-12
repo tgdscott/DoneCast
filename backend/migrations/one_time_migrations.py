@@ -65,7 +65,9 @@ def run_one_time_migrations() -> dict[str, bool]:
     results["fix_episode_213_cover"] = run_migration_once("fix_episode_213_cover", _fix_episode_213_cover)
     results["cleanup_orphaned_records"] = run_migration_once("cleanup_orphaned_records", _cleanup_orphaned_records)
     results["add_audio_threshold_label"] = run_migration_once("add_audio_threshold_label", _add_audio_threshold_label)
+    results["add_audio_threshold_label"] = run_migration_once("add_audio_threshold_label", _add_audio_threshold_label)
     results["add_episode_length_management"] = run_migration_once("add_episode_length_management", _add_episode_length_management)
+    results["add_ai_metadata_enum"] = run_migration_once("add_ai_metadata_enum", _add_ai_metadata_enum)
     
     # Check for pending migrations
     pending = get_pending_migrations()
@@ -1343,3 +1345,21 @@ def _add_episode_length_management() -> bool:
         log.warning("[migrate] Episode length management migration failed: %s", e)
         return False
 
+
+def _add_ai_metadata_enum() -> bool:
+    """Add AI_METADATA_GENERATION to ledgerreason enum (migration 103)."""
+    import importlib.util
+    import os
+    
+    try:
+        migration_path = os.path.join(os.path.dirname(__file__), '103_add_ai_metadata_enum.py')
+        spec = importlib.util.spec_from_file_location('migration_103', migration_path)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            module.upgrade()
+        log.debug("[migrate] AI Metadata Enum migration completed")
+        return True
+    except Exception as e:
+        log.warning("[migrate] AI Metadata Enum migration failed: %s", e)
+        return False

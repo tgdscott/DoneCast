@@ -40,6 +40,11 @@ export default function useAIOrchestration({
       try {
         const res = await api.get(url);
         if (canceled) return;
+        if (res && res.ready === false && attempt < 20) {
+          // Backend says not ready - retry without error
+          setTimeout(() => { if (!canceled) fetchHints(attempt + 1); }, 750);
+          return;
+        }
         const hints = (res && res.intents) ? res.intents : {};
         setIntentDetections(hints);
         const flubberCount = Number((hints?.flubber?.count) ?? 0);
@@ -57,7 +62,7 @@ export default function useAIOrchestration({
       } catch (err) {
         if (canceled) return;
         const status = err && typeof err === 'object' ? err.status : null;
-        if (status && [404, 409, 425].includes(status) && attempt < 5) {
+        if (status && [404, 409, 425].includes(status) && attempt < 10) {
           setTimeout(() => { if (!canceled) fetchHints(attempt + 1); }, 750);
           return;
         }
@@ -100,7 +105,7 @@ export default function useAIOrchestration({
       try {
         const voiceId = resolveInternVoiceId();
         if (voiceId) payload.voice_id = voiceId;
-      } catch (_) {}
+      } catch (_) { }
     }
 
     (async () => {

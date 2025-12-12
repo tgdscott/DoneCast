@@ -22,17 +22,17 @@ const safeJsonParse = (text) => {
   try { return text ? JSON.parse(text) : {}; } catch { return {}; }
 };
 const ensureIsoZ = (iso) => {
-  if(!iso) return iso;
+  if (!iso) return iso;
   // If already has timezone info return as-is
-  if(/[zZ]|[+\-]\d{2}:?\d{2}$/.test(iso)) return iso;
+  if (/[zZ]|[+\-]\d{2}:?\d{2}$/.test(iso)) return iso;
   // Accept space separator
-  if(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(iso)) return iso.replace(' ', 'T')+'Z';
+  if (/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(iso)) return iso.replace(' ', 'T') + 'Z';
   // Basic naive pattern
-  if(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(iso)) return iso+'Z';
+  if (/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(iso)) return iso + 'Z';
   return iso; // fallback (let Date attempt)
 };
 const normalizeDate = (iso) => {
-  if(!iso) return null;
+  if (!iso) return null;
   const d = new Date(ensureIsoZ(iso));
   return isNaN(d.getTime()) ? null : d;
 };
@@ -45,29 +45,29 @@ const compareEpisodes = (a, b, direction = 'desc') => {
   const bHasSeason = typeof b.season_number === 'number';
   const aHasEpisode = typeof a.episode_number === 'number';
   const bHasEpisode = typeof b.episode_number === 'number';
-  
+
   // If both have season numbers, compare by season first
   if (aHasSeason && bHasSeason) {
     const seasonDiff = a.season_number - b.season_number;
     if (seasonDiff !== 0) {
       return direction === 'desc' ? -seasonDiff : seasonDiff;
     }
-    
+
     // Same season, compare by episode number if both have it
     if (aHasEpisode && bHasEpisode) {
       const episodeDiff = a.episode_number - b.episode_number;
       return direction === 'desc' ? -episodeDiff : episodeDiff;
     }
-    
+
     // One has episode number, one doesn't - prioritize the one with episode number
     if (aHasEpisode && !bHasEpisode) return direction === 'desc' ? -1 : 1;
     if (!aHasEpisode && bHasEpisode) return direction === 'desc' ? 1 : -1;
   }
-  
+
   // Only one has season number - prioritize the one with season/episode numbers
   if (aHasSeason && !bHasSeason) return direction === 'desc' ? -1 : 1;
   if (!aHasSeason && bHasSeason) return direction === 'desc' ? 1 : -1;
-  
+
   // Neither has season numbers, fall back to date sorting
   const dateDiff = episodeSortDate(a) - episodeSortDate(b);
   return direction === 'desc' ? -dateDiff : dateDiff;
@@ -84,18 +84,18 @@ const resolveAssetUrl = (path) => {
 // Helper to build template variables for AI requests
 const buildTemplateVariables = (episode, podcast, mediaItem) => {
   const vars = {};
-  
+
   // From episode
   if (episode) {
     if (episode.season_number != null) vars.season_number = episode.season_number;
     if (episode.episode_number != null) vars.episode_number = episode.episode_number;
-    
+
     // Duration in minutes (convert from seconds if available)
     const duration = episode.duration || episode.audio_duration;
     if (duration != null) {
       vars.duration_minutes = Math.round(duration / 60);
     }
-    
+
     // Date-based variables
     const pubDate = normalizeDate(episode.publish_at) || normalizeDate(episode.created_at);
     if (pubDate) {
@@ -104,12 +104,12 @@ const buildTemplateVariables = (episode, podcast, mediaItem) => {
       vars.month = pubDate.toLocaleDateString('en-US', { month: 'long' });
     }
   }
-  
+
   // From podcast
   if (podcast?.title) {
     vars.podcast_name = podcast.title;
   }
-  
+
   // From media item (main content)
   if (mediaItem) {
     if (mediaItem.friendly_name) {
@@ -119,33 +119,33 @@ const buildTemplateVariables = (episode, podcast, mediaItem) => {
       vars.filename = mediaItem.filename;
     }
   }
-  
+
   return vars;
 };
 const isWithin24h = (iso) => {
   const d = normalizeDate(iso);
-  if(!d) return false;
-  return (Date.now() - d.getTime()) < 24*3600*1000;
+  if (!d) return false;
+  return (Date.now() - d.getTime()) < 24 * 3600 * 1000;
 };
 const isWithin7Days = (iso) => {
   const d = normalizeDate(iso);
-  if(!d) return false;
+  if (!d) return false;
   const elapsed = Date.now() - d.getTime();
-  return elapsed >= 0 && elapsed < 7*24*3600*1000;
+  return elapsed >= 0 && elapsed < 7 * 24 * 3600 * 1000;
 };
 const formatPublishAt = (iso, { fallback = null, timezone } = {}) => {
-  if(!iso) return fallback ?? '';
+  if (!iso) return fallback ?? '';
   try {
     const d = normalizeDate(iso);
-    if(!d) return fallback ?? iso;
-    const datePart = formatInTimezone(d, { year:'numeric', month:'short', day:'numeric' }, timezone);
-    const timePart = formatInTimezone(d, { hour:'numeric', minute:'2-digit', hour12:true, timeZoneName:'short' }, timezone);
+    if (!d) return fallback ?? iso;
+    const datePart = formatInTimezone(d, { year: 'numeric', month: 'short', day: 'numeric' }, timezone);
+    const timePart = formatInTimezone(d, { hour: 'numeric', minute: '2-digit', hour12: true, timeZoneName: 'short' }, timezone);
     const now = Date.now();
-    const diffMin = Math.round((d.getTime()-now)/60000);
-    let rel='';
-    if (Math.abs(diffMin) < 60*24*7) {
-      if (diffMin>0) rel = diffMin<60?`in ${diffMin}m`: (diffMin<1440?`in ${Math.round(diffMin/60)}h`:`in ${Math.round(diffMin/60/24)}d`);
-      else if (diffMin<0){ const m=Math.abs(diffMin); rel = m<60?`${m}m ago`:(m<1440?`${Math.round(m/60)}h ago`:`${Math.round(m/60/24)}d ago`); }
+    const diffMin = Math.round((d.getTime() - now) / 60000);
+    let rel = '';
+    if (Math.abs(diffMin) < 60 * 24 * 7) {
+      if (diffMin > 0) rel = diffMin < 60 ? `in ${diffMin}m` : (diffMin < 1440 ? `in ${Math.round(diffMin / 60)}h` : `in ${Math.round(diffMin / 60 / 24)}d`);
+      else if (diffMin < 0) { const m = Math.abs(diffMin); rel = m < 60 ? `${m}m ago` : (m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 60 / 24)}d ago`); }
     }
     const label = [datePart, timePart].filter(Boolean).join(' ').trim();
     return label ? `${label}${rel ? " - " + rel : ""}` : (fallback ?? iso);
@@ -206,7 +206,7 @@ export default function EpisodeHistory({ token, onBack }) {
   // Preview toggle removed; mosaic view is now permanent
   // Editing panel
   const [editing, setEditing] = useState(null);
-  const [editValues, setEditValues] = useState({ title:'', description:'', publish_state:'', tags:'', is_explicit:false, image_crop:'', cover_file:null, cover_uploading:false, season_number:null, episode_number:null, template_id:null });
+  const [editValues, setEditValues] = useState({ title: '', description: '', publish_state: '', tags: '', is_explicit: false, image_crop: '', cover_file: null, cover_uploading: false, season_number: null, episode_number: null, template_id: null });
   const [saving, setSaving] = useState(false);
   const [templates, setTemplates] = useState([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
@@ -228,11 +228,11 @@ export default function EpisodeHistory({ token, onBack }) {
       title: ep.title || '',
       description: ep.description || '',
       publish_state: '',
-      tags: (ep.tags||[]).join(', '),
+      tags: (ep.tags || []).join(', '),
       is_explicit: !!ep.is_explicit,
       image_crop: ep.image_crop || '',
       cover_file: null,
-      cover_uploading:false,
+      cover_uploading: false,
       season_number: ep.season_number ?? null,
       episode_number: ep.episode_number ?? null,
       template_id: ep.template_id ?? null,
@@ -240,14 +240,14 @@ export default function EpisodeHistory({ token, onBack }) {
     // Add reset conflict
     setNumberingConflict(false);
   };
-  const closeEdit = () => { if(saving) return; setEditing(null); };
+  const closeEdit = () => { if (saving) return; setEditing(null); };
   const editDirty = () => editing && (
-    editValues.title !== (editing.title||'') ||
-    editValues.description !== (editing.description||'') ||
+    editValues.title !== (editing.title || '') ||
+    editValues.description !== (editing.description || '') ||
     (editValues.publish_state && editValues.publish_state.trim() !== '') ||
-    editValues.tags !== (Array.isArray(editing.tags)?editing.tags.join(', '):'') ||
+    editValues.tags !== (Array.isArray(editing.tags) ? editing.tags.join(', ') : '') ||
     editValues.is_explicit !== !!editing.is_explicit ||
-    editValues.image_crop !== (editing.image_crop||'') ||
+    editValues.image_crop !== (editing.image_crop || '') ||
     !!editValues.cover_file ||
     (editValues.season_number !== (editing.season_number ?? null)) ||
     (editValues.episode_number !== (editing.episode_number ?? null)) ||
@@ -279,7 +279,7 @@ export default function EpisodeHistory({ token, onBack }) {
       const api = makeApi(token);
       await api.post(`/api/episodes/${ep.id}/retry`, {});
       // Optimistic: mark as processing; refresh shortly
-      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id===ep.id ? { ...e, status:'processing' } : e) : []);
+      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id === ep.id ? { ...e, status: 'processing' } : e) : []);
       setTimeout(fetchEpisodes, 1200);
     } catch (e) {
       const msg = isApiError(e) ? (e.detail || e.error || e.message) : String(e);
@@ -290,13 +290,13 @@ export default function EpisodeHistory({ token, onBack }) {
   };
   // One-click publish (makes episode public immediately)
   const quickPublish = async (episodeId) => {
-    if(!episodeId) return;
-    setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id===episodeId ? { ...e, _publishing:true } : e) : []);
+    if (!episodeId) return;
+    setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id === episodeId ? { ...e, _publishing: true } : e) : []);
     try {
-  const api = makeApi(token);
-  await api.post(`/api/episodes/${episodeId}/publish`, { publish_state:'public' });
+      const api = makeApi(token);
+      await api.post(`/api/episodes/${episodeId}/publish`, { publish_state: 'public' });
       // Do not optimistically flip to published; refresh shortly to reflect actual server state
-      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id===episodeId ? { ...e, _publishing:false } : e) : []);
+      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id === episodeId ? { ...e, _publishing: false } : e) : []);
       // Poll status briefly to surface errors promptly
       const start = Date.now();
       const poll = async () => {
@@ -306,31 +306,31 @@ export default function EpisodeHistory({ token, onBack }) {
             await fetchEpisodes();
             if (st.last_error) {
               const errorMsg = getUserFriendlyError({ detail: st.last_error }, { context: 'publish' });
-              toast({ 
-                title: errorMsg.title, 
+              toast({
+                title: errorMsg.title,
                 description: errorMsg.description,
                 variant: 'destructive'
               });
             }
             return;
           }
-        } catch {}
+        } catch { }
         if (Date.now() - start < 4000) {
           setTimeout(poll, 600);
         } else {
           // final refresh
-          try { await fetchEpisodes(); } catch {}
+          try { await fetchEpisodes(); } catch { }
         }
       };
       setTimeout(poll, 600);
-    } catch(err){
+    } catch (err) {
       const errorMsg = getUserFriendlyError(err, { context: 'publish' });
       toast({
         title: errorMsg.title,
         description: errorMsg.description,
         variant: 'destructive'
       });
-      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id===episodeId ? { ...e, _publishing:false } : e) : []);
+      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id === episodeId ? { ...e, _publishing: false } : e) : []);
     }
   };
   const openSchedule = (ep) => {
@@ -339,15 +339,15 @@ export default function EpisodeHistory({ token, onBack }) {
     setScheduleSubmitting(false);
     setScheduleError("");
     // Default date/time = now + 60 min rounded to next 5 min
-    const now = new Date(Date.now() + 60*60000);
+    const now = new Date(Date.now() + 60 * 60000);
     const yyyy = now.getFullYear();
-    const mm = String(now.getMonth()+1).padStart(2,'0');
-    const dd = String(now.getDate()).padStart(2,'0');
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
     const mins = now.getMinutes();
-    const rounded = Math.ceil(mins/5)*5;
-    if(rounded >= 60){ now.setHours(now.getHours()+1); now.setMinutes(0); }
-    const hh = String(now.getHours()).padStart(2,'0');
-    const mi = String(rounded >= 60? 0 : rounded).padStart(2,'0');
+    const rounded = Math.ceil(mins / 5) * 5;
+    if (rounded >= 60) { now.setHours(now.getHours() + 1); now.setMinutes(0); }
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mi = String(rounded >= 60 ? 0 : rounded).padStart(2, '0');
     setScheduleDate(`${yyyy}-${mm}-${dd}`);
     setScheduleTime(`${hh}:${mi}`);
   };
@@ -358,7 +358,7 @@ export default function EpisodeHistory({ token, onBack }) {
     try {
       const api = makeApi(token);
       await api.post(`/api/episodes/${ep.id}/republish`, {});
-      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id===ep.id ? { ...e, _republishing: true } : e) : []);
+      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id === ep.id ? { ...e, _republishing: true } : e) : []);
       setTimeout(fetchEpisodes, 1500);
     } catch (e) {
       const msg = isApiError(e) ? (e.detail || e.error || e.message) : String(e);
@@ -383,25 +383,25 @@ export default function EpisodeHistory({ token, onBack }) {
       setHasGlobalNumberingConflict(false);
     }
   }, []);
-  const closeSchedule = () => { if(scheduleSubmitting) return; setScheduleEp(null); };
+  const closeSchedule = () => { if (scheduleSubmitting) return; setScheduleEp(null); };
   const submitSchedule = async () => {
-    if(!scheduleEp) return;
+    if (!scheduleEp) return;
     setScheduleSubmitting(true);
     setScheduleError("");
     try {
-      if(!scheduleDate || !scheduleTime){ throw new Error('Date & time required'); }
+      if (!scheduleDate || !scheduleTime) { throw new Error('Date & time required'); }
       const local = new Date(`${scheduleDate}T${scheduleTime}:00`);
-      if(isNaN(local.getTime())) throw new Error('Invalid date/time');
-      if(local.getTime() <= Date.now()+60*1000) throw new Error('Choose a time at least 1 minute in the future');
-  // Build ISO (UTC) and trim milliseconds for backend leniency
-  let iso = local.toISOString();
-  iso = iso.replace(/\.\d{3}Z$/, 'Z');
-      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id===scheduleEp.id ? { ...e, _scheduling:true } : e) : []);
-  const api = makeApi(token);
-  await api.post(`/api/episodes/${scheduleEp.id}/publish`, { publish_state:'public', publish_at: iso, publish_at_local: `${scheduleDate} ${scheduleTime}` });
-      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id===scheduleEp.id ? { ...e, status:'scheduled', publish_at: iso, publish_at_local: `${scheduleDate} ${scheduleTime}`, _scheduling:false } : e) : []);
+      if (isNaN(local.getTime())) throw new Error('Invalid date/time');
+      if (local.getTime() <= Date.now() + 60 * 1000) throw new Error('Choose a time at least 1 minute in the future');
+      // Build ISO (UTC) and trim milliseconds for backend leniency
+      let iso = local.toISOString();
+      iso = iso.replace(/\.\d{3}Z$/, 'Z');
+      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id === scheduleEp.id ? { ...e, _scheduling: true } : e) : []);
+      const api = makeApi(token);
+      await api.post(`/api/episodes/${scheduleEp.id}/publish`, { publish_state: 'public', publish_at: iso, publish_at_local: `${scheduleDate} ${scheduleTime}` });
+      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id === scheduleEp.id ? { ...e, status: 'scheduled', publish_at: iso, publish_at_local: `${scheduleDate} ${scheduleTime}`, _scheduling: false } : e) : []);
       setScheduleEp(null);
-    } catch(e){
+    } catch (e) {
       // Extract string message from error object (never render object directly)
       let msg = 'Failed to schedule';
       if (isApiError(e)) {
@@ -420,12 +420,12 @@ export default function EpisodeHistory({ token, onBack }) {
         }
       }
       setScheduleError(msg);
-      setEpisodes(prev => Array.isArray(prev) ? prev.map(p => p.id===scheduleEp.id ? { ...p, _scheduling:false } : p) : []);
+      setEpisodes(prev => Array.isArray(prev) ? prev.map(p => p.id === scheduleEp.id ? { ...p, _scheduling: false } : p) : []);
     } finally { setScheduleSubmitting(false); }
   };
   const submitEdit = async () => {
-    if(!editing) return;
-    if(!editDirty()) { closeEdit(); return; }
+    if (!editing) return;
+    if (!editDirty()) { closeEdit(); return; }
     setSaving(true);
     const body = {};
     try {
@@ -436,30 +436,30 @@ export default function EpisodeHistory({ token, onBack }) {
       const seasonChanged = newSeason !== origSeason;
       const episodeIncreased = (newEpisode != null && origEpisode != null && newEpisode > origEpisode);
 
-      if(editValues.title !== (editing.title||'')) body.title = editValues.title.trim();
-      if(editValues.description !== (editing.description||'')) body.description = editValues.description;
-      if(editValues.publish_state) body.publish_state = editValues.publish_state;
-      const newTags = editValues.tags.split(',').map(t=>t.trim()).filter(Boolean);
-      if(newTags.join('\u0001') !== (Array.isArray(editing.tags)?editing.tags.join('\u0001') : '')) body.tags = newTags;
-      if(editValues.is_explicit !== !!editing.is_explicit) body.is_explicit = editValues.is_explicit;
-      if(editValues.image_crop !== (editing.image_crop||'')) body.image_crop = editValues.image_crop;
-      if(editValues.season_number !== (editing.season_number ?? null)) body.season_number = editValues.season_number;
-      if(editValues.episode_number !== (editing.episode_number ?? null)) body.episode_number = editValues.episode_number;
-      if((editValues.template_id ?? null) !== (editing.template_id ?? null)) body.template_id = editValues.template_id;
+      if (editValues.title !== (editing.title || '')) body.title = editValues.title.trim();
+      if (editValues.description !== (editing.description || '')) body.description = editValues.description;
+      if (editValues.publish_state) body.publish_state = editValues.publish_state;
+      const newTags = editValues.tags.split(',').map(t => t.trim()).filter(Boolean);
+      if (newTags.join('\u0001') !== (Array.isArray(editing.tags) ? editing.tags.join('\u0001') : '')) body.tags = newTags;
+      if (editValues.is_explicit !== !!editing.is_explicit) body.is_explicit = editValues.is_explicit;
+      if (editValues.image_crop !== (editing.image_crop || '')) body.image_crop = editValues.image_crop;
+      if (editValues.season_number !== (editing.season_number ?? null)) body.season_number = editValues.season_number;
+      if (editValues.episode_number !== (editing.episode_number ?? null)) body.episode_number = editValues.episode_number;
+      if ((editValues.template_id ?? null) !== (editing.template_id ?? null)) body.template_id = editValues.template_id;
       // Cover upload (if new file)
       let coverPath = null;
-      if(editValues.cover_file){
-        setEditValues(v=>({...v,cover_uploading:true}));
+      if (editValues.cover_file) {
+        setEditValues(v => ({ ...v, cover_uploading: true }));
         try {
           const fd = new FormData();
           let fileToSend = editValues.cover_file;
-          if(cropperRef.current){
+          if (cropperRef.current) {
             try {
               const blob = await cropperRef.current.getProcessedBlob();
-              if(blob){
-                fileToSend = new File([blob], editValues.cover_file.name.replace(/\.[^.]+$/,'')+"-square.jpg", { type:'image/jpeg' });
+              if (blob) {
+                fileToSend = new File([blob], editValues.cover_file.name.replace(/\.[^.]+$/, '') + "-square.jpg", { type: 'image/jpeg' });
               }
-              if(cropperRef.current.getMode && cropperRef.current.getMode()==='pad' && body.image_crop){
+              if (cropperRef.current.getMode && cropperRef.current.getMode() === 'pad' && body.image_crop) {
                 delete body.image_crop; // pad mode keeps full image
               }
             } catch (err) {
@@ -474,26 +474,14 @@ export default function EpisodeHistory({ token, onBack }) {
             const fd1 = new FormData();
             fd1.append('files', fileToSend);
             fd1.append('friendly_names', JSON.stringify([fileToSend.name || 'cover.jpg']));
-            try {
-              const result1 = await api.raw('/api/media/upload/episode_cover', { method:'POST', body: fd1 });
-              if (result1 && Array.isArray(result1) && result1.length > 0) {
-                uploadResult = result1[0];
-              } else if (result1 && result1.filename) {
-                uploadResult = result1;
-              }
-            } catch (e1) {
-              // Fallback: cover_art endpoint with 'file' field (singular)
-              const fd2 = new FormData();
-              fd2.append('file', fileToSend);
-              try {
-                const result2 = await api.raw('/api/media/upload/cover_art', { method:'POST', body: fd2 });
-                uploadResult = result2;
-              } catch (e2) {
-                // Both failed, throw the more specific error
-                throw e2.status === 422 || e2.status === 400 ? e2 : e1;
-              }
+
+            const result1 = await api.raw('/api/media/upload/episode_cover', { method: 'POST', body: fd1 });
+            if (result1 && Array.isArray(result1) && result1.length > 0) {
+              uploadResult = result1[0];
+            } else if (result1 && result1.filename) {
+              uploadResult = result1;
             }
-            
+
             // Extract path from result
             if (uploadResult) {
               coverPath = uploadResult.filename || uploadResult.path || uploadResult.stored_as || null;
@@ -501,7 +489,7 @@ export default function EpisodeHistory({ token, onBack }) {
                 coverPath = uploadResult[0].filename || uploadResult[0].path || uploadResult[0].stored_as || null;
               }
             }
-            
+
             if (!coverPath) {
               throw new Error('Cover upload succeeded but no path returned from server');
             }
@@ -509,7 +497,7 @@ export default function EpisodeHistory({ token, onBack }) {
             // Extract detailed error message - handle various error response formats
             let errorMsg = 'Cover upload failed. Please try again.';
             console.error('Cover upload error:', e);
-            
+
             if (isApiError(e)) {
               // Handle nested error structure: { error: { code, message, details } }
               if (e.error && typeof e.error === 'object') {
@@ -530,7 +518,7 @@ export default function EpisodeHistory({ token, onBack }) {
                 } else {
                   errorMsg = JSON.stringify(e.error);
                 }
-              } 
+              }
               // Handle detail field (can be string, object, or array)
               else if (e.detail) {
                 if (typeof e.detail === 'string') {
@@ -546,7 +534,7 @@ export default function EpisodeHistory({ token, onBack }) {
                 } else {
                   errorMsg = JSON.stringify(e.detail);
                 }
-              } 
+              }
               // Fallback to error or message fields
               else if (e.error) {
                 errorMsg = String(e.error);
@@ -558,30 +546,30 @@ export default function EpisodeHistory({ token, onBack }) {
             } else if (typeof e === 'string') {
               errorMsg = e;
             }
-            
+
             toast({
               variant: 'destructive',
               title: 'Cover upload failed',
               description: errorMsg
             });
-            setEditValues(v=>({...v,cover_uploading:false}));
+            setEditValues(v => ({ ...v, cover_uploading: false }));
             setSaving(false);
             return; // Abort save - don't PATCH without cover_image_path
           }
-        } catch(err){
+        } catch (err) {
           const errorMsg = err?.message || String(err);
           toast({
             variant: 'destructive',
             title: 'Cover upload error',
             description: errorMsg || 'Failed to prepare cover image for upload'
           });
-          setEditValues(v=>({...v,cover_uploading:false}));
+          setEditValues(v => ({ ...v, cover_uploading: false }));
           setSaving(false);
           return; // Abort save
         }
-        setEditValues(v=>({...v,cover_uploading:false}));
+        setEditValues(v => ({ ...v, cover_uploading: false }));
       }
-      if(coverPath) body.cover_image_path = coverPath;
+      if (coverPath) body.cover_image_path = coverPath;
       const api = makeApi(token);
       // If the target episode number would collide with another in the same season, offer swap
       if (newSeason != null && newEpisode != null) {
@@ -595,29 +583,31 @@ export default function EpisodeHistory({ token, onBack }) {
             variant: 'default'
           });
           if (confirmed) {
-            try { await api.patch(`/api/episodes/${conflictEp.id}`, { episode_number: origEpisode }); } catch {}
+            try { await api.patch(`/api/episodes/${conflictEp.id}`, { episode_number: origEpisode }); } catch { }
           }
         }
       }
       const j = await api.patch(`/api/episodes/${editing.id}`, body);
-      setEpisodes(prev => Array.isArray(prev) ? prev.map(p => p.id===editing.id ? { ...p, ...(j?.episode||{}), ...(j?.episode ? {} : {
-        title: body.title ?? p.title,
-        description: body.description ?? p.description,
-        tags: body.tags ?? p.tags,
-        is_explicit: body.is_explicit ?? p.is_explicit,
-        image_crop: body.image_crop ?? p.image_crop,
-        cover_path: coverPath || p.cover_path,
-        season_number: body.season_number ?? p.season_number,
-        episode_number: body.episode_number ?? p.episode_number,
-        template_id: body.template_id ?? p.template_id,
-      }) } : p) : []);
+      setEpisodes(prev => Array.isArray(prev) ? prev.map(p => p.id === editing.id ? {
+        ...p, ...(j?.episode || {}), ...(j?.episode ? {} : {
+          title: body.title ?? p.title,
+          description: body.description ?? p.description,
+          tags: body.tags ?? p.tags,
+          is_explicit: body.is_explicit ?? p.is_explicit,
+          image_crop: body.image_crop ?? p.image_crop,
+          cover_path: coverPath || p.cover_path,
+          season_number: body.season_number ?? p.season_number,
+          episode_number: body.episode_number ?? p.episode_number,
+          template_id: body.template_id ?? p.template_id,
+        })
+      } : p) : []);
       // Optional cascades for season change and episode increments
       if ((seasonChanged || episodeIncreased) && episodes && episodes.length) {
-        const sorted = [...episodes].sort((a,b)=> episodeSortDate(a) - episodeSortDate(b));
-        const idx = sorted.findIndex(e=> e.id===editing.id);
-        const subsequent = idx>=0 ? sorted.slice(idx+1) : [];
+        const sorted = [...episodes].sort((a, b) => episodeSortDate(a) - episodeSortDate(b));
+        const idx = sorted.findIndex(e => e.id === editing.id);
+        const subsequent = idx >= 0 ? sorted.slice(idx + 1) : [];
         // Season cascade
-        if (seasonChanged && subsequent.length>0) {
+        if (seasonChanged && subsequent.length > 0) {
           const confirmed = await showConfirm({
             title: 'Apply Season Change to Subsequent Episodes?',
             description: `Also change the season to ${newSeason ?? '—'} for ${subsequent.length} episode(s) after this one?`,
@@ -627,12 +617,12 @@ export default function EpisodeHistory({ token, onBack }) {
           });
           if (confirmed) {
             for (const e of subsequent) {
-              try { await api.patch(`/api/episodes/${e.id}`, { season_number: newSeason }); } catch {}
+              try { await api.patch(`/api/episodes/${e.id}`, { season_number: newSeason }); } catch { }
             }
           }
         }
         // Episode increment cascade
-        if (episodeIncreased && subsequent.length>0 && origEpisode != null) {
+        if (episodeIncreased && subsequent.length > 0 && origEpisode != null) {
           const delta = newEpisode - origEpisode;
           const confirmed = await showConfirm({
             title: 'Increment Episode Numbers?',
@@ -644,15 +634,15 @@ export default function EpisodeHistory({ token, onBack }) {
           if (confirmed) {
             for (const e of subsequent) {
               const en = (e.episode_number ?? 0) + delta;
-              try { await api.patch(`/api/episodes/${e.id}`, { episode_number: en }); } catch {}
+              try { await api.patch(`/api/episodes/${e.id}`, { episode_number: en }); } catch { }
             }
           }
         }
       }
       closeEdit();
       // Refresh to recompute duplicate warnings
-      try { await fetchEpisodes(); } catch {}
-    } catch(e){
+      try { await fetchEpisodes(); } catch { }
+    } catch (e) {
       const errorMsg = getUserFriendlyError(e, { context: 'save' });
       toast({
         title: errorMsg.title,
@@ -713,7 +703,7 @@ export default function EpisodeHistory({ token, onBack }) {
   const handleAiError = (err, label) => {
     let message = '';
     let isRetryable = false;
-    
+
     if (isApiError(err)) {
       const detail = err.detail;
       if (detail && typeof detail === 'object') {
@@ -742,7 +732,7 @@ export default function EpisodeHistory({ token, onBack }) {
       } else if (err.message) {
         message = String(err.message);
       }
-      
+
       // Catch any 429 or 503 we might have missed
       if (!isRetryable && (err.status === 429 || err.status === 503)) {
         isRetryable = true;
@@ -751,10 +741,10 @@ export default function EpisodeHistory({ token, onBack }) {
     if (!message) {
       message = `AI ${label} request failed.`;
     }
-    
+
     // Store error state for UI
     setAiError(prev => ({ ...prev, [label]: isRetryable ? message : null }));
-    
+
     const errorMsg = getUserFriendlyError({ detail: message }, { context: 'save' });
     toast({
       title: errorMsg.title,
@@ -804,11 +794,11 @@ export default function EpisodeHistory({ token, onBack }) {
     updateAiBusy(field, true);
     const api = makeApi(token);
     const hint = deriveEpisodeHint(editing);
-    
+
     // Build template variables from available episode data
     // We'll fetch podcast name if needed, but for now use editing.podcast_name if available
     const podcast = editing.podcast_name ? { title: editing.podcast_name } : null;
-    
+
     // Try to get main content media item (usually has friendly_name)
     let mediaItem = null;
     try {
@@ -818,13 +808,13 @@ export default function EpisodeHistory({ token, onBack }) {
         const mediaRes = await api.get(`/api/media/${mainContentId}`);
         mediaItem = mediaRes;
       }
-    } catch {}
-    
+    } catch { }
+
     const templateVars = buildTemplateVariables(editing, podcast, mediaItem);
-    
+
     console.log('[AI] Template variables built:', templateVars);
     console.log('[AI] Media item:', mediaItem);
-    
+
     const basePayload = {
       episode_id: editing.id,
       podcast_id: editing.podcast_id,
@@ -942,20 +932,20 @@ export default function EpisodeHistory({ token, onBack }) {
       const firstData = await api.get('/api/episodes/?limit=500', { signal: controller.signal });
       list = Array.isArray(firstData?.items) ? firstData.items : [];
       const total = firstData?.total ?? list.length;
-      for(let offset=list.length; offset < total; offset += 500){
+      for (let offset = list.length; offset < total; offset += 500) {
         let page;
         try { page = await api.get(`/api/episodes/?limit=500&offset=${offset}`, { signal: controller.signal }); }
         catch { break; }
         const items = Array.isArray(page?.items) ? page.items : [];
-        if(!items.length) break;
+        if (!items.length) break;
         list = list.concat(items);
-        if(items.length < 500) break;
+        if (items.length < 500) break;
       }
-  setEpisodes(list);
-  // recompute duplicates
-  recomputeGlobalNumberingConflicts(list);
+      setEpisodes(list);
+      // recompute duplicates
+      recomputeGlobalNumberingConflicts(list);
     } catch (e) {
-      if(e.name !== 'AbortError') {
+      if (e.name !== 'AbortError') {
         const msg = isApiError(e) ? (e.detail || e.error || e.message) : String(e);
         setErr(msg || 'Failed to load episodes.');
       }
@@ -979,16 +969,16 @@ export default function EpisodeHistory({ token, onBack }) {
     setUnpublishError("");
     setUnpublishCanForce(false);
   };
-  const doUnpublish = async (force=false) => {
-    if(!unpublishEp) return;
+  const doUnpublish = async (force = false) => {
+    if (!unpublishEp) return;
     setUnpublishDoing(true); setUnpublishError("");
     try {
       const api = makeApi(token);
       await api.post(`/api/episodes/${unpublishEp.id}/unpublish`, { force });
-      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id===unpublishEp.id ? { ...e, status:'processed', publish_at:null } : e) : []);
+      setEpisodes(prev => Array.isArray(prev) ? prev.map(e => e.id === unpublishEp.id ? { ...e, status: 'processed', publish_at: null } : e) : []);
       setUnpublishEp(null);
       setTimeout(fetchEpisodes, 800);
-    } catch(e){
+    } catch (e) {
       if (e && typeof e === 'object' && e.status === 409) setUnpublishCanForce(true);
       const msg = isApiError(e) ? (e.detail || e.error || e.message) : String(e);
       setUnpublishError(msg || 'Failed to unpublish');
@@ -1017,12 +1007,12 @@ export default function EpisodeHistory({ token, onBack }) {
     finally { setDeletingIds(prev => { const n = new Set(prev); n.delete(episodeId); return n; }); }
   };
   const statusChip = (s) => {
-    switch(statusLabel(s)){
-      case 'published': return <Badge className="bg-green-600 hover:bg-green-600"><CheckCircle2 className="w-4 h-4 mr-1"/>Published</Badge>;
-      case 'scheduled': return <Badge className="bg-purple-600 hover:bg-purple-600"><CalendarClock className="w-4 h-4 mr-1"/>Scheduled</Badge>;
-      case 'processed': return <Badge className="bg-blue-600 hover:bg-blue-600"><Clock className="w-4 h-4 mr-1"/>Processed</Badge>;
-      case 'processing': return <Badge className="bg-amber-600 hover:bg-amber-600"><Loader2 className="w-4 h-4 mr-1 animate-spin"/>Processing</Badge>;
-      case 'error': return <Badge className="bg-red-600 hover:bg-red-600"><AlertTriangle className="w-4 h-4 mr-1"/>Error</Badge>;
+    switch (statusLabel(s)) {
+      case 'published': return <Badge className="bg-green-600 hover:bg-green-600"><CheckCircle2 className="w-4 h-4 mr-1" />Published</Badge>;
+      case 'scheduled': return <Badge className="bg-purple-600 hover:bg-purple-600"><CalendarClock className="w-4 h-4 mr-1" />Scheduled</Badge>;
+      case 'processed': return <Badge className="bg-blue-600 hover:bg-blue-600"><Clock className="w-4 h-4 mr-1" />Processed</Badge>;
+      case 'processing': return <Badge className="bg-amber-600 hover:bg-amber-600"><Loader2 className="w-4 h-4 mr-1 animate-spin" />Processing</Badge>;
+      case 'error': return <Badge className="bg-red-600 hover:bg-red-600"><AlertTriangle className="w-4 h-4 mr-1" />Error</Badge>;
       default: return <Badge variant="outline">{s || 'Unknown'}</Badge>;
     }
   };
@@ -1031,27 +1021,27 @@ export default function EpisodeHistory({ token, onBack }) {
     let list = [...episodes];
     if (search.trim()) {
       const q = search.trim().toLowerCase();
-      list = list.filter(e => (e.title||'').toLowerCase().includes(q) || (e.description||'').toLowerCase().includes(q));
+      list = list.filter(e => (e.title || '').toLowerCase().includes(q) || (e.description || '').toLowerCase().includes(q));
     }
     if (statusFilter !== 'all') {
-      list = list.filter(e => String(e.status||'').toLowerCase() === statusFilter);
+      list = list.filter(e => String(e.status || '').toLowerCase() === statusFilter);
     }
     switch (sortKey) {
       case 'oldest':
-        list.sort((a,b)=> compareEpisodes(a, b, 'asc'));
+        list.sort((a, b) => compareEpisodes(a, b, 'asc'));
         break;
       case 'title':
-        list.sort((a,b)=> (a.title||'').localeCompare(b.title||''));
+        list.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
         break;
       case 'status':
-        list.sort((a,b)=> (a.status||'').localeCompare(b.status||''));
+        list.sort((a, b) => (a.status || '').localeCompare(b.status || ''));
         break;
       case 'plays':
-        list.sort((a,b)=> (b.plays_total||0) - (a.plays_total||0));
+        list.sort((a, b) => (b.plays_total || 0) - (a.plays_total || 0));
         break;
       case 'newest':
       default:
-        list.sort((a,b)=> compareEpisodes(a, b, 'desc'));
+        list.sort((a, b) => compareEpisodes(a, b, 'desc'));
     }
     return list;
   }, [episodes, search, statusFilter, sortKey]);
@@ -1065,8 +1055,8 @@ export default function EpisodeHistory({ token, onBack }) {
         audioUrl = resolveAssetUrl(audioUrl) || '';
         const hasProxyAudio = !!ep.proxy_playback_url;
         const missingAudio = audioUrl && ep.final_audio_exists === false && ep.playback_type !== 'stream' && !hasProxyAudio;
-  // Allow unpublish for all scheduled/published episodes (force option available after 24h)
-  const showUnpublish = statusLabel(ep.status) === 'scheduled' || statusLabel(ep.status) === 'published';
+        // Allow unpublish for all scheduled/published episodes (force option available after 24h)
+        const showUnpublish = statusLabel(ep.status) === 'scheduled' || statusLabel(ep.status) === 'published';
         // Heuristic: show Retry when status is error, or processing exceeds 1.25x duration (fallback 15min)
         let showRetry = false;
         const st = statusLabel(ep.status);
@@ -1075,172 +1065,172 @@ export default function EpisodeHistory({ token, onBack }) {
           // Use processed_at if present, otherwise fall back to created_at so we can detect long-running items reliably
           const started = normalizeDate(ep.processed_at) || normalizeDate(ep.created_at) || new Date(0);
           const elapsed = Date.now() - started.getTime();
-          const durMs = (typeof ep.duration_ms === 'number' && ep.duration_ms > 0) ? ep.duration_ms : (15*60*1000);
+          const durMs = (typeof ep.duration_ms === 'number' && ep.duration_ms > 0) ? ep.duration_ms : (15 * 60 * 1000);
           const threshold = Math.round(durMs * 1.25);
           if (elapsed > threshold) showRetry = true;
         }
         return (
           <div key={ep.id} className="space-y-2">
-          <Card className="group overflow-hidden border border-gray-200 relative">
-            <div className="w-full h-36 bg-gray-100 flex items-center justify-center relative">
-              <img
-                src={coverUrl}
-                alt="Cover"
-                className="w-full h-full object-cover"
-                onError={(e) => { e.currentTarget.style.display = 'none'; const fb = e.currentTarget.nextSibling; if(fb) fb.style.display='flex'; }}
-              />
-              <div className="hidden w-full h-full items-center justify-center text-gray-400">
-                <ImageOff className="w-8 h-8 mr-2"/> No cover
+            <Card className="group overflow-hidden border border-gray-200 relative">
+              <div className="w-full h-36 bg-gray-100 flex items-center justify-center relative">
+                <img
+                  src={coverUrl}
+                  alt="Cover"
+                  className="w-full h-full object-cover"
+                  onError={(e) => { e.currentTarget.style.display = 'none'; const fb = e.currentTarget.nextSibling; if (fb) fb.style.display = 'flex'; }}
+                />
+                <div className="hidden w-full h-full items-center justify-center text-gray-400">
+                  <ImageOff className="w-8 h-8 mr-2" /> No cover
+                </div>
+                {showUnpublish && (
+                  <button
+                    className="absolute top-1 left-1 bg-white/85 hover:bg-white text-amber-700 border border-amber-300 rounded p-1 shadow-sm text-[11px] font-medium opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Unpublish episode (revert to processed)"
+                    onClick={() => openUnpublish(ep)}
+                  >
+                    <Undo2 className="w-3 h-3 inline mr-1" />Unpublish
+                  </button>
+                )}
+                {/* Move Cut for edits to bottom-right cluster */}
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="absolute top-2 right-2 flex items-center gap-1 bg-white/90 text-red-600 hover:bg-white shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Delete episode"
+                  onClick={() => handleDeleteEpisode(ep.id)}
+                  disabled={deletingIds.has(ep.id)}
+                >
+                  {deletingIds.has(ep.id) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  Delete
+                </Button>
+                {showRetry && (
+                  <button
+                    className="absolute bottom-1 left-1 bg-white/90 hover:bg-white text-amber-700 border border-amber-300 rounded px-2 py-1 shadow-sm text-[11px] font-medium flex items-center gap-1"
+                    title="Retry processing"
+                    onClick={() => doRetry(ep)}
+                    disabled={retryingId === ep.id}
+                  >
+                    {retryingId === ep.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+                    Retry
+                  </button>
+                )}
+                <div className="absolute bottom-1 right-1 flex gap-1 items-center">
+                  {(ep.status === 'processed' ||
+                    statusLabel(ep.status) === 'published' ||
+                    statusLabel(ep.status) === 'scheduled') && (
+                      <>
+                        {/* Cut for edits - ONLY show if transcript contains "flubber" */}
+                        {ep.has_flubber && (
+                          <button
+                            className="bg-white/85 hover:bg-white text-purple-700 border border-purple-300 rounded p-1 shadow-sm"
+                            title="Cut for edits (flubber detected)"
+                            onClick={() => setFlubberEpId(prev => prev === ep.id ? null : ep.id)}
+                          >
+                            <Scissors className="w-4 h-4" />
+                          </button>
+                        )}
+                        {/* Manual Editor */}
+                        <button
+                          className="bg-white/85 hover:bg-white text-blue-700 border border-blue-300 rounded p-1 shadow-sm"
+                          title="Open Manual Editor"
+                          onClick={() => setManualEpId(prev => prev === ep.id ? null : ep.id)}
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        {(ep.needs_republish || !!ep.publish_error) ? (
+                          <button
+                            className="bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-medium px-2 py-1 rounded shadow disabled:opacity-60"
+                            onClick={() => doRepublish(ep)}
+                            title="Retry publishing"
+                            disabled={republishingId === ep.id}
+                          >{republishingId === ep.id ? 'Retrying…' : 'Retry Publish'}</button>
+                        ) : (
+                          <button
+                            className="bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-medium px-2 py-1 rounded shadow disabled:opacity-60"
+                            onClick={() => quickPublish(ep.id)}
+                            title="Publish now"
+                          >Publish</button>
+                        )}
+                      </>
+                    )}
+                  <button
+                    className={`bg-purple-600 text-white text-[11px] font-medium px-2 py-1 rounded shadow transition disabled:opacity-60 disabled:cursor-not-allowed ${canScheduleEpisode(ep) ? 'hover:bg-purple-700' : 'bg-purple-500/80'}`}
+                    onClick={() => openSchedule(ep)}
+                    title={scheduleTooltip(ep)}
+                    disabled={!canScheduleEpisode(ep)}
+                    type="button"
+                  >Schedule</button>
+                </div>
               </div>
-              {showUnpublish && (
-                <button
-                  className="absolute top-1 left-1 bg-white/85 hover:bg-white text-amber-700 border border-amber-300 rounded p-1 shadow-sm text-[11px] font-medium opacity-0 group-hover:opacity-100 transition-opacity"
-                  title="Unpublish episode (revert to processed)"
-                  onClick={()=>openUnpublish(ep)}
-                >
-                  <Undo2 className="w-3 h-3 inline mr-1"/>Unpublish
-                </button>
-              )}
-              {/* Move Cut for edits to bottom-right cluster */}
-              <Button
-                variant="destructive"
-                size="sm"
-                className="absolute top-2 right-2 flex items-center gap-1 bg-white/90 text-red-600 hover:bg-white shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
-                title="Delete episode"
-                onClick={() => handleDeleteEpisode(ep.id)}
-                disabled={deletingIds.has(ep.id)}
-              >
-                {deletingIds.has(ep.id) ? <Loader2 className="w-4 h-4 animate-spin"/> : <Trash2 className="w-4 h-4"/>}
-                Delete
-              </Button>
-              {showRetry && (
-                <button
-                  className="absolute bottom-1 left-1 bg-white/90 hover:bg-white text-amber-700 border border-amber-300 rounded px-2 py-1 shadow-sm text-[11px] font-medium flex items-center gap-1"
-                  title="Retry processing"
-                  onClick={() => doRetry(ep)}
-                  disabled={retryingId === ep.id}
-                >
-                  {retryingId === ep.id ? <Loader2 className="w-3 h-3 animate-spin"/> : <RotateCcw className="w-3 h-3"/>}
-                  Retry
-                </button>
-              )}
-              <div className="absolute bottom-1 right-1 flex gap-1 items-center">
-                {(ep.status === 'processed' || 
-                  statusLabel(ep.status) === 'published' ||
-                  statusLabel(ep.status) === 'scheduled') && (
-                  <>
-                    {/* Cut for edits - ONLY show if transcript contains "flubber" */}
-                    {ep.has_flubber && (
-                      <button
-                        className="bg-white/85 hover:bg-white text-purple-700 border border-purple-300 rounded p-1 shadow-sm"
-                        title="Cut for edits (flubber detected)"
-                        onClick={() => setFlubberEpId(prev => prev===ep.id? null : ep.id)}
+              <CardHeader className="pb-2">
+                <div className="flex items-start justify-between gap-2">
+                  <CardTitle className="text-base font-semibold leading-tight line-clamp-2" title={ep.title}>
+                    {(ep.season_number != null && ep.episode_number != null) ? `S${ep.season_number}E${ep.episode_number} · ${ep.title || 'Untitled Episode'}` : (ep.title || 'Untitled Episode')}
+                  </CardTitle>
+                  <Button variant="secondary" size="sm" className="flex items-center gap-1" onClick={() => startEdit(ep)}><Pencil className="w-4 h-4" />Edit</Button>
+                  {typeof ep.plays_total === 'number' && (
+                    <Badge variant="secondary" className="text-[11px] font-medium">{ep.plays_total} plays</Badge>
+                  )}
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {statusChip(ep.status)}
+                  {ep.cleanup_stats && (
+                    <span className="text-[10px] text-gray-500">FW:{ep.cleanup_stats.fillers_removed} PC:{ep.cleanup_stats.pauses_compressed}</span>
+                  )}
+                  {ep.publish_at && (
+                    <span className="text-[11px] text-gray-500 flex items-center gap-1" title={ep.publish_at}>
+                      <CalendarClock className="w-3 h-3" /> {ep.status === 'scheduled' ? 'Publishes' : 'Publish'}: {formatPublishAtForUser(ep.publish_at)}
+                    </span>
+                  )}
+                  {ep.playback_type === 'local' && (
+                    <span className="text-[10px] text-gray-500">Local file</span>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-2 pt-0">
+                {ep.description && <p className="text-xs text-gray-600 line-clamp-3">{ep.description}</p>}
+                {audioUrl ? (
+                  <audio controls src={audioUrl} className="w-full" preload="none" />
+                ) : (
+                  <div className="text-gray-500 text-xs flex items-center"><Play className="w-3 h-3 mr-1" />No audio</div>
+                )}
+                {missingAudio && <div className="text-[10px] text-red-600">File missing on server</div>}
+                {/* Show publicly accessible transcript link if available */}
+                {(() => {
+                  // Prefer the public TXT endpoint for human-readable diarized transcript
+                  const transcriptTxtUrl = ep.has_transcript && ep.transcript_url ? resolveAssetUrl(ep.transcript_url) : null;
+                  // Also check GCS JSON as fallback
+                  let transcriptJsonUrl = null;
+                  if (ep.meta_json) {
+                    try {
+                      const meta = typeof ep.meta_json === 'string' ? JSON.parse(ep.meta_json) : ep.meta_json;
+                      transcriptJsonUrl = resolveAssetUrl(meta?.transcripts?.gcs_json || null) || null;
+                    } catch { }
+                  }
+                  const transcriptUrl = transcriptTxtUrl || transcriptJsonUrl;
+                  if (transcriptUrl) {
+                    return (
+                      <a
+                        href={transcriptUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 underline"
+                        title="View human-readable transcript (publicly accessible)"
                       >
-                        <Scissors className="w-4 h-4" />
-                      </button>
-                    )}
-                    {/* Manual Editor */}
-                    <button
-                      className="bg-white/85 hover:bg-white text-blue-700 border border-blue-300 rounded p-1 shadow-sm"
-                      title="Open Manual Editor"
-                      onClick={() => setManualEpId(prev => prev===ep.id? null : ep.id)}
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    {(ep.needs_republish || !!ep.publish_error) ? (
-                      <button
-                        className="bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-medium px-2 py-1 rounded shadow disabled:opacity-60"
-                        onClick={() => doRepublish(ep)}
-                        title="Retry publishing"
-                        disabled={republishingId === ep.id}
-                      >{republishingId === ep.id ? 'Retrying…' : 'Retry Publish'}</button>
-                    ) : (
-                      <button
-                        className="bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-medium px-2 py-1 rounded shadow disabled:opacity-60"
-                        onClick={() => quickPublish(ep.id)}
-                        title="Publish now"
-                      >Publish</button>
-                    )}
-                  </>
-                )}
-                <button
-                  className={`bg-purple-600 text-white text-[11px] font-medium px-2 py-1 rounded shadow transition disabled:opacity-60 disabled:cursor-not-allowed ${canScheduleEpisode(ep) ? 'hover:bg-purple-700' : 'bg-purple-500/80'}`}
-                  onClick={() => openSchedule(ep)}
-                  title={scheduleTooltip(ep)}
-                  disabled={!canScheduleEpisode(ep)}
-                  type="button"
-                >Schedule</button>
-              </div>
-            </div>
-            <CardHeader className="pb-2">
-              <div className="flex items-start justify-between gap-2">
-                <CardTitle className="text-base font-semibold leading-tight line-clamp-2" title={ep.title}>
-                  {(ep.season_number!=null && ep.episode_number!=null) ? `S${ep.season_number}E${ep.episode_number} · ${ep.title || 'Untitled Episode'}` : (ep.title || 'Untitled Episode')}
-                </CardTitle>
-                <Button variant="secondary" size="sm" className="flex items-center gap-1" onClick={()=>startEdit(ep)}><Pencil className="w-4 h-4" />Edit</Button>
-                {typeof ep.plays_total === 'number' && (
-                  <Badge variant="secondary" className="text-[11px] font-medium">{ep.plays_total} plays</Badge>
-                )}
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                {statusChip(ep.status)}
-                {ep.cleanup_stats && (
-                  <span className="text-[10px] text-gray-500">FW:{ep.cleanup_stats.fillers_removed} PC:{ep.cleanup_stats.pauses_compressed}</span>
-                )}
-                {ep.publish_at && (
-                  <span className="text-[11px] text-gray-500 flex items-center gap-1" title={ep.publish_at}>
-                    <CalendarClock className="w-3 h-3"/> {ep.status === 'scheduled' ? 'Publishes' : 'Publish'}: {formatPublishAtForUser(ep.publish_at)}
-                  </span>
-                )}
-                {ep.playback_type === 'local' && (
-                  <span className="text-[10px] text-gray-500">Local file</span>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2 pt-0">
-              {ep.description && <p className="text-xs text-gray-600 line-clamp-3">{ep.description}</p>}
-              {audioUrl ? (
-                <audio controls src={audioUrl} className="w-full" preload="none"/>
-              ) : (
-                <div className="text-gray-500 text-xs flex items-center"><Play className="w-3 h-3 mr-1"/>No audio</div>
-              )}
-              {missingAudio && <div className="text-[10px] text-red-600">File missing on server</div>}
-              {/* Show publicly accessible transcript link if available */}
-              {(() => {
-                // Prefer the public TXT endpoint for human-readable diarized transcript
-                const transcriptTxtUrl = ep.has_transcript && ep.transcript_url ? resolveAssetUrl(ep.transcript_url) : null;
-                // Also check GCS JSON as fallback
-                let transcriptJsonUrl = null;
-                if (ep.meta_json) {
-                  try {
-                    const meta = typeof ep.meta_json === 'string' ? JSON.parse(ep.meta_json) : ep.meta_json;
-                    transcriptJsonUrl = resolveAssetUrl(meta?.transcripts?.gcs_json || null) || null;
-                  } catch {}
-                }
-                const transcriptUrl = transcriptTxtUrl || transcriptJsonUrl;
-                if (transcriptUrl) {
-                  return (
-                    <a
-                      href={transcriptUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 underline"
-                      title="View human-readable transcript (publicly accessible)"
-                    >
-                      <FileText className="w-3 h-3"/>
-                      Transcript
-                    </a>
-                  );
-                }
-                return null;
-              })()}
-            </CardContent>
+                        <FileText className="w-3 h-3" />
+                        Transcript
+                      </a>
+                    );
+                  }
+                  return null;
+                })()}
+              </CardContent>
             </Card>
             {manualEpId === ep.id && (
-              <ManualEditorModal episodeId={ep.id} token={token} onClose={()=>setManualEpId(null)} />
+              <ManualEditorModal episodeId={ep.id} token={token} onClose={() => setManualEpId(null)} />
             )}
             {flubberEpId === ep.id && (
-              <FlubberReview episodeId={ep.id} token={token} onClose={()=>setFlubberEpId(null)} />
+              <FlubberReview episodeId={ep.id} token={token} onClose={() => setFlubberEpId(null)} />
             )}
           </div>
         );
@@ -1261,9 +1251,9 @@ export default function EpisodeHistory({ token, onBack }) {
         <div className="col-span-1 text-right">Actions</div>
       </div>
       {displayEpisodes.map(ep => {
-      let audioUrl = ep.proxy_playback_url || ep.playback_url || ep.stream_url || ep.final_audio_url || '';
+        let audioUrl = ep.proxy_playback_url || ep.playback_url || ep.stream_url || ep.final_audio_url || '';
         audioUrl = resolveAssetUrl(audioUrl) || '';
-  const showUnpublish = statusLabel(ep.status) === 'scheduled' || (statusLabel(ep.status) === 'published' && isWithin24h(ep.publish_at));
+        const showUnpublish = statusLabel(ep.status) === 'scheduled' || (statusLabel(ep.status) === 'published' && isWithin24h(ep.publish_at));
         let showRetry = false;
         {
           const st = statusLabel(ep.status);
@@ -1271,7 +1261,7 @@ export default function EpisodeHistory({ token, onBack }) {
           if (st === 'processing') {
             const started = normalizeDate(ep.processed_at) || normalizeDate(ep.created_at) || new Date(0);
             const elapsed = Date.now() - started.getTime();
-            const durMs = (typeof ep.duration_ms === 'number' && ep.duration_ms > 0) ? ep.duration_ms : (15*60*1000);
+            const durMs = (typeof ep.duration_ms === 'number' && ep.duration_ms > 0) ? ep.duration_ms : (15 * 60 * 1000);
             const threshold = Math.round(durMs * 1.25);
             if (elapsed > threshold) showRetry = true;
           }
@@ -1280,7 +1270,7 @@ export default function EpisodeHistory({ token, onBack }) {
           <div key={ep.id} className="group grid grid-cols-12 items-start px-3 py-3 gap-2 text-sm hover:bg-gray-50">
             <div className="col-span-5 flex flex-col">
               <span className="font-medium truncate" title={ep.title}>
-                {(ep.season_number!=null && ep.episode_number!=null) ? `S${ep.season_number}E${ep.episode_number} · ${ep.title || 'Untitled Episode'}` : (ep.title || 'Untitled Episode')}
+                {(ep.season_number != null && ep.episode_number != null) ? `S${ep.season_number}E${ep.episode_number} · ${ep.title || 'Untitled Episode'}` : (ep.title || 'Untitled Episode')}
               </span>
               {ep.description && <span className="text-[11px] text-gray-500 line-clamp-1" title={ep.description}>{ep.description}</span>}
               {ep.has_transcript && ep.transcript_url && (
@@ -1302,14 +1292,14 @@ export default function EpisodeHistory({ token, onBack }) {
                 <button
                   className="mr-2 text-amber-600 hover:text-amber-700 text-xs underline opacity-0 group-hover:opacity-100 transition-opacity"
                   title="Unpublish episode (revert to processed)"
-                  onClick={()=>openUnpublish(ep)}
+                  onClick={() => openUnpublish(ep)}
                 >Unpublish</button>
               )}
               {showRetry && (
                 <button
                   className="mr-2 text-amber-700 hover:text-amber-800 text-xs underline"
                   title="Retry processing"
-                  onClick={()=>doRetry(ep)}
+                  onClick={() => doRetry(ep)}
                   disabled={retryingId === ep.id}
                 >
                   {retryingId === ep.id ? 'Retrying…' : 'Retry'}
@@ -1323,14 +1313,14 @@ export default function EpisodeHistory({ token, onBack }) {
                 onClick={() => handleDeleteEpisode(ep.id)}
                 disabled={deletingIds.has(ep.id)}
               >
-                {deletingIds.has(ep.id) ? <Loader2 className="w-4 h-4 animate-spin"/> : <Trash2 className="w-4 h-4"/>}
+                {deletingIds.has(ep.id) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                 Delete
               </Button>
-              <Button variant="outline" size="sm" className="ml-2 flex items-center gap-1" onClick={()=>startEdit(ep)}><Pencil className="w-4 h-4" />Edit</Button>
+              <Button variant="outline" size="sm" className="ml-2 flex items-center gap-1" onClick={() => startEdit(ep)}><Pencil className="w-4 h-4" />Edit</Button>
               <button
                 className="ml-2 text-purple-600 hover:text-purple-700 text-xs underline"
                 title="Cut for edits"
-                onClick={() => setFlubberEpId(prev => prev===ep.id? null : ep.id)}
+                onClick={() => setFlubberEpId(prev => prev === ep.id ? null : ep.id)}
               >Cut for edits</button>
               {ep.status === 'processed' && (ep.needs_republish || !!ep.publish_error) ? (
                 <button
@@ -1352,10 +1342,10 @@ export default function EpisodeHistory({ token, onBack }) {
                 type="button"
               >Schedule</button>
             </div>
-      {audioUrl && (
+            {audioUrl && (
               <div className="col-span-12 mt-2">
-                <audio controls src={audioUrl} className="w-full" preload="none"/>
-  {/* Streaming badge removed (Option E) */}
+                <audio controls src={audioUrl} className="w-full" preload="none" />
+                {/* Streaming badge removed (Option E) */}
               </div>
             )}
           </div>
@@ -1364,8 +1354,8 @@ export default function EpisodeHistory({ token, onBack }) {
       {displayEpisodes.length === 0 && episodes.length > 0 && (
         <div className="px-3 py-6 text-center">
           <p className="text-sm text-gray-500 mb-2">No episodes match your search or filters.</p>
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             size="sm"
             onClick={() => {
               setSearch('');
@@ -1383,8 +1373,8 @@ export default function EpisodeHistory({ token, onBack }) {
     <div className="rounded-lg">
       <EpisodeHistoryPreview
         episodes={displayEpisodes}
-        onEdit={(ep)=>startEdit(ep)}
-        onDelete={(ep)=>handleDeleteEpisode(ep.id)}
+        onEdit={(ep) => startEdit(ep)}
+        onDelete={(ep) => handleDeleteEpisode(ep.id)}
         formatPublishAt={formatPublishAtForUser}
       />
     </div>
@@ -1403,7 +1393,7 @@ export default function EpisodeHistory({ token, onBack }) {
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <Button onClick={fetchEpisodes} variant="outline" size="sm" className="h-8">
-              <RefreshCw className="w-4 h-4 mr-1"/>Refresh
+              <RefreshCw className="w-4 h-4 mr-1" />Refresh
             </Button>
             <div className="flex items-center border rounded px-2 h-8 bg-white">
               <Search className="w-4 h-4 text-gray-500" />
@@ -1412,10 +1402,10 @@ export default function EpisodeHistory({ token, onBack }) {
                 placeholder="Search..."
                 className="ml-2 outline-none text-sm placeholder:text-gray-400 bg-transparent"
                 value={search}
-                onChange={e=>setSearch(e.target.value)}
+                onChange={e => setSearch(e.target.value)}
               />
             </div>
-            <select className="h-8 border rounded text-sm px-2 bg-white" value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}>
+            <select className="h-8 border rounded text-sm px-2 bg-white" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
               <option value="all">All statuses</option>
               <option value="published">Published</option>
               <option value="scheduled">Scheduled</option>
@@ -1423,34 +1413,34 @@ export default function EpisodeHistory({ token, onBack }) {
               <option value="processing">Processing</option>
               <option value="error">Error</option>
             </select>
-            <select className="h-8 border rounded text-sm px-2 bg-white" value={sortKey} onChange={e=>setSortKey(e.target.value)}>
+            <select className="h-8 border rounded text-sm px-2 bg-white" value={sortKey} onChange={e => setSortKey(e.target.value)}>
               <option value="newest">Newest</option>
               <option value="oldest">Oldest</option>
               <option value="title">Title</option>
               <option value="status">Status</option>
               <option value="plays">Plays</option>
             </select>
-    <div className="flex border rounded overflow-hidden">
+            <div className="flex border rounded overflow-hidden">
               <button
-                className={`px-2 h-8 text-sm flex items-center gap-1 ${viewMode==='grid'?'bg-gray-200 font-medium':'bg-white hover:bg-gray-50'}`}
-                onClick={()=>setViewMode('grid')}
+                className={`px-2 h-8 text-sm flex items-center gap-1 ${viewMode === 'grid' ? 'bg-gray-200 font-medium' : 'bg-white hover:bg-gray-50'}`}
+                onClick={() => setViewMode('grid')}
                 title="Grid view"
               >
-                <LayoutGrid className="w-4 h-4"/>
+                <LayoutGrid className="w-4 h-4" />
               </button>
               <button
-                className={`px-2 h-8 text-sm flex items-center gap-1 border-l ${viewMode==='mosaic'?'bg-gray-200 font-medium':'bg-white hover:bg-gray-50'}`}
-                onClick={()=>setViewMode('mosaic')}
+                className={`px-2 h-8 text-sm flex items-center gap-1 border-l ${viewMode === 'mosaic' ? 'bg-gray-200 font-medium' : 'bg-white hover:bg-gray-50'}`}
+                onClick={() => setViewMode('mosaic')}
                 title="Mosaic view"
               >
-                <Grid3x3 className="w-4 h-4"/>
+                <Grid3x3 className="w-4 h-4" />
               </button>
               <button
-                className={`px-2 h-8 text-sm flex items-center gap-1 border-l ${viewMode==='list'?'bg-gray-200 font-medium':'bg-white hover:bg-gray-50'}`}
-                onClick={()=>setViewMode('list')}
+                className={`px-2 h-8 text-sm flex items-center gap-1 border-l ${viewMode === 'list' ? 'bg-gray-200 font-medium' : 'bg-white hover:bg-gray-50'}`}
+                onClick={() => setViewMode('list')}
                 title="List view"
               >
-                <ListIcon className="w-4 h-4"/>
+                <ListIcon className="w-4 h-4" />
               </button>
             </div>
           </div>
@@ -1463,10 +1453,10 @@ export default function EpisodeHistory({ token, onBack }) {
           )}
         </div>
       </div>
-  {loading && <div className="flex items-center text-gray-600"><Loader2 className="w-5 h-5 mr-2 animate-spin"/>Loading...</div>}
-  {err && <div className="text-red-600 text-sm">{err}</div>}
-  {retryError && <div className="text-amber-700 text-sm">{retryError}</div>}
-  {!loading && (viewMode === 'grid' ? renderGrid() : viewMode === 'mosaic' ? renderMosaic() : renderList())}
+      {loading && <div className="flex items-center text-gray-600"><Loader2 className="w-5 h-5 mr-2 animate-spin" />Loading...</div>}
+      {err && <div className="text-red-600 text-sm">{err}</div>}
+      {retryError && <div className="text-amber-700 text-sm">{retryError}</div>}
+      {!loading && (viewMode === 'grid' ? renderGrid() : viewMode === 'mosaic' ? renderMosaic() : renderList())}
       {editing && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-end z-50">
           <div className="w-full max-w-md h-full bg-white shadow-xl flex flex-col">
@@ -1477,16 +1467,16 @@ export default function EpisodeHistory({ token, onBack }) {
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Season Number</label>
-                <input type="number" min="0" className="w-full border rounded px-2 py-1 text-sm" value={editValues.season_number ?? ''} onChange={e=>setEditValues(v=>({...v,season_number:e.target.value===''?null:parseInt(e.target.value)}))} />
+                <input type="number" min="0" className="w-full border rounded px-2 py-1 text-sm" value={editValues.season_number ?? ''} onChange={e => setEditValues(v => ({ ...v, season_number: e.target.value === '' ? null : parseInt(e.target.value) }))} />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Episode Number</label>
-                <input type="number" min="0" className="w-full border rounded px-2 py-1 text-sm" value={editValues.episode_number ?? ''} onChange={e=>setEditValues(v=>({...v,episode_number:e.target.value===''?null:parseInt(e.target.value)}))} />
+                <input type="number" min="0" className="w-full border rounded px-2 py-1 text-sm" value={editValues.episode_number ?? ''} onChange={e => setEditValues(v => ({ ...v, episode_number: e.target.value === '' ? null : parseInt(e.target.value) }))} />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Title</label>
                 <div className="flex items-center gap-2">
-                  <input className="flex-1 border rounded px-2 py-1 text-sm" value={editValues.title} onChange={e=>setEditValues(v=>({...v,title:e.target.value}))} />
+                  <input className="flex-1 border rounded px-2 py-1 text-sm" value={editValues.title} onChange={e => setEditValues(v => ({ ...v, title: e.target.value }))} />
                   <Button
                     type="button"
                     variant="outline"
@@ -1523,7 +1513,7 @@ export default function EpisodeHistory({ token, onBack }) {
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Description / Show Notes</label>
                 <div className="flex items-start gap-2">
-                  <textarea rows={6} className="flex-1 border rounded px-2 py-1 text-sm resize-vertical" value={editValues.description} onChange={e=>setEditValues(v=>({...v,description:e.target.value}))} />
+                  <textarea rows={6} className="flex-1 border rounded px-2 py-1 text-sm resize-vertical" value={editValues.description} onChange={e => setEditValues(v => ({ ...v, description: e.target.value }))} />
                   <div className="flex flex-col gap-2">
                     <Button
                       type="button"
@@ -1556,7 +1546,7 @@ export default function EpisodeHistory({ token, onBack }) {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Visibility</label>
-                <select className="w-full border rounded px-2 py-1 text-sm" value={editValues.publish_state} onChange={e=>setEditValues(v=>({...v,publish_state:e.target.value}))}>
+                <select className="w-full border rounded px-2 py-1 text-sm" value={editValues.publish_state} onChange={e => setEditValues(v => ({ ...v, publish_state: e.target.value }))}>
                   <option value="">(no change)</option>
                   <option value="public">Public</option>
                   <option value="unpublished">Unpublished</option>
@@ -1566,7 +1556,7 @@ export default function EpisodeHistory({ token, onBack }) {
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Tags (comma separated)</label>
                 <div className="flex items-center gap-2">
-                  <input className="flex-1 border rounded px-2 py-1 text-sm" value={editValues.tags} onChange={e=>setEditValues(v=>({...v,tags:e.target.value}))} placeholder="tag1, tag2" />
+                  <input className="flex-1 border rounded px-2 py-1 text-sm" value={editValues.tags} onChange={e => setEditValues(v => ({ ...v, tags: e.target.value }))} placeholder="tag1, tag2" />
                   <Button
                     type="button"
                     variant="outline"
@@ -1596,23 +1586,23 @@ export default function EpisodeHistory({ token, onBack }) {
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <input id="explicitFlag" type="checkbox" className="h-4 w-4" checked={editValues.is_explicit} onChange={e=>setEditValues(v=>({...v,is_explicit:e.target.checked}))} />
+                <input id="explicitFlag" type="checkbox" className="h-4 w-4" checked={editValues.is_explicit} onChange={e => setEditValues(v => ({ ...v, is_explicit: e.target.checked }))} />
                 <label htmlFor="explicitFlag" className="text-xs font-medium text-gray-600">Explicit content</label>
               </div>
               <div className="space-y-2">
                 <label className="block text-xs font-medium text-gray-600">Cover Image & Crop</label>
-                <input type="file" accept="image/*" className="w-full text-xs" onChange={e=>setEditValues(v=>({...v,cover_file:e.target.files?.[0]||null}))} />
+                <input type="file" accept="image/*" className="w-full text-xs" onChange={e => setEditValues(v => ({ ...v, cover_file: e.target.files?.[0] || null }))} />
                 {editValues.cover_uploading && <div className="text-[11px] text-blue-600">Uploading cover...</div>}
                 <CoverCropper
                   ref={cropperRef}
                   sourceFile={editValues.cover_file}
                   existingUrl={resolveAssetUrl(editing?.cover_url) || (editing && (editing.cover_path || editing.gcs_cover_path) ? resolveAssetUrl(`/api/episodes/${editing.id}/cover`) : null)}
                   value={editValues.cover_file ? editValues.image_crop : (editing?.image_crop || '')}
-                  onChange={(c)=>setEditValues(v=>{
+                  onChange={(c) => setEditValues(v => {
                     // Only store crop if a new file is selected; otherwise ignore (can't edit existing)
-                    if(!v.cover_file) return v;
+                    if (!v.cover_file) return v;
                     const next = c || '';
-                    if(v.image_crop === next) return v;
+                    if (v.image_crop === next) return v;
                     return { ...v, image_crop: next };
                   })}
                   disabled={saving || !editValues.cover_file}
@@ -1625,7 +1615,7 @@ export default function EpisodeHistory({ token, onBack }) {
               {/* In submit section (edit drawer footer) show warning */}
               {numberingConflict && <div className="text-[11px] text-red-600 mr-auto">Duplicate season/episode for this podcast</div>}
               <Button size="sm" onClick={submitEdit} disabled={saving || !editDirty() || numberingConflict}>
-                {saving ? <><Loader2 className="w-4 h-4 mr-1 animate-spin"/>Saving...</> : 'Save Changes'}
+                {saving ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />Saving...</> : 'Save Changes'}
               </Button>
             </div>
           </div>
@@ -1676,7 +1666,7 @@ export default function EpisodeHistory({ token, onBack }) {
       {unpublishEp && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white w-full max-w-sm rounded shadow-lg p-5 space-y-4">
-            <h3 className="text-lg font-semibold flex items-center gap-2 text-amber-700"><Undo2 className="w-5 h-5"/>Unpublish Episode</h3>
+            <h3 className="text-lg font-semibold flex items-center gap-2 text-amber-700"><Undo2 className="w-5 h-5" />Unpublish Episode</h3>
             <div className="text-sm text-gray-700 space-y-2">
               <p>Revert <strong>{unpublishEp.title || 'Untitled Episode'}</strong> back to processed? It will be removed from the feed and can be republished.</p>
               <p className="text-[11px] text-gray-500">Allowed within 24 hours of original publication. Remote delete attempted.</p>
@@ -1686,15 +1676,15 @@ export default function EpisodeHistory({ token, onBack }) {
               )}
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" size="sm" disabled={unpublishDoing} onClick={()=>setUnpublishEp(null)}>Cancel</Button>
+              <Button variant="outline" size="sm" disabled={unpublishDoing} onClick={() => setUnpublishEp(null)}>Cancel</Button>
               {unpublishCanForce && (
-                <Button variant="destructive" size="sm" disabled={unpublishDoing} onClick={()=>doUnpublish(true)}>
-                  {unpublishDoing ? <><Loader2 className="w-4 h-4 mr-1 animate-spin"/>Forcing...</> : 'Force Unpublish'}
+                <Button variant="destructive" size="sm" disabled={unpublishDoing} onClick={() => doUnpublish(true)}>
+                  {unpublishDoing ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />Forcing...</> : 'Force Unpublish'}
                 </Button>
               )}
               {!unpublishCanForce && (
-                <Button size="sm" disabled={unpublishDoing} onClick={()=>doUnpublish(false)}>
-                  {unpublishDoing ? <><Loader2 className="w-4 h-4 mr-1 animate-spin"/>Unpublishing...</> : 'Unpublish'}
+                <Button size="sm" disabled={unpublishDoing} onClick={() => doUnpublish(false)}>
+                  {unpublishDoing ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />Unpublishing...</> : 'Unpublish'}
                 </Button>
               )}
             </div>
@@ -1709,9 +1699,9 @@ export default function EpisodeHistory({ token, onBack }) {
               <p>Pick a local date & time to publish <strong>{scheduleEp.title || 'Untitled Episode'}</strong>. We'll convert it to UTC for the server.</p>
               <div className="flex flex-col gap-2">
                 <label className="text-xs font-medium text-gray-600">Date</label>
-                <input type="date" className="border rounded px-2 py-1 text-sm" value={scheduleDate} onChange={e=>setScheduleDate(e.target.value)} />
+                <input type="date" className="border rounded px-2 py-1 text-sm" value={scheduleDate} onChange={e => setScheduleDate(e.target.value)} />
                 <label className="text-xs font-medium text-gray-600">Time</label>
-                <input type="time" step={300} className="border rounded px-2 py-1 text-sm" value={scheduleTime} onChange={e=>setScheduleTime(e.target.value)} />
+                <input type="time" step={300} className="border rounded px-2 py-1 text-sm" value={scheduleTime} onChange={e => setScheduleTime(e.target.value)} />
               </div>
               <p className="text-[11px] text-gray-500">Must be at least 1 minute in the future. Local time is converted to exact UTC ISO.</p>
               {scheduleError && (
@@ -1723,7 +1713,7 @@ export default function EpisodeHistory({ token, onBack }) {
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" size="sm" disabled={scheduleSubmitting} onClick={closeSchedule}>Cancel</Button>
               <Button size="sm" disabled={scheduleSubmitting || !scheduleDate || !scheduleTime} onClick={submitSchedule}>
-                {scheduleSubmitting ? <><Loader2 className="w-4 h-4 mr-1 animate-spin"/>Scheduling...</> : 'Schedule'}
+                {scheduleSubmitting ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />Scheduling...</> : 'Schedule'}
               </Button>
             </div>
           </div>

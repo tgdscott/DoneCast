@@ -173,3 +173,15 @@ async def get_credit_award_logs(
     Get log of all credit awards given away (Admin only).
     """
     return services.get_credit_award_logs_service(session, limit, offset)
+
+
+@router.delete("/cleanup/test-accounts")
+async def bulk_delete_test_accounts(
+    session: Session = Depends(get_session),
+    admin_user: User = Depends(get_current_superadmin_user),
+) -> Dict[str, Any]:
+    """
+    Bulk delete test accounts (Super Admin only).
+    Criteria: Email starts with 'builder', 'test', or ends with '@example.com'.
+    """
+    return services.bulk_delete_test_users(session, admin_user)

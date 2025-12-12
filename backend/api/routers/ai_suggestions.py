@@ -397,7 +397,7 @@ def post_notes(
         _log.exception("[ai_notes] unexpected error: %s", e)
         if is_stub_mode:
             return SuggestNotesOut(description="Stub Notes (error fallback)", bullets=["stub", "notes"])
-        raise HTTPException(status_code=500, detail={"error": "AI_INTERNAL_ERROR"})
+        raise HTTPException(status_code=500, detail={"error": f"AI_INTERNAL_ERROR: {str(e)}"})
 @router.post("/tags", response_model=SuggestTagsOut)
 @(_limiter.limit("10/minute") if _limiter and hasattr(_limiter, "limit") else (lambda f: f))
 def post_tags(
@@ -544,7 +544,8 @@ def intent_hints(
                     _log.warning("[intent-hints] failed to read text transcript %s: %s", tpath, exc, exc_info=True)
                     raise HTTPException(status_code=500, detail="TRANSCRIPT_LOAD_ERROR")
     if words is None:
-        audit_and_raise_conflict("TRANSCRIPT_NOT_READY", context={"module": "ai_suggestions", "endpoint": "intent-hints", "episode_id": episode_id})
+        # Return 200 OK with ready=False to avoid console errors
+        return {"ready": False, "transcript": None, "intents": None}
     commands_cfg = get_user_commands(current_user) if current_user is not None else {}
     sfx_entries = list(_gather_user_sfx_entries(session, current_user))
     intents = analyze_intents(words, commands_cfg, sfx_entries)

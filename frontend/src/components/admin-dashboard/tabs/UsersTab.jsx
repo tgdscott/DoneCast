@@ -122,6 +122,7 @@ export default function UsersTab({
   onTriggerPasswordReset,
   isSuperAdmin,
   isAdmin,
+  onBulkDeleteTestUsers,
 }) {
   const deriveBaseISO = useCallback((user) => {
     const pending = editingDates[user.id];
@@ -216,6 +217,18 @@ export default function UsersTab({
                 <MessageSquare className="w-4 h-4 mr-2" />
                 Bulk Message
               </Button>
+              {isSuperAdmin && onBulkDeleteTestUsers && (
+                <Button
+                  aria-label="Bulk Clean Test Users"
+                  variant="outline"
+                  size="sm"
+                  className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                  onClick={onBulkDeleteTestUsers}
+                >
+                  <Trash className="w-4 h-4 mr-2" />
+                  Clean Test Users
+                </Button>
+              )}
               <Button size="sm" className="text-white" style={{ backgroundColor: "#2C3E50" }}>
                 <Plus className="w-4 h-4 mr-2" />
                 Add User

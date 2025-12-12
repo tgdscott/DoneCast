@@ -131,6 +131,7 @@ export default function AdminMainContent({
   verifyUserEmail,
   triggerPasswordReset,
   setAdminSettings,
+  onBulkDeleteTestUsers,
 }) {
   return (
     <main className="flex-1 p-6">
@@ -217,6 +218,7 @@ export default function AdminMainContent({
           onTriggerPasswordReset={triggerPasswordReset}
           isSuperAdmin={isSuperAdmin}
           isAdmin={isAdmin}
+          onBulkDeleteTestUsers={onBulkDeleteTestUsers}
         />
       )}
 
@@ -384,4 +386,5 @@ AdminMainContent.propTypes = {
   verifyUserEmail: PropTypes.func.isRequired,
   triggerPasswordReset: PropTypes.func.isRequired,
   setAdminSettings: PropTypes.func.isRequired,
+  onBulkDeleteTestUsers: PropTypes.func,
 };

@@ -171,18 +171,19 @@ export default function PreUploadManager({
       setConverting(false);
       setConversionProgress(null);
     }
+  };
 
-    // Check if upload was queued while converting - trigger it now
-    if (submitAfterConvert && preparedFile && friendlyName.trim()) {
+  // Watch for conversion completion to trigger queued upload
+  useEffect(() => {
+    if (!converting && submitAfterConvert && file && friendlyName.trim()) {
       setSubmitAfterConvert(false);
       toast({ title: 'Starting upload...', description: 'Your audio is ready!' });
-      try {
-        await doUpload(preparedFile);
-      } catch (err) {
-        console.error('Auto-upload after conversion failed:', err);
-      }
+      // Use a small timeout to allow state to settle
+      setTimeout(() => {
+        doUpload(file);
+      }, 0);
     }
-  };
+  }, [converting, submitAfterConvert, file, friendlyName]);
 
   // Shared upload logic so we can trigger after conversion
   const doUpload = async (overrideFile) => {

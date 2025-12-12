@@ -64,6 +64,7 @@ export default function AdminDashboard() {
     prepareUserForDeletion,
     verifyUserEmail,
     triggerPasswordReset,
+    handleBulkDeleteTestUsers,
   } = useAdminDashboardData({ token, toast });
 
   const {
@@ -182,7 +183,6 @@ export default function AdminDashboard() {
     if (creditViewerDialog.open && creditViewerDialog.userId && !creditViewerDialog.loading) {
       viewUserCredits(creditViewerDialog.userId, chargesPage, chargesPerPage, creditViewerDialog.refundRequest);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chargesPage, chargesPerPage]);
 
   const handleChargeSelect = (chargeId) => {
@@ -433,6 +433,7 @@ export default function AdminDashboard() {
           verifyUserEmail={verifyUserEmail}
           triggerPasswordReset={triggerPasswordReset}
           setAdminSettings={setAdminSettings}
+          onBulkDeleteTestUsers={handleBulkDeleteTestUsers}
         />
       </div>
 

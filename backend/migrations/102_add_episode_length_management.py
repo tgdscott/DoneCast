@@ -41,17 +41,26 @@ def migrate(session: Session) -> None:
     """))
     
     # Add check constraints to ensure valid ranges
-    session.exec(text("""
-        ALTER TABLE "user"
-        ADD CONSTRAINT IF NOT EXISTS check_speed_up_factor_range 
-        CHECK (speed_up_factor >= 1.0 AND speed_up_factor <= 1.25);
-    """))
+    # Note: Postgres doesn't support IF NOT EXISTS for ADD CONSTRAINT directly in all versions/dialects
+    # We rely on one_time_migrations logic to prevent re-run, or catch the specific error if needed.
+    try:
+        session.exec(text("""
+            ALTER TABLE "user"
+            ADD CONSTRAINT check_speed_up_factor_range 
+            CHECK (speed_up_factor >= 1.0 AND speed_up_factor <= 1.25);
+        """))
+    except Exception:
+        # Ignore if constraint already exists (simple idempotency)
+        pass
     
-    session.exec(text("""
-        ALTER TABLE "user"
-        ADD CONSTRAINT IF NOT EXISTS check_slow_down_factor_range 
-        CHECK (slow_down_factor >= 0.75 AND slow_down_factor < 1.0);
-    """))
+    try:
+        session.exec(text("""
+            ALTER TABLE "user"
+            ADD CONSTRAINT check_slow_down_factor_range 
+            CHECK (slow_down_factor >= 0.75 AND slow_down_factor < 1.0);
+        """))
+    except Exception:
+        pass
     
     session.commit()
     print("✅ Migration 102: Added episode length management fields")

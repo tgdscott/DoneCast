@@ -564,6 +564,40 @@ export function useAdminDashboardData({ token, toast }) {
     }
   }, [toast, toastApiError, token]);
 
+  const handleBulkDeleteTestUsers = useCallback(async () => {
+    const confirmation = window.confirm(
+      "Create cleanup action: Bulk delete ALL 'test' accounts?\n\n" +
+      "This will permanently delete all users where:\n" +
+      "- Email starts with 'test'\n" +
+      "- Email starts with 'builder'\n" +
+      "- Email ends with '@example.com'\n" +
+      "- AND account has ≤ 1 episode\n\n" +
+      "This cannot be undone. Are you sure?"
+    );
+
+    if (!confirmation) return;
+
+    try {
+      const api = makeApi(token);
+      toast?.({ title: "Processing", description: "Bulk deleting test users... This may take a moment." });
+
+      const result = await api.del("/api/admin/users/cleanup/test-accounts");
+
+      if (result.success) {
+        toast?.({
+          title: "Cleanup Complete",
+          description: `Deleted ${result.deleted} test users. Errors: ${result.errors?.length || 0}`,
+        });
+        // Refresh users
+        api.get("/api/admin/users/full").then(setUsers).catch(() => { });
+      } else {
+        toast?.({ title: "Cleanup Failed", description: "Unknown error occurred", variant: "destructive" });
+      }
+    } catch (error) {
+      toastApiError(error, "Failed to bulk delete users");
+    }
+  }, [toast, toastApiError, token]);
+
   return {
     users,
     usersLoading,
@@ -598,6 +632,7 @@ export function useAdminDashboardData({ token, toast }) {
     deleteUser,
     verifyUserEmail,
     triggerPasswordReset,
+    handleBulkDeleteTestUsers,
   };
 }
 

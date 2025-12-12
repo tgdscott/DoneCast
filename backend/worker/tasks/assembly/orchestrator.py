@@ -24,6 +24,7 @@ def execute_podcast_assembly(
     intents: dict | None = None,
     skip_charge: bool = False,
     use_auphonic: bool = False,
+    force_auphonic: bool | None = None,
 ) -> dict:
     """
     Orchestrates the full podcast assembly process using the defined pipeline steps.
@@ -31,6 +32,9 @@ def execute_podcast_assembly(
     """
     
     # 1. Define Initial Context (Data needed to start the process)
+    # Extract cover_image_path from episode_details if present
+    cover_image_path = episode_details.get("cover_image_path")
+    
     initial_context: PipelineContext = {
         'episode_id': episode_id,
         'template_id': template_id,
@@ -43,6 +47,8 @@ def execute_podcast_assembly(
         'intents': intents,
         'skip_charge': skip_charge,
         'use_auphonic': use_auphonic,
+        'force_auphonic': force_auphonic,
+        'cover_image_path': cover_image_path,
         'status': 'STARTED'
     }
 
@@ -51,7 +57,6 @@ def execute_podcast_assembly(
         TranscriptStep(),
         MixingStep(),
         UploadStep(),
-        # NotificationStep() - Add this when ready to notify user
     ])
 
     # 3. Run the Pipeline
@@ -85,18 +90,48 @@ def execute_podcast_assembly(
             raise
 
 
-# Backwards-compatible exports of the legacy orchestrator implementation.
+def orchestrate_create_podcast_episode(
+    *,
+    episode_id: str,
+    template_id: str,
+    main_content_filename: str,
+    output_filename: str,
+    tts_values: dict,
+    episode_details: dict,
+    user_id: str,
+    podcast_id: str,
+    intents: dict | None = None,
+    skip_charge: bool = False,
+    force_auphonic: bool | None = None,
+    use_auphonic: bool = False, # Maintain kwarg compatibility
+):
+    """Wrapper to maintain signature compatibility while enforcing new pipeline usage."""
+    return execute_podcast_assembly(
+        episode_id=episode_id,
+        template_id=template_id,
+        main_content_filename=main_content_filename,
+        output_filename=output_filename,
+        tts_values=tts_values,
+        episode_details=episode_details,
+        user_id=user_id,
+        podcast_id=podcast_id,
+        intents=intents,
+        skip_charge=skip_charge,
+        use_auphonic=use_auphonic,
+        force_auphonic=force_auphonic,
+    )
+
+# Backwards-compatible exports of the legacy orchestrator implementation (ONLY for resume/cleanup).
 try:  # pragma: no cover - defensive import to avoid breaking pipeline mode
-    from .oldorchestrator import (  # type: ignore
-        orchestrate_create_podcast_episode,
+    from .archived_oldorchestrator import (  # type: ignore
         orchestrate_resume_episode_assembly,
         _cleanup_main_content,
     )
     __all__ = [
         "execute_podcast_assembly",
-        "orchestrate_create_podcast_episode",
+        "orchestrate_create_podcast_episode", # Now defined here
         "orchestrate_resume_episode_assembly",
         "_cleanup_main_content",
     ]
 except Exception:
-    __all__ = ["execute_podcast_assembly"]
+    __all__ = ["execute_podcast_assembly", "orchestrate_create_podcast_episode"]
