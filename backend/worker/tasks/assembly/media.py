@@ -705,7 +705,14 @@ def resolve_media_context(
                 # Main content files are uploaded to: {user_id}/media_uploads/{filename}
                 # CRITICAL: Intermediate files are ALWAYS in GCS, never R2
                 try:
-                    gcs_bucket = os.getenv("MEDIA_BUCKET") or os.getenv("GCS_BUCKET") or "ppp-media-us-west1"
+                    # Construct candidate buckets to search
+                    bucket_candidates_list = []
+                    if os.getenv("MEDIA_BUCKET"): bucket_candidates_list.append(os.getenv("MEDIA_BUCKET"))
+                    if os.getenv("GCS_BUCKET"): bucket_candidates_list.append(os.getenv("GCS_BUCKET"))
+                    bucket_candidates_list.append("ppp-media-us-west1")
+                    # Remove duplicates while preserving order
+                    bucket_candidates = list(dict.fromkeys([b for b in bucket_candidates_list if b]))
+                    
                     # Note: storage_backend is ignored - we always use GCS for intermediate files
                     
                     # Convert user_id to hex format if it's a UUID
@@ -716,8 +723,8 @@ def resolve_media_context(
                         # Already in hex format or invalid
                         user_id_hex = str(user_id).replace("-", "")
                     
-                    logging.info("[assemble] Constructing GCS paths for user_id=%s (hex=%s), filename=%s, bucket=%s (intermediate files always in GCS)",
-                                user_id, user_id_hex, filename, gcs_bucket)
+                    logging.info("[assemble] Constructing GCS paths for user_id=%s (hex=%s), filename=%s, searching buckets: %s",
+                                user_id, user_id_hex, filename, bucket_candidates)
                     
                     # Try multiple path patterns - the file might be in different locations
                     path_candidates = [
@@ -732,20 +739,28 @@ def resolve_media_context(
                     try:
                         from google.cloud import storage as gcs_storage
                         client = gcs_storage.Client()
-                        bucket_obj = client.bucket(gcs_bucket)
                         
-                        for candidate_key in path_candidates:
-                            logging.info("[assemble] Checking GCS path: gs://%s/%s", gcs_bucket, candidate_key)
+                        for bucket_name in bucket_candidates:
                             try:
-                                blob = bucket_obj.blob(candidate_key)
-                                if blob.exists():
-                                    gcs_uri = f"gs://{gcs_bucket}/{candidate_key}"
-                                    logging.info("[assemble] ✅ Found file at GCS path: %s", gcs_uri)
-                                    break
-                                else:
-                                    logging.debug("[assemble] File not found at: gs://%s/%s", gcs_bucket, candidate_key)
-                            except Exception as check_err:
-                                logging.warning("[assemble] Error checking path %s: %s", candidate_key, check_err)
+                                bucket_obj = client.bucket(bucket_name)
+                                for candidate_key in path_candidates:
+                                    logging.info("[assemble] Checking GCS path: gs://%s/%s", bucket_name, candidate_key)
+                                    try:
+                                        blob = bucket_obj.blob(candidate_key)
+                                        if blob.exists():
+                                            gcs_uri = f"gs://{bucket_name}/{candidate_key}"
+                                            logging.info("[assemble] ✅ Found file at GCS path: %s", gcs_uri)
+                                            break
+                                        else:
+                                            logging.debug("[assemble] File not found at: gs://%s/%s", bucket_name, candidate_key)
+                                    except Exception as check_err:
+                                        logging.warning("[assemble] Error checking path gs://%s/%s: %s", bucket_name, candidate_key, check_err)
+                                
+                                if gcs_uri:
+                                    break # Found it!
+                            except Exception as bucket_err:
+                                logging.warning("[assemble] Error accessing bucket %s: %s", bucket_name, bucket_err)
+
                     except Exception as gcs_client_err:
                         logging.error("[assemble] Failed to initialize GCS client for blob existence check: %s", gcs_client_err, exc_info=True)
                     

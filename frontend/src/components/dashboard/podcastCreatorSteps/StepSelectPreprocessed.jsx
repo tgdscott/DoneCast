@@ -9,7 +9,13 @@ import { AlertTriangle, FileAudio, Loader2, RefreshCcw, Sparkles, Trash2 } from 
 const formatDate = (iso, timezone = null) => {
   if (!iso) return '—';
   try {
-    const date = new Date(iso);
+    // Backend sends naive datetimes (UTC implied) which browsers parse as local.
+    // Force UTC interpretation by appending Z if missing timezone info.
+    let safeIso = iso;
+    if (typeof iso === 'string' && !iso.endsWith('Z') && !iso.includes('+')) {
+      safeIso = iso + 'Z';
+    }
+    const date = new Date(safeIso);
     if (Number.isNaN(date.getTime())) return iso;
 
     const baseOptions = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' };
@@ -26,21 +32,27 @@ const formatDate = (iso, timezone = null) => {
 const formatExpirationDate = (expiresAt) => {
   if (!expiresAt) return null;
   try {
+    // Force UTC interpretation if naive
+    let safeExpires = expiresAt;
+    if (typeof expiresAt === 'string' && !expiresAt.endsWith('Z') && !expiresAt.includes('+')) {
+      safeExpires = expiresAt + 'Z';
+    }
+
     // Parse the ISO date string (stored in UTC)
-    const date = new Date(expiresAt);
+    const date = new Date(safeExpires);
     if (Number.isNaN(date.getTime())) return null;
-    
+
     // The expiration date represents when cleanup will happen (2am PT)
     // We want to show the day BEFORE that date
     // Since the date is stored in UTC, we need to convert to PT first
     // PT is UTC-8 (PST) or UTC-7 (PDT)
     // For simplicity, we'll subtract 1 day from the UTC date
     // This works because the expiration is already aligned to 2am PT boundary
-    
+
     // Create a new date and subtract 1 day
     const expirationDate = new Date(date);
     expirationDate.setUTCDate(expirationDate.getUTCDate() - 1);
-    
+
     // Format as M/D (e.g., 8/12) using UTC date to avoid timezone issues
     const month = expirationDate.getUTCMonth() + 1; // getUTCMonth() returns 0-11
     const day = expirationDate.getUTCDate();
@@ -57,12 +69,18 @@ const formatExpirationDate = (expiresAt) => {
 const isExpiringSoon = (expiresAt) => {
   if (!expiresAt) return false;
   try {
-    const expirationDate = new Date(expiresAt);
+    // Force UTC interpretation if naive
+    let safeExpires = expiresAt;
+    if (typeof expiresAt === 'string' && !expiresAt.endsWith('Z') && !expiresAt.includes('+')) {
+      safeExpires = expiresAt + 'Z';
+    }
+
+    const expirationDate = new Date(safeExpires);
     if (Number.isNaN(expirationDate.getTime())) return false;
-    
+
     const now = new Date();
     const daysUntilExpiration = Math.ceil((expirationDate - now) / (1000 * 60 * 60 * 24));
-    
+
     // Return true if expiration is within 3 days
     return daysUntilExpiration <= 3;
   } catch {
@@ -157,7 +175,7 @@ export default function StepSelectPreprocessed({
         intern: internCount > 0 ? 'yes' : 'no',
         sfx: sfxCount > 0 ? 'yes' : 'no',
       };
-      
+
       // Submit intents - this will trigger the review flow
       await onIntentSubmit(intentAnswers);
       return;
@@ -281,9 +299,8 @@ export default function StepSelectPreprocessed({
                       role="button"
                       tabIndex={ready ? 0 : -1}
                       aria-disabled={!ready}
-                      className={`text-left p-4 transition border-r border-b border-slate-200 focus:outline-none focus-visible:ring relative ${
-                        ready ? 'bg-white hover:bg-slate-50 cursor-pointer' : 'bg-slate-100 cursor-not-allowed opacity-70'
-                      } ${isSelected ? 'ring-2 ring-blue-500' : ''}`}
+                      className={`text-left p-4 transition border-r border-b border-slate-200 focus:outline-none focus-visible:ring relative ${ready ? 'bg-white hover:bg-slate-50 cursor-pointer' : 'bg-slate-100 cursor-not-allowed opacity-70'
+                        } ${isSelected ? 'ring-2 ring-blue-500' : ''}`}
                       onClick={() => {
                         if (!ready || !canInteract) return;
                         onSelect(item);
@@ -361,7 +378,7 @@ export default function StepSelectPreprocessed({
                         let expirationData = formatExpirationDate(item.expires_at);
                         let expirationDateStr = null;
                         let isSoon = false;
-                        
+
                         if (expirationData) {
                           expirationDateStr = expirationData.formatted;
                           isSoon = isExpiringSoon(item.expires_at);
@@ -376,7 +393,7 @@ export default function StepSelectPreprocessed({
                               const month = defaultExpiration.getUTCMonth() + 1;
                               const day = defaultExpiration.getUTCDate();
                               expirationDateStr = `${month}/${day}`;
-                              
+
                               // Check if this fallback date is within 3 days
                               const now = new Date();
                               const daysUntilExpiration = Math.ceil((defaultExpiration - now) / (1000 * 60 * 60 * 24));
@@ -387,7 +404,7 @@ export default function StepSelectPreprocessed({
                             expirationDateStr = null;
                           }
                         }
-                        
+
                         return expirationDateStr ? (
                           <div className={`absolute bottom-2 right-2 text-xs ${isSoon ? 'text-red-600 font-semibold' : 'text-slate-500'}`}>
                             Expires {expirationDateStr}

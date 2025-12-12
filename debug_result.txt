@@ -1,0 +1,37 @@
+--- Environment Variables ---
+MEDIA_BUCKET: None
+GCS_BUCKET: None
+TRANSCRIPTS_BUCKET: None
+
+--- Checking Buckets: ['ppp-media', 'ppp-media-us-west1', 'pod-web-deploy-media'] ---
+
+Checking bucket: 'ppp-media'
+  [✓] Bucket client created.
+  [!] Error listing blobs: 404 GET https://storage.googleapis.com/storage/v1/b/ppp-media/o?maxResults=10&projection=noAcl&prettyPrint=false: The specified bucket does not exist.
+
+Checking bucket: 'ppp-media-us-west1'
+  [✓] Bucket client created.
+  Found 10 sample files:
+    - 1b30903a-dbe6-427c-bce0-f4470e07f8e6/main_content/3dc5d35e5a9b466dbc929ee75b7a3e3c_test_beep.wav
+    - 25315492-d317-4527-ac81-aacd128bc697/cleaned_audio/cleaned_a672fd1e0af141b19cc29dd87ca4f675.mp3
+    - 25315492d3174527ac81aacd128bc697/covers/25315492-d317-4527-ac81-aacd128bc697_33669cc0-9b6c-4d5b-821f-90c9efd56a60.jpg
+    - 25315492d3174527ac81aacd128bc697/main_content/05e242fb6f364ee9afb39a152b4c5ec9.wav
+    - 25315492d3174527ac81aacd128bc697/main_content/0f2a8f4c6728438f8821fda5a95592eb.wav
+    - 25315492d3174527ac81aacd128bc697/main_content/243a7472360146d0ab4d2b8688083454.wav
+    - 25315492d3174527ac81aacd128bc697/main_content/82f21f7e567645d5ad3bddb41966f0dd.wav
+    - 25315492d3174527ac81aacd128bc697/main_content/a672fd1e0af141b19cc29dd87ca4f675.wav
+    - 25315492d3174527ac81aacd128bc697/main_content/b6613bbd33714533b95ac11bcce562e4.wav
+    - 25315492d3174527ac81aacd128bc697/media/episode_cover/25315492d3174527ac81aacd128bc697_d86794d80fa14fb09a6843d2669e6b2f_2024_Acer_Consumer_Option_02_3840x2400-square.jpg
+  Found transcripts in 'ppp-media-us-west1':
+    - transcripts/b6d5f77e-699e-444b-a31a-e1b4cb15feb4/b6d5f77e699e444ba31ae1b4cb15feb4_517a80dfa2ed47b6ae19510a5802da00_MyMothersWedding.json
+    - transcripts/b6d5f77e-699e-444b-a31a-e1b4cb15feb4/b6d5f77e699e444ba31ae1b4cb15feb4_570a1a4b86a241819963c35b56db1546_Shit_covered_Plunger.json
+    - transcripts/b6d5f77e-699e-444b-a31a-e1b4cb15feb4/b6d5f77e699e444ba31ae1b4cb15feb4_973c8c346f58494799ef594182eee09e_Shit_covered_Plunger.json
+    - transcripts/b6d5f77e-699e-444b-a31a-e1b4cb15feb4/b6d5f77e699e444ba31ae1b4cb15feb4_a2d9a6a334e14c919134ed6c61d2a6de_Shit_covered_Plunger.json
+    - transcripts/b6d5f77e-699e-444b-a31a-e1b4cb15feb4/b6d5f77e699e444ba31ae1b4cb15feb4_c9ad58ef9b954d77b56701abf4564230_Shit_covered_Plunger.json
+
+Checking bucket: 'pod-web-deploy-media'
+  [✓] Bucket client created.
+  [!] Error listing blobs: 404 GET https://storage.googleapis.com/storage/v1/b/pod-web-deploy-media/o?maxResults=10&projection=noAcl&prettyPrint=false: The specified bucket does not exist.
+
+--- Searching for missing episode 86592515-246e-4c63-b7a6-0ed16ee6c2ca ---
+NOT FOUND: No artifacts for 86592515-246e-4c63-b7a6-0ed16ee6c2ca in ppp-media-us-west1

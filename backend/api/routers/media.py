@@ -207,31 +207,29 @@ async def upload_media_files(
             file_stream = BytesIO(file_content)
             final_content_type = file.content_type or ("audio/mpeg" if category != MediaCategory.podcast_cover and category != MediaCategory.episode_cover else "image/jpeg")
             
-            # **CRITICAL**: Episode covers are FINAL ASSETS, not intermediate files
-            # They should go to R2 (permanent storage) like assembled episodes
-            # This ensures covers work permanently without expiration
+            # **CRITICAL**: Episode covers SHOULD go to R2 (permanent storage)
+            # But if R2 isn't configured (returns None), we MUST fallback to GCS to avoid blocking users
+            uploaded_to_r2 = False
             if category == MediaCategory.episode_cover:
-                from infrastructure import r2 as r2_module
-                r2_bucket = os.getenv("R2_BUCKET", "ppp-media").strip()
-                # Use structure: covers/episode/{user_id}/{filename}
-                # When assigned to a specific episode, it can be migrated to {user_id}/episodes/{episode_id}/cover/{filename}
-                # For now, this generic path works and ensures covers are in R2 (permanent storage)
-                storage_key = f"covers/episode/{current_user.id.hex}/{safe_filename}"
-                
-                log.info("[upload.storage] Uploading episode_cover to R2 bucket %s, key: %s", r2_bucket, storage_key)
-                
-                r2_url = r2_module.upload_bytes(r2_bucket, storage_key, file_content, content_type=final_content_type)
-                if not r2_url:
-                    log.error("[upload.storage] CRITICAL: R2 upload returned None for episode_cover")
-                    raise HTTPException(
-                        status_code=500,
-                        detail="Failed to upload episode cover to R2 - upload returned None"
-                    )
-                final_filename = r2_url
-                log.info("[upload.storage] SUCCESS: episode_cover uploaded to R2: %s", r2_url)
-                log.info("[upload.storage] MediaItem will be saved with filename='%s'", final_filename)
-            else:
-                # **CRITICAL**: Intermediate files (uploads) ALWAYS go to GCS, not R2
+                try:
+                    from infrastructure import r2 as r2_module
+                    r2_bucket = os.getenv("R2_BUCKET", "ppp-media").strip()
+                    storage_key = f"covers/episode/{current_user.id.hex}/{safe_filename}"
+                    
+                    log.info("[upload.storage] Uploading episode_cover to R2 bucket %s, key: %s", r2_bucket, storage_key)
+                    
+                    r2_url = r2_module.upload_bytes(r2_bucket, storage_key, file_content, content_type=final_content_type)
+                    if r2_url:
+                        final_filename = r2_url
+                        log.info("[upload.storage] SUCCESS: episode_cover uploaded to R2: %s", r2_url)
+                        uploaded_to_r2 = True
+                    else:
+                        log.warning("[upload.storage] R2 upload returned None (likely missing config), falling back to GCS")
+                except Exception as r2_err:
+                     log.error("[upload.storage] R2 upload exception: %s. Falling back to GCS.", r2_err)
+
+            if not uploaded_to_r2:
+                # **Fallback/Standard Path**: Upload to GCS
                 # R2 is only for final files (assembled episodes and episode covers)
                 # This ensures worker servers can download intermediate files for processing
                 from infrastructure import gcs
@@ -241,6 +239,7 @@ async def upload_media_files(
                     storage_key = f"{current_user.id.hex}/media_uploads/{safe_filename}"
                 else:
                     # Other categories go to media/{category}
+                    # For episode_cover fallback, this puts it in media/episode_cover/...
                     storage_key = f"{current_user.id.hex}/media/{category.value}/{safe_filename}"
                 
                 log.info("[upload.storage] Uploading %s to GCS bucket %s, key: %s", 
