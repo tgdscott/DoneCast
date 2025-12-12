@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 from uuid import UUID
-from backend.worker.tasks.assembly.pipeline import PipelineStep, PipelineContext
+from ...pipeline import PipelineStep, PipelineContext
 from api.models.podcast import Episode, User, Podcast
 
 # Import the audio processing service hook

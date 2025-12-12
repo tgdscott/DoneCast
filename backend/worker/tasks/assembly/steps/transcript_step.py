@@ -1,12 +1,12 @@
 import logging
 from pathlib import Path
-from backend.worker.tasks.assembly.pipeline import PipelineStep, PipelineContext
+from ...pipeline import PipelineStep, PipelineContext
 from api.models.podcast import Episode, User, Podcast
 from uuid import UUID
 
 # Import the transcription service hook
 try:
-    from backend.worker.tasks.assembly.transcribe_episode import transcribe_episode
+    from ..transcribe_episode import transcribe_episode
 except ImportError:
     transcribe_episode = None
 
