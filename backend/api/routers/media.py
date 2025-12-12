@@ -289,13 +289,21 @@ async def upload_media_files(
         
         # Verify final_filename is valid (GCS URL for intermediate files, R2 URL for episode covers)
         if category == MediaCategory.episode_cover:
-            # Episode covers go to R2 - verify it's an R2 URL
-            if not (final_filename.startswith("https://") and ".r2.cloudflarestorage.com" in final_filename):
-                log.error("[upload.storage] CRITICAL: final_filename is not an R2 URL: '%s'", final_filename)
+            # Episode covers SHOULD go to R2, but GCS fallback is allowed
+            # Accept: R2 URLs (https://*.r2.cloudflarestorage.com/*) OR GCS URLs (gs://*)
+            is_r2_url = final_filename.startswith("https://") and ".r2.cloudflarestorage.com" in final_filename
+            is_gcs_url = final_filename.startswith("gs://")
+            
+            if not (is_r2_url or is_gcs_url):
+                log.error("[upload.storage] CRITICAL: final_filename is not a valid R2 or GCS URL: '%s'", final_filename)
                 raise HTTPException(
                     status_code=500,
-                    detail="Internal error: episode cover filename is not an R2 URL. This indicates a bug in the upload process."
+                    detail="Internal error: episode cover filename is not a valid storage URL. This indicates a bug in the upload process."
                 )
+            
+            # Log if we're using GCS fallback (indicates R2 issue that should be investigated)
+            if is_gcs_url:
+                log.warning("[upload.storage] Episode cover uploaded to GCS fallback (R2 unavailable): %s", final_filename)
         else:
             # Intermediate files go to GCS - verify it's a GCS URL
             if not final_filename.startswith("gs://"):
