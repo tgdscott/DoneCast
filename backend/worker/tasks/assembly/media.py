@@ -705,7 +705,7 @@ def resolve_media_context(
                 # Main content files are uploaded to: {user_id}/media_uploads/{filename}
                 # CRITICAL: Intermediate files are ALWAYS in GCS, never R2
                 try:
-                    gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
+                    gcs_bucket = os.getenv("MEDIA_BUCKET") or os.getenv("GCS_BUCKET") or "ppp-media-us-west1"
                     # Note: storage_backend is ignored - we always use GCS for intermediate files
                     
                     # Convert user_id to hex format if it's a UUID
