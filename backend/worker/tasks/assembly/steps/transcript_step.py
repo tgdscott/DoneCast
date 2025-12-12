@@ -1,7 +1,8 @@
 import logging
 from pathlib import Path
 from ..pipeline import PipelineStep, PipelineContext
-from api.models.podcast import Episode, User, Podcast
+from api.models.podcast import Episode, Podcast
+from api.models.user import User
 from uuid import UUID
 
 # Import the transcription service hook

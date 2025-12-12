@@ -2,7 +2,8 @@ import logging
 from pathlib import Path
 from uuid import UUID
 from ..pipeline import PipelineStep, PipelineContext
-from api.models.podcast import Episode, User, Podcast
+from api.models.podcast import Episode, Podcast
+from api.models.user import User
 
 # Import the audio processing service hook
 try:
