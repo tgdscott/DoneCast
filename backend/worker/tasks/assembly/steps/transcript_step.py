@@ -30,11 +30,9 @@ class TranscriptStep(PipelineStep):
         tts_values = context.get('tts_values')
         episode_details = context.get('episode_details')
         
-        # We need to resolve media_context first - this is a bit of a dependency 
-        # that was inline in the old orchestrator.
+        # We need to resolve media_context first.
         # Ideally this should be its own step or part of initialization.
-        # For now, we'll do it here as it's needed for transcription.
-        from api.routers import media
+        from ..media import resolve_media_context
         
         try:
              # Load entities
@@ -42,7 +40,7 @@ class TranscriptStep(PipelineStep):
             user = session.get(User, UUID(user_id))
             podcast = session.get(Podcast, UUID(podcast_id))
             
-            media_context, words_json_path, early_result = media.resolve_media_context(
+            media_context, words_json_path, early_result = resolve_media_context(
                 session=session,
                 episode_id=episode_id,
                 template_id=context.get('template_id'),
