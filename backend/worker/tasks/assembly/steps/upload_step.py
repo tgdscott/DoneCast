@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import UUID
 from datetime import timedelta
 
-from ...pipeline import PipelineStep, PipelineContext
+from ..pipeline import PipelineStep, PipelineContext
 from api.core.paths import MEDIA_DIR, TRANSCRIPTS_DIR, FINAL_DIR
 from api.models.podcast import Episode, User, EpisodeStatus, Notification
 from api.services.audio.common import sanitize_filename

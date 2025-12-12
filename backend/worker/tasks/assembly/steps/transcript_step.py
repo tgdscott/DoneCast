@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from ...pipeline import PipelineStep, PipelineContext
+from ..pipeline import PipelineStep, PipelineContext
 from api.models.podcast import Episode, User, Podcast
 from uuid import UUID
 
