@@ -8,7 +8,9 @@ from datetime import timedelta
 
 from ..pipeline import PipelineStep, PipelineContext
 from api.core.paths import MEDIA_DIR, TRANSCRIPTS_DIR, FINAL_DIR
-from api.models.podcast import Episode, EpisodeStatus, Notification
+from api.models.podcast import Episode
+from api.models.enums import EpisodeStatus
+from api.models.notification import Notification
 from api.models.user import User
 from api.services.audio.common import sanitize_filename
 from infrastructure import storage, gcs
