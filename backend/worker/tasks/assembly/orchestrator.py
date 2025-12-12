@@ -5,10 +5,10 @@ from uuid import UUID
 
 from api.core.database import session_scope
 from api.models.podcast import Episode
-from backend.worker.tasks.assembly.pipeline import AssemblyPipeline, PipelineContext
-from backend.worker.tasks.assembly.steps.transcript_step import TranscriptStep
-from backend.worker.tasks.assembly.steps.mixing_step import MixingStep
-from backend.worker.tasks.assembly.steps.upload_step import UploadStep
+from .pipeline import AssemblyPipeline, PipelineContext
+from .steps.transcript_step import TranscriptStep
+from .steps.mixing_step import MixingStep
+from .steps.upload_step import UploadStep
 
 logger = logging.getLogger(__name__)
 
