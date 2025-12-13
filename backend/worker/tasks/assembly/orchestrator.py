@@ -67,10 +67,13 @@ def execute_podcast_assembly(
             
             final_context = pipeline.run(initial_context)
             
-            # CRITICAL: Commit the session before session_scope's finally block rolls it back
-            # The upload_step already called commit(), but session_scope always rolls back
-            # any active transaction in its finally block, so we must commit again here
+            # CRITICAL: Ensure transaction is CLOSED before session_scope cleanup
+            # session_scope's finally block ALWAYS rolls back any active transaction
+            # We must: 1) commit 2) flush 3) expunge all objects to prevent lazy loads
+            # from starting a new transaction that would get rolled back
             session.commit()
+            session.flush()  # Ensure all pending SQL is executed
+            session.expunge_all()  # Detach all objects to prevent lazy loads
             
             logger.info(f"Assembly successful. Final URL: {final_context.get('final_podcast_url')}")
             return {"message": "Episode assembled successfully!", "episode_id": episode_id}
