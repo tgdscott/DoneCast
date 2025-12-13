@@ -53,9 +53,14 @@ class TranscriptStep(PipelineStep):
             
             context['media_context'] = media_context
             
+            
             if early_result:
                  logger.info(f"[{self.step_name}] Transcription/Media resolution returned early result")
-                 return context # Might need valid flow control here
+                 # CRITICAL: Set words_json_path even for early returns (duplicate episodes)
+                 # The mixing step needs this to proceed
+                 if words_json_path:
+                     context['words_json_path'] = str(words_json_path)
+                 return context # Episode already processed
             
             # Check if transcript already exists (Optimization & Re-entry Fix)
             if words_json_path and Path(words_json_path).exists():

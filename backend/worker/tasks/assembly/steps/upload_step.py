@@ -182,6 +182,10 @@ class UploadStep(PipelineStep):
         # ---------------------------------------------------------------------
         self._send_notifications(session, episode, user_id)
 
+        # 8. Spreaker Publishing (if configured)
+        # ---------------------------------------------------------------------
+        self._trigger_spreaker_publishing(session, episode)
+
         context['final_podcast_url'] = gcs_audio_url
         context['status'] = 'COMPLETED'
         return context
@@ -330,3 +334,48 @@ class UploadStep(PipelineStep):
             session.commit()
         except Exception as e:
             logger.warning(f"[{self.step_name}] Notification failed: {e}")
+
+    def _trigger_spreaker_publishing(self, session, episode):
+        """Trigger Spreaker publishing if podcast has spreaker_show_id (Cinema IRL)."""
+        try:
+            from api.models.podcast import Podcast
+            from api.models.user import User
+            
+            # Check if podcast has Spreaker integration
+            podcast = session.get(Podcast, episode.podcast_id)
+            if not podcast or not podcast.spreaker_show_id:
+                logger.debug(f"[{self.step_name}] Podcast has no spreaker_show_id, skipping Spreaker publishing")
+                return
+            
+            # Get user's Spreaker access token
+            user = session.get(User, episode.user_id)
+            if not user or not user.spreaker_access_token:
+                logger.warning(f"[{self.step_name}] User has no spreaker_access_token, cannot publish to Spreaker")
+                return
+            
+            # Queue Spreaker publishing task
+            try:
+                from worker.tasks.publish import publish_episode_to_spreaker_task
+                
+                title = episode.title or "Untitled Episode"
+                description = episode.description or episode.show_notes or ""
+                auto_published_at = episode.publish_at.isoformat() if episode.publish_at else None
+                publish_state = "published"  # Default to published immediately
+                
+                # Queue async task
+                publish_episode_to_spreaker_task.delay(
+                    episode_id=str(episode.id),
+                    spreaker_show_id=podcast.spreaker_show_id,
+                    title=title,
+                    description=description,
+                    auto_published_at=auto_published_at,
+                    spreaker_access_token=user.spreaker_access_token,
+                    publish_state=publish_state,
+                )
+                
+                logger.info(f"[{self.step_name}] Queued Spreaker publishing for episode {episode.id} to show {podcast.spreaker_show_id}")
+            except Exception as task_err:
+                logger.error(f"[{self.step_name}] Failed to queue Spreaker publishing task: {task_err}", exc_info=True)
+        except Exception as e:
+            logger.warning(f"[{self.step_name}] Spreaker publishing trigger failed: {e}", exc_info=True)
+
