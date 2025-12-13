@@ -166,18 +166,14 @@ class UploadStep(PipelineStep):
         # ---------------------------------------------------------------------
         self._charge_credits(session, episode, context.get('use_auphonic', False))
 
-        # 6. Update Status & Commit
+        # 6. Update Status (Orchestrator will commit)
         # ---------------------------------------------------------------------
         episode.status = EpisodeStatus.processed
         session.add(episode)
-        
-        try:
-            session.commit()
-            logger.info(f"[{self.step_name}] Episode {episode_id} successfully finalized.")
-        except Exception as e:
-            logger.error(f"[{self.step_name}] Failed to commit episode status: {e}")
-            session.rollback()
-            raise
+        # NOTE: Don't commit here! Orchestrator commits once at the end.
+        # Multiple commits cause session to reload stale data that overwrites our changes.
+        logger.info(f"[{self.step_name}] Episode {episode_id} successfully finalized.")
+
 
         # 7. Notify User
         # ---------------------------------------------------------------------
