@@ -497,20 +497,23 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None, guest_id
         session = next(get_session())
         logging.info(f"[transcription] 🔍 Looking up MediaItem for filename={filename}, user_id={user_id}")
         
-        # Find MediaItem by filename (could be partial match for GCS URLs)
-        filename_search = filename.split("/")[-1] if "/" in filename else filename
+        # CRITICAL FIX: Match EXACT filename, not basename
+        # The filename in MediaItem is the full GCS URL: gs://bucket/user_id/media_uploads/file.mp3
+        # We must match it exactly, not use .contains() which is unreliable
         media_item = session.exec(
             select(MediaItem)
             .where(MediaItem.user_id == user_id)
-            .where(MediaItem.filename.contains(filename_search))
+            .where(MediaItem.filename == filename)  # Exact match
             .order_by(MediaItem.created_at.desc())
         ).first()
         
         if not media_item:
             raise TranscriptionError(
-                f"MediaItem not found for filename={filename} (searched for '{filename_search}'). "
+                f"MediaItem not found for filename={filename}. "
                 f"Cannot determine transcription service. MediaItem must exist before transcription."
             )
+
+
         
         # Get user for charging credits
         user = session.exec(select(User).where(User.id == user_id)).first()
