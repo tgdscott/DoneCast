@@ -69,11 +69,9 @@ def execute_podcast_assembly(
             
             # CRITICAL: Ensure transaction is CLOSED before session_scope cleanup
             # session_scope's finally block ALWAYS rolls back any active transaction
-            # We must: 1) commit 2) flush 3) expunge all objects to prevent lazy loads
-            # from starting a new transaction that would get rolled back
+            # commit() already does a flush, so we just need to commit and expunge
             session.commit()
-            session.flush()  # Ensure all pending SQL is executed
-            session.expunge_all()  # Detach all objects to prevent lazy loads
+            session.expunge_all()  # Detach all objects to prevent lazy loads from starting new transaction
             
             logger.info(f"Assembly successful. Final URL: {final_context.get('final_podcast_url')}")
             return {"message": "Episode assembled successfully!", "episode_id": episode_id}
