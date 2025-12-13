@@ -784,28 +784,31 @@ def resolve_media_context(
                     
                     if not gcs_uri:
                         logging.error("[assemble] ❌ File not found in GCS at any of these paths:")
-                        for candidate_key in path_candidates:
-                            logging.error("[assemble]   - gs://%s/%s", gcs_bucket, candidate_key)
+                        for bucket_name in bucket_candidates:
+                            for candidate_key in path_candidates:
+                                logging.error("[assemble]   - gs://%s/%s", bucket_name, candidate_key)
                         logging.error("[assemble] MediaItem filename in DB: '%s'", filename)
                         logging.error("[assemble] MediaItem id: %s", media_item.id)
                         logging.error("[assemble] This suggests the file was not uploaded to GCS, or was uploaded to a different path")
                         logging.error("[assemble] ACTION REQUIRED: Verify the file was uploaded successfully. Check:")
                         logging.error("[assemble]   1. Upload logs to see if GCS upload succeeded")
-                        logging.error("[assemble]   2. GCS bucket %s to see if file exists", gcs_bucket)
+                        logging.error("[assemble]   2. GCS buckets searched: %s", bucket_candidates)
                         logging.error("[assemble]   3. MediaItem record in database to verify filename matches GCS path")
                         # Try to list files in the user's directory to see what's actually there
                         try:
                             from google.cloud import storage as gcs_storage
                             client = gcs_storage.Client()
-                            bucket_obj = client.bucket(gcs_bucket)
+                            # Use the first bucket candidate for listing
+                            primary_bucket = bucket_candidates[0] if bucket_candidates else "ppp-media-us-west1"
+                            bucket_obj = client.bucket(primary_bucket)
                             user_prefix = f"{user_id_hex}/media_uploads/"
                             blobs = list(bucket_obj.list_blobs(prefix=user_prefix, max_results=10))
                             if blobs:
-                                logging.info("[assemble] Found %d files in GCS at prefix %s:", len(blobs), user_prefix)
+                                logging.info("[assemble] Found %d files in GCS bucket %s at prefix %s:", len(blobs), primary_bucket, user_prefix)
                                 for blob in blobs[:5]:  # Show first 5
                                     logging.info("[assemble]   - %s", blob.name)
                             else:
-                                logging.warning("[assemble] No files found in GCS at prefix %s", user_prefix)
+                                logging.warning("[assemble] No files found in GCS bucket %s at prefix %s", primary_bucket, user_prefix)
                         except Exception as list_err:
                             logging.warning("[assemble] Could not list GCS files: %s", list_err)
                 except Exception as e:
@@ -981,10 +984,11 @@ def resolve_media_context(
             try:
                 from sqlmodel import select
                 from uuid import UUID
-                from app.db.models import MediaItem, MediaCategory
+                # Use correct import path - MediaItem and MediaCategory are already imported at top
                 query = select(MediaItem).where(MediaItem.user_id == UUID(user_id))
                 query = query.where(MediaItem.category == MediaCategory.main_content)
                 all_media = list(session.exec(query).all())
+
                 
                 # Match by filename
                 for item in all_media:

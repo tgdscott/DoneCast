@@ -132,9 +132,9 @@ export default function StepEpisodeDetails({
           </ul>
           <p className="text-xs text-slate-500">
             Need to brainstorm? The{' '}
-            <a 
-              href="https://www.podcastplusplus.com/guide" 
-              target="_blank" 
+            <a
+              href="https://www.podcastplusplus.com/guide"
+              target="_blank"
               rel="noopener noreferrer"
               className="text-blue-600 hover:text-blue-800 underline"
             >
@@ -144,6 +144,22 @@ export default function StepEpisodeDetails({
           </p>
         </CardContent>
       </Card>
+      {/* CRITICAL ERROR: Transcript not ready - MUST be visible! */}
+      {!transcriptReady && (
+        <div className="rounded-md border border-red-400 bg-red-50 p-4 text-sm text-red-800">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-semibold text-red-900">❌ Transcript Not Ready - Assembly Blocked</span>
+            <AlertTriangle className="h-5 w-5 text-red-600" aria-hidden="true" />
+          </div>
+          <div className="mt-3 space-y-2">
+            <p className="font-medium">Your audio file is still being transcribed. You cannot proceed until this completes.</p>
+            <p><strong>What's a transcript?</strong> We convert your audio to text so we can apply voice cleaning, remove filler words, and enable AI features.</p>
+            <p><strong>Why is it not ready?</strong> Transcription usually takes 10-60 seconds after upload, depending on file length. If it's been longer, check for errors in the Bug Reports page.</p>
+            <p className="text-xs mt-2 text-red-700">If you just uploaded this file, please wait a moment and refresh the page. If the problem persists after 2-3 minutes, contact support.</p>
+          </div>
+        </div>
+      )}
+
       {showPrecheckNotice && (
         <div
           className={`rounded-md border p-4 text-sm ${minutesBlocking ? 'border-red-300 bg-red-50 text-red-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}
@@ -455,14 +471,14 @@ export default function StepEpisodeDetails({
               {minutesPrecheckPending
                 ? 'Waiting for processing minutes check…'
                 : minutesBlocking
-                ? blockingMessage
-                : blockingQuota
-                ? 'Quota exceeded – upgrade or wait for reset.'
-                : missingTitle
-                ? 'Enter a title to continue.'
-                : missingEpisodeNumber
-                ? 'Enter an episode number to continue.'
-                : ''}
+                  ? blockingMessage
+                  : blockingQuota
+                    ? 'Quota exceeded – upgrade or wait for reset.'
+                    : missingTitle
+                      ? 'Enter a title to continue.'
+                      : missingEpisodeNumber
+                        ? 'Enter an episode number to continue.'
+                        : ''}
             </div>
           )}
         </div>

@@ -35,6 +35,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["speakers"])
 
+# Log successful import to verify router loads
+logger.info("[speakers] Router initialized successfully")
+
 
 # ========== REQUEST/RESPONSE MODELS ==========
 
@@ -72,11 +75,22 @@ async def get_podcast_speakers(
 ) -> PodcastSpeakersConfig:
     """Get podcast speaker configuration."""
     
+    logger.info(
+        "[speakers] GET /podcasts/%s/speakers - user_id=%s",
+        podcast_id,
+        current_user.id
+    )
+    
     podcast = session.exec(
         select(Podcast).where(Podcast.id == podcast_id)
     ).first()
     
     if not podcast:
+        logger.warning(
+            "[speakers] Podcast not found: podcast_id=%s, user_id=%s",
+            podcast_id,
+            current_user.id
+        )
         raise HTTPException(status_code=404, detail="Podcast not found")
     
     # Check ownership
@@ -95,6 +109,13 @@ async def get_podcast_speakers(
         )
         for idx, host in enumerate(hosts_data)
     ]
+    
+    logger.info(
+        "[speakers] Retrieved speakers for podcast %s: %d hosts, has_guests=%s",
+        podcast_id,
+        len(hosts),
+        podcast.has_guests or False
+    )
     
     return PodcastSpeakersConfig(
         has_guests=podcast.has_guests or False,
