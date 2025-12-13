@@ -46,7 +46,8 @@ from .orchestrator_steps_lib.transcripts import write_final_transcripts_and_clea
 execute_intern_commands = execute_intern_commands_step
 StreamingMixBuffer = _StreamingMixBuffer
 
-USE_TEST_AUDIO_SHIMS = os.getenv("DISABLE_TEST_AUDIO_SHIMS", "0") != "1"
+# Default to False (Production-first). Only enable if explicitly requested.
+USE_TEST_AUDIO_SHIMS = os.getenv("ENABLE_TEST_AUDIO_SHIMS", "0") == "1"
 
 # Test-friendly StreamingMixBuffer stub to avoid heavy allocations during unit tests
 if USE_TEST_AUDIO_SHIMS:
