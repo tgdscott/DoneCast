@@ -46,15 +46,19 @@ export default function SpeakerSettings({ podcast, token, isOpen, onClose, onSav
       try {
         const api = makeApi(token);
         const config = await api.get(`/api/podcasts/${podcast.id}/speakers`);
-        
+
         setSpeakers(config.hosts || []);
         setHasGuests(config.has_guests || false);
       } catch (err) {
         console.error("Failed to load speakers:", err);
+        let errorMessage = "Unknown error";
+        if (isApiError(err)) {
+          errorMessage = err.detail || (typeof err.error === 'string' ? err.error : JSON.stringify(err.error));
+        }
         toast({
           variant: "destructive",
           title: "Failed to load speakers",
-          description: isApiError(err) ? err.detail || err.error : "Unknown error"
+          description: errorMessage
         });
       } finally {
         setLoading(false);
@@ -66,7 +70,7 @@ export default function SpeakerSettings({ podcast, token, isOpen, onClose, onSav
     setSaving(true);
     try {
       const api = makeApi(token);
-      
+
       // Update speaker configuration
       await api.post(`/api/podcasts/${podcast.id}/speakers`, {
         has_guests: hasGuests,
@@ -86,10 +90,14 @@ export default function SpeakerSettings({ podcast, token, isOpen, onClose, onSav
       onClose();
     } catch (err) {
       console.error("Failed to save speakers:", err);
+      let errorMessage = "Unknown error";
+      if (isApiError(err)) {
+        errorMessage = err.detail || (typeof err.error === 'string' ? err.error : JSON.stringify(err.error));
+      }
       toast({
         variant: "destructive",
         title: "Failed to save",
-        description: isApiError(err) ? err.detail || err.error : "Unknown error"
+        description: errorMessage
       });
     } finally {
       setSaving(false);
@@ -121,7 +129,7 @@ export default function SpeakerSettings({ podcast, token, isOpen, onClose, onSav
       gcs_path: null,
       order: prev.length
     }]);
-    
+
     setNewSpeakerName("");
     setAddingSpeaker(false);
 
@@ -156,10 +164,10 @@ export default function SpeakerSettings({ podcast, token, isOpen, onClose, onSav
   const handleStartRecording = async (speakerName) => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      
+
       audioChunksRef.current = [];
       const mediaRecorder = new MediaRecorder(stream);
-      
+
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data);
@@ -168,12 +176,12 @@ export default function SpeakerSettings({ podcast, token, isOpen, onClose, onSav
 
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
-        
+
         // Upload to backend
         try {
           const formData = new FormData();
           formData.append('intro_audio', audioBlob, `${speakerName}_intro.wav`);
-          
+
           const api = makeApi(token);
           const result = await api.post(
             `/api/podcasts/${podcast.id}/speakers/${encodeURIComponent(speakerName)}/intro`,

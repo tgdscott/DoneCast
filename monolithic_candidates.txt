@@ -1,0 +1,33 @@
+TOP BACKEND FILES:
+2129: backend\api\services\podcast_websites.py
+2084: backend\worker\tasks\assembly\archived_oldorchestrator.py
+2035: backend\api\routers\admin\users_pkg\services.py
+1566: backend\api\routers\media.py
+1537: backend\api\routers\assistant.py
+1416: backend\worker\tasks\assembly\transcript.py
+1389: backend\migrations\one_time_migrations.py
+1353: backend\worker\tasks\assembly\media.py
+1302: backend\api\routers\billing.py
+1275: backend\api\services\episodes\assembler.py
+1195: backend\api\services\audio\orchestrator_steps_lib\export.py
+1171: backend\infrastructure\gcs.py
+1150: backend\api\services\transcription\__init__.py
+1114: backend\api\services\ai_theme_generator.py
+1052: backend\api\services\website_sections.py
+
+TOP FRONTEND FILES:
+1737: frontend/src\components\dashboard\EpisodeHistory.jsx
+1709: frontend/src\components\dashboard.jsx
+1469: frontend/src\pages\Guides.jsx
+1432: frontend/src\components\admin-dashboard.jsx
+1171: frontend/src\ab\pages\CreatorUpload.jsx
+1091: frontend/src\components\website\sections\SectionPreviews.jsx
+1020: frontend/src\components\admin\AdminLandingEditor.jsx
+999: frontend/src\components\onboarding\OnboardingWizard.jsx
+929: frontend/src\components\assistant\AIAssistant.jsx
+929: frontend/src\components\dashboard\CreditLedger.jsx
+826: frontend/src\components\dashboard\BillingPage.jsx
+824: frontend/src\pages\Pricing.jsx
+816: frontend/src\components\dashboard\template-editor\TemplateEditor.jsx
+808: frontend/src\components\website\VisualEditor.jsx
+786: frontend/src\components\website\PersistentPlayer.jsx

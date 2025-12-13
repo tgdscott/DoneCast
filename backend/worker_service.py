@@ -154,9 +154,43 @@ def _validate_assemble_payload(data: Dict[str, Any]) -> AssembleIn:
         return AssembleIn.parse_obj(data)  # type: ignore[attr-defined]
 
 
+from fastapi import BackgroundTasks
+
+def _report_assembly_failure_background(
+    user_id: str,
+    episode_id: str,
+    retry_count: int,
+    error_message: str
+):
+    """Background task to report assembly failure."""
+    try:
+        from uuid import UUID
+        from api.core.database import session_scope
+        from api.services.bug_reporter import report_assembly_failure
+        from api.models.user import User
+        from api.models.podcast import Episode
+
+        log.info("event=worker.assemble.reporting_background episode_id=%s", episode_id)
+        with session_scope() as session:
+            user = session.get(User, UUID(user_id))
+            episode = session.get(Episode, UUID(episode_id))
+            episode_title = episode.title if episode else f"Episode {episode_id}"
+            
+            if user:
+                report_assembly_failure(
+                    session=session,
+                    user=user,
+                    episode_title=episode_title,
+                    error_message=f"Permanent Failure after {retry_count+1} attempts: {error_message}",
+                )
+    except Exception as e:
+        log.error("event=worker.assemble.report_failed_background error=%s", e)
+
+
 @app.post("/api/tasks/assemble")
 async def assemble_episode_worker(
-    request: Request, 
+    request: Request,
+    background_tasks: BackgroundTasks,
     x_tasks_auth: str | None = Header(default=None),
     x_cloudtasks_taskretrycount: int | None = Header(default=None)
 ):
@@ -246,32 +280,16 @@ async def assemble_episode_worker(
                 payload.episode_id, current_retry, str(exc)
             )
             
-            # REPORT BUG (Sentry + Internal DB)
-            try:
-                from uuid import UUID
-                from api.core.database import session_scope
-                from api.services.bug_reporter import report_assembly_failure
-                from api.models.user import User
-                from api.models.podcast import Episode
+            # REPORT BUG in BACKGROUND to avoid blocking response
+            background_tasks.add_task(
+                _report_assembly_failure_background,
+                user_id=payload.user_id,
+                episode_id=payload.episode_id,
+                retry_count=current_retry,
+                error_message=str(exc)
+            )
 
-                with session_scope() as session:
-                    # Fetch user and episode for context
-                    user = session.get(User, UUID(payload.user_id))
-                    # Try to get episode title, fallback to ID
-                    episode = session.get(Episode, UUID(payload.episode_id))
-                    episode_title = episode.title if episode else f"Episode {payload.episode_id}"
-                    
-                    if user:
-                        report_assembly_failure(
-                            session=session,
-                            user=user,
-                            episode_title=episode_title,
-                            error_message=f"Permanent Failure after {current_retry+1} attempts: {str(exc)}",
-                        )
-            except Exception as report_err:
-                log.error("event=worker.assemble.report_failed error=%s", report_err)
-
-            # Return 200 OK with failed status to tell Cloud Tasks to stop retrying
+            # Return 200 OK with failed status to tell Cloud Tasks to stop retrying immediately
             return {
                 "ok": False, 
                 "status": "failed", 
