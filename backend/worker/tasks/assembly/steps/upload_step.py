@@ -72,7 +72,7 @@ class UploadStep(PipelineStep):
              raise RuntimeError(f"Cloud storage upload returned invalid URL: {gcs_audio_url}")
 
         episode.gcs_audio_path = gcs_audio_url
-        episode.final_audio_path = final_basename
+        episode.final_audio_path = gcs_audio_url  # CRITICAL: Use cloud URL, not local basename!
         
         # Calculate file size and duration for RSS
         # Calculate file size and duration for RSS

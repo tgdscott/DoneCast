@@ -55,12 +55,12 @@ class TranscriptStep(PipelineStep):
             
             
             if early_result:
-                 logger.info(f"[{self.step_name}] Transcription/Media resolution returned early result")
-                 # CRITICAL: Set words_json_path even for early returns (duplicate episodes)
-                 # The mixing step needs this to proceed
-                 if words_json_path:
-                     context['words_json_path'] = str(words_json_path)
-                 return context # Episode already processed
+                 logger.info(f"[{self.step_name}] Episode already processed, aborting pipeline to prevent status overwrite")
+                 # Raise a special exception that the orchestrator can catch
+                 # This prevents duplicate retries from overwriting successful assemblies with error status
+                 class EpisodeAlreadyProcessed(Exception):
+                     pass
+                 raise EpisodeAlreadyProcessed(f"Episode {episode_id} already processed")
             
             # Check if transcript already exists (Optimization & Re-entry Fix)
             if words_json_path and Path(words_json_path).exists():

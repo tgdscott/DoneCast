@@ -75,7 +75,13 @@ def execute_podcast_assembly(
             logger.info(f"Assembly successful. Final URL: {final_context.get('final_podcast_url')}")
             return {"message": "Episode assembled successfully!", "episode_id": episode_id}
         
+        
         except Exception as e:
+            # Check if this is a duplicate episode that was already processed
+            if "EpisodeAlreadyProcessed" in str(type(e).__name__) or "already processed" in str(e).lower():
+                logger.info(f"Episode {episode_id} already processed, skipping reassembly (idempotent)")
+                return {"message": "Episode already processed (idempotent skip)", "episode_id": episode_id}
+            
             logger.error(f"Assembly FAILED for episode {episode_id}: {e}", exc_info=True)
             
             # Handle error status update
