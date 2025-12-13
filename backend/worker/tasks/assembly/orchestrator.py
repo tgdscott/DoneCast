@@ -67,6 +67,11 @@ def execute_podcast_assembly(
             
             final_context = pipeline.run(initial_context)
             
+            # CRITICAL: Commit the session before session_scope's finally block rolls it back
+            # The upload_step already called commit(), but session_scope always rolls back
+            # any active transaction in its finally block, so we must commit again here
+            session.commit()
+            
             logger.info(f"Assembly successful. Final URL: {final_context.get('final_podcast_url')}")
             return {"message": "Episode assembled successfully!", "episode_id": episode_id}
         

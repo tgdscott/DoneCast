@@ -8,7 +8,7 @@ import { Suspense } from "react"
 import { PostHogProvider } from "posthog-js/react"
 
 export const metadata: Metadata = {
-  title: "PodcastPlusPlus - Professional Podcast Hosting Made Simple",
+  title: "DoneCast - Professional Podcast Hosting Made Simple",
   description:
     "The modern podcast hosting platform built for creators who want more. Unlimited uploads, advanced analytics, and powerful distribution tools.",
   generator: "v0.app",

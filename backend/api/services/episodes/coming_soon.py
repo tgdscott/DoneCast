@@ -20,9 +20,9 @@ from ...models.podcast import Podcast
 
 logger = logging.getLogger(__name__)
 
-# Reference episode: "The Podcast Plus Plus Podcast" Episode 0 (trailer)
+# Reference episode: "DoneCast" Episode 0 (trailer)
 # This episode's audio file is used as the permanent trailer for all new podcasts
-REFERENCE_PODCAST_NAME = "The Podcast Plus Plus Podcast"
+REFERENCE_PODCAST_NAME = "DoneCast"
 REFERENCE_EPISODE_NUMBER = 0
 
 
@@ -200,7 +200,7 @@ def create_coming_soon_episode(
         coming_soon_episode = Episode(
             user_id=user_id,
             podcast_id=podcast.id,
-            title="Coming Soon - A New Show From Podcast Plus Plus",
+            title="DoneCast",
             show_notes=(
                 "Welcome! This is a placeholder episode. "
                 "Your first real episode will replace this one. "

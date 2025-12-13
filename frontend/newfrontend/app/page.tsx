@@ -14,7 +14,7 @@ export default function LandingPage() {
               <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary">
                 <Radio className="w-6 h-6 text-primary-foreground" />
               </div>
-              <span className="text-xl font-bold text-foreground">PodcastPlusPlus</span>
+              <span className="text-xl font-bold text-foreground">DoneCast</span>
             </div>
             <div className="hidden md:flex items-center gap-8">
               <Link
@@ -63,7 +63,7 @@ export default function LandingPage() {
               </h1>
               <p className="text-xl text-muted-foreground leading-relaxed text-pretty max-w-2xl">
                 No experience needed. No technical skills required. No age limit. Just you and your voice.
-                PodcastPlusPlus makes professional podcasting so easy, it's faster and cheaper than hiring someone else
+                DoneCast makes professional podcasting so easy, it's faster and cheaper than hiring someone else
                 to do it.
               </p>
               {/* ... existing code ... */}
@@ -201,7 +201,7 @@ export default function LandingPage() {
             </h2>
             <p className="text-xl text-muted-foreground text-pretty">
               Why pay someone else when you can do it yourself—faster, cheaper, and with complete creative control?
-              PodcastPlusPlus is so intuitive that publishing your podcast takes less time and effort than explaining it
+              DoneCast is so intuitive that publishing your podcast takes less time and effort than explaining it
               to someone else.
             </p>
           </div>
@@ -401,7 +401,7 @@ export default function LandingPage() {
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <div className="space-y-6">
               <h2 className="text-4xl sm:text-5xl font-bold text-foreground text-balance">
-                Why <span className="text-primary">PodcastPlusPlus</span>?
+                Why <span className="text-primary">DoneCast</span>?
               </h2>
               <p className="text-xl text-muted-foreground leading-relaxed text-pretty">
                 We've built something truly special here. Technology that doesn't exist anywhere else. A platform that
@@ -482,7 +482,7 @@ export default function LandingPage() {
               Ready to Take Your Podcast to the Next Level?
             </h2>
             <p className="text-xl text-primary-foreground/90 mb-10 text-pretty">
-              Join the next generation of podcasters who are building their audience with PodcastPlusPlus
+              Join the next generation of podcasters who are building their audience with DoneCast
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Button
@@ -517,7 +517,7 @@ export default function LandingPage() {
                 <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary">
                   <Radio className="w-5 h-5 text-primary-foreground" />
                 </div>
-                <span className="text-lg font-bold text-foreground">PodcastPlusPlus</span>
+                <span className="text-lg font-bold text-foreground">DoneCast</span>
               </div>
               <p className="text-sm text-muted-foreground">Professional podcast hosting for the modern creator.</p>
             </div>
@@ -578,7 +578,7 @@ export default function LandingPage() {
             </div>
           </div>
           <div className="pt-8 border-t border-border text-center text-sm text-muted-foreground">
-            <p>&copy; 2025 PodcastPlusPlus. All rights reserved.</p>
+            <p>&copy; 2025 DoneCast. All rights reserved.</p>
           </div>
         </div>
       </footer>
