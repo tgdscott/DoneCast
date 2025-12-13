@@ -1050,8 +1050,11 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None, guest_id
 
             can_mark_ready = bool(gcs_uri or gcs_url or transcript_has_words)
 
+            # CRITICAL FIX: Use original_filename (GCS URL) not local filename
+            # When GCS files are downloaded for transcription, `filename` becomes the local name
+            # But MediaItem.filename stores the GCS URL, so we must use original_filename
             media_item = session.exec(
-                select(MediaItem).where(MediaItem.filename == filename)
+                select(MediaItem).where(MediaItem.filename == original_filename)
             ).first()
 
             if media_item:
