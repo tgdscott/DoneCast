@@ -58,6 +58,10 @@ class MediaItem(SQLModel, table=True):
     transcript_ready: bool = Field(default=False, description="True when transcription is complete and file is ready for episode assembly")
     transcription_error: Optional[str] = Field(default=None, description="Error message if transcription failed or detected instrumental/silence")
     
+    # CRITICAL: GCS transcript metadata for worker lookup
+    # Stores location of transcript JSON in GCS so worker can find it during assembly
+    transcript_meta_json: Optional[str] = Field(default=None, description="JSON with GCS transcript location: {gcs_uri, gcs_url, bucket, key, stem}")
+    
     # CRITICAL: Sole source of truth for transcription routing
     # Set by decision helper based on audio quality, user tier, and config. Determines Auphonic vs AssemblyAI.
     use_auphonic: bool = Field(default=False, description="True if Auphonic transcription should be used (set by decision helper)")

@@ -69,6 +69,8 @@ def run_one_time_migrations() -> dict[str, bool]:
     results["add_episode_length_management"] = run_migration_once("add_episode_length_management", _add_episode_length_management)
     results["add_ai_metadata_enum"] = run_migration_once("add_ai_metadata_enum", _add_ai_metadata_enum)
     results["add_speaker_identification"] = run_migration_once("add_speaker_identification", _add_speaker_identification)
+    results["add_transcript_meta_json"] = run_migration_once("add_transcript_meta_json", _add_transcript_meta_json)
+
 
     
     # Check for pending migrations
@@ -1386,4 +1388,25 @@ def _add_speaker_identification() -> bool:
         return True
     except Exception as e:
         log.warning("[migrate] Speaker identification migration failed: %s", e)
+        return False
+
+
+def _add_transcript_meta_json() -> bool:
+    """Add transcript_meta_json column to mediaitem table (migration 105)."""
+    import importlib.util
+    import os
+    from sqlmodel import Session
+    from api.core.database import engine
+    
+    try:
+        migration_path = os.path.join(os.path.dirname(__file__), '105_add_transcript_meta_json.py')
+        spec = importlib.util.spec_from_file_location('migration_105', migration_path)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            module.upgrade(engine)
+        log.debug("[migrate] Transcript meta JSON column added")
+        return True
+    except Exception as e:
+        log.warning("[migrate] Transcript meta JSON migration failed: %s", e)
         return False
