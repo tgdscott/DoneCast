@@ -47,9 +47,10 @@ class UploadStep(PipelineStep):
 
         logger.info(f"[{self.step_name}] Starting upload for episode {episode_id} from {audio_src}")
 
-        # 1. Upload Final Audio to GCS
+        # 1. Upload Final Audio to GCS/R2
         # ---------------------------------------------------------------------
-        final_basename = audio_src.name
+        # CRITICAL: Sanitize filename - R2 rejects filenames with ? and other special chars
+        final_basename = audio_src.name.replace('?', '').replace('#', '').replace('&', '-and-')
         gcs_audio_key = f"{user_id}/episodes/{episode_id}/audio/{final_basename}"
         gcs_bucket = os.getenv("GCS_BUCKET", "ppp-media-us-west1")
         
