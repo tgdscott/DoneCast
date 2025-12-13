@@ -32,6 +32,7 @@ class MixingStep(PipelineStep):
         tts_values = context.get('tts_values')
         episode_details = context.get('episode_details')
         words_json_path = context.get('words_json_path')
+        media_context = context.get('media_context')
         
         try:
              # Load entities
@@ -40,6 +41,22 @@ class MixingStep(PipelineStep):
             podcast = session.get(Podcast, UUID(podcast_id))
             
             logger.info(f"[{self.step_name}] Starting audio assembly for episode {episode_id}...")
+            
+            # CRITICAL FIX: Use the resolved local audio path from media_context
+            # The transcription step downloaded the file from GCS and stored it in media_context
+            # We must use source_audio_path (local path), NOT main_content_filename (GCS URL)
+            resolved_audio_path = None
+            if media_context and hasattr(media_context, 'source_audio_path'):
+                resolved_audio_path = media_context.source_audio_path
+                if resolved_audio_path:
+                    resolved_audio_filename = str(resolved_audio_path)
+                    logger.info(f"[{self.step_name}] Using resolved local audio path: {resolved_audio_filename}")
+                else:
+                    logger.warning(f"[{self.step_name}] media_context.source_audio_path is None, falling back to main_content_filename")
+                    resolved_audio_filename = main_content_filename
+            else:
+                logger.warning(f"[{self.step_name}] No media_context available, using main_content_filename: {main_content_filename}")
+                resolved_audio_filename = main_content_filename
             
             # Resolve Auphonic usage: force takes precedence, otherwise use contextual default
             should_use_auphonic = context.get('force_auphonic')
@@ -52,7 +69,7 @@ class MixingStep(PipelineStep):
                     episode=episode,
                     user=user,
                     podcast=podcast,
-                    main_content_filename=main_content_filename,
+                    main_content_filename=resolved_audio_filename,  # Use resolved local path
                     output_filename=output_filename,
                     tts_values=tts_values,
                     episode_details=episode_details,
