@@ -3,7 +3,8 @@ from pathlib import Path
 from ..pipeline import PipelineStep, PipelineContext
 from api.models.podcast import Episode, Podcast
 from api.models.user import User
-from uuid import UUID
+import uuid
+from uuid import UUID as UUIDType
 
 # Import the transcription service hook
 try:
@@ -36,9 +37,9 @@ class TranscriptStep(PipelineStep):
         
         try:
              # Load entities
-            episode = session.get(Episode, UUID(episode_id))
-            user = session.get(User, UUID(user_id))
-            podcast = session.get(Podcast, UUID(podcast_id))
+            episode = session.get(Episode, UUIDType(episode_id))
+            user = session.get(User, UUIDType(user_id))
+            podcast = session.get(Podcast, UUIDType(podcast_id))
             
             media_context, words_json_path, early_result = resolve_media_context(
                 session=session,

@@ -23,18 +23,19 @@ class SentryAPIClient:
     
     def __init__(
         self,
-        org_slug: str = "donecast",
+        org_slug: Optional[str] = None,
         project_slug: str = "default",
         auth_token: Optional[str] = None,
     ):
         """Initialize Sentry API client.
         
         Args:
-            org_slug: Sentry organization slug (e.g., "donecast")
+            org_slug: Sentry organization slug. If None, reads from SENTRY_ORG_SLUG env var 
+                     or defaults to "chainsaw-enterprises"
             project_slug: Sentry project slug (e.g., "default")
             auth_token: Sentry organization auth token. If None, reads from SENTRY_ORG_TOKEN env var.
         """
-        self.org_slug = org_slug
+        self.org_slug = org_slug or os.getenv("SENTRY_ORG_SLUG", "chainsaw-enterprises")
         self.project_slug = project_slug
         self.auth_token = auth_token or os.getenv("SENTRY_ORG_TOKEN")
         
@@ -211,13 +212,14 @@ _sentry_client: Optional[SentryAPIClient] = None
 
 
 def get_sentry_client(
-    org_slug: str = "donecast",
+    org_slug: Optional[str] = None,
     project_slug: str = "default",
 ) -> SentryAPIClient:
     """Get or create Sentry API client singleton.
     
     Args:
-        org_slug: Sentry organization slug
+        org_slug: Sentry organization slug. If None, uses SENTRY_ORG_SLUG env var
+                 or defaults to "chainsaw-enterprises"
         project_slug: Sentry project slug
     
     Returns:
