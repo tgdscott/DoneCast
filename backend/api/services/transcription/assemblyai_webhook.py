@@ -71,6 +71,75 @@ class AssemblyAIWebhookManager:
         job_id = str(payload.get("id") or payload.get("transcript_id") or "").strip()
         if not job_id:
             return False
+        
+        # CRITICAL: When transcript is completed, download and save to GCS
+        status = payload.get("status", "").lower()
+        if status == "completed":
+            try:
+                import logging
+                import os
+                from pathlib import Path
+                import json
+                from api.services.audio.common import sanitize_filename
+                
+                logging.info(f"[assemblyai_webhook] Transcript {job_id} completed, downloading and saving to GCS...")
+                
+                # Download transcript JSON from AssemblyAI
+                try:
+                    from .assemblyai_client import get_transcription
+                    api_key = (os.getenv("ASSEMBLYAI_API_KEY") or "").strip()
+                    transcript_data = get_transcription(job_id, api_key=api_key)
+                    
+                    if not transcript_data or not transcript_data.get("words"):
+                        logging.warning(f"[assemblyai_webhook] Transcript {job_id} has no words data, skipping GCS save")
+                    else:
+                        # Extract audio_url to determine filename
+                        audio_url = transcript_data.get("audio_url", "")
+                        
+                        # Try to extract filename from audio_url
+                        # audio_url format: https://cdn.assemblyai.com/upload/{hash}/{filename}
+                        filename_stem = None
+                        if audio_url:
+                            try:
+                                url_parts = audio_url.rstrip('/').split('/')
+                                if len(url_parts) >= 2:
+                                    filename_stem = Path(url_parts[-1]).stem
+                            except Exception:
+                                pass
+                        
+                        if not filename_stem:
+                            # Fallback: use transcript_id as filename
+                            filename_stem = job_id
+                        
+                        # Sanitize filename
+                        safe_stem = sanitize_filename(filename_stem)
+                        
+                        # Upload to GCS with correct path pattern
+                        # Pattern: transcripts/{sanitized_stem}.words.json
+                        gcs_bucket = (os.getenv("TRANSCRIPTS_BUCKET") or os.getenv("MEDIA_BUCKET") or "ppp-media-us-west1").strip()
+                        gcs_key = f"transcripts/{safe_stem}.words.json"
+                        
+                        try:
+                            from infrastructure import gcs
+                            transcript_json = json.dumps(transcript_data, indent=2).encode('utf-8')
+                            gcs_url = gcs.upload_bytes_to_gcs(gcs_bucket, gcs_key, transcript_json, content_type="application/json")
+                            
+                            if gcs_url:
+                                logging.info(f"[assemblyai_webhook] ✅ Transcript {job_id} saved to GCS: {gcs_url}")
+                                # Store GCS URL in payload so it's available to caller
+                                payload["gcs_transcript_url"] = gcs_url
+                                payload["gcs_transcript_key"] = gcs_key
+                                payload["gcs_bucket"] = gcs_bucket
+                            else:
+                                logging.error(f"[assemblyai_webhook] ❌ Failed to upload transcript {job_id} to GCS (returned None)")
+                        except Exception as gcs_err:
+                            logging.error(f"[assemblyai_webhook] ❌ Failed to upload transcript {job_id} to GCS: {gcs_err}", exc_info=True)
+                except Exception as download_err:
+                    logging.error(f"[assemblyai_webhook] ❌ Failed to download transcript {job_id}: {download_err}", exc_info=True)
+            except Exception as outer_err:
+                import logging
+                logging.error(f"[assemblyai_webhook] ❌ Failed to process completed transcript {job_id}: {outer_err}", exc_info=True)
+        
         with self._lock:
             pending = self._pending.get(job_id)
             if pending is not None:
