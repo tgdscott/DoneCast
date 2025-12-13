@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pydub import AudioSegment
 
+import logging
 from api.services.audio.cleanup import rebuild_audio_from_words
 from api.services.audio.filler_pipeline import remove_fillers as remove_fillers_from_pipeline
 from api.services.audio.silence_pipeline import (
@@ -14,6 +15,7 @@ from api.services.audio.silence_pipeline import (
     retime_words as retime_words_for_pauses,
 )
 
+logger = logging.getLogger(__name__)
 
 def primary_cleanup_and_rebuild(
     content_path: Path,
@@ -23,7 +25,9 @@ def primary_cleanup_and_rebuild(
     log: List[str],
 ) -> Tuple[AudioSegment, List[Dict[str, Any]], Dict[str, int], int]:
     if mix_only:
-        log.append("[FILLERS] Skipping filler removal (mix_only=True)")
+        msg = "[FILLERS] Skipping filler removal (mix_only=True)"
+        log.append(msg)
+        logger.info(msg)
         try:
             actual_audio = AudioSegment.from_file(content_path)
             log.append(
@@ -40,7 +44,9 @@ def primary_cleanup_and_rebuild(
 
     auphonic_processed = bool(cleanup_options.get("auphonic_processed", False))
     if auphonic_processed:
-        log.append("[FILLERS] Skipping filler removal (auphonic_processed=True)")
+        msg = "[FILLERS] Skipping filler removal (auphonic_processed=True)"
+        log.append(msg)
+        logger.info(msg)
 
         has_flubber_markers = any(str(w.get("word", "")).strip() == "" for w in mutable_words)
         if has_flubber_markers:
@@ -77,6 +83,7 @@ def primary_cleanup_and_rebuild(
             f"[FILLERS_CFG] remove_fillers={remove_fillers} "
             f"filler_count={len(filler_words)} reasons={','.join(reason) if reason else 'ok'}"
         )
+        logger.info(log[-1])
         try:
             log.append(
                 f"[FILLERS_NORM_LIST] {sorted(list(filler_words))[:12]}"
@@ -106,6 +113,7 @@ def primary_cleanup_and_rebuild(
                 f"[FILLERS_AUDIO_STATS] removed_count={total_fills} "
                 f"kinds={len(filler_freq_map or {})} top={[(k, v) for v, k in top_k]}"
             )
+            logger.info(log[-1])
     except Exception:
         pass
     if remove_fillers and filler_words:
@@ -133,7 +141,9 @@ def compress_pauses_step(
     )
 
     if auphonic_processed:
-        log.append("[SILENCE] Skipping pause compression (auphonic_processed=True)")
+        msg = "[SILENCE] Skipping pause compression (auphonic_processed=True)"
+        log.append(msg)
+        logger.info(msg)
         return cleaned_audio, mutable_words
 
     if remove_pauses:
@@ -153,6 +163,7 @@ def compress_pauses_step(
             "pausePadPreMs": float(cleanup_options.get("pausePadPreMs", 0.0)),
             "pausePadPostMs": float(cleanup_options.get("pausePadPostMs", 0.0)),
         }
+        logger.info(f"[SILENCE_CFG] Compressing pauses: maxPause={silence_cfg['maxPauseSeconds']}s ratio={silence_cfg['pauseCompressionRatio']}")
         raw_spans = detect_silence_pauses(mutable_words, silence_cfg, log)
         spans = guard_and_pad_pauses(raw_spans, silence_cfg, log)
 

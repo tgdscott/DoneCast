@@ -244,15 +244,20 @@ class UploadStep(PipelineStep):
                          meta["transcripts"] = {}
                     
                     # Update known keys
+                    # Update known keys
                     for key in ["final", "published", "original_json", "words_json", "json"]:
                         if key in transcript_urls:
-                             meta["transcripts"][f"{key}_url" if "_url" not in key and "r2" not in key else key] = transcript_urls[key]
-                             # Legacy keys
-                             if key == "final": meta["transcripts"]["final_r2_url"] = transcript_urls[key]
-                             if key == "published": meta["transcripts"]["published_r2_url"] = transcript_urls[key]
-                             if key == "original_json": meta["transcripts"]["original_json_url"] = transcript_urls[key]
-                             if key == "words_json": meta["transcripts"]["words_json_url"] = transcript_urls[key]
-                             if key == "json": meta["transcripts"]["json_url"] = transcript_urls[key]
+                             # Ensure standard structure
+                             meta["transcripts"][key] = transcript_urls[key]
+                             meta["transcripts"][f"{key}_url"] = transcript_urls[key]
+                             
+                             # Explicit legacy backups for critical keys
+                             if key == "final": 
+                                 meta["transcripts"]["final_r2_url"] = transcript_urls[key]
+                             if key == "published": 
+                                 meta["transcripts"]["published_r2_url"] = transcript_urls[key]
+                                 # CRITICAL: Also set top-level for some legacy frontend components
+                                 meta["transcripts"]["url"] = transcript_urls[key]
 
                     episode.meta_json = json.dumps(meta)
         except Exception as e:
@@ -358,24 +363,47 @@ class UploadStep(PipelineStep):
                 description = episode.description or episode.show_notes or ""
                 auto_published_at = episode.publish_at.isoformat() if episode.publish_at else None
                 publish_state = "published"  # Default to published immediately
+                # CRITICAL FIX: If we are in the standalone worker service without a broker,
+                # calling .delay() will fail with ConnectionRefusedError.
+                # execute the task synchronously instead.
                 
-                # Queue async task
-                publish_episode_to_spreaker_task.delay(
-                    episode_id=str(episode.id),
-                    spreaker_show_id=podcast.spreaker_show_id,
-                    title=title,
-                    description=description,
-                    auto_published_at=auto_published_at,
-                    spreaker_access_token=user.spreaker_access_token,
-                    publish_state=publish_state,
-                )
+                # Check if we have a broker configured (simple heuristic)
+                import os
+                has_broker = bool(os.getenv("CELERY_BROKER_URL"))
                 
-                logger.info(f"[{self.step_name}] Queued Spreaker publishing for episode {episode.id} to show {podcast.spreaker_show_id}")
+                token = user.spreaker_access_token # Define token here
+                
+                if has_broker:
+                    publish_episode_to_spreaker_task.delay(
+                        episode_id=str(episode.id),
+                        spreaker_show_id=str(podcast.spreaker_show_id),
+                        title=episode.title,
+                        description=episode.description,
+                        auto_published_at=episode.publish_at.isoformat() if episode.publish_at else None,
+                        spreaker_access_token=token,
+                        publish_state=publish_state,
+                    )
+                    logger.info(f"[{self.step_name}] Queued Spreaker publishing (Async) for episode {episode.id}")
+                else:
+                    logger.info(f"[{self.step_name}] No Broker detected. Executing Spreaker publishing SYNCHRONOUSLY.")
+                    result = publish_episode_to_spreaker_task(
+                        episode_id=str(episode.id),
+                        spreaker_show_id=str(podcast.spreaker_show_id),
+                        title=episode.title,
+                        description=episode.description,
+                        auto_published_at=episode.publish_at.isoformat() if episode.publish_at else None,
+                        spreaker_access_token=token,
+                        publish_state=publish_state,
+                    )
+                    if not result.get("ok"):
+                         logger.error(f"[{self.step_name}] Synchronous publishing succeeded but returned error: {result.get('error')}")
+                    else:
+                         logger.info(f"[{self.step_name}] Synchronous publishing COMPLETED successfully.")
+
             except Exception as task_err:
                 # Catching generic Exception covers kombu.exceptions.OperationalError too,
                 # but let's be explicit in logs that this is non-fatal for assembly.
-                logger.error(f"[{self.step_name}] Failed to queue Spreaker publishing task (Broker/Connection Error): {task_err}. Assembly still considered successful.")
+                logger.error(f"[{self.step_name}] Failed to queue/run Spreaker publishing task: {task_err}. Assembly still considered successful.")
                 # CRITICAL: Do NOT re-raise. We must ensure the assembly task finishes and gets ACKed.
         except Exception as e:
             logger.warning(f"[{self.step_name}] Spreaker publishing trigger failed: {e}", exc_info=True)
-
