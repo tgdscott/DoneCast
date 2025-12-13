@@ -1,2 +1,8 @@
 --- Starting Route Check ---
-❌ Failed to import api.routers.speakers: No module named 'redis'
+✅ Successfully imported api.routers.speakers
+✅ App loaded. Total routes: 320
+✅ Found 4 speaker routes:
+  - {'GET'} /api/api/podcasts/{podcast_id}/speakers
+  - {'POST'} /api/api/podcasts/{podcast_id}/speakers
+  - {'POST'} /api/api/podcasts/{podcast_id}/speakers/{speaker_name}/intro
+  - {'DELETE'} /api/api/podcasts/{podcast_id}/speakers/{speaker_name}
