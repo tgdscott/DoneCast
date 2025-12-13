@@ -10,7 +10,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Any
-from uuid import UUID
+from uuid import UUID as UUIDType
 
 from sqlmodel import select
 
@@ -300,7 +300,7 @@ def resolve_media_context(
 ):
     """Resolve database entities and local media artifacts for assembly."""
 
-    template = crud.get_template_by_id(session, UUID(template_id))
+    template = crud.get_template_by_id(session, UUIDType(template_id))
     if not template:
         logging.warning(
             "[assemble] stale job: template %s not found; dropping task", template_id
@@ -342,7 +342,7 @@ def resolve_media_context(
     except Exception:
         logging.debug("[assemble] Failed to eagerly load template attributes", exc_info=True)
 
-    episode = crud.get_episode_by_id(session, UUID(episode_id))
+    episode = crud.get_episode_by_id(session, UUIDType(episode_id))
     if not episode:
         logging.warning(
             "[assemble] stale job: episode %s not found; dropping task", episode_id
@@ -402,7 +402,7 @@ def resolve_media_context(
                     cover_basename = Path(cover_filename).name
                     
                     # Search for MediaItem with episode_cover category
-                    query = select(MediaItem).where(MediaItem.user_id == UUID(user_id))
+                    query = select(MediaItem).where(MediaItem.user_id == UUIDType(user_id))
                     query = query.where(MediaItem.category == MediaCategory.episode_cover)
                     all_cover_items = list(session.exec(query).all())
                     
@@ -470,7 +470,7 @@ def resolve_media_context(
                 exc_info=True,
             )
 
-    user_obj = crud.get_user_by_id(session, UUID(user_id)) if hasattr(crud, "get_user_by_id") else None
+    user_obj = crud.get_user_by_id(session, UUIDType(user_id)) if hasattr(crud, "get_user_by_id") else None
     
     # CRITICAL: Eagerly load user attributes while session is still valid
     # This prevents DetachedInstanceError when accessing attributes after session closes
@@ -630,7 +630,7 @@ def resolve_media_context(
         
         # Look up MediaItem by filename - try multiple matching strategies
         try:
-            query = select(MediaItem).where(MediaItem.user_id == UUID(user_id))
+            query = select(MediaItem).where(MediaItem.user_id == UUIDType(user_id))
             query = query.where(MediaItem.category == MediaCategory.main_content)
             all_items = list(session.exec(query).all())
             logging.info("[assemble] Found %d main_content MediaItems for user %s", len(all_items), user_id)
@@ -735,7 +735,7 @@ def resolve_media_context(
                     
                     # Convert user_id to hex format if it's a UUID
                     try:
-                        user_uuid = UUID(user_id)
+                        user_uuid = UUIDType(user_id)
                         user_id_hex = user_uuid.hex
                     except (ValueError, AttributeError):
                         # Already in hex format or invalid
@@ -983,9 +983,9 @@ def resolve_media_context(
             media_item_for_transcript = None
             try:
                 from sqlmodel import select
-                from uuid import UUID
                 # Use correct import path - MediaItem and MediaCategory are already imported at top
-                query = select(MediaItem).where(MediaItem.user_id == UUID(user_id))
+                # UUID is also imported at top as UUIDType
+                query = select(MediaItem).where(MediaItem.user_id == UUIDType(user_id))
                 query = query.where(MediaItem.category == MediaCategory.main_content)
                 all_media = list(session.exec(query).all())
 
