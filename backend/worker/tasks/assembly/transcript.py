@@ -864,7 +864,7 @@ def prepare_transcript_context(
         try:
             from api.services.transcription.speaker_identification import map_speaker_labels
             from api.models.podcast import Podcast
-            from sqlmodel import select
+            # select is already imported at module level (line 15)
             
             # Load podcast speaker configuration
             podcast = session.exec(

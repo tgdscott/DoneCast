@@ -982,9 +982,9 @@ def resolve_media_context(
             # Find the MediaItem for main_content_filename
             media_item_for_transcript = None
             try:
-                from sqlmodel import select
                 # Use correct import path - MediaItem and MediaCategory are already imported at top
                 # UUID is also imported at top as UUIDType
+                # select is already imported at top from sqlmodel
                 query = select(MediaItem).where(MediaItem.user_id == UUIDType(user_id))
                 query = query.where(MediaItem.category == MediaCategory.main_content)
                 all_media = list(session.exec(query).all())
