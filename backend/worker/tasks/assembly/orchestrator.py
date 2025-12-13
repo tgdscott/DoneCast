@@ -67,11 +67,9 @@ def execute_podcast_assembly(
             
             final_context = pipeline.run(initial_context)
             
-            # CRITICAL: Ensure transaction is CLOSED before session_scope cleanup
-            # session_scope's finally block ALWAYS rolls back any active transaction
-            # commit() already does a flush, so we just need to commit and expunge
+            # CRITICAL: Commit the transaction
+            # session_scope's finally block will handle cleanup
             session.commit()
-            session.expunge_all()  # Detach all objects to prevent lazy loads from starting new transaction
             
             logger.info(f"Assembly successful. Final URL: {final_context.get('final_podcast_url')}")
             return {"message": "Episode assembled successfully!", "episode_id": episode_id}
