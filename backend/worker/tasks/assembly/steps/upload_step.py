@@ -372,7 +372,10 @@ class UploadStep(PipelineStep):
                 
                 logger.info(f"[{self.step_name}] Queued Spreaker publishing for episode {episode.id} to show {podcast.spreaker_show_id}")
             except Exception as task_err:
-                logger.error(f"[{self.step_name}] Failed to queue Spreaker publishing task: {task_err}", exc_info=True)
+                # Catching generic Exception covers kombu.exceptions.OperationalError too,
+                # but let's be explicit in logs that this is non-fatal for assembly.
+                logger.error(f"[{self.step_name}] Failed to queue Spreaker publishing task (Broker/Connection Error): {task_err}. Assembly still considered successful.")
+                # CRITICAL: Do NOT re-raise. We must ensure the assembly task finishes and gets ACKed.
         except Exception as e:
             logger.warning(f"[{self.step_name}] Spreaker publishing trigger failed: {e}", exc_info=True)
 
