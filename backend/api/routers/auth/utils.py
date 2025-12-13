@@ -170,7 +170,24 @@ def _terms_need_acceptance(user: User, current_terms_version: str | None) -> boo
     current_terms_date = _parse_terms_version_date(current_terms_version)
     if current_terms_date and user_accepted_at:
         # Both dates are available - compare them
-        return current_terms_date > user_accepted_at.replace(tzinfo=None)
+        # Handle case where user_accepted_at might be a string (from some DB serialization paths)
+        if isinstance(user_accepted_at, str):
+            try:
+                user_accepted_at = datetime.fromisoformat(user_accepted_at.replace('Z', '+00:00'))
+            except Exception:
+                logger.warning(f"Failed to parse terms_accepted_at string: {user_accepted_at}")
+                # Can't parse - fallback to version check
+                if accepted_version:
+                    return accepted_version != current_terms_version
+                return True
+        
+        # user_accepted_at is now a datetime object
+        try:
+            user_accepted_naive = user_accepted_at.replace(tzinfo=None) if hasattr(user_accepted_at, 'replace') else user_accepted_at
+            return current_terms_date > user_accepted_naive
+        except Exception as e:
+            logger.warning(f"Failed to compare terms dates: {e}")
+            return True
     
     # Fallback to version string comparison if:
     # - Date parsing failed, OR
