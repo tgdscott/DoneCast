@@ -1165,6 +1165,13 @@ def build_template_and_final_mix_step(
             except Exception as meta_err:
                 log.append(f"[METADATA_WARN] Failed to embed metadata: {meta_err}")
         log.append(f"Saved final content to {final_path.name}")
+
+        # CRITICAL: Verify file was actually written and is not empty
+        if not final_path.exists():
+            raise RuntimeError(f"Export failed: Output file {final_path} was not created")
+        if final_path.stat().st_size == 0:
+            raise RuntimeError(f"Export failed: Output file {final_path} is empty (0 bytes)")
+        log.append(f"[EXPORT_VERIFY] Output file size: {final_path.stat().st_size} bytes")
     except MemoryError as e:
         log.append(f"[EXPORT_MEMORY_ERROR] Out of memory during export: {e}")
         log.append(f"[EXPORT_MEMORY_ERROR] final_mix duration_ms={len(final_mix) if 'final_mix' in locals() else 'N/A'}")

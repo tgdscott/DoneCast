@@ -45,7 +45,15 @@ def match_target_dbfs(segment: AudioSegment, target_dbfs: float = DEFAULT_TARGET
 
 
 def sanitize_filename(name: str) -> str:
-    return re.sub(r'[<>:"/\\|?*\s]+', '-', name).lower()
+    # Lowercase and replace keys with standard separators
+    s = name.lower()
+    # Replace anything that isn't alphanumeric or hyphen with a hyphen
+    s = re.sub(r'[^\w\d-]', '-', s)
+    # Collapse multiple hyphens
+    s = re.sub(r'-+', '-', s)
+    # Strip leading/trailing hyphens
+    s = s.strip('-')
+    return s or "untitled"
 
 
 # Public re-exports
