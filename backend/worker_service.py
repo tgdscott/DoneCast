@@ -46,6 +46,14 @@ app = FastAPI(
 _TASKS_AUTH = os.getenv("TASKS_AUTH", "a-secure-local-secret")
 _IS_DEV = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev").lower().startswith("dev")
 
+# Initialize Sentry
+try:
+    from api.config.logging import setup_sentry
+    env = os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("PYTHON_ENV") or "dev"
+    setup_sentry(environment=env)
+except ImportError:
+    log.warning("Could not import setup_sentry, skipping Sentry init")
+
 log.info("event=worker.init.config_loaded is_dev=%s", _IS_DEV)
 
 from worker.tasks import create_podcast_episode
@@ -147,7 +155,11 @@ def _validate_assemble_payload(data: Dict[str, Any]) -> AssembleIn:
 
 
 @app.post("/api/tasks/assemble")
-async def assemble_episode_worker(request: Request, x_tasks_auth: str | None = Header(default=None)):
+async def assemble_episode_worker(
+    request: Request, 
+    x_tasks_auth: str | None = Header(default=None),
+    x_cloudtasks_taskretrycount: int | None = Header(default=None)
+):
     """Execute episode assembly synchronously in this worker process.
     
     This runs DIRECTLY in the HTTP request handler - no background threads/processes.
@@ -225,6 +237,49 @@ async def assemble_episode_worker(request: Request, x_tasks_auth: str | None = H
         
     except Exception as exc:
         log.exception("event=worker.assemble.error episode_id=%s", payload.episode_id)
+        
+        # Stop perpetual retry loops: if we've already retried once (total 2 attempts), stop.
+        current_retry = x_cloudtasks_taskretrycount or 0
+        if current_retry >= 1:
+            log.error(
+                "event=worker.assemble.max_retries_reached episode_id=%s retries=%s error=%s", 
+                payload.episode_id, current_retry, str(exc)
+            )
+            
+            # REPORT BUG (Sentry + Internal DB)
+            try:
+                from uuid import UUID
+                from api.core.database import session_scope
+                from api.services.bug_reporter import report_assembly_failure
+                from api.models.user import User
+                from api.models.podcast import Episode
+
+                with session_scope() as session:
+                    # Fetch user and episode for context
+                    user = session.get(User, UUID(payload.user_id))
+                    # Try to get episode title, fallback to ID
+                    episode = session.get(Episode, UUID(payload.episode_id))
+                    episode_title = episode.title if episode else f"Episode {payload.episode_id}"
+                    
+                    if user:
+                        report_assembly_failure(
+                            session=session,
+                            user=user,
+                            episode_title=episode_title,
+                            error_message=f"Permanent Failure after {current_retry+1} attempts: {str(exc)}",
+                        )
+            except Exception as report_err:
+                log.error("event=worker.assemble.report_failed error=%s", report_err)
+
+            # Return 200 OK with failed status to tell Cloud Tasks to stop retrying
+            return {
+                "ok": False, 
+                "status": "failed", 
+                "error": str(exc),
+                "retry_count": current_retry,
+                "episode_id": payload.episode_id
+            }
+
         # Return 500 with error details (Cloud Tasks will retry on 5xx)
         raise HTTPException(
             status_code=500,

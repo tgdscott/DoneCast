@@ -68,6 +68,8 @@ def run_one_time_migrations() -> dict[str, bool]:
     results["add_audio_threshold_label"] = run_migration_once("add_audio_threshold_label", _add_audio_threshold_label)
     results["add_episode_length_management"] = run_migration_once("add_episode_length_management", _add_episode_length_management)
     results["add_ai_metadata_enum"] = run_migration_once("add_ai_metadata_enum", _add_ai_metadata_enum)
+    results["add_speaker_identification"] = run_migration_once("add_speaker_identification", _add_speaker_identification)
+
     
     # Check for pending migrations
     pending = get_pending_migrations()
@@ -1362,4 +1364,26 @@ def _add_ai_metadata_enum() -> bool:
         return True
     except Exception as e:
         log.warning("[migrate] AI Metadata Enum migration failed: %s", e)
+        return False
+
+
+def _add_speaker_identification() -> bool:
+    """Add speaker identification fields to podcast table (migration 104)."""
+    import importlib.util
+    import os
+    from sqlmodel import Session
+    from api.core.database import engine
+    
+    try:
+        migration_path_104 = os.path.join(os.path.dirname(__file__), '104_add_speaker_identification.py')
+        spec_104 = importlib.util.spec_from_file_location('migration_104', migration_path_104)
+        if spec_104 and spec_104.loader:
+            module_104 = importlib.util.module_from_spec(spec_104)
+            spec_104.loader.exec_module(module_104)
+            with Session(engine) as session:
+                module_104.migrate(session)
+        log.debug("[migrate] Speaker identification fields verified")
+        return True
+    except Exception as e:
+        log.warning("[migrate] Speaker identification migration failed: %s", e)
         return False

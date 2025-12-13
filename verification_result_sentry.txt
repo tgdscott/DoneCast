@@ -1,0 +1,10 @@
+DEBUG: api.services.bug_reporter is <MagicMock name='mock.services.bug_reporter' id='2928370210848'>
+DEBUG: api.core.database is <MagicMock name='mock.core.database' id='2928370242176'>
+
+--- Test: Retry Count 1 (Should Report Bug) ---
+Status Code: 200
+PASS: Returned 200 as expected.
+LOG ERROR CALL: call('event=worker.assemble.max_retries_reached episode_id=%s retries=%s error=%s', '00000000-0000-0000-0000-000000000000', 1, 'Fatal Error')
+FAIL: report_assembly_failure was NOT called.
+Session Scope Called? False
+Session Get Called? False

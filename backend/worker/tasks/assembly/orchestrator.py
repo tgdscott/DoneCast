@@ -76,13 +76,26 @@ def execute_podcast_assembly(
             # Handle error status update
             try:
                 from api.core import crud
+                import json
+                
+                # Re-fetch episode to ensure we have fresh state
                 episode = crud.get_episode_by_id(session, UUID(episode_id))
                 if episode:
+                    # Update status
                     try:
                         from api.models.podcast import EpisodeStatus as EpStatus
                         episode.status = EpStatus.error  # type: ignore[attr-defined]
                     except Exception:
                         episode.status = "error"  # type: ignore[assignment]
+                    
+                    # Store error message in meta_json
+                    try:
+                        meta = json.loads(episode.meta_json or "{}")
+                        meta["assembly_error"] = str(e)
+                        episode.meta_json = json.dumps(meta)
+                    except Exception as meta_err:
+                        logger.warning(f"Failed to save error to meta_json: {meta_err}")
+                    
                     session.add(episode)
                     session.commit()
             except Exception:
