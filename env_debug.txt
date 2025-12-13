@@ -1,0 +1,7 @@
+Python Executable: C:\Python312\python.exe
+Sys Path: ['C:\\Users\\windo\\OneDrive\\PodWebDeploy', 'C:\\Python312\\python312.zip', 'C:\\Python312\\DLLs', 'C:\\Python312\\Lib', 'C:\\Python312', 'C:\\Users\\windo\\AppData\\Roaming\\Python\\Python312\\site-packages', 'C:\\Python312\\Lib\\site-packages']
+CWD: C:\Users\windo\OneDrive\PodWebDeploy
+Redis import failed: No module named 'redis'
+
+--- PIP LIST ---
+C:\Python312\python.exe: No module named pip

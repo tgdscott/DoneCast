@@ -118,28 +118,40 @@ class Mailer:
             logger.warning("Configured SMTP_FROM '%s' lacks '@'; this may be rejected by provider", self.sender)
 
         try:
-            with smtplib.SMTP(self.host, self.port, timeout=20) as server:
-                # Identify ourselves & upgrade to TLS
-                server.ehlo()
-                try:
-                    server.starttls()
+            from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+            @retry(
+                stop=stop_after_attempt(3),
+                wait=wait_exponential(multiplier=1, min=1, max=4),
+                retry=retry_if_exception_type((smtplib.SMTPException, OSError, socket.timeout)),
+                reraise=True
+            )
+            def _send_with_retry():
+                with smtplib.SMTP(self.host, self.port, timeout=20) as server:
+                    # Identify ourselves & upgrade to TLS
                     server.ehlo()
-                except smtplib.SMTPException as tls_err:
-                    logger.warning("SMTP STARTTLS failed (%s); continuing without TLS", tls_err)
-
-                if self.user and self.password:
                     try:
-                        server.login(self.user, self.password)
-                    except smtplib.SMTPAuthenticationError as auth_err:
-                        logger.error("SMTP auth failed: code=%s msg=%s", getattr(auth_err, 'smtp_code', '?'), getattr(auth_err, 'smtp_error', auth_err))
-                        raise
+                        server.starttls()
+                        server.ehlo()
+                    except smtplib.SMTPException as tls_err:
+                        logger.warning("SMTP STARTTLS failed (%s); continuing without TLS", tls_err)
 
-                # Send
-                server.send_message(msg)
-                logger.info(
-                    "SMTP mail accepted: to=%s from=%s host=%s:%s user_set=%s", to, self.sender, self.host, self.port, bool(self.user)
-                )
+                    if self.user and self.password:
+                        try:
+                            server.login(self.user, self.password)
+                        except smtplib.SMTPAuthenticationError as auth_err:
+                            logger.error("SMTP auth failed: code=%s msg=%s", getattr(auth_err, 'smtp_code', '?'), getattr(auth_err, 'smtp_error', auth_err))
+                            raise
+
+                    # Send
+                    server.send_message(msg)
+                    logger.info(
+                        "SMTP mail accepted: to=%s from=%s host=%s:%s user_set=%s", to, self.sender, self.host, self.port, bool(self.user)
+                    )
+            
+            _send_with_retry()
             return True
+
         except smtplib.SMTPDataError as data_err:
             # Mailgun returns SMTPDataError for domain verification issues
             error_code = getattr(data_err, 'smtp_code', '?')
@@ -172,7 +184,8 @@ class Mailer:
                 )
             print(f"[MAIL-ERROR] {detail}")
             return False
-        except (smtplib.SMTPException, OSError, socket.timeout) as e:
+        except Exception as e:
+            # Catch all after retries exhausted (tenacity reraise=True propagates the last exception)
             logger.exception("General SMTP failure sending to %s: %s", to, e)
             print(f"[MAIL-ERROR] {e}")
             return False

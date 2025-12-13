@@ -6,45 +6,46 @@ from fastapi import FastAPI
 # Add backend directory to python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.join(current_dir, 'backend')
-sys.path.append(backend_dir)
+# Ensure we add the backend dir to path so imports work as if running from root
+if backend_dir not in sys.path:
+    sys.path.append(backend_dir)
+sys.path.append(os.getcwd()) # Add root as well
 
-async def check_routes():
-    # 1. Try importing the router module directly
-    print("--- Attempting import of api.routers.speakers ---")
-    try:
-        from api.routers import speakers
-        print("✅ Successfully imported api.routers.speakers")
-    except Exception as e:
-        print(f"❌ Failed to import api.routers.speakers: {e}")
-        return
+def main():
+    with open("check_routes_result.txt", "w", encoding='utf-8') as f:
+        f.write("--- Starting Route Check ---\n")
+        
+        # 1. Try importing the router module directly
+        try:
+            from api.routers import speakers
+            f.write("✅ Successfully imported api.routers.speakers\n")
+        except Exception as e:
+            f.write(f"❌ Failed to import api.routers.speakers: {e}\n")
+            return
 
-    # 2. Try importing the main app (which loads routing.py)
-    print("\n--- Attempting to load main FastAPI app ---")
-    try:
-        from api.main import app
-        # Inspect routes
-        print(f"✅ App loaded. Total routes: {len(app.routes)}")
-        
-        found = False
-        print("\n--- Searching for speaker routes ---")
-        for route in app.routes:
-            if hasattr(route, 'path') and 'speakers' in route.path:
-                print(f"✅ Found route: {route.methods} {route.path}")
-                found = True
-        
-        if not found:
-            print("❌ No routes containing 'speakers' found in the app!")
+        # 2. Try importing the main app
+        try:
+            from api.main import app
+            f.write(f"✅ App loaded. Total routes: {len(app.routes)}\n")
             
-            # 3. Check availability map if possible
-            try:
-                from api.routing import attach_routers
-                availability = attach_routers(app)
-                print(f"\nRouter availability report: {availability.get('speakers_router')}")
-            except Exception as e:
-                print(f"Could not check availability: {e}")
-                
-    except Exception as e:
-        print(f"❌ Failed to load api.main: {e}")
+            found = False
+            speakers_routes = []
+            for route in app.routes:
+                if hasattr(route, 'path') and 'speakers' in route.path:
+                    speakers_routes.append(f"{route.methods} {route.path}")
+                    found = True
+            
+            if found:
+                f.write(f"✅ Found {len(speakers_routes)} speaker routes:\n")
+                for r in speakers_routes:
+                    f.write(f"  - {r}\n")
+            else:
+                f.write("❌ No routes containing 'speakers' found in the app!\n")
+
+        except Exception as e:
+            f.write(f"❌ Failed to load api.main: {e}\n")
+            import traceback
+            f.write(traceback.format_exc())
 
 if __name__ == "__main__":
-    asyncio.run(check_routes())
+    main()

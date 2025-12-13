@@ -1,0 +1,2 @@
+--- Starting Route Check ---
+❌ Failed to import api.routers.speakers: No module named 'redis'
