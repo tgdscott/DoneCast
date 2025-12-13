@@ -9,6 +9,7 @@ from .pipeline import AssemblyPipeline, PipelineContext
 from .steps.transcript_step import TranscriptStep
 from .steps.mixing_step import MixingStep
 from .steps.upload_step import UploadStep
+from api.services.audio.common import sanitize_filename
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,15 @@ def execute_podcast_assembly(
     # 1. Define Initial Context (Data needed to start the process)
     # Extract cover_image_path from episode_details if present
     cover_image_path = episode_details.get("cover_image_path")
+
+    # CRITICAL FIX: Sanitize output_filename immediately.
+    # This prevents characters like '?' from:
+    # 1. Breaking ffmpeg (invalid argument) during duration calc
+    # 2. Creating invalid transcript URLs (browser interprets ? as query string)
+    if output_filename:
+        output_filename = sanitize_filename(output_filename)
+        # Log the modification if it changed
+        logger.info(f"Sanitized output_filename: {output_filename}")
     
     initial_context: PipelineContext = {
         'episode_id': episode_id,
