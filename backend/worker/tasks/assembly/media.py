@@ -675,8 +675,26 @@ def resolve_media_context(
             logging.warning("[assemble] Error looking up MediaItem: %s", e, exc_info=True)
             media_item = None
         
+        # CRITICAL FIX: Check MediaItem.transcript_meta_json FIRST for transcript location
+        # This is where transcripts are now stored during upload
+        if media_item and not gcs_uri:
+            try:
+                transcript_meta_str = getattr(media_item, "transcript_meta_json", None)
+                if transcript_meta_str:
+                    try:
+                        transcript_meta = json.loads(transcript_meta_str)
+                        if isinstance(transcript_meta, dict):
+                            gcs_uri_from_media = transcript_meta.get("gcs_uri")
+                            if gcs_uri_from_media:
+                                gcs_uri = gcs_uri_from_media
+                                logging.info("[assemble] ✅ Found transcript GCS URI in MediaItem.transcript_meta_json: %s", gcs_uri)
+                    except json.JSONDecodeError as json_err:
+                        logging.warning("[assemble] Failed to parse MediaItem.transcript_meta_json: %s", json_err)
+            except Exception as meta_err:
+                logging.warning("[assemble] Error reading MediaItem.transcript_meta_json: %s", meta_err)
+        
         # If MediaItem found, try to get GCS URL
-        if media_item:
+        if media_item and not gcs_uri:
             filename = str(getattr(media_item, "filename", "") or "")
             logging.info("[assemble] MediaItem filename value: '%s' (starts with gs://: %s, starts with http: %s, length=%d)", 
                         filename, filename.startswith("gs://"), filename.startswith("http"), len(filename))
@@ -952,6 +970,67 @@ def resolve_media_context(
         pass
 
     # If not found locally, try episode.meta_json hint for a GCS transcript and download it
+    # BUT FIRST: Check MediaItem.transcript_meta_json (primary source) before episode.meta_json (legacy)
+    if not words_json_path:
+        # PRIORITY 0: Check MediaItem.transcript_meta_json FIRST (primary source)
+        # This is populated during upload and is the most reliable source
+        try:
+            logging.info("[assemble] Checking MediaItem.transcript_meta_json for transcript location...")
+            # Find the MediaItem for main_content_filename
+            media_item_for_transcript = None
+            try:
+                from sqlmodel import select
+                from uuid import UUID
+                from app.db.models import MediaItem, MediaCategory
+                query = select(MediaItem).where(MediaItem.user_id == UUID(user_id))
+                query = query.where(MediaItem.category == MediaCategory.main_content)
+                all_media = list(session.exec(query).all())
+                
+                # Match by filename
+                for item in all_media:
+                    item_filename = str(getattr(item, "filename", "") or "")
+                    if main_content_filename in item_filename or item_filename in main_content_filename:
+                        media_item_for_transcript = item
+                        break
+            except Exception as find_err:
+                logging.warning("[assemble] Failed to find MediaItem for transcript lookup: %s", find_err)
+            
+            if media_item_for_transcript:
+                transcript_meta_str = getattr(media_item_for_transcript, "transcript_meta_json", None)
+                if transcript_meta_str:
+                    try:
+                        import json
+                        transcript_meta = json.loads(transcript_meta_str)
+                        if isinstance(transcript_meta, dict):
+                            gcs_json_from_media = transcript_meta.get("gcs_uri")
+                            bucket_from_media = transcript_meta.get("bucket")
+                            key_from_media = transcript_meta.get("key")
+                            safe_stem_from_media = transcript_meta.get("safe_stem") or transcript_meta.get("stem")
+                            
+                            if gcs_json_from_media and bucket_from_media and key_from_media:
+                                logging.info("[assemble] ✅ Found transcript in MediaItem.transcript_meta_json: %s", gcs_json_from_media)
+                                try:
+                                    from google.cloud import storage
+                                    client = storage.Client()
+                                    bucket_obj = client.bucket(bucket_from_media)
+                                    blob = bucket_obj.blob(key_from_media)
+                                    if blob.exists():
+                                        data = blob.download_as_bytes()
+                                        if data:
+                                            local_path = (PROJECT_ROOT / "transcripts") / f"{safe_stem_from_media}.json"
+                                            local_path.parent.mkdir(parents=True, exist_ok=True)
+                                            local_path.write_bytes(data)
+                                            if local_path.exists() and local_path.stat().st_size > 0:
+                                                words_json_path = local_path
+                                                logging.info("[assemble] ✅ Downloaded transcript from MediaItem metadata: %s -> %s", gcs_json_from_media, local_path)
+                                except Exception as download_err:
+                                    logging.warning("[assemble] Failed to download transcript from MediaItem metadata: %s", download_err)
+                    except json.JSONDecodeError as json_err:
+                        logging.warning("[assemble] Failed to parse MediaItem.transcript_meta_json: %s", json_err)
+        except Exception as media_meta_err:
+            logging.warning("[assemble] Error checking MediaItem.transcript_meta_json: %s", media_meta_err)
+    
+    # PRIORITY 1: Check episode.meta_json (legacy/fallback)
     if not words_json_path:
         try:
             import json

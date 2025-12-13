@@ -1054,13 +1054,24 @@ def transcribe_media_file(filename: str, user_id: Optional[str] = None, guest_id
             if media_item:
                 if can_mark_ready:
                     media_item.transcript_ready = True
+                    # CRITICAL FIX: Store GCS transcript location in MediaItem so worker can find it
+                    # Worker looks for this during assembly when episode.meta_json doesn't have it
+                    transcript_meta = {
+                        "gcs_uri": gcs_uri,
+                        "gcs_url": gcs_url,
+                        "bucket": bucket,
+                        "key": key,
+                        "stem": stem,
+                        "safe_stem": safe_stem,
+                    }
+                    media_item.transcript_meta_json = json.dumps(transcript_meta)
                     session.add(media_item)
                     session.commit()
 
                     if transcript_has_words:
-                        logging.info("[transcription] ✅ Marked MediaItem %s as transcript_ready (words=%d)", media_item.id, len(words))
+                        logging.info("[transcription] ✅ Marked MediaItem %s as transcript_ready (words=%d, gcs_uri=%s)", media_item.id, len(words), gcs_uri)
                     else:
-                        logging.info("[transcription] ✅ Marked MediaItem %s as transcript_ready (gcs present)", media_item.id)
+                        logging.info("[transcription] ✅ Marked MediaItem %s as transcript_ready (gcs present: %s)", media_item.id, gcs_uri)
                 else:
                     # DO NOT mark as ready if we have no durable transcript
                     logging.warning(

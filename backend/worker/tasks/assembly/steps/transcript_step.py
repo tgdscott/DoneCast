@@ -64,10 +64,12 @@ class TranscriptStep(PipelineStep):
 
             # Hard failure if transcript is missing (per user request)
             # This worker is not equipped to transcribe, so we must fail loudly if it's missing.
-            # Hard failure if transcript is missing (per user request) -> DISABLED
-            # Re-enabling automatic transcription to self-heal
-            # raise RuntimeError(f"[{self.step_name}] Transcript not found! Automatic re-transcription is disabled on this worker. Please ensure transcript exists in GCS or locally at expected path.")
+            # Hard failure if transcript is missing (per user request)
+            # This worker is not equipped to transcribe, so we must fail loudly if it's missing.
+            raise RuntimeError(f"[{self.step_name}] Transcript not found! Automatic re-transcription is disabled on this worker. Please ensure transcript exists in GCS or locally at expected path.")
             
+            # Unreachable code below - preserved for future reference or different worker configuration
+            """
             transcribed_words_path = None
             if callable(transcribe_episode):
                 logger.info(f"[{self.step_name}] Starting transcription...")
@@ -102,6 +104,7 @@ class TranscriptStep(PipelineStep):
                  # Fallback to what resolve_media_context found
                  context['words_json_path'] = words_json_path
                  logger.info(f"[{self.step_name}] Using existing transcript: {words_json_path}")
+            """
         except Exception as e:
             logger.error(f"[{self.step_name}] Transcription failed: {e}", exc_info=True)
             raise
